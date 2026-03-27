@@ -2,6 +2,7 @@ package pigo
 
 import (
 	"math"
+	"reflect"
 	"testing"
 )
 
@@ -91,6 +92,170 @@ func TestModelsAreEqualComparesIDAndProvider(t *testing.T) {
 	}
 	if ModelsAreEqual(left, nil) {
 		t.Fatal("expected nil model comparison to be false")
+	}
+}
+
+func TestRegisterLazyProviderModuleLoadsOnDemand(t *testing.T) {
+	provider := Provider("test-lazy-provider")
+	loadCount := 0
+
+	RegisterLazyProviderModule(provider, func() ProviderModule {
+		loadCount++
+		return ProviderModule{
+			Models: map[string]Model{
+				"lazy-model": {
+					Name:          "Lazy Model",
+					API:           "lazy-api",
+					BaseURL:       "https://example.invalid",
+					ContextWindow: 1024,
+					MaxTokens:     256,
+				},
+			},
+		}
+	})
+
+	providers := GetProviders()
+	if !containsProvider(providers, provider) {
+		t.Fatal("expected lazy provider to appear before module load")
+	}
+	if loadCount != 0 {
+		t.Fatalf("expected lazy provider to remain unloaded before use, got %d loads", loadCount)
+	}
+
+	model := GetModel(provider, "lazy-model")
+	if model == nil {
+		t.Fatal("expected lazy model to load on first use")
+	}
+	if loadCount != 1 {
+		t.Fatalf("expected single lazy load, got %d", loadCount)
+	}
+	if model.Provider != provider {
+		t.Fatalf("expected lazy model provider to be normalized, got %q", model.Provider)
+	}
+
+	models := GetModels(provider)
+	if len(models) != 1 || models[0].ID != "lazy-model" {
+		t.Fatalf("expected lazy model list after load, got %+v", models)
+	}
+	if loadCount != 1 {
+		t.Fatalf("expected lazy module to load only once, got %d", loadCount)
+	}
+}
+
+func TestRegisterProviderModuleDispatchesStreamThroughRegistry(t *testing.T) {
+	provider := Provider("test-stream-provider")
+	modelID := "stream-model"
+	called := false
+
+	RegisterProviderModule(ProviderModule{
+		Provider: provider,
+		Models: map[string]Model{
+			modelID: {
+				ID:      modelID,
+				Name:    "Stream Model",
+				API:     "stream-api",
+				BaseURL: "https://example.invalid",
+			},
+		},
+		Stream: func(model Model, ctx Context, options CompleteOptions) *AssistantMessageEventStream {
+			called = true
+			stream := newAssistantMessageEventStream()
+			message := AssistantMessage{
+				API:        model.API,
+				Provider:   model.Provider,
+				Model:      model.ID,
+				StopReason: StopReasonStop,
+				Content: []ContentBlock{
+					TextContent{Text: "from plugin"},
+				},
+			}
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: message})
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventDone, Reason: message.StopReason, Message: message})
+			stream.finish(message)
+			return stream
+		},
+	})
+
+	model := GetModel(provider, modelID)
+	if model == nil {
+		t.Fatal("expected registered stream model to exist")
+	}
+
+	stream := StreamSimple(*model, Context{}, CompleteOptions{})
+	var events []AssistantMessageEvent
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+	result := stream.Result()
+
+	if !called {
+		t.Fatal("expected stream dispatch to use registered provider module")
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected start + done events, got %d", len(events))
+	}
+	if events[1].Type != AssistantMessageEventDone {
+		t.Fatalf("expected done event, got %q", events[1].Type)
+	}
+	if !reflect.DeepEqual(events[1].Message, result) {
+		t.Fatalf("expected registry stream result to match done event, got done=%+v result=%+v", events[1].Message, result)
+	}
+}
+
+func TestGetProviderCapabilitiesReturnsBuiltInMetadata(t *testing.T) {
+	codex := GetProviderCapabilities("openai-codex")
+	if !codex.SupportsStreaming || !codex.SupportsSession || !codex.SupportsReasoningSummary || !codex.SupportsTextVerbosity || !codex.SupportsToolChoice {
+		t.Fatalf("expected openai-codex capabilities to be registered, got %+v", codex)
+	}
+	if codex.SupportsPromptCacheControl {
+		t.Fatalf("expected openai-codex to not advertise prompt cache control, got %+v", codex)
+	}
+
+	kimi := GetProviderCapabilities("kimi-coding")
+	if !kimi.SupportsStreaming || !kimi.SupportsPromptCacheControl || !kimi.SupportsThinkingBudget {
+		t.Fatalf("expected kimi capabilities to be registered, got %+v", kimi)
+	}
+	if kimi.SupportsToolChoice {
+		t.Fatalf("expected kimi to not advertise tool choice support, got %+v", kimi)
+	}
+}
+
+func TestNormalizeCompleteOptionsUsesProviderModuleRules(t *testing.T) {
+	codex := GetModel("openai-codex", "gpt-5.1")
+	if codex == nil {
+		t.Fatal("expected openai-codex model")
+	}
+
+	codexOptions := NormalizeCompleteOptions(*codex, CompleteOptions{
+		Reasoning:      ThinkingLevelXHigh,
+		CacheRetention: CacheRetentionLong,
+	})
+	if codexOptions.Reasoning != ThinkingLevelHigh {
+		t.Fatalf("expected codex reasoning to be normalized through module, got %q", codexOptions.Reasoning)
+	}
+	if codexOptions.ReasoningSummary != "auto" {
+		t.Fatalf("expected codex reasoning summary default, got %q", codexOptions.ReasoningSummary)
+	}
+	if codexOptions.TextVerbosity != "medium" {
+		t.Fatalf("expected codex verbosity default, got %q", codexOptions.TextVerbosity)
+	}
+	if codexOptions.CacheRetention != CacheRetentionNone {
+		t.Fatalf("expected codex cache retention to be cleared, got %q", codexOptions.CacheRetention)
+	}
+
+	kimi := GetModel("kimi-coding", "kimi-k2-thinking")
+	if kimi == nil {
+		t.Fatal("expected kimi model")
+	}
+
+	kimiOptions := NormalizeCompleteOptions(*kimi, CompleteOptions{
+		ToolChoice:       "required",
+		TextVerbosity:    "high",
+		ReasoningSummary: "detailed",
+		SessionID:        "session-1",
+	})
+	if kimiOptions.ToolChoice != "" || kimiOptions.TextVerbosity != "" || kimiOptions.ReasoningSummary != "" || kimiOptions.SessionID != "" {
+		t.Fatalf("expected kimi unsupported options to be cleared, got %+v", kimiOptions)
 	}
 }
 

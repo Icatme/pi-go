@@ -33,6 +33,29 @@ func TestGetEnvAPIKeyReadsKimiKey(t *testing.T) {
 	}
 }
 
+func TestGetEnvAPIKeyUsesRegisteredProviderAuthMetadata(t *testing.T) {
+	provider := Provider("test-env-provider")
+	RegisterProviderModule(ProviderModule{
+		Provider: provider,
+		Auth: ProviderAuth{
+			EnvAPIKeyName: "TEST_PROVIDER_KEY",
+		},
+		Models: map[string]Model{
+			"test-model": {
+				ID: "test-model",
+			},
+		},
+	})
+
+	t.Setenv("TEST_PROVIDER_KEY", "provider-env-token")
+	dotEnvOnce = syncOnceForTests()
+	dotEnvValues = nil
+
+	if got := GetEnvAPIKey(provider); got != "provider-env-token" {
+		t.Fatalf("expected provider env token from module metadata, got %q", got)
+	}
+}
+
 func TestResolveAPIKeyPrefersExplicitAPIKey(t *testing.T) {
 	t.Setenv("KIMI_API_KEY", "kimi-env-token")
 	dotEnvOnce = syncOnceForTests()

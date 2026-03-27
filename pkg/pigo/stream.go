@@ -22,28 +22,29 @@ func Stream(model Model, ctx Context, options CompleteOptions) *AssistantMessage
 }
 
 func StreamSimple(model Model, ctx Context, options CompleteOptions) *AssistantMessageEventStream {
-	switch model.Provider {
-	case "kimi-coding":
-		return streamAnthropicMessages(model, ctx, options)
-	case "openai-codex":
-		return streamOpenAICodex(model, ctx, options)
-	default:
-		stream := newAssistantMessageEventStream()
-		response := AssistantMessage{
-			API:          model.API,
-			Provider:     model.Provider,
-			Model:        model.ID,
-			StopReason:   StopReasonError,
-			ErrorMessage: "provider not implemented",
-		}
-		stream.push(AssistantMessageEvent{
-			Type:   AssistantMessageEventError,
-			Reason: response.StopReason,
-			Error:  response,
-		})
-		stream.finish(response)
-		return stream
+	module := resolveProviderModule(model.Provider)
+	if module != nil && module.NormalizeOptions != nil {
+		options = module.NormalizeOptions(model, options)
 	}
+	if module != nil && module.Stream != nil {
+		return module.Stream(model, ctx, options)
+	}
+
+	stream := newAssistantMessageEventStream()
+	response := AssistantMessage{
+		API:          model.API,
+		Provider:     model.Provider,
+		Model:        model.ID,
+		StopReason:   StopReasonError,
+		ErrorMessage: "provider not implemented",
+	}
+	stream.push(AssistantMessageEvent{
+		Type:   AssistantMessageEventError,
+		Reason: response.StopReason,
+		Error:  response,
+	})
+	stream.finish(response)
+	return stream
 }
 
 func Complete(model Model, ctx Context, options CompleteOptions) AssistantMessage {

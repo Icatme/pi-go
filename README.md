@@ -19,6 +19,7 @@ Initial migrated areas:
 
 - model metadata and `SupportsXHigh`
 - provider/model registry helpers and target-provider model metadata
+- lazy provider-module registry for plugin-style provider wiring
 - target-provider auth resolution primitives for `openai-codex` OAuth and `kimi-coding` API keys
 - minimal `Complete` / `CompleteSimple` path for `kimi-coding` via Anthropic-style Messages API
 - minimal `Complete` / `CompleteSimple` path for `openai-codex` via Responses API
@@ -33,6 +34,14 @@ Package import path:
 ```go
 import "github.com/Icatme/pi-go/pkg/pigo"
 ```
+
+Provider module registration:
+
+- built-in providers are registered through a lazy provider registry
+- external providers can register with `RegisterProviderModule` or `RegisterLazyProviderModule`
+- `Stream` / `Complete` resolve provider execution through that registry instead of a hard-coded switch
+- provider auth metadata and provider capability metadata are also attached to registry modules
+- runtime auth resolution now reads provider auth behavior from the registered module
 
 Support-file boundaries:
 

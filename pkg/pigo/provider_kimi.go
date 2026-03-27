@@ -150,6 +150,8 @@ type anthropicStreamingBlockState struct {
 }
 
 func streamAnthropicMessages(model Model, ctx Context, options CompleteOptions) *AssistantMessageEventStream {
+	options = NormalizeCompleteOptions(model, options)
+
 	stream := newAssistantMessageEventStream()
 
 	response := AssistantMessage{

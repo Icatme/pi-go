@@ -245,6 +245,8 @@ func streamOpenAICodex(model Model, ctx Context, options CompleteOptions) *Assis
 }
 
 func buildOpenAICodexRequest(model Model, ctx Context, options CompleteOptions) openAICodexRequest {
+	options = NormalizeCompleteOptions(model, options)
+
 	requestBody := openAICodexRequest{
 		Model:             model.ID,
 		Store:             false,
@@ -267,10 +269,10 @@ func buildOpenAICodexRequest(model Model, ctx Context, options CompleteOptions) 
 		requestBody.PromptCacheKey = options.SessionID
 	}
 
-	if effort := clampOpenAICodexReasoningEffort(model, options.Reasoning); effort != "" {
+	if effort := string(options.Reasoning); effort != "" {
 		requestBody.Reasoning = &openAICodexReasoningOptions{
 			Effort:  effort,
-			Summary: defaultReasoningSummary(options.ReasoningSummary),
+			Summary: options.ReasoningSummary,
 		}
 	}
 

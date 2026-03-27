@@ -52,16 +52,19 @@ const (
 )
 
 func RequiresOAuth(provider Provider) bool {
-	return provider == "openai-codex"
+	module := resolveProviderModule(provider)
+	if module == nil {
+		return false
+	}
+	return module.Auth.RequiresOAuth
 }
 
 func GetEnvAPIKey(provider Provider) string {
-	switch provider {
-	case "kimi-coding":
-		return lookupEnvValue("KIMI_API_KEY")
-	default:
+	module := resolveProviderModule(provider)
+	if module == nil || strings.TrimSpace(module.Auth.EnvAPIKeyName) == "" {
 		return ""
 	}
+	return lookupEnvValue(module.Auth.EnvAPIKeyName)
 }
 
 func ResolveAPIKey(provider Provider, auth map[Provider]AuthConfig) string {
@@ -97,21 +100,41 @@ func ResolveAuthorization(provider Provider, auth map[Provider]AuthConfig, httpC
 		if config.OAuth == nil {
 			return "", nil
 		}
-		if !RequiresOAuth(provider) || !oauthCredentialsNeedRefresh(config.OAuth) {
-			return config.OAuth.AccessToken, nil
+		module := resolveProviderModule(provider)
+		if module != nil && module.Auth.ResolveAuthorization != nil {
+			updated, token, err := module.Auth.ResolveAuthorization(provider, config, httpClient, requestContext)
+			if err != nil {
+				return "", err
+			}
+			auth[provider] = updated
+			return token, nil
 		}
-
-		refreshed, err := refreshOpenAICodexOAuth(config.OAuth.RefreshToken, httpClient, requestContext)
-		if err != nil {
-			return "", err
-		}
-
-		config.OAuth = refreshed
-		auth[provider] = config
-		return refreshed.AccessToken, nil
+		return config.OAuth.AccessToken, nil
 	default:
 		return "", nil
 	}
+}
+
+func resolveOpenAICodexAuthorization(
+	_ Provider,
+	config AuthConfig,
+	httpClient *http.Client,
+	requestContext context.Context,
+) (AuthConfig, string, error) {
+	if config.OAuth == nil {
+		return config, "", nil
+	}
+	if !oauthCredentialsNeedRefresh(config.OAuth) {
+		return config, config.OAuth.AccessToken, nil
+	}
+
+	refreshed, err := refreshOpenAICodexOAuth(config.OAuth.RefreshToken, httpClient, requestContext)
+	if err != nil {
+		return config, "", err
+	}
+
+	config.OAuth = refreshed
+	return config, refreshed.AccessToken, nil
 }
 
 func oauthCredentialsNeedRefresh(credentials *OAuthCredentials) bool {
