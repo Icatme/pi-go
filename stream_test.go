@@ -849,6 +849,150 @@ func TestStreamSimpleOpenAICodexTopLevelErrorPreservesCreatedResponseID(t *testi
 	}
 }
 
+func TestStreamSimpleOpenAICodexPreservesReasoningDeltaWhenDoneHasNoSummary(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.added",
+				"item": map[string]any{
+					"type": "reasoning",
+					"id":   "rs_empty_summary",
+				},
+			},
+			map[string]any{
+				"type":  "response.reasoning_summary_text.delta",
+				"delta": "draft reasoning",
+			},
+			map[string]any{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type":    "reasoning",
+					"id":      "rs_empty_summary",
+					"summary": []map[string]any{},
+				},
+			},
+			map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":     "resp_reasoning_preserve",
+					"status": "completed",
+					"usage": map[string]any{
+						"input_tokens":  4,
+						"output_tokens": 2,
+						"total_tokens":  6,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	stream := StreamSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+	}, CompleteOptions{
+		APIKey: token,
+	})
+
+	var events []AssistantMessageEvent
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+
+	result := stream.Result()
+	if events[2].Type != AssistantMessageEventThinkingDelta || events[2].Delta != "draft reasoning" {
+		t.Fatalf("expected reasoning delta event, got %+v", events[2])
+	}
+	if events[3].Type != AssistantMessageEventThinkingEnd || events[3].Content != "draft reasoning" {
+		t.Fatalf("expected reasoning end to preserve accumulated delta, got %+v", events[3])
+	}
+	thinking, ok := result.Content[0].(ThinkingContent)
+	if !ok || thinking.Thinking != "draft reasoning" {
+		t.Fatalf("expected result to preserve reasoning delta, got %#v", result.Content[0])
+	}
+}
+
+func TestStreamSimpleOpenAICodexTerminalToolArgumentsOverridePartialJSON(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.added",
+				"item": map[string]any{
+					"type":    "function_call",
+					"id":      "fc_override",
+					"call_id": "call_override",
+					"name":    "edit_file",
+				},
+			},
+			map[string]any{
+				"type":  "response.function_call_arguments.delta",
+				"delta": `{"path":"REA`,
+			},
+			map[string]any{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type":      "function_call",
+					"id":        "fc_override",
+					"call_id":   "call_override",
+					"name":      "edit_file",
+					"arguments": `{"path":"README.md","content":"ok"}`,
+				},
+			},
+			map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":     "resp_tool_override",
+					"status": "completed",
+					"usage": map[string]any{
+						"input_tokens":  4,
+						"output_tokens": 2,
+						"total_tokens":  6,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	stream := StreamSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+	}, CompleteOptions{
+		APIKey: token,
+	})
+
+	for range stream.Events() {
+	}
+	result := stream.Result()
+	call, ok := result.Content[0].(ToolCall)
+	if !ok {
+		t.Fatalf("expected tool call result, got %#v", result.Content)
+	}
+	if call.Arguments["path"] != "README.md" || call.Arguments["content"] != "ok" {
+		t.Fatalf("expected terminal arguments to override partial json, got %+v", call.Arguments)
+	}
+}
+
 func TestStreamSimpleEmitsAbortedErrorEvent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("did not expect request to reach server after context cancellation")
