@@ -49,3 +49,38 @@ func TestCompleteSimpleKimiCodingLive(t *testing.T) {
 		t.Fatalf("expected live kimi response to contain OK, got %q", text.Text)
 	}
 }
+
+func TestCompleteSimpleKimiCodingLiveWithThinkingAndCache(t *testing.T) {
+	if os.Getenv("PIGO_LIVE_TEST") != "1" {
+		t.Skip("set PIGO_LIVE_TEST=1 to run live kimi-coding test")
+	}
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+
+	apiKey := GetEnvAPIKey("kimi-coding")
+	if apiKey == "" {
+		t.Skip("missing KIMI_API_KEY for live test")
+	}
+
+	response := CompleteSimple(*model, Context{
+		SystemPrompt: "Reply with exactly OK.",
+		Messages: []Message{
+			UserMessage{Content: "Say OK"},
+		},
+	}, CompleteOptions{
+		APIKey:               apiKey,
+		Reasoning:            ThinkingLevelHigh,
+		ThinkingBudgetTokens: 2048,
+		CacheRetention:       CacheRetentionShort,
+	})
+
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected live stop reason stop, got %q with error %q", response.StopReason, response.ErrorMessage)
+	}
+	if response.ResponseID == "" {
+		t.Fatal("expected live kimi response id")
+	}
+}

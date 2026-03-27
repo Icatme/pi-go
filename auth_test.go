@@ -1,9 +1,14 @@
 package pigo
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestRequiresOAuth(t *testing.T) {
@@ -68,6 +73,89 @@ func TestResolveAPIKeyFallsBackToEnv(t *testing.T) {
 
 	if got := ResolveAPIKey("kimi-coding", nil); got != "" {
 		t.Fatalf("expected runtime auth resolution to ignore env fallback, got %q", got)
+	}
+}
+
+func TestResolveAuthorizationRefreshesExpiredOpenAICodexOAuth(t *testing.T) {
+	previousURL := openAICodexOAuthTokenURL
+	defer func() {
+		openAICodexOAuthTokenURL = previousURL
+	}()
+
+	refreshedToken := makeOpenAICodexToken("acc_refresh")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/token" {
+			t.Fatalf("expected oauth token path, got %s", r.URL.Path)
+		}
+		if got := r.Header.Get("content-type"); got != "application/x-www-form-urlencoded" {
+			t.Fatalf("expected form content-type, got %q", got)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("expected refresh form body: %v", err)
+		}
+		if r.Form.Get("grant_type") != "refresh_token" {
+			t.Fatalf("expected refresh grant_type, got %q", r.Form.Get("grant_type"))
+		}
+		if r.Form.Get("refresh_token") != "refresh-old" {
+			t.Fatalf("expected refresh token in form, got %q", r.Form.Get("refresh_token"))
+		}
+		if r.Form.Get("client_id") != openAICodexOAuthClientID {
+			t.Fatalf("expected client_id %q, got %q", openAICodexOAuthClientID, r.Form.Get("client_id"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  refreshedToken,
+			"refresh_token": "refresh-new",
+			"expires_in":    3600,
+		})
+	}))
+	defer server.Close()
+
+	openAICodexOAuthTokenURL = server.URL + "/oauth/token"
+
+	auth := map[Provider]AuthConfig{
+		"openai-codex": {
+			Type: AuthTypeOAuth,
+			OAuth: &OAuthCredentials{
+				AccessToken:  "expired-token",
+				RefreshToken: "refresh-old",
+				ExpiresUnix:  time.Now().Unix() - 10,
+			},
+		},
+	}
+
+	token, err := ResolveAuthorization("openai-codex", auth, server.Client(), context.Background())
+	if err != nil {
+		t.Fatalf("expected refreshed oauth token, got error: %v", err)
+	}
+	if token != refreshedToken {
+		t.Fatalf("expected refreshed access token, got %q", token)
+	}
+	if auth["openai-codex"].OAuth == nil || auth["openai-codex"].OAuth.RefreshToken != "refresh-new" {
+		t.Fatalf("expected auth map to be updated with refreshed credentials, got %+v", auth["openai-codex"].OAuth)
+	}
+	if auth["openai-codex"].OAuth.ExpiresUnix <= time.Now().Unix() {
+		t.Fatalf("expected refreshed expiry in the future, got %d", auth["openai-codex"].OAuth.ExpiresUnix)
+	}
+}
+
+func TestResolveAuthorizationKeepsValidOpenAICodexOAuthWithoutRefresh(t *testing.T) {
+	auth := map[Provider]AuthConfig{
+		"openai-codex": {
+			Type: AuthTypeOAuth,
+			OAuth: &OAuthCredentials{
+				AccessToken:  "still-valid",
+				RefreshToken: "refresh-token",
+				ExpiresUnix:  time.Now().Unix() + 3600,
+			},
+		},
+	}
+
+	token, err := ResolveAuthorization("openai-codex", auth, nil, context.Background())
+	if err != nil {
+		t.Fatalf("expected valid oauth token without refresh, got error: %v", err)
+	}
+	if token != "still-valid" {
+		t.Fatalf("expected current access token, got %q", token)
 	}
 }
 

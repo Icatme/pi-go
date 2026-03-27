@@ -17,6 +17,9 @@ type anthropicRequest struct {
 	Tools       []anthropicTool      `json:"tools,omitempty"`
 	MaxTokens   int                  `json:"max_tokens"`
 	Temperature *float64             `json:"temperature,omitempty"`
+	Thinking    any                  `json:"thinking,omitempty"`
+	ToolChoice  any                  `json:"tool_choice,omitempty"`
+	Stream      bool                 `json:"stream,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -25,9 +28,10 @@ type anthropicMessage struct {
 }
 
 type anthropicTextBlock struct {
-	Type      string `json:"type"`
-	Text      string `json:"text"`
-	Signature string `json:"signature,omitempty"`
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text"`
+	Signature    string                 `json:"signature,omitempty"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicThinkingBlock struct {
@@ -37,8 +41,9 @@ type anthropicThinkingBlock struct {
 }
 
 type anthropicImageBlock struct {
-	Type   string               `json:"type"`
-	Source anthropicImageSource `json:"source"`
+	Type         string                 `json:"type"`
+	Source       anthropicImageSource   `json:"source"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicImageSource struct {
@@ -60,16 +65,22 @@ type anthropicToolUseBlock struct {
 }
 
 type anthropicToolResultBlock struct {
-	Type      string `json:"type"`
-	ToolUseID string `json:"tool_use_id"`
-	Content   any    `json:"content"`
-	IsError   bool   `json:"is_error,omitempty"`
+	Type         string                 `json:"type"`
+	ToolUseID    string                 `json:"tool_use_id"`
+	Content      any                    `json:"content"`
+	IsError      bool                   `json:"is_error,omitempty"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicTool struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	InputSchema any    `json:"input_schema,omitempty"`
+}
+
+type anthropicCacheControl struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type anthropicResponse struct {
@@ -162,34 +173,30 @@ func streamAnthropicMessages(model Model, ctx Context, options CompleteOptions) 
 			return
 		}
 
+		cacheControl := resolveAnthropicCacheControl(model.BaseURL, options.CacheRetention)
 		requestBody := anthropicRequest{
 			Model:     model.ID,
-			Messages:  convertAnthropicMessages(ctx.Messages, model),
+			Messages:  convertAnthropicMessagesWithCache(ctx.Messages, model, cacheControl),
 			Tools:     convertAnthropicTools(ctx.Tools),
 			MaxTokens: defaultMaxTokens(model, options.MaxTokens),
+			Thinking:  buildAnthropicThinkingOptions(model, options),
+			Stream:    true,
 		}
 		if ctx.SystemPrompt != "" {
 			requestBody.System = []anthropicTextBlock{{
-				Type: "text",
-				Text: ctx.SystemPrompt,
+				Type:         "text",
+				Text:         ctx.SystemPrompt,
+				CacheControl: cacheControl,
 			}}
 		}
-		if options.Temperature != nil {
+		if options.Temperature != nil && requestBody.Thinking == nil {
 			requestBody.Temperature = options.Temperature
 		}
-
-		payload := map[string]any{
-			"model":      requestBody.Model,
-			"messages":   requestBody.Messages,
-			"tools":      requestBody.Tools,
-			"max_tokens": requestBody.MaxTokens,
-			"stream":     true,
-		}
-		if len(requestBody.System) > 0 {
-			payload["system"] = requestBody.System
-		}
-		if requestBody.Temperature != nil {
-			payload["temperature"] = requestBody.Temperature
+		payload := any(requestBody)
+		if options.OnPayload != nil {
+			if next := options.OnPayload(payload, model); next != nil {
+				payload = next
+			}
 		}
 
 		bodyBytes, err := json.Marshal(payload)
@@ -504,6 +511,68 @@ func defaultMaxTokens(model Model, override int) int {
 }
 
 func convertAnthropicMessages(messages []Message, model Model) []anthropicMessage {
+	return convertAnthropicMessagesWithCache(messages, model, nil)
+}
+
+func resolveAnthropicCacheControl(baseURL string, retention CacheRetention) *anthropicCacheControl {
+	switch retention {
+	case CacheRetentionNone:
+		return nil
+	case CacheRetentionLong:
+		cacheControl := &anthropicCacheControl{Type: "ephemeral"}
+		if strings.Contains(baseURL, "api.anthropic.com") {
+			cacheControl.TTL = "1h"
+		}
+		return cacheControl
+	case CacheRetentionShort:
+		return &anthropicCacheControl{Type: "ephemeral"}
+	default:
+		return nil
+	}
+}
+
+func buildAnthropicThinkingOptions(model Model, options CompleteOptions) any {
+	if options.Reasoning == "" {
+		return nil
+	}
+
+	budget := options.ThinkingBudgetTokens
+	if budget <= 0 {
+		switch options.Reasoning {
+		case ThinkingLevelMinimal:
+			budget = 1024
+		case ThinkingLevelLow:
+			budget = 2048
+		case ThinkingLevelMedium:
+			budget = 4096
+		case ThinkingLevelHigh:
+			budget = 8192
+		case ThinkingLevelXHigh:
+			if SupportsXHigh(model) {
+				budget = 16384
+			} else {
+				budget = 8192
+			}
+		default:
+			budget = 4096
+		}
+	}
+
+	maxBudget := defaultMaxTokens(model, options.MaxTokens)
+	if maxBudget > 0 && budget > maxBudget {
+		budget = maxBudget
+	}
+	if budget <= 0 {
+		return nil
+	}
+
+	return map[string]any{
+		"type":          "enabled",
+		"budget_tokens": budget,
+	}
+}
+
+func convertAnthropicMessagesWithCache(messages []Message, model Model, cacheControl *anthropicCacheControl) []anthropicMessage {
 	transformed := TransformMessages(messages, model, func(id string, _ Model, _ AssistantMessage) string {
 		return NormalizeSimpleToolCallID(id)
 	})
@@ -556,7 +625,69 @@ func convertAnthropicMessages(messages []Message, model Model) []anthropicMessag
 		}
 	}
 
+	applyAnthropicMessageCacheControl(params, cacheControl)
 	return params
+}
+
+func applyAnthropicMessageCacheControl(messages []anthropicMessage, cacheControl *anthropicCacheControl) {
+	if cacheControl == nil {
+		return
+	}
+
+	for index := len(messages) - 1; index >= 0; index-- {
+		if messages[index].Role != "user" {
+			continue
+		}
+		messages[index].Content = applyAnthropicContentCacheControl(messages[index].Content, cacheControl)
+		return
+	}
+}
+
+func applyAnthropicContentCacheControl(content any, cacheControl *anthropicCacheControl) any {
+	if cacheControl == nil {
+		return content
+	}
+
+	switch typed := content.(type) {
+	case string:
+		if strings.TrimSpace(typed) == "" {
+			return content
+		}
+		return []any{anthropicTextBlock{
+			Type:         "text",
+			Text:         typed,
+			CacheControl: cacheControl,
+		}}
+	case []any:
+		if len(typed) == 0 {
+			return content
+		}
+		lastIndex := len(typed) - 1
+		switch block := typed[lastIndex].(type) {
+		case anthropicTextBlock:
+			block.CacheControl = cacheControl
+			typed[lastIndex] = block
+		case anthropicImageBlock:
+			block.CacheControl = cacheControl
+			typed[lastIndex] = block
+		case anthropicToolResultBlock:
+			block.CacheControl = cacheControl
+			typed[lastIndex] = block
+		}
+		return typed
+	case []anthropicToolResultBlock:
+		if len(typed) == 0 {
+			return content
+		}
+		typed[len(typed)-1].CacheControl = cacheControl
+		blocks := make([]any, 0, len(typed))
+		for _, block := range typed {
+			blocks = append(blocks, block)
+		}
+		return blocks
+	default:
+		return content
+	}
 }
 
 func convertUserContent(value any, model Model) any {

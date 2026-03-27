@@ -306,6 +306,549 @@ func TestStreamSimpleOpenAICodexEmitsTextLifecycleFromSSEDelta(t *testing.T) {
 	}
 }
 
+func TestStreamSimpleOpenAICodexEmitsLifecycleFromTerminalOnlyOutput(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.created",
+				"response": map[string]any{
+					"id": "resp_terminal_only",
+				},
+			},
+			map[string]any{
+				"type": "response.done",
+				"response": map[string]any{
+					"status": "completed",
+					"output": []map[string]any{
+						{
+							"type": "reasoning",
+							"id":   "rs_1",
+							"summary": []map[string]any{
+								{"type": "summary_text", "text": "plan first"},
+							},
+						},
+						{
+							"type": "message",
+							"id":   "msg_1",
+							"content": []map[string]any{
+								{"type": "output_text", "text": "hello"},
+							},
+						},
+						{
+							"type":      "function_call",
+							"id":        "fc_9",
+							"call_id":   "call_9",
+							"name":      "edit_file",
+							"arguments": `{"path":"README.md"}`,
+						},
+					},
+					"usage": map[string]any{
+						"input_tokens":  6,
+						"output_tokens": 3,
+						"total_tokens":  9,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	stream := StreamSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+	}, CompleteOptions{
+		APIKey: token,
+	})
+
+	var events []AssistantMessageEvent
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+
+	result := stream.Result()
+	expected := []AssistantMessageEventType{
+		AssistantMessageEventStart,
+		AssistantMessageEventThinkingStart,
+		AssistantMessageEventThinkingDelta,
+		AssistantMessageEventThinkingEnd,
+		AssistantMessageEventTextStart,
+		AssistantMessageEventTextDelta,
+		AssistantMessageEventTextEnd,
+		AssistantMessageEventToolCallStart,
+		AssistantMessageEventToolCallDelta,
+		AssistantMessageEventToolCallEnd,
+		AssistantMessageEventDone,
+	}
+	if len(events) != len(expected) {
+		t.Fatalf("expected %d events, got %d", len(expected), len(events))
+	}
+	for index, event := range events {
+		if event.Type != expected[index] {
+			t.Fatalf("expected event %d to be %q, got %q", index, expected[index], event.Type)
+		}
+	}
+	if events[2].Delta != "plan first" {
+		t.Fatalf("expected terminal thinking delta, got %q", events[2].Delta)
+	}
+	if events[5].Delta != "hello" {
+		t.Fatalf("expected terminal text delta from message output_text, got %q", events[5].Delta)
+	}
+	if events[6].Content != "hello" {
+		t.Fatalf("expected text end content to reflect output_text block, got %q", events[6].Content)
+	}
+	if events[8].Delta != `{"path":"README.md"}` {
+		t.Fatalf("expected terminal tool delta, got %q", events[8].Delta)
+	}
+	if events[9].ToolCall.ID != "call_9|fc_9" {
+		t.Fatalf("expected terminal tool call id, got %q", events[9].ToolCall.ID)
+	}
+	if result.ResponseID != "resp_terminal_only" {
+		t.Fatalf("expected response id from response.created, got %q", result.ResponseID)
+	}
+	if result.StopReason != StopReasonToolUse {
+		t.Fatalf("expected toolUse stop reason, got %q", result.StopReason)
+	}
+}
+
+func TestStreamSimpleOpenAICodexFailedEventPreservesResponseID(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.failed",
+				"response": map[string]any{
+					"id":     "resp_failed_1",
+					"status": "failed",
+					"error": map[string]any{
+						"type":    "server_error",
+						"message": "backend exploded",
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	stream := StreamSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+	}, CompleteOptions{
+		APIKey: token,
+	})
+
+	var events []AssistantMessageEvent
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("expected start + error events, got %d", len(events))
+	}
+	if events[1].Type != AssistantMessageEventError {
+		t.Fatalf("expected error event, got %q", events[1].Type)
+	}
+	if events[1].Error.ResponseID != "resp_failed_1" {
+		t.Fatalf("expected failed response id to be preserved, got %q", events[1].Error.ResponseID)
+	}
+}
+
+func TestStreamSimpleOpenAICodexEmitsRefusalLifecycle(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.added",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_refusal",
+				},
+			},
+			map[string]any{
+				"type": "response.content_part.added",
+				"part": map[string]any{
+					"type":    "refusal",
+					"refusal": "",
+				},
+			},
+			map[string]any{
+				"type":  "response.refusal.delta",
+				"delta": "cannot comply",
+			},
+			map[string]any{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_refusal",
+					"content": []map[string]any{
+						{"type": "refusal", "refusal": "cannot comply"},
+					},
+				},
+			},
+			map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":     "resp_refusal_stream",
+					"status": "completed",
+					"usage": map[string]any{
+						"input_tokens":  4,
+						"output_tokens": 2,
+						"total_tokens":  6,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	stream := StreamSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+	}, CompleteOptions{
+		APIKey: token,
+	})
+
+	var events []AssistantMessageEvent
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+
+	if len(events) != 5 {
+		t.Fatalf("expected 5 refusal events, got %d", len(events))
+	}
+	if events[1].Type != AssistantMessageEventTextStart || events[2].Type != AssistantMessageEventTextDelta || events[3].Type != AssistantMessageEventTextEnd {
+		t.Fatalf("expected refusal to reuse text lifecycle, got %+v", []AssistantMessageEventType{events[1].Type, events[2].Type, events[3].Type})
+	}
+	if events[2].Delta != "cannot comply" || events[3].Content != "cannot comply" {
+		t.Fatalf("expected refusal delta/content to match, got delta=%q content=%q", events[2].Delta, events[3].Content)
+	}
+}
+
+func TestStreamSimpleOpenAICodexFinalizesOpenMessageFromTerminalOutput(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.added",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_1",
+				},
+			},
+			map[string]any{
+				"type": "response.content_part.added",
+				"part": map[string]any{
+					"type": "output_text",
+					"text": "",
+				},
+			},
+			map[string]any{
+				"type":  "response.output_text.delta",
+				"delta": "hello",
+			},
+			map[string]any{
+				"type": "response.done",
+				"response": map[string]any{
+					"id":     "resp_finish_open",
+					"status": "completed",
+					"output": []map[string]any{
+						{
+							"type": "message",
+							"id":   "msg_1",
+							"content": []map[string]any{
+								{"type": "output_text", "text": "hello"},
+							},
+						},
+					},
+					"usage": map[string]any{
+						"input_tokens":  4,
+						"output_tokens": 2,
+						"total_tokens":  6,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	stream := StreamSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+	}, CompleteOptions{
+		APIKey: token,
+	})
+
+	var events []AssistantMessageEvent
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+
+	if len(events) != 5 {
+		t.Fatalf("expected 5 events, got %d", len(events))
+	}
+	if events[3].Type != AssistantMessageEventTextEnd {
+		t.Fatalf("expected terminal to finalize open text block, got %q", events[3].Type)
+	}
+	if events[3].Content != "hello" {
+		t.Fatalf("expected finalized text content, got %q", events[3].Content)
+	}
+}
+
+func TestStreamSimpleOpenAICodexAppendsMissingTerminalItems(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.added",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_1",
+				},
+			},
+			map[string]any{
+				"type": "response.content_part.added",
+				"part": map[string]any{
+					"type": "output_text",
+					"text": "",
+				},
+			},
+			map[string]any{
+				"type":  "response.output_text.delta",
+				"delta": "hello",
+			},
+			map[string]any{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_1",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "hello"},
+					},
+				},
+			},
+			map[string]any{
+				"type": "response.done",
+				"response": map[string]any{
+					"id":     "resp_append_terminal",
+					"status": "completed",
+					"output": []map[string]any{
+						{
+							"type": "message",
+							"id":   "msg_1",
+							"content": []map[string]any{
+								{"type": "output_text", "text": "hello"},
+							},
+						},
+						{
+							"type":      "function_call",
+							"id":        "fc_2",
+							"call_id":   "call_2",
+							"name":      "edit_file",
+							"arguments": `{"path":"README.md"}`,
+						},
+					},
+					"usage": map[string]any{
+						"input_tokens":  5,
+						"output_tokens": 3,
+						"total_tokens":  8,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	stream := StreamSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+	}, CompleteOptions{
+		APIKey: token,
+	})
+
+	var events []AssistantMessageEvent
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+
+	result := stream.Result()
+	if len(result.Content) != 2 {
+		t.Fatalf("expected terminal output to append missing tool call, got %+v", result.Content)
+	}
+	call, ok := result.Content[1].(ToolCall)
+	if !ok || call.ID != "call_2|fc_2" {
+		t.Fatalf("expected appended terminal tool call, got %#v", result.Content[1])
+	}
+	if len(events) != 8 {
+		t.Fatalf("expected 8 events including terminal tool lifecycle, got %d", len(events))
+	}
+	if events[4].Type != AssistantMessageEventToolCallStart || events[5].Type != AssistantMessageEventToolCallDelta || events[6].Type != AssistantMessageEventToolCallEnd {
+		t.Fatalf("expected terminal tool lifecycle events, got %+v", []AssistantMessageEventType{events[4].Type, events[5].Type, events[6].Type})
+	}
+}
+
+func TestStreamSimpleOpenAICodexCombinesTerminalMessagePartsIntoSingleLifecycle(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.done",
+				"response": map[string]any{
+					"id":     "resp_multi_message",
+					"status": "completed",
+					"output": []map[string]any{
+						{
+							"type": "message",
+							"id":   "msg_multi",
+							"content": []map[string]any{
+								{"type": "output_text", "text": "hello"},
+								{"type": "output_text", "text": " there"},
+								{"type": "refusal", "refusal": "!"},
+							},
+						},
+					},
+					"usage": map[string]any{
+						"input_tokens":  5,
+						"output_tokens": 3,
+						"total_tokens":  8,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	stream := StreamSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+	}, CompleteOptions{
+		APIKey: token,
+	})
+
+	var events []AssistantMessageEvent
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+
+	result := stream.Result()
+	if len(events) != 5 {
+		t.Fatalf("expected single message lifecycle plus done, got %d events", len(events))
+	}
+	if events[1].Type != AssistantMessageEventTextStart || events[2].Type != AssistantMessageEventTextDelta || events[3].Type != AssistantMessageEventTextEnd {
+		t.Fatalf("expected single text lifecycle, got %+v", []AssistantMessageEventType{events[1].Type, events[2].Type, events[3].Type})
+	}
+	if events[2].Delta != "hello there!" || events[3].Content != "hello there!" {
+		t.Fatalf("expected combined terminal message text, got delta=%q content=%q", events[2].Delta, events[3].Content)
+	}
+	if len(result.Content) != 1 {
+		t.Fatalf("expected single text content block, got %+v", result.Content)
+	}
+	text, ok := result.Content[0].(TextContent)
+	if !ok || text.Text != "hello there!" {
+		t.Fatalf("expected combined result text, got %#v", result.Content[0])
+	}
+	if !reflect.DeepEqual(events[4].Message, result) {
+		t.Fatalf("expected done event message to equal result, got done=%+v result=%+v", events[4].Message, result)
+	}
+}
+
+func TestStreamSimpleOpenAICodexTopLevelErrorPreservesCreatedResponseID(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.created",
+				"response": map[string]any{
+					"id": "resp_error_created",
+				},
+			},
+			map[string]any{
+				"type":    "error",
+				"message": "transport broke",
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	stream := StreamSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+	}, CompleteOptions{
+		APIKey: token,
+	})
+
+	var events []AssistantMessageEvent
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("expected start + error events, got %d", len(events))
+	}
+	if events[1].Type != AssistantMessageEventError {
+		t.Fatalf("expected error event, got %q", events[1].Type)
+	}
+	if events[1].Error.ResponseID != "resp_error_created" {
+		t.Fatalf("expected created response id to survive error, got %q", events[1].Error.ResponseID)
+	}
+}
+
 func TestStreamSimpleEmitsAbortedErrorEvent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("did not expect request to reach server after context cancellation")

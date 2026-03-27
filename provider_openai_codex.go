@@ -13,14 +13,28 @@ import (
 )
 
 type openAICodexRequest struct {
-	Model             string           `json:"model"`
-	Store             bool             `json:"store"`
-	Stream            bool             `json:"stream"`
-	Instructions      string           `json:"instructions,omitempty"`
-	Input             []map[string]any `json:"input,omitempty"`
-	Tools             []map[string]any `json:"tools,omitempty"`
-	ToolChoice        string           `json:"tool_choice,omitempty"`
-	ParallelToolCalls bool             `json:"parallel_tool_calls,omitempty"`
+	Model             string                       `json:"model"`
+	Store             bool                         `json:"store"`
+	Stream            bool                         `json:"stream"`
+	Instructions      string                       `json:"instructions,omitempty"`
+	Input             []map[string]any             `json:"input,omitempty"`
+	Tools             []map[string]any             `json:"tools,omitempty"`
+	ToolChoice        string                       `json:"tool_choice,omitempty"`
+	ParallelToolCalls bool                         `json:"parallel_tool_calls,omitempty"`
+	Temperature       *float64                     `json:"temperature,omitempty"`
+	Reasoning         *openAICodexReasoningOptions `json:"reasoning,omitempty"`
+	Text              *openAICodexTextOptions      `json:"text,omitempty"`
+	Include           []string                     `json:"include,omitempty"`
+	PromptCacheKey    string                       `json:"prompt_cache_key,omitempty"`
+}
+
+type openAICodexReasoningOptions struct {
+	Effort  string `json:"effort,omitempty"`
+	Summary string `json:"summary,omitempty"`
+}
+
+type openAICodexTextOptions struct {
+	Verbosity string `json:"verbosity,omitempty"`
 }
 
 type openAICodexResponse struct {
@@ -70,10 +84,14 @@ type openAICodexResponseError struct {
 }
 
 type openAICodexStreamingState struct {
-	CurrentTextIndex     int
-	CurrentThinkingIndex int
-	CurrentToolIndex     int
-	CurrentToolJSON      string
+	CurrentTextIndex       int
+	CurrentThinkingIndex   int
+	CurrentToolIndex       int
+	CurrentToolJSON        string
+	CurrentTextItemKey     string
+	CurrentThinkingItemKey string
+	CurrentToolItemKey     string
+	FinalizedItemKeys      map[string]bool
 }
 
 func streamOpenAICodex(model Model, ctx Context, options CompleteOptions) *AssistantMessageEventStream {
@@ -90,7 +108,15 @@ func streamOpenAICodex(model Model, ctx Context, options CompleteOptions) *Assis
 	go func() {
 		apiKey := options.APIKey
 		if apiKey == "" {
-			apiKey = ResolveAPIKey(model.Provider, options.Auth)
+			resolved, err := ResolveAuthorization(model.Provider, options.Auth, options.HTTPClient, options.RequestContext)
+			if err != nil {
+				response.StopReason = StopReasonError
+				response.ErrorMessage = err.Error()
+				stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
+				stream.finish(response)
+				return
+			}
+			apiKey = resolved
 		}
 		if apiKey == "" {
 			response.StopReason = StopReasonError
@@ -109,18 +135,15 @@ func streamOpenAICodex(model Model, ctx Context, options CompleteOptions) *Assis
 			return
 		}
 
-		requestBody := openAICodexRequest{
-			Model:             model.ID,
-			Store:             false,
-			Stream:            true,
-			Instructions:      ctx.SystemPrompt,
-			Input:             convertOpenAICodexMessages(model, ctx),
-			Tools:             convertOpenAICodexTools(ctx.Tools),
-			ToolChoice:        "auto",
-			ParallelToolCalls: true,
+		requestBody := buildOpenAICodexRequest(model, ctx, options)
+		payload := any(requestBody)
+		if options.OnPayload != nil {
+			if next := options.OnPayload(payload, model); next != nil {
+				payload = next
+			}
 		}
 
-		bodyBytes, err := json.Marshal(requestBody)
+		bodyBytes, err := json.Marshal(payload)
 		if err != nil {
 			response.StopReason = StopReasonError
 			response.ErrorMessage = err.Error()
@@ -153,6 +176,10 @@ func streamOpenAICodex(model Model, ctx Context, options CompleteOptions) *Assis
 		request.Header.Set("chatgpt-account-id", accountID)
 		request.Header.Set("originator", "pi")
 		request.Header.Set("openai-beta", "responses=experimental")
+		if options.SessionID != "" {
+			request.Header.Set("conversation_id", options.SessionID)
+			request.Header.Set("session_id", options.SessionID)
+		}
 		for key, value := range options.Headers {
 			request.Header.Set(key, value)
 		}
@@ -189,6 +216,7 @@ func streamOpenAICodex(model Model, ctx Context, options CompleteOptions) *Assis
 			CurrentTextIndex:     -1,
 			CurrentThinkingIndex: -1,
 			CurrentToolIndex:     -1,
+			FinalizedItemKeys:    map[string]bool{},
 		}
 		terminalSeen := false
 		if err := readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
@@ -216,6 +244,39 @@ func streamOpenAICodex(model Model, ctx Context, options CompleteOptions) *Assis
 	return stream
 }
 
+func buildOpenAICodexRequest(model Model, ctx Context, options CompleteOptions) openAICodexRequest {
+	requestBody := openAICodexRequest{
+		Model:             model.ID,
+		Store:             false,
+		Stream:            true,
+		Instructions:      ctx.SystemPrompt,
+		Input:             convertOpenAICodexMessages(model, ctx),
+		Tools:             convertOpenAICodexTools(ctx.Tools),
+		ToolChoice:        "auto",
+		ParallelToolCalls: true,
+		Include:           []string{"reasoning.encrypted_content"},
+		Text: &openAICodexTextOptions{
+			Verbosity: defaultTextVerbosity(options.TextVerbosity),
+		},
+	}
+
+	if options.Temperature != nil {
+		requestBody.Temperature = options.Temperature
+	}
+	if options.SessionID != "" {
+		requestBody.PromptCacheKey = options.SessionID
+	}
+
+	if effort := clampOpenAICodexReasoningEffort(model, options.Reasoning); effort != "" {
+		requestBody.Reasoning = &openAICodexReasoningOptions{
+			Effort:  effort,
+			Summary: defaultReasoningSummary(options.ReasoningSummary),
+		}
+	}
+
+	return requestBody
+}
+
 func resolveOpenAICodexURL(baseURL string) string {
 	trimmed := strings.TrimRight(baseURL, "/")
 	if trimmed == "" {
@@ -228,6 +289,50 @@ func resolveOpenAICodexURL(baseURL string) string {
 		return trimmed + "/responses"
 	}
 	return trimmed + "/codex/responses"
+}
+
+func defaultTextVerbosity(verbosity string) string {
+	if strings.TrimSpace(verbosity) == "" {
+		return "medium"
+	}
+	return verbosity
+}
+
+func defaultReasoningSummary(summary string) string {
+	if strings.TrimSpace(summary) == "" {
+		return "auto"
+	}
+	return summary
+}
+
+func clampOpenAICodexReasoningEffort(model Model, level ThinkingLevel) string {
+	effort := string(level)
+	if effort == "" {
+		return ""
+	}
+
+	id := model.ID
+	if strings.Contains(id, "/") {
+		parts := strings.Split(id, "/")
+		id = parts[len(parts)-1]
+	}
+
+	if (strings.HasPrefix(id, "gpt-5.2") || strings.HasPrefix(id, "gpt-5.3") || strings.HasPrefix(id, "gpt-5.4")) && effort == string(ThinkingLevelMinimal) {
+		return string(ThinkingLevelLow)
+	}
+	if id == "gpt-5.1" && effort == string(ThinkingLevelXHigh) {
+		return string(ThinkingLevelHigh)
+	}
+	if id == "gpt-5.1-codex-mini" {
+		if effort == string(ThinkingLevelHigh) || effort == string(ThinkingLevelXHigh) {
+			return string(ThinkingLevelHigh)
+		}
+		return string(ThinkingLevelMedium)
+	}
+	if effort == string(ThinkingLevelXHigh) && !SupportsXHigh(model) {
+		return string(ThinkingLevelHigh)
+	}
+	return effort
 }
 
 func extractOpenAICodexAccountID(token string) (string, error) {
@@ -594,6 +699,7 @@ func processOpenAICodexStreamEvent(
 		if err := json.Unmarshal(responseBytes, &terminal); err != nil {
 			return false, err
 		}
+		emitOpenAICodexTerminalOutputIfNeeded(response, stream, state, terminal)
 		applyOpenAICodexTerminal(model, response, terminal)
 		stream.push(AssistantMessageEvent{
 			Type:    AssistantMessageEventDone,
@@ -614,6 +720,9 @@ func processOpenAICodexStreamEvent(
 		var terminal openAICodexResponse
 		if err := json.Unmarshal(responseBytes, &terminal); err != nil {
 			return false, err
+		}
+		if terminal.ID != "" {
+			response.ResponseID = terminal.ID
 		}
 		if terminal.Error != nil && strings.TrimSpace(terminal.Error.Message) != "" {
 			response.StopReason = StopReasonError
@@ -646,6 +755,66 @@ func processOpenAICodexStreamEvent(
 	}
 
 	return false, nil
+}
+
+func emitOpenAICodexTerminalOutputIfNeeded(
+	response *AssistantMessage,
+	stream *AssistantMessageEventStream,
+	state *openAICodexStreamingState,
+	terminal openAICodexResponse,
+) {
+	if len(terminal.Output) == 0 {
+		return
+	}
+
+	for _, item := range terminal.Output {
+		itemKey := openAICodexItemKey(item)
+		if itemKey != "" && state != nil && state.FinalizedItemKeys[itemKey] {
+			continue
+		}
+
+		switch item.Type {
+		case "message":
+			if state != nil && state.CurrentTextIndex >= 0 && state.CurrentTextItemKey == itemKey {
+				finalizeOpenAICodexStreamItem(response, stream, state, item)
+				continue
+			}
+		case "reasoning":
+			if state != nil && state.CurrentThinkingIndex >= 0 && state.CurrentThinkingItemKey == itemKey {
+				finalizeOpenAICodexStreamItem(response, stream, state, item)
+				continue
+			}
+		case "function_call":
+			if state != nil && state.CurrentToolIndex >= 0 && state.CurrentToolItemKey == itemKey {
+				finalizeOpenAICodexStreamItem(response, stream, state, item)
+				continue
+			}
+		}
+
+		emitOpenAICodexItemLifecycle(response, stream, item)
+		if itemKey != "" && state != nil {
+			state.FinalizedItemKeys[itemKey] = true
+		}
+	}
+}
+
+func openAICodexItemKey(item openAICodexResponseItem) string {
+	switch item.Type {
+	case "message":
+		if strings.TrimSpace(item.ID) != "" {
+			return "message|" + item.ID
+		}
+		return "message|" + mustJSON(item.Content)
+	case "reasoning":
+		if strings.TrimSpace(item.ID) != "" {
+			return "reasoning|" + item.ID
+		}
+		return "reasoning|" + mustJSON(item.Summary)
+	case "function_call":
+		return "function_call|" + item.CallID + "|" + item.ID
+	default:
+		return ""
+	}
 }
 
 func emitOpenAICodexItemLifecycle(response *AssistantMessage, stream *AssistantMessageEventStream, item openAICodexResponseItem) {
@@ -727,11 +896,14 @@ func startOpenAICodexStreamItem(
 	state *openAICodexStreamingState,
 	item openAICodexResponseItem,
 ) {
+	itemKey := openAICodexItemKey(item)
 	switch item.Type {
 	case "message":
 		startOpenAICodexTextBlock(response, stream, state)
+		state.CurrentTextItemKey = itemKey
 	case "reasoning":
 		startOpenAICodexThinkingBlock(response, stream, state)
+		state.CurrentThinkingItemKey = itemKey
 	case "function_call":
 		contentIndex := len(response.Content)
 		response.Content = append(response.Content, ToolCall{
@@ -741,6 +913,7 @@ func startOpenAICodexStreamItem(
 		})
 		state.CurrentToolIndex = contentIndex
 		state.CurrentToolJSON = item.Arguments
+		state.CurrentToolItemKey = itemKey
 		stream.push(AssistantMessageEvent{
 			Type:         AssistantMessageEventToolCallStart,
 			ContentIndex: contentIndex,
@@ -777,10 +950,14 @@ func finalizeOpenAICodexStreamItem(
 	state *openAICodexStreamingState,
 	item openAICodexResponseItem,
 ) {
+	itemKey := openAICodexItemKey(item)
 	switch item.Type {
 	case "message":
 		if state.CurrentTextIndex < 0 {
 			emitOpenAICodexItemLifecycle(response, stream, item)
+			if itemKey != "" {
+				state.FinalizedItemKeys[itemKey] = true
+			}
 			return
 		}
 		block, _ := response.Content[state.CurrentTextIndex].(TextContent)
@@ -804,9 +981,13 @@ func finalizeOpenAICodexStreamItem(
 			Partial:      *response,
 		})
 		state.CurrentTextIndex = -1
+		state.CurrentTextItemKey = ""
 	case "reasoning":
 		if state.CurrentThinkingIndex < 0 {
 			emitOpenAICodexItemLifecycle(response, stream, item)
+			if itemKey != "" {
+				state.FinalizedItemKeys[itemKey] = true
+			}
 			return
 		}
 		block, _ := response.Content[state.CurrentThinkingIndex].(ThinkingContent)
@@ -833,9 +1014,13 @@ func finalizeOpenAICodexStreamItem(
 			Partial:      *response,
 		})
 		state.CurrentThinkingIndex = -1
+		state.CurrentThinkingItemKey = ""
 	case "function_call":
 		if state.CurrentToolIndex < 0 {
 			emitOpenAICodexItemLifecycle(response, stream, item)
+			if itemKey != "" {
+				state.FinalizedItemKeys[itemKey] = true
+			}
 			return
 		}
 		block, _ := response.Content[state.CurrentToolIndex].(ToolCall)
@@ -855,6 +1040,10 @@ func finalizeOpenAICodexStreamItem(
 		})
 		state.CurrentToolIndex = -1
 		state.CurrentToolJSON = ""
+		state.CurrentToolItemKey = ""
+	}
+	if itemKey != "" {
+		state.FinalizedItemKeys[itemKey] = true
 	}
 }
 
@@ -869,9 +1058,16 @@ func applyOpenAICodexTerminal(model Model, response *AssistantMessage, terminal 
 	if terminal.ID != "" {
 		response.ResponseID = terminal.ID
 	}
+	if len(response.Content) == 0 && len(terminal.Output) > 0 {
+		response.Content = append(response.Content, parseOpenAICodexResponseOutput(terminal.Output)...)
+	}
 	response.StopReason = mapOpenAICodexStopReason(terminal.Status, response.Content)
+	inputTokens := terminal.Usage.InputTokens - terminal.Usage.InputDetails.CachedTokens
+	if inputTokens < 0 {
+		inputTokens = 0
+	}
 	response.Usage = Usage{
-		Input:       terminal.Usage.InputTokens - terminal.Usage.InputDetails.CachedTokens,
+		Input:       inputTokens,
 		Output:      terminal.Usage.OutputTokens,
 		CacheRead:   terminal.Usage.InputDetails.CachedTokens,
 		CacheWrite:  0,
@@ -885,13 +1081,17 @@ func parseOpenAICodexResponseOutput(items []openAICodexResponseItem) []ContentBl
 	for _, item := range items {
 		switch item.Type {
 		case "message":
+			var parts []string
 			for _, part := range item.Content {
 				switch part.Type {
 				case "output_text":
-					blocks = append(blocks, TextContent{Text: part.Text})
+					parts = append(parts, part.Text)
 				case "refusal":
-					blocks = append(blocks, TextContent{Text: part.Refusal})
+					parts = append(parts, part.Refusal)
 				}
+			}
+			if len(parts) > 0 {
+				blocks = append(blocks, TextContent{Text: strings.Join(parts, "")})
 			}
 		case "reasoning":
 			if len(item.Summary) == 0 {

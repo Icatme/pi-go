@@ -364,3 +364,199 @@ func TestCompleteSimpleKimiCodingReturnsProviderErrorMessage(t *testing.T) {
 		t.Fatalf("expected provider error message, got %q", response.ErrorMessage)
 	}
 }
+
+func TestCompleteSimpleKimiCodingSetsThinkingCacheAndToolChoice(t *testing.T) {
+	var requestBody anthropicRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request json: %v", err)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildAnthropicSSE(
+			map[string]any{
+				"type": "message_start",
+				"message": map[string]any{
+					"id": "msg_126",
+					"usage": map[string]any{
+						"input_tokens":                10,
+						"output_tokens":               0,
+						"cache_read_input_tokens":     0,
+						"cache_creation_input_tokens": 0,
+					},
+				},
+			},
+			map[string]any{
+				"type":  "content_block_start",
+				"index": 0,
+				"content_block": map[string]any{
+					"type": "text",
+					"text": "",
+				},
+			},
+			map[string]any{
+				"type":  "content_block_delta",
+				"index": 0,
+				"delta": map[string]any{
+					"type": "text_delta",
+					"text": "configured",
+				},
+			},
+			map[string]any{
+				"type":  "content_block_stop",
+				"index": 0,
+			},
+			map[string]any{
+				"type": "message_delta",
+				"delta": map[string]any{
+					"stop_reason": "end_turn",
+				},
+				"usage": map[string]any{
+					"output_tokens": 3,
+				},
+			},
+			map[string]any{
+				"type": "message_stop",
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	_ = CompleteSimple(*model, Context{
+		SystemPrompt: "Use tools when needed.",
+		Tools: []Tool{
+			{
+				Name:        "noop",
+				Description: "Do nothing",
+				Parameters: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+				},
+			},
+		},
+		Messages: []Message{
+			UserMessage{Content: "hello"},
+		},
+	}, CompleteOptions{
+		APIKey:               "kimi-test-key",
+		Reasoning:            ThinkingLevelHigh,
+		ThinkingBudgetTokens: 2048,
+		CacheRetention:       CacheRetentionShort,
+		ToolChoice:           "any",
+	})
+
+	thinking, ok := requestBody.Thinking.(map[string]any)
+	if !ok {
+		t.Fatalf("expected thinking payload, got %T", requestBody.Thinking)
+	}
+	if thinking["type"] != "enabled" || thinking["budget_tokens"] != float64(2048) {
+		t.Fatalf("expected budget-based thinking payload, got %#v", thinking)
+	}
+	if requestBody.ToolChoice != nil {
+		t.Fatalf("expected unsupported kimi tool_choice to be omitted, got %#v", requestBody.ToolChoice)
+	}
+	if len(requestBody.System) != 1 || requestBody.System[0].CacheControl == nil || requestBody.System[0].CacheControl.Type != "ephemeral" {
+		t.Fatalf("expected cache control on system prompt, got %+v", requestBody.System)
+	}
+	lastMessage := requestBody.Messages[len(requestBody.Messages)-1]
+	blocks, ok := lastMessage.Content.([]any)
+	if !ok || len(blocks) == 0 {
+		t.Fatalf("expected user content blocks with cache control, got %#v", lastMessage.Content)
+	}
+	lastBlock, ok := blocks[len(blocks)-1].(map[string]any)
+	if !ok {
+		t.Fatalf("expected last block object, got %T", blocks[len(blocks)-1])
+	}
+	cacheControl, ok := lastBlock["cache_control"].(map[string]any)
+	if !ok || cacheControl["type"] != "ephemeral" {
+		t.Fatalf("expected cache_control on last user block, got %#v", lastBlock["cache_control"])
+	}
+}
+
+func TestCompleteSimpleKimiCodingOmitsCacheControlWhenDisabled(t *testing.T) {
+	var requestBody anthropicRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request json: %v", err)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildAnthropicSSE(
+			map[string]any{
+				"type": "message_start",
+				"message": map[string]any{
+					"id": "msg_127",
+					"usage": map[string]any{
+						"input_tokens":                10,
+						"output_tokens":               0,
+						"cache_read_input_tokens":     0,
+						"cache_creation_input_tokens": 0,
+					},
+				},
+			},
+			map[string]any{
+				"type":  "content_block_start",
+				"index": 0,
+				"content_block": map[string]any{
+					"type": "text",
+					"text": "",
+				},
+			},
+			map[string]any{
+				"type":  "content_block_delta",
+				"index": 0,
+				"delta": map[string]any{
+					"type": "text_delta",
+					"text": "configured",
+				},
+			},
+			map[string]any{
+				"type":  "content_block_stop",
+				"index": 0,
+			},
+			map[string]any{
+				"type": "message_delta",
+				"delta": map[string]any{
+					"stop_reason": "end_turn",
+				},
+				"usage": map[string]any{
+					"output_tokens": 3,
+				},
+			},
+			map[string]any{
+				"type": "message_stop",
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "kimi-k2-thinking")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	_ = CompleteSimple(*model, Context{
+		SystemPrompt: "No cache.",
+		Messages: []Message{
+			UserMessage{Content: "hello"},
+		},
+	}, CompleteOptions{
+		APIKey:         "kimi-test-key",
+		CacheRetention: CacheRetentionNone,
+	})
+
+	if len(requestBody.System) != 1 || requestBody.System[0].CacheControl != nil {
+		t.Fatalf("expected no system cache control, got %+v", requestBody.System)
+	}
+	lastMessage := requestBody.Messages[len(requestBody.Messages)-1]
+	if _, ok := lastMessage.Content.(string); !ok {
+		t.Fatalf("expected plain string user content when cache is disabled, got %T", lastMessage.Content)
+	}
+}

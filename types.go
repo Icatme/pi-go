@@ -6,6 +6,8 @@ type API string
 type Provider string
 type StopReason string
 type InputType string
+type CacheRetention string
+type ThinkingLevel string
 
 const (
 	StopReasonStop    StopReason = "stop"
@@ -16,6 +18,16 @@ const (
 
 	InputText  InputType = "text"
 	InputImage InputType = "image"
+
+	CacheRetentionNone  CacheRetention = "none"
+	CacheRetentionShort CacheRetention = "short"
+	CacheRetentionLong  CacheRetention = "long"
+
+	ThinkingLevelMinimal ThinkingLevel = "minimal"
+	ThinkingLevelLow     ThinkingLevel = "low"
+	ThinkingLevelMedium  ThinkingLevel = "medium"
+	ThinkingLevelHigh    ThinkingLevel = "high"
+	ThinkingLevelXHigh   ThinkingLevel = "xhigh"
 )
 
 type UsageCost struct {
