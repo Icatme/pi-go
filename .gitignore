@@ -5,3 +5,5 @@ dist/
 coverage.out
 .env
 .env.*
+*_auth.json
+*_oauth.json

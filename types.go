@@ -94,6 +94,7 @@ type AssistantMessage struct {
 	API          API
 	Provider     Provider
 	Model        string
+	ResponseID   string
 	Usage        Usage
 	StopReason   StopReason
 	ErrorMessage string
@@ -108,6 +109,7 @@ func (m AssistantMessage) clone() Message {
 		API:          m.API,
 		Provider:     m.Provider,
 		Model:        m.Model,
+		ResponseID:   m.ResponseID,
 		Usage:        m.Usage,
 		StopReason:   m.StopReason,
 		ErrorMessage: m.ErrorMessage,
@@ -151,7 +153,43 @@ type Model struct {
 type Tool struct {
 	Name        string
 	Description string
+	Parameters  any
 	Validator   ToolArgumentsValidator
+}
+
+type Context struct {
+	SystemPrompt string
+	Messages     []Message
+	Tools        []Tool
+}
+
+type AssistantMessageEventType string
+
+const (
+	AssistantMessageEventStart         AssistantMessageEventType = "start"
+	AssistantMessageEventTextStart     AssistantMessageEventType = "text_start"
+	AssistantMessageEventTextDelta     AssistantMessageEventType = "text_delta"
+	AssistantMessageEventTextEnd       AssistantMessageEventType = "text_end"
+	AssistantMessageEventThinkingStart AssistantMessageEventType = "thinking_start"
+	AssistantMessageEventThinkingDelta AssistantMessageEventType = "thinking_delta"
+	AssistantMessageEventThinkingEnd   AssistantMessageEventType = "thinking_end"
+	AssistantMessageEventToolCallStart AssistantMessageEventType = "toolcall_start"
+	AssistantMessageEventToolCallDelta AssistantMessageEventType = "toolcall_delta"
+	AssistantMessageEventToolCallEnd   AssistantMessageEventType = "toolcall_end"
+	AssistantMessageEventDone          AssistantMessageEventType = "done"
+	AssistantMessageEventError         AssistantMessageEventType = "error"
+)
+
+type AssistantMessageEvent struct {
+	Type         AssistantMessageEventType
+	ContentIndex int
+	Delta        string
+	Content      string
+	ToolCall     ToolCall
+	Partial      AssistantMessage
+	Reason       StopReason
+	Message      AssistantMessage
+	Error        AssistantMessage
 }
 
 type ToolArgumentsValidator interface {
