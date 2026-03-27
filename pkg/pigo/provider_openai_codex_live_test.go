@@ -27,7 +27,7 @@ func loadOpenAICodexTestToken(path string) string {
 }
 
 func loadOpenAICodexTestOAuth(path string) *OAuthCredentials {
-	bytes, err := os.ReadFile(path)
+	bytes, err := os.ReadFile(resolveSupportFilePath(path))
 	if err != nil {
 		return nil
 	}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -184,13 +185,17 @@ func lookupEnvValue(name string) string {
 	}
 
 	dotEnvOnce.Do(func() {
-		dotEnvValues = loadDotEnvFile(".env")
+		dotEnvValues = loadDotEnvFile(resolveSupportFilePath(".env"))
 	})
 
 	return dotEnvValues[name]
 }
 
 func loadDotEnvFile(path string) map[string]string {
+	if strings.TrimSpace(path) == "" {
+		return map[string]string{}
+	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		return map[string]string{}
@@ -212,4 +217,36 @@ func loadDotEnvFile(path string) map[string]string {
 		values[strings.TrimSpace(key)] = strings.TrimSpace(value)
 	}
 	return values
+}
+
+func resolveSupportFilePath(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return ""
+	}
+
+	candidate := name
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+
+	workingDir, err := os.Getwd()
+	if err != nil {
+		return name
+	}
+
+	dir := workingDir
+	for {
+		candidate = filepath.Join(dir, name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir || parent == "" {
+			break
+		}
+		dir = parent
+	}
+
+	return name
 }

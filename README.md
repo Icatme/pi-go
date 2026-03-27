@@ -2,6 +2,12 @@
 
 `pi-go` is a Go port of `V:\gitdownload\pi-mono\packages\ai`.
 
+Repository layout:
+
+- `pkg/pigo`: library code and tests
+- `docs`: project notes and repo-level documentation
+- repo root: module files and top-level docs only
+
 Current approach:
 
 - migrate provider-agnostic tests first
@@ -21,3 +27,15 @@ Initial migrated areas:
 - overflow detection
 - message transformation for cross-provider replay
 - minimal tool argument validation fallback
+
+Package import path:
+
+```go
+import "github.com/Icatme/pi-go/pkg/pigo"
+```
+
+Support-file boundaries:
+
+- `.env` is ignored by git and used only by tests/helpers
+- `01_auth.json` is ignored by git and used only by live tests
+- runtime auth must be passed explicitly and does not read those files
