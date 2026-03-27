@@ -68,7 +68,7 @@ func TestStreamSimpleKimiCodingEmitsTextLifecycle(t *testing.T) {
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: "kimi-test-key",
 	})
 
@@ -181,7 +181,7 @@ func TestStreamSimpleOpenAICodexEmitsThinkingAndToolCallLifecycle(t *testing.T) 
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "edit readme"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -286,7 +286,7 @@ func TestStreamSimpleOpenAICodexEmitsTextLifecycleFromSSEDelta(t *testing.T) {
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -366,7 +366,7 @@ func TestStreamSimpleOpenAICodexEmitsLifecycleFromTerminalOnlyOutput(t *testing.
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -448,7 +448,7 @@ func TestStreamSimpleOpenAICodexFailedEventPreservesResponseID(t *testing.T) {
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -528,7 +528,7 @@ func TestStreamSimpleOpenAICodexEmitsRefusalLifecycle(t *testing.T) {
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -607,7 +607,7 @@ func TestStreamSimpleOpenAICodexFinalizesOpenMessageFromTerminalOutput(t *testin
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -703,7 +703,7 @@ func TestStreamSimpleOpenAICodexAppendsMissingTerminalItems(t *testing.T) {
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -771,7 +771,7 @@ func TestStreamSimpleOpenAICodexCombinesTerminalMessagePartsIntoSingleLifecycle(
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -829,7 +829,7 @@ func TestStreamSimpleOpenAICodexTopLevelErrorPreservesCreatedResponseID(t *testi
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -900,7 +900,7 @@ func TestStreamSimpleOpenAICodexPreservesReasoningDeltaWhenDoneHasNoSummary(t *t
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -977,7 +977,7 @@ func TestStreamSimpleOpenAICodexTerminalToolArgumentsOverridePartialJSON(t *test
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -1010,7 +1010,7 @@ func TestStreamSimpleEmitsAbortedErrorEvent(t *testing.T) {
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey:         "kimi-test-key",
 		RequestContext: requestContext,
 	})
@@ -1031,3 +1031,4 @@ func TestStreamSimpleEmitsAbortedErrorEvent(t *testing.T) {
 		t.Fatalf("expected aborted result, got %+v", result)
 	}
 }
+

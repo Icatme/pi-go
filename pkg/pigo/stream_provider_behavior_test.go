@@ -54,7 +54,7 @@ func TestStreamSimpleOpenAICodexReturnsAfterTerminalEventBeforeBodyCloses(t *tes
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -139,7 +139,7 @@ func TestStreamSimpleKimiCodingReturnsAfterTerminalEventBeforeBodyCloses(t *test
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: "kimi-test-key",
 	})
 
@@ -157,3 +157,4 @@ func TestStreamSimpleKimiCodingReturnsAfterTerminalEventBeforeBodyCloses(t *test
 		t.Fatal("timed out waiting for kimi stream result after terminal event")
 	}
 }
+

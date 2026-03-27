@@ -26,7 +26,7 @@ func TestCompleteSimpleKimiCodingLive(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "Say OK"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: apiKey,
 	})
 
@@ -65,12 +65,12 @@ func TestCompleteSimpleKimiCodingLiveWithThinkingAndCache(t *testing.T) {
 		t.Skip("missing KIMI_API_KEY for live test")
 	}
 
-	response := CompleteSimple(*model, Context{
+	response := Complete(*model, Context{
 		SystemPrompt: "Reply with exactly OK.",
 		Messages: []Message{
 			UserMessage{Content: "Say OK"},
 		},
-	}, CompleteOptions{
+	}, ProviderStreamOptions{
 		APIKey:               apiKey,
 		Reasoning:            ThinkingLevelHigh,
 		ThinkingBudgetTokens: 2048,

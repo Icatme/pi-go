@@ -26,7 +26,7 @@ func TestStreamSimpleKimiCodingLive(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "Say OK"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: apiKey,
 	})
 
@@ -69,7 +69,7 @@ func TestStreamSimpleOpenAICodexLive(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "Say OK"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -91,3 +91,4 @@ func TestStreamSimpleOpenAICodexLive(t *testing.T) {
 		t.Fatal("expected live codex stream text delta")
 	}
 }
+

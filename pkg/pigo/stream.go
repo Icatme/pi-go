@@ -17,26 +17,41 @@ func newAssistantMessageEventStream() *AssistantMessageEventStream {
 	}
 }
 
-func Stream(model Model, ctx Context, options CompleteOptions) *AssistantMessageEventStream {
-	return StreamSimple(model, ctx, options)
+func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	apiModule := resolveAPIModule(model.API)
+	if providerModule := resolveProviderModule(model.Provider); providerModule != nil && providerModule.NormalizeOptions != nil {
+		options = providerModule.NormalizeOptions(model, options)
+	}
+	if apiModule != nil && apiModule.Stream != nil {
+		return apiModule.Stream(model, ctx, options)
+	}
+	return streamAPIUnavailable(model, "api not implemented")
 }
 
-func StreamSimple(model Model, ctx Context, options CompleteOptions) *AssistantMessageEventStream {
-	module := resolveProviderModule(model.Provider)
-	if module != nil && module.NormalizeOptions != nil {
-		options = module.NormalizeOptions(model, options)
+func StreamSimple(model Model, ctx Context, options SimpleStreamOptions) *AssistantMessageEventStream {
+	apiModule := resolveAPIModule(model.API)
+	if apiModule != nil && apiModule.StreamSimple != nil {
+		return apiModule.StreamSimple(model, ctx, options)
 	}
-	if module != nil && module.Stream != nil {
-		return module.Stream(model, ctx, options)
-	}
+	return streamAPIUnavailable(model, "api not implemented")
+}
 
+func Complete(model Model, ctx Context, options ProviderStreamOptions) AssistantMessage {
+	return Stream(model, ctx, options).Result()
+}
+
+func CompleteSimple(model Model, ctx Context, options SimpleStreamOptions) AssistantMessage {
+	return StreamSimple(model, ctx, options).Result()
+}
+
+func streamAPIUnavailable(model Model, message string) *AssistantMessageEventStream {
 	stream := newAssistantMessageEventStream()
 	response := AssistantMessage{
 		API:          model.API,
 		Provider:     model.Provider,
 		Model:        model.ID,
 		StopReason:   StopReasonError,
-		ErrorMessage: "provider not implemented",
+		ErrorMessage: message,
 	}
 	stream.push(AssistantMessageEvent{
 		Type:   AssistantMessageEventError,
@@ -45,14 +60,6 @@ func StreamSimple(model Model, ctx Context, options CompleteOptions) *AssistantM
 	})
 	stream.finish(response)
 	return stream
-}
-
-func Complete(model Model, ctx Context, options CompleteOptions) AssistantMessage {
-	return CompleteSimple(model, ctx, options)
-}
-
-func CompleteSimple(model Model, ctx Context, options CompleteOptions) AssistantMessage {
-	return StreamSimple(model, ctx, options).Result()
 }
 
 func (s *AssistantMessageEventStream) Events() <-chan AssistantMessageEvent {

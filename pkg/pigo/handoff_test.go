@@ -81,7 +81,7 @@ func TestCrossProviderHandoffKimiToCodexBuildsReplaySafePayload(t *testing.T) {
 			},
 			UserMessage{Content: "What was the result? Reply with just the number."},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -176,7 +176,7 @@ func TestCrossProviderHandoffCodexToKimiBuildsReplaySafePayload(t *testing.T) {
 			},
 			UserMessage{Content: "What was the result? Reply with just the number."},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: "kimi-test-key",
 	})
 
@@ -214,3 +214,4 @@ func TestCrossProviderHandoffCodexToKimiBuildsReplaySafePayload(t *testing.T) {
 		t.Fatalf("expected tool result to reference normalized tool id %q, got %#v", toolUseID, toolResult)
 	}
 }
+

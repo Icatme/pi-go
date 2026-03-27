@@ -33,7 +33,7 @@ func runOpenAICodexFixture(t *testing.T, modelID string, sseBody string) openAIC
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -45,7 +45,7 @@ func runOpenAICodexFixture(t *testing.T, modelID string, sseBody string) openAIC
 	streamResult := stream.Result()
 	completeResult := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -304,7 +304,7 @@ func TestStreamSimpleOpenAICodexMalformedJSONAfterCreatedPreservesResponseID(t *
 
 	stream := StreamSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -327,3 +327,4 @@ func TestStreamSimpleOpenAICodexMalformedJSONAfterCreatedPreservesResponseID(t *
 		t.Fatalf("expected malformed json error message, got %q", result.ErrorMessage)
 	}
 }
+

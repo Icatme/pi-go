@@ -66,7 +66,7 @@ func TestCompleteSimpleKimiCodingExposesResponseID(t *testing.T) {
 
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: "kimi-test-key",
 	})
 
@@ -116,7 +116,7 @@ func TestCompleteSimpleOpenAICodexExposesResponseID(t *testing.T) {
 
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hi"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -124,3 +124,4 @@ func TestCompleteSimpleOpenAICodexExposesResponseID(t *testing.T) {
 		t.Fatalf("expected response id resp_abc123, got %q", response.ResponseID)
 	}
 }
+

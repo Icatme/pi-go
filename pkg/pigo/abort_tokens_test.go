@@ -20,7 +20,7 @@ func TestCompleteSimpleOpenAICodexImmediateAbort(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "hello"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey:         makeOpenAICodexToken("acc_test"),
 		RequestContext: requestContext,
 	})
@@ -43,7 +43,7 @@ func TestCompleteSimpleKimiCodingImmediateAbort(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "hello"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey:         "kimi-test-key",
 		RequestContext: requestContext,
 	})
@@ -84,7 +84,7 @@ func TestStreamSimpleOpenAICodexAbortedRequestKeepsZeroUsage(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "hello"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey:         token,
 		RequestContext: requestContext,
 	})
@@ -134,7 +134,7 @@ func TestStreamSimpleKimiCodingAbortedRequestKeepsInputUsage(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "hello"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey:         "kimi-test-key",
 		RequestContext: requestContext,
 	})
@@ -233,7 +233,7 @@ func TestAbortedAssistantMessageCanBeReplayedOnFollowup(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "start"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey:         "kimi-test-key",
 		RequestContext: requestContext,
 	})
@@ -247,7 +247,7 @@ func TestAbortedAssistantMessageCanBeReplayedOnFollowup(t *testing.T) {
 			aborted,
 			UserMessage{Content: "continue"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: "kimi-test-key",
 	})
 
@@ -255,3 +255,4 @@ func TestAbortedAssistantMessageCanBeReplayedOnFollowup(t *testing.T) {
 		t.Fatalf("expected successful followup after aborted replay, got %+v", followup)
 	}
 }
+

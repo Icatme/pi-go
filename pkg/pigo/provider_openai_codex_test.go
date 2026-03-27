@@ -90,7 +90,7 @@ func TestCompleteSimpleOpenAICodexBuildsRequestAndParsesText(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "Say hello"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -160,7 +160,7 @@ func TestCompleteSimpleOpenAICodexParsesToolCallResponse(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "Edit the file"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -242,7 +242,7 @@ func TestCompleteSimpleOpenAICodexNormalizesForeignToolCallIDsInRequest(t *testi
 				Content:    []ContentBlock{TextContent{Text: "ok"}},
 			},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -293,7 +293,7 @@ func TestCompleteSimpleOpenAICodexReturnsProviderErrorMessage(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "hello"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -368,7 +368,7 @@ func TestCompleteSimpleOpenAICodexParsesTerminalOnlyMixedOutput(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "hello"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -438,7 +438,7 @@ func TestCompleteSimpleOpenAICodexMapsIncompleteResponseToLength(t *testing.T) {
 
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hello"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -476,7 +476,7 @@ func TestCompleteSimpleOpenAICodexReturnsTerminalFailureMessage(t *testing.T) {
 
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hello"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -510,7 +510,7 @@ func TestCompleteSimpleOpenAICodexReturnsTopLevelErrorEventMessage(t *testing.T)
 
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hello"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -565,7 +565,7 @@ func TestCompleteSimpleOpenAICodexParsesRefusalMessageContent(t *testing.T) {
 
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hello"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -622,7 +622,7 @@ func TestCompleteSimpleOpenAICodexCombinesMultipleMessageContentParts(t *testing
 
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hello"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -660,7 +660,7 @@ func TestCompleteSimpleOpenAICodexFailedWithoutMessageUsesFallback(t *testing.T)
 
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hello"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -703,7 +703,7 @@ func TestCompleteSimpleOpenAICodexTopLevelErrorPreservesCreatedResponseID(t *tes
 
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hello"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -757,7 +757,7 @@ func TestCompleteSimpleOpenAICodexClampsNegativeComputedInputUsage(t *testing.T)
 
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hello"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -790,7 +790,7 @@ func TestCompleteSimpleOpenAICodexFailsOnMalformedTerminalResponse(t *testing.T)
 
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hello"}},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -852,12 +852,12 @@ func TestCompleteSimpleOpenAICodexSetsSessionCacheAndReasoningOptions(t *testing
 	}
 	model.BaseURL = server.URL
 
-	_ = CompleteSimple(*model, Context{
+	_ = Complete(*model, Context{
 		SystemPrompt: "Be precise.",
 		Messages: []Message{
 			UserMessage{Content: "hi"},
 		},
-	}, CompleteOptions{
+	}, ProviderStreamOptions{
 		APIKey:           token,
 		SessionID:        sessionID,
 		Reasoning:        ThinkingLevelMinimal,
@@ -952,7 +952,7 @@ func TestCompleteSimpleOpenAICodexRefreshesExpiredOAuthBeforeRequest(t *testing.
 		Messages: []Message{
 			UserMessage{Content: "hi"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		Auth: map[Provider]AuthConfig{
 			"openai-codex": {
 				Type: AuthTypeOAuth,

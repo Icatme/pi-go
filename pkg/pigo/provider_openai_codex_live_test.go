@@ -75,7 +75,7 @@ func TestCompleteSimpleOpenAICodexLive(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "Say OK"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -113,12 +113,12 @@ func TestCompleteSimpleOpenAICodexLiveWithSessionAndReasoning(t *testing.T) {
 		t.Fatal("expected openai-codex model")
 	}
 
-	response := CompleteSimple(*model, Context{
+	response := Complete(*model, Context{
 		SystemPrompt: "Reply with exactly OK.",
 		Messages: []Message{
 			UserMessage{Content: "Say OK"},
 		},
-	}, CompleteOptions{
+	}, ProviderStreamOptions{
 		APIKey:           token,
 		SessionID:        "live-session-codex",
 		Reasoning:        ThinkingLevelMinimal,
@@ -154,7 +154,7 @@ func TestCompleteSimpleOpenAICodexLiveRefresh(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "Say OK"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		Auth: map[Provider]AuthConfig{
 			"openai-codex": {
 				Type: AuthTypeOAuth,

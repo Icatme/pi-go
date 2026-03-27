@@ -96,7 +96,7 @@ func TestCompleteSimpleKimiCodingBuildsAnthropicRequestAndParsesText(t *testing.
 		Messages: []Message{
 			UserMessage{Content: "Say hello"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: "kimi-test-key",
 	})
 
@@ -122,8 +122,9 @@ func TestCompleteSimpleKimiCodingBuildsAnthropicRequestAndParsesText(t *testing.
 	if len(requestBody.System) != 1 || requestBody.System[0].Text != "You are concise." {
 		t.Fatalf("expected system prompt in request, got %+v", requestBody.System)
 	}
-	if requestBody.MaxTokens != model.MaxTokens/3 {
-		t.Fatalf("expected default max tokens %d, got %d", model.MaxTokens/3, requestBody.MaxTokens)
+	expectedMaxTokens := minInt(model.MaxTokens, 32000)
+	if requestBody.MaxTokens != expectedMaxTokens {
+		t.Fatalf("expected default max tokens %d, got %d", expectedMaxTokens, requestBody.MaxTokens)
 	}
 }
 
@@ -191,7 +192,7 @@ func TestCompleteSimpleKimiCodingParsesToolCallResponse(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "Edit the file"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: "kimi-test-key",
 	})
 
@@ -305,7 +306,7 @@ func TestCompleteSimpleKimiCodingConvertsToolResultsAndTools(t *testing.T) {
 				},
 			},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: "kimi-test-key",
 	})
 
@@ -353,7 +354,7 @@ func TestCompleteSimpleKimiCodingReturnsProviderErrorMessage(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "hello"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: "kimi-test-key",
 	})
 
@@ -428,7 +429,7 @@ func TestCompleteSimpleKimiCodingSetsThinkingCacheAndToolChoice(t *testing.T) {
 	}
 	model.BaseURL = server.URL
 
-	_ = CompleteSimple(*model, Context{
+	_ = Complete(*model, Context{
 		SystemPrompt: "Use tools when needed.",
 		Tools: []Tool{
 			{
@@ -443,7 +444,7 @@ func TestCompleteSimpleKimiCodingSetsThinkingCacheAndToolChoice(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "hello"},
 		},
-	}, CompleteOptions{
+	}, ProviderStreamOptions{
 		APIKey:               "kimi-test-key",
 		Reasoning:            ThinkingLevelHigh,
 		ThinkingBudgetTokens: 2048,
@@ -547,7 +548,7 @@ func TestCompleteSimpleKimiCodingOmitsCacheControlWhenDisabled(t *testing.T) {
 		Messages: []Message{
 			UserMessage{Content: "hello"},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey:         "kimi-test-key",
 		CacheRetention: CacheRetentionNone,
 	})

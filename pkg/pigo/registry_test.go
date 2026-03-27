@@ -145,7 +145,25 @@ func TestRegisterLazyProviderModuleLoadsOnDemand(t *testing.T) {
 func TestRegisterProviderModuleDispatchesStreamThroughRegistry(t *testing.T) {
 	provider := Provider("test-stream-provider")
 	modelID := "stream-model"
+	apiID := API("test-stream-api")
 	called := false
+	emit := func(model Model) *AssistantMessageEventStream {
+		called = true
+		stream := newAssistantMessageEventStream()
+		message := AssistantMessage{
+			API:        model.API,
+			Provider:   model.Provider,
+			Model:      model.ID,
+			StopReason: StopReasonStop,
+			Content: []ContentBlock{
+				TextContent{Text: "from plugin"},
+			},
+		}
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: message})
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventDone, Reason: message.StopReason, Message: message})
+		stream.finish(message)
+		return stream
+	}
 
 	RegisterProviderModule(ProviderModule{
 		Provider: provider,
@@ -153,26 +171,18 @@ func TestRegisterProviderModuleDispatchesStreamThroughRegistry(t *testing.T) {
 			modelID: {
 				ID:      modelID,
 				Name:    "Stream Model",
-				API:     "stream-api",
+				API:     apiID,
 				BaseURL: "https://example.invalid",
 			},
 		},
-		Stream: func(model Model, ctx Context, options CompleteOptions) *AssistantMessageEventStream {
-			called = true
-			stream := newAssistantMessageEventStream()
-			message := AssistantMessage{
-				API:        model.API,
-				Provider:   model.Provider,
-				Model:      model.ID,
-				StopReason: StopReasonStop,
-				Content: []ContentBlock{
-					TextContent{Text: "from plugin"},
-				},
-			}
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: message})
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventDone, Reason: message.StopReason, Message: message})
-			stream.finish(message)
-			return stream
+	})
+	RegisterAPIModule(APIModule{
+		API: apiID,
+		Stream: func(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+			return emit(model)
+		},
+		StreamSimple: func(model Model, ctx Context, options SimpleStreamOptions) *AssistantMessageEventStream {
+			return emit(model)
 		},
 	})
 
@@ -181,7 +191,7 @@ func TestRegisterProviderModuleDispatchesStreamThroughRegistry(t *testing.T) {
 		t.Fatal("expected registered stream model to exist")
 	}
 
-	stream := StreamSimple(*model, Context{}, CompleteOptions{})
+	stream := StreamSimple(*model, Context{}, SimpleStreamOptions{})
 	var events []AssistantMessageEvent
 	for event := range stream.Events() {
 		events = append(events, event)
@@ -189,7 +199,7 @@ func TestRegisterProviderModuleDispatchesStreamThroughRegistry(t *testing.T) {
 	result := stream.Result()
 
 	if !called {
-		t.Fatal("expected stream dispatch to use registered provider module")
+		t.Fatal("expected stream dispatch to use registered api module")
 	}
 	if len(events) != 2 {
 		t.Fatalf("expected start + done events, got %d", len(events))
@@ -226,7 +236,7 @@ func TestNormalizeCompleteOptionsUsesProviderModuleRules(t *testing.T) {
 		t.Fatal("expected openai-codex model")
 	}
 
-	codexOptions := NormalizeCompleteOptions(*codex, CompleteOptions{
+	codexOptions := NormalizeProviderStreamOptions(*codex, ProviderStreamOptions{
 		Reasoning:      ThinkingLevelXHigh,
 		CacheRetention: CacheRetentionLong,
 	})
@@ -248,7 +258,7 @@ func TestNormalizeCompleteOptionsUsesProviderModuleRules(t *testing.T) {
 		t.Fatal("expected kimi model")
 	}
 
-	kimiOptions := NormalizeCompleteOptions(*kimi, CompleteOptions{
+	kimiOptions := NormalizeProviderStreamOptions(*kimi, ProviderStreamOptions{
 		ToolChoice:       "required",
 		TextVerbosity:    "high",
 		ReasoningSummary: "detailed",

@@ -7,9 +7,8 @@ import (
 	"sync"
 )
 
-type ProviderStreamFunc func(Model, Context, CompleteOptions) *AssistantMessageEventStream
 type ProviderAuthResolveFunc func(Provider, AuthConfig, *http.Client, context.Context) (AuthConfig, string, error)
-type ProviderOptionsNormalizeFunc func(Model, CompleteOptions) CompleteOptions
+type ProviderOptionsNormalizeFunc func(Model, ProviderStreamOptions) ProviderStreamOptions
 
 type ProviderAuth struct {
 	RequiresOAuth        bool
@@ -31,7 +30,6 @@ type ProviderCapabilities struct {
 type ProviderModule struct {
 	Provider         Provider
 	Models           map[string]Model
-	Stream           ProviderStreamFunc
 	Auth             ProviderAuth
 	Capabilities     ProviderCapabilities
 	NormalizeOptions ProviderOptionsNormalizeFunc
@@ -141,9 +139,6 @@ func normalizeProviderModule(provider Provider, module ProviderModule) ProviderM
 	}
 	if module.Models == nil {
 		module.Models = map[string]Model{}
-	}
-	if module.Stream != nil {
-		module.Capabilities.SupportsStreaming = true
 	}
 	for modelID, model := range module.Models {
 		if model.ID == "" {

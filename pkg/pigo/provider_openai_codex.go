@@ -94,7 +94,7 @@ type openAICodexStreamingState struct {
 	FinalizedItemKeys      map[string]bool
 }
 
-func streamOpenAICodex(model Model, ctx Context, options CompleteOptions) *AssistantMessageEventStream {
+func streamOpenAICodex(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
 	stream := newAssistantMessageEventStream()
 
 	response := AssistantMessage{
@@ -244,8 +244,12 @@ func streamOpenAICodex(model Model, ctx Context, options CompleteOptions) *Assis
 	return stream
 }
 
-func buildOpenAICodexRequest(model Model, ctx Context, options CompleteOptions) openAICodexRequest {
-	options = NormalizeCompleteOptions(model, options)
+func streamSimpleOpenAICodex(model Model, ctx Context, options SimpleStreamOptions) *AssistantMessageEventStream {
+	return streamOpenAICodex(model, ctx, BuildProviderStreamOptions(model, options))
+}
+
+func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOptions) openAICodexRequest {
+	options = NormalizeProviderStreamOptions(model, options)
 
 	requestBody := openAICodexRequest{
 		Model:             model.ID,

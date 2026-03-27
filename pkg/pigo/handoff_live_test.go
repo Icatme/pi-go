@@ -49,7 +49,7 @@ func TestCrossProviderHandoffCodexToKimiLive(t *testing.T) {
 			},
 			UserMessage{Content: "What was the result? Reply with just the number."},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: kimiAPIKey,
 	})
 
@@ -111,7 +111,7 @@ func TestCrossProviderHandoffKimiToCodexLive(t *testing.T) {
 			},
 			UserMessage{Content: "What was the result? Reply with just the number."},
 		},
-	}, CompleteOptions{
+	}, SimpleStreamOptions{
 		APIKey: token,
 	})
 
@@ -129,3 +129,4 @@ func TestCrossProviderHandoffKimiToCodexLive(t *testing.T) {
 		t.Fatalf("expected codex handoff response to contain 42, got %q", text.Text)
 	}
 }
+

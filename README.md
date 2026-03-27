@@ -43,6 +43,14 @@ Provider module registration:
 - provider auth metadata and provider capability metadata are also attached to registry modules
 - runtime auth resolution now reads provider auth behavior from the registered module
 
+API registration:
+
+- runtime stream dispatch is registered by `model.API`, not directly by provider
+- built-in APIs are registered lazily through an API registry
+- `Stream` / `Complete` are the provider-option path
+- `StreamSimple` / `CompleteSimple` are the generic simple-option path
+- simple options are normalized into provider options through a dedicated simple-options layer
+
 Support-file boundaries:
 
 - `.env` is ignored by git and used only by tests/helpers

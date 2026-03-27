@@ -149,8 +149,8 @@ type anthropicStreamingBlockState struct {
 	PartialJSON  string
 }
 
-func streamAnthropicMessages(model Model, ctx Context, options CompleteOptions) *AssistantMessageEventStream {
-	options = NormalizeCompleteOptions(model, options)
+func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	options = NormalizeProviderStreamOptions(model, options)
 
 	stream := newAssistantMessageEventStream()
 
@@ -533,7 +533,11 @@ func resolveAnthropicCacheControl(baseURL string, retention CacheRetention) *ant
 	}
 }
 
-func buildAnthropicThinkingOptions(model Model, options CompleteOptions) any {
+func streamSimpleAnthropicMessages(model Model, ctx Context, options SimpleStreamOptions) *AssistantMessageEventStream {
+	return streamAnthropicMessages(model, ctx, BuildProviderStreamOptions(model, options))
+}
+
+func buildAnthropicThinkingOptions(model Model, options ProviderStreamOptions) any {
 	if options.Reasoning == "" {
 		return nil
 	}

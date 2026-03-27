@@ -1,9 +1,28 @@
 package pigo
 
 func init() {
+	RegisterLazyAPIModule("anthropic-messages", func() APIModule {
+		return APIModule{
+			API:          "anthropic-messages",
+			Stream:       streamAnthropicMessages,
+			StreamSimple: streamSimpleAnthropicMessages,
+		}
+	})
+
+	RegisterLazyAPIModule("openai-codex-responses", func() APIModule {
+		return APIModule{
+			API:          "openai-codex-responses",
+			Stream:       streamOpenAICodex,
+			StreamSimple: streamSimpleOpenAICodex,
+		}
+	})
+
 	RegisterLazyProviderModule("anthropic", func() ProviderModule {
 		return ProviderModule{
 			Provider: "anthropic",
+			Capabilities: ProviderCapabilities{
+				SupportsStreaming: true,
+			},
 			Models: map[string]Model{
 				"claude-opus-4-6": {
 					ID:            "claude-opus-4-6",
@@ -37,6 +56,7 @@ func init() {
 				ResolveAuthorization: resolveOpenAICodexAuthorization,
 			},
 			Capabilities: ProviderCapabilities{
+				SupportsStreaming:        true,
 				SupportsSession:          true,
 				SupportsPromptCacheKey:   true,
 				SupportsReasoningSummary: true,
@@ -145,7 +165,6 @@ func init() {
 					MaxTokens:     128000,
 				},
 			},
-			Stream: streamOpenAICodex,
 		}
 	})
 
@@ -156,6 +175,7 @@ func init() {
 				EnvAPIKeyName: "KIMI_API_KEY",
 			},
 			Capabilities: ProviderCapabilities{
+				SupportsStreaming:          true,
 				SupportsPromptCacheControl: true,
 				SupportsThinkingBudget:     true,
 			},
@@ -184,7 +204,6 @@ func init() {
 					MaxTokens:     32768,
 				},
 			},
-			Stream: streamAnthropicMessages,
 		}
 	})
 
