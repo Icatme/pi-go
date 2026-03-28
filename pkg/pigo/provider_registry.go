@@ -9,6 +9,7 @@ import (
 
 type ProviderAuthResolveFunc func(Provider, AuthConfig, *http.Client, context.Context) (AuthConfig, string, error)
 type ProviderOptionsNormalizeFunc func(Model, ProviderStreamOptions) ProviderStreamOptions
+type ProviderOptionsBuildFunc func(Model, SimpleStreamOptions) ProviderStreamOptions
 
 type ProviderAuth struct {
 	RequiresOAuth        bool
@@ -32,6 +33,7 @@ type ProviderModule struct {
 	Models           map[string]Model
 	Auth             ProviderAuth
 	Capabilities     ProviderCapabilities
+	BuildOptions     ProviderOptionsBuildFunc
 	NormalizeOptions ProviderOptionsNormalizeFunc
 }
 

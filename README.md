@@ -33,6 +33,13 @@ Package import path:
 
 ```go
 import "github.com/Icatme/pi-go/pkg/pigo"
+
+Context serialization:
+
+- `Context` now supports standard JSON round-tripping via `json.Marshal` / `json.Unmarshal`
+- `SerializeContext` and `DeserializeContext` provide explicit helpers for persistence boundaries
+- serialized tools preserve name/description/parameters; runtime validators are intentionally omitted
+- messages and content blocks are encoded with explicit role/type tags so conversations can be restored safely
 ```
 
 Provider module registration:

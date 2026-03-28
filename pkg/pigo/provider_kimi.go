@@ -151,6 +151,10 @@ type anthropicStreamingBlockState struct {
 
 func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
 	options = NormalizeProviderStreamOptions(model, options)
+	anthropicOptions := resolveAnthropicMessagesProviderOptions(model, options)
+	if model.Provider == "kimi-coding" {
+		anthropicOptions = resolveKimiCodingProviderOptions(model, options).AnthropicMessagesProviderOptions
+	}
 
 	stream := newAssistantMessageEventStream()
 
@@ -175,13 +179,13 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 			return
 		}
 
-		cacheControl := resolveAnthropicCacheControl(model.BaseURL, options.CacheRetention)
+		cacheControl := resolveAnthropicCacheControl(model.BaseURL, anthropicOptions.CacheRetention)
 		requestBody := anthropicRequest{
 			Model:     model.ID,
 			Messages:  convertAnthropicMessagesWithCache(ctx.Messages, model, cacheControl),
 			Tools:     convertAnthropicTools(ctx.Tools),
-			MaxTokens: defaultMaxTokens(model, options.MaxTokens),
-			Thinking:  buildAnthropicThinkingOptions(model, options),
+			MaxTokens: defaultMaxTokens(model, anthropicOptions.MaxTokens),
+			Thinking:  buildAnthropicThinkingOptions(model, anthropicOptions),
 			Stream:    true,
 		}
 		if ctx.SystemPrompt != "" {
@@ -191,12 +195,12 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 				CacheControl: cacheControl,
 			}}
 		}
-		if options.Temperature != nil && requestBody.Thinking == nil {
-			requestBody.Temperature = options.Temperature
+		if anthropicOptions.Temperature != nil && requestBody.Thinking == nil {
+			requestBody.Temperature = anthropicOptions.Temperature
 		}
 		payload := any(requestBody)
-		if options.OnPayload != nil {
-			if next := options.OnPayload(payload, model); next != nil {
+		if anthropicOptions.OnPayload != nil {
+			if next := anthropicOptions.OnPayload(payload, model); next != nil {
 				payload = next
 			}
 		}
@@ -210,7 +214,7 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 			return
 		}
 
-		requestContext := options.RequestContext
+		requestContext := anthropicOptions.RequestContext
 		if requestContext == nil {
 			requestContext = context.Background()
 		}
@@ -232,11 +236,11 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 		request.Header.Set("accept", "text/event-stream")
 		request.Header.Set("anthropic-version", "2023-06-01")
 		request.Header.Set("x-api-key", apiKey)
-		for key, value := range options.Headers {
+		for key, value := range anthropicOptions.Headers {
 			request.Header.Set(key, value)
 		}
 
-		httpClient := options.HTTPClient
+		httpClient := anthropicOptions.HTTPClient
 		if httpClient == nil {
 			httpClient = http.DefaultClient
 		}
@@ -537,7 +541,7 @@ func streamSimpleAnthropicMessages(model Model, ctx Context, options SimpleStrea
 	return streamAnthropicMessages(model, ctx, BuildProviderStreamOptions(model, options))
 }
 
-func buildAnthropicThinkingOptions(model Model, options ProviderStreamOptions) any {
+func buildAnthropicThinkingOptions(model Model, options AnthropicMessagesProviderOptions) any {
 	if options.Reasoning == "" {
 		return nil
 	}

@@ -269,6 +269,55 @@ func TestNormalizeCompleteOptionsUsesProviderModuleRules(t *testing.T) {
 	}
 }
 
+func TestBuildProviderStreamOptionsUsesProviderModuleBuilders(t *testing.T) {
+	codex := GetModel("openai-codex", "gpt-5.1")
+	if codex == nil {
+		t.Fatal("expected openai-codex model")
+	}
+
+	codexOptions := BuildProviderStreamOptions(*codex, SimpleStreamOptions{
+		Reasoning:      ThinkingLevelXHigh,
+		CacheRetention: CacheRetentionLong,
+	})
+	if codexOptions.Reasoning != ThinkingLevelHigh {
+		t.Fatalf("expected codex builder to clamp reasoning, got %q", codexOptions.Reasoning)
+	}
+	if codexOptions.ReasoningSummary != "auto" || codexOptions.TextVerbosity != "medium" {
+		t.Fatalf("expected codex builder defaults, got %+v", codexOptions)
+	}
+	if codexOptions.CacheRetention != CacheRetentionNone {
+		t.Fatalf("expected codex builder to clear cache retention, got %q", codexOptions.CacheRetention)
+	}
+
+	kimi := GetModel("kimi-coding", "kimi-k2-thinking")
+	if kimi == nil {
+		t.Fatal("expected kimi model")
+	}
+
+	kimiOptions := BuildProviderStreamOptions(*kimi, SimpleStreamOptions{
+		Reasoning: ThinkingLevelHigh,
+		SessionID: "session-1",
+	})
+	if kimiOptions.SessionID != "" {
+		t.Fatalf("expected kimi builder to clear session id, got %+v", kimiOptions)
+	}
+	if kimiOptions.ThinkingBudgetTokens <= 0 {
+		t.Fatalf("expected kimi builder to compute thinking budget, got %+v", kimiOptions)
+	}
+
+	anthropic := GetModel("anthropic", "claude-sonnet-4-5")
+	if anthropic == nil {
+		t.Fatal("expected anthropic model")
+	}
+
+	anthropicOptions := BuildProviderStreamOptions(*anthropic, SimpleStreamOptions{
+		Reasoning: ThinkingLevelHigh,
+	})
+	if anthropicOptions.ThinkingBudgetTokens <= 0 || anthropicOptions.MaxTokens <= 0 {
+		t.Fatalf("expected anthropic builder to preserve thinking budget behavior, got %+v", anthropicOptions)
+	}
+}
+
 func containsProvider(providers []Provider, target Provider) bool {
 	for _, provider := range providers {
 		if provider == target {

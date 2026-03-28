@@ -1,13 +1,12 @@
 package pigo
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
+	"math"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -78,9 +77,11 @@ type openAICodexInputTokenDetails struct {
 }
 
 type openAICodexResponseError struct {
-	Code    string `json:"code"`
-	Type    string `json:"type"`
-	Message string `json:"message"`
+	Code     string `json:"code"`
+	Type     string `json:"type"`
+	Message  string `json:"message"`
+	PlanType string `json:"plan_type"`
+	ResetsAt int64  `json:"resets_at"`
 }
 
 type openAICodexStreamingState struct {
@@ -95,6 +96,7 @@ type openAICodexStreamingState struct {
 }
 
 func streamOpenAICodex(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	options = resolveOpenAICodexProviderOptions(model, NormalizeProviderStreamOptions(model, options)).toProviderStreamOptions()
 	stream := newAssistantMessageEventStream()
 
 	response := AssistantMessage{
@@ -157,87 +159,11 @@ func streamOpenAICodex(model Model, ctx Context, options ProviderStreamOptions) 
 			requestContext = context.Background()
 		}
 
-		request, err := http.NewRequestWithContext(
-			requestContext,
-			http.MethodPost,
-			resolveOpenAICodexURL(model.BaseURL),
-			bytes.NewReader(bodyBytes),
-		)
-		if err != nil {
+		if err := streamOpenAICodexWithTransport(model, options, bodyBytes, apiKey, accountID, &response, stream); err != nil {
 			applyRequestError(&response, err)
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
 			return
-		}
-
-		request.Header.Set("content-type", "application/json")
-		request.Header.Set("accept", "text/event-stream")
-		request.Header.Set("authorization", "Bearer "+apiKey)
-		request.Header.Set("chatgpt-account-id", accountID)
-		request.Header.Set("originator", "pi")
-		request.Header.Set("openai-beta", "responses=experimental")
-		if options.SessionID != "" {
-			request.Header.Set("conversation_id", options.SessionID)
-			request.Header.Set("session_id", options.SessionID)
-		}
-		for key, value := range options.Headers {
-			request.Header.Set(key, value)
-		}
-
-		httpClient := options.HTTPClient
-		if httpClient == nil {
-			httpClient = http.DefaultClient
-		}
-
-		httpResponse, err := httpClient.Do(request)
-		if err != nil {
-			applyRequestError(&response, err)
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
-			stream.finish(response)
-			return
-		}
-		defer httpResponse.Body.Close()
-
-		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
-			body, _ := io.ReadAll(httpResponse.Body)
-			response.StopReason = StopReasonError
-			response.ErrorMessage = parseOpenAICodexError(body, httpResponse.Status)
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
-			stream.finish(response)
-			return
-		}
-
-		stream.push(AssistantMessageEvent{
-			Type:    AssistantMessageEventStart,
-			Partial: response,
-		})
-
-		state := openAICodexStreamingState{
-			CurrentTextIndex:     -1,
-			CurrentThinkingIndex: -1,
-			CurrentToolIndex:     -1,
-			FinalizedItemKeys:    map[string]bool{},
-		}
-		terminalSeen := false
-		if err := readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
-			done, err := processOpenAICodexStreamEvent(data, model, &response, stream, &state)
-			if done {
-				terminalSeen = true
-				return true, nil
-			}
-			return false, err
-		}); err != nil {
-			applyRequestError(&response, err)
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
-			stream.finish(response)
-			return
-		}
-
-		if !terminalSeen {
-			response.StopReason = StopReasonError
-			response.ErrorMessage = "missing terminal sse event"
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
-			stream.finish(response)
 		}
 	}()
 
@@ -249,7 +175,7 @@ func streamSimpleOpenAICodex(model Model, ctx Context, options SimpleStreamOptio
 }
 
 func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOptions) openAICodexRequest {
-	options = NormalizeProviderStreamOptions(model, options)
+	resolvedOptions := resolveOpenAICodexProviderOptions(model, options)
 
 	requestBody := openAICodexRequest{
 		Model:             model.ID,
@@ -262,21 +188,21 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 		ParallelToolCalls: true,
 		Include:           []string{"reasoning.encrypted_content"},
 		Text: &openAICodexTextOptions{
-			Verbosity: defaultTextVerbosity(options.TextVerbosity),
+			Verbosity: defaultTextVerbosity(resolvedOptions.TextVerbosity),
 		},
 	}
 
-	if options.Temperature != nil {
-		requestBody.Temperature = options.Temperature
+	if resolvedOptions.Temperature != nil {
+		requestBody.Temperature = resolvedOptions.Temperature
 	}
-	if options.SessionID != "" {
-		requestBody.PromptCacheKey = options.SessionID
+	if resolvedOptions.SessionID != "" {
+		requestBody.PromptCacheKey = resolvedOptions.SessionID
 	}
 
-	if effort := string(options.Reasoning); effort != "" {
+	if effort := string(resolvedOptions.ReasoningEffort); effort != "" {
 		requestBody.Reasoning = &openAICodexReasoningOptions{
 			Effort:  effort,
-			Summary: options.ReasoningSummary,
+			Summary: resolvedOptions.ReasoningSummary,
 		}
 	}
 
@@ -1159,12 +1085,47 @@ func mapOpenAICodexStopReason(status string, content []ContentBlock) StopReason 
 
 func parseOpenAICodexError(body []byte, fallback string) string {
 	var payload openAICodexResponse
-	if err := json.Unmarshal(body, &payload); err == nil && payload.Error != nil && strings.TrimSpace(payload.Error.Message) != "" {
-		return payload.Error.Message
+	if err := json.Unmarshal(body, &payload); err == nil && payload.Error != nil {
+		if friendly := buildOpenAICodexFriendlyErrorMessage(payload.Error, fallback); friendly != "" {
+			return friendly
+		}
+		if strings.TrimSpace(payload.Error.Message) != "" {
+			return payload.Error.Message
+		}
 	}
 	text := strings.TrimSpace(string(body))
 	if text == "" {
 		return fallback
 	}
 	return text
+}
+
+func buildOpenAICodexFriendlyErrorMessage(err *openAICodexResponseError, fallback string) string {
+	if err == nil {
+		return ""
+	}
+
+	code := strings.TrimSpace(err.Code)
+	if code == "" {
+		code = strings.TrimSpace(err.Type)
+	}
+	if !regexp.MustCompile(`(?i)usage_limit_reached|usage_not_included|rate_limit_exceeded`).MatchString(code) &&
+		!strings.HasPrefix(strings.TrimSpace(fallback), "429") {
+		return ""
+	}
+
+	plan := ""
+	if strings.TrimSpace(err.PlanType) != "" {
+		plan = " (" + strings.ToLower(strings.TrimSpace(err.PlanType)) + " plan)"
+	}
+	when := ""
+	if err.ResetsAt > 0 {
+		minutes := int(math.Round(float64(err.ResetsAt-time.Now().Unix()) / 60.0))
+		if minutes < 0 {
+			minutes = 0
+		}
+		when = fmt.Sprintf(" Try again in ~%d min.", minutes)
+	}
+
+	return strings.TrimSpace(fmt.Sprintf("You have hit your ChatGPT usage limit%s.%s", plan, when))
 }

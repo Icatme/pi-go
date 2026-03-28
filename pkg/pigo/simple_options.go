@@ -1,7 +1,5 @@
 package pigo
 
-import "strings"
-
 func NormalizeProviderStreamOptions(model Model, options ProviderStreamOptions) ProviderStreamOptions {
 	module := resolveProviderModule(model.Provider)
 	if module == nil || module.NormalizeOptions == nil {
@@ -11,98 +9,18 @@ func NormalizeProviderStreamOptions(model Model, options ProviderStreamOptions) 
 }
 
 func BuildProviderStreamOptions(model Model, options SimpleStreamOptions) ProviderStreamOptions {
-	switch model.API {
-	case "openai-codex-responses":
-		return buildOpenAICodexProviderOptions(model, options)
-	case "anthropic-messages":
-		return buildAnthropicProviderOptions(model, options)
-	default:
-		return buildBaseProviderStreamOptions(model, options)
+	module := resolveProviderModule(model.Provider)
+	if module != nil && module.BuildOptions != nil {
+		return module.BuildOptions(model, options)
 	}
+	return buildBaseProviderStreamOptions(model, options)
 }
 
 func buildBaseProviderStreamOptions(model Model, options SimpleStreamOptions) ProviderStreamOptions {
-	maxTokens := options.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = minInt(model.MaxTokens, 32000)
-	}
-	return ProviderStreamOptions{
-		APIKey:         options.APIKey,
-		Auth:           options.Auth,
-		HTTPClient:     options.HTTPClient,
-		Headers:        cloneStringMap(options.Headers),
-		MaxTokens:      maxTokens,
-		Temperature:    options.Temperature,
-		Transport:      options.Transport,
-		CacheRetention: options.CacheRetention,
-		SessionID:      options.SessionID,
-		OnPayload:      options.OnPayload,
-		MaxRetryDelay:  options.MaxRetryDelay,
-		Metadata:       cloneMap(options.Metadata),
-		RequestContext: options.RequestContext,
-		Reasoning:      options.Reasoning,
-	}
-}
-
-func buildOpenAICodexProviderOptions(model Model, options SimpleStreamOptions) ProviderStreamOptions {
-	providerOptions := buildBaseProviderStreamOptions(model, options)
-	if SupportsXHigh(model) {
-		providerOptions.Reasoning = options.Reasoning
-	} else {
-		providerOptions.Reasoning = clampReasoning(options.Reasoning)
-	}
-	providerOptions.TextVerbosity = defaultTextVerbosity("")
-	if providerOptions.Reasoning != "" {
-		providerOptions.ReasoningSummary = defaultReasoningSummary("")
-	}
-	return NormalizeProviderStreamOptions(model, providerOptions)
-}
-
-func buildAnthropicProviderOptions(model Model, options SimpleStreamOptions) ProviderStreamOptions {
-	providerOptions := buildBaseProviderStreamOptions(model, options)
-	if providerOptions.Reasoning == "" {
-		return NormalizeProviderStreamOptions(model, providerOptions)
-	}
-
-	maxTokens, thinkingBudget := adjustMaxTokensForThinking(
-		providerOptions.MaxTokens,
-		model.MaxTokens,
-		providerOptions.Reasoning,
-		options.ThinkingBudgets,
-	)
-	providerOptions.MaxTokens = maxTokens
-	providerOptions.ThinkingBudgetTokens = thinkingBudget
-	return NormalizeProviderStreamOptions(model, providerOptions)
-}
-
-func normalizeOpenAICodexOptions(model Model, options ProviderStreamOptions) ProviderStreamOptions {
-	if options.Reasoning != "" {
-		options.Reasoning = ThinkingLevel(clampOpenAICodexReasoningEffort(model, options.Reasoning))
-	}
-	if strings.TrimSpace(options.TextVerbosity) == "" {
-		options.TextVerbosity = defaultTextVerbosity("")
-	}
-	if strings.TrimSpace(options.ReasoningSummary) == "" && options.Reasoning != "" {
-		options.ReasoningSummary = defaultReasoningSummary("")
-	}
-	if options.CacheRetention != "" {
-		options.CacheRetention = CacheRetentionNone
-	}
-	return options
-}
-
-func normalizeKimiCodingOptions(_ Model, options ProviderStreamOptions) ProviderStreamOptions {
-	options.ToolChoice = ""
-	if options.TextVerbosity != "" {
-		options.TextVerbosity = ""
-	}
-	if options.ReasoningSummary != "" {
-		options.ReasoningSummary = ""
-	}
-	if options.SessionID != "" {
-		options.SessionID = ""
-	}
-	return options
+	baseOptions := buildCommonProviderOptions(model, options)
+	streamOptions := baseOptions.toProviderStreamOptions()
+	streamOptions.Reasoning = options.Reasoning
+	return streamOptions
 }
 
 func clampReasoning(level ThinkingLevel) ThinkingLevel {

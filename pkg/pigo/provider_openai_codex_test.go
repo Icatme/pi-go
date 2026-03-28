@@ -3,10 +3,15 @@ package pigo
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 func makeOpenAICodexToken(accountID string) string {
@@ -26,6 +31,15 @@ func buildOpenAICodexSSE(events ...map[string]any) string {
 	}
 	lines = append(lines, "data: [DONE]")
 	return strings.Join(lines, "\n\n") + "\n\n"
+}
+
+func clearOpenAICodexWebSocketSessionCache() {
+	openAICodexWebSocketCacheMu.Lock()
+	defer openAICodexWebSocketCacheMu.Unlock()
+	for sessionID, entry := range openAICodexWebSocketSessionCache {
+		delete(openAICodexWebSocketSessionCache, sessionID)
+		closeOpenAICodexWebSocket(entry)
+	}
 }
 
 func TestCompleteSimpleOpenAICodexBuildsRequestAndParsesText(t *testing.T) {
@@ -300,8 +314,29 @@ func TestCompleteSimpleOpenAICodexReturnsProviderErrorMessage(t *testing.T) {
 	if response.StopReason != StopReasonError {
 		t.Fatalf("expected error stop reason, got %q", response.StopReason)
 	}
-	if response.ErrorMessage != "usage limit reached" {
-		t.Fatalf("expected provider error message, got %q", response.ErrorMessage)
+	if response.ErrorMessage != "You have hit your ChatGPT usage limit." {
+		t.Fatalf("expected friendly usage limit message, got %q", response.ErrorMessage)
+	}
+}
+
+func TestParseOpenAICodexErrorBuildsFriendlyUsageLimitMessageWithPlanAndReset(t *testing.T) {
+	message := parseOpenAICodexError([]byte(fmt.Sprintf(
+		`{"error":{"type":"usage_limit_reached","message":"usage limit reached","plan_type":"PRO","resets_at":%d}}`,
+		time.Now().Unix()+120,
+	)), "429 Too Many Requests")
+
+	if !strings.Contains(message, "You have hit your ChatGPT usage limit (pro plan).") {
+		t.Fatalf("expected friendly usage limit message with plan, got %q", message)
+	}
+	if !strings.Contains(message, "Try again in ~") {
+		t.Fatalf("expected retry window in friendly usage limit message, got %q", message)
+	}
+}
+
+func TestParseOpenAICodexErrorFallsBackToProviderMessageForNonUsageErrors(t *testing.T) {
+	message := parseOpenAICodexError([]byte(`{"error":{"type":"invalid_request_error","message":"bad request body"}}`), "400 Bad Request")
+	if message != "bad request body" {
+		t.Fatalf("expected provider message for non-usage error, got %q", message)
 	}
 }
 
@@ -974,5 +1009,529 @@ func TestCompleteSimpleOpenAICodexRefreshesExpiredOAuthBeforeRequest(t *testing.
 	}
 	if requestToken != refreshedToken {
 		t.Fatalf("expected refreshed token on request, got %q", requestToken)
+	}
+}
+
+func TestCompleteSimpleOpenAICodexAutoTransportFallsBackToSSEWhenWebSocketSetupFails(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	var websocketAttempts, sseAttempts int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			websocketAttempts++
+			http.Error(w, "websocket unavailable", http.StatusBadGateway)
+			return
+		}
+
+		sseAttempts++
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_auto_fallback",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "fell back to sse"},
+					},
+				},
+			},
+			map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":     "resp_auto_fallback",
+					"status": "completed",
+					"usage": map[string]any{
+						"input_tokens":  4,
+						"output_tokens": 3,
+						"total_tokens":  7,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hello"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportAuto,
+	})
+
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected fallback request to succeed, got %+v", response)
+	}
+	if websocketAttempts != 1 {
+		t.Fatalf("expected one websocket attempt before fallback, got %d", websocketAttempts)
+	}
+	if sseAttempts != 1 {
+		t.Fatalf("expected one sse fallback request, got %d", sseAttempts)
+	}
+	text, ok := response.Content[0].(TextContent)
+	if !ok || text.Text != "fell back to sse" {
+		t.Fatalf("expected sse fallback content, got %+v", response.Content)
+	}
+}
+
+func TestCompleteSimpleOpenAICodexWebSocketTransportDoesNotFallbackToSSE(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	var websocketAttempts, sseAttempts int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			websocketAttempts++
+			http.Error(w, "websocket unavailable", http.StatusBadGateway)
+			return
+		}
+
+		sseAttempts++
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":     "resp_sse_should_not_run",
+					"status": "completed",
+					"usage": map[string]any{
+						"input_tokens":  1,
+						"output_tokens": 1,
+						"total_tokens":  2,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hello"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportWebSocket,
+	})
+
+	if response.StopReason != StopReasonError {
+		t.Fatalf("expected websocket-only request to fail, got %+v", response)
+	}
+	if websocketAttempts != 1 {
+		t.Fatalf("expected one websocket attempt, got %d", websocketAttempts)
+	}
+	if sseAttempts != 0 {
+		t.Fatalf("expected no sse fallback for websocket transport, got %d", sseAttempts)
+	}
+}
+
+func TestCompleteSimpleOpenAICodexSSERetriesTransientHTTPError(t *testing.T) {
+	previousRetryCount := openAICodexRetryCount
+	previousRetryDelay := openAICodexBaseRetryDelay
+	openAICodexRetryCount = 2
+	openAICodexBaseRetryDelay = time.Millisecond
+	defer func() {
+		openAICodexRetryCount = previousRetryCount
+		openAICodexBaseRetryDelay = previousRetryDelay
+	}()
+
+	token := makeOpenAICodexToken("acc_test")
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limit hit"}}`))
+			return
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_retry_success",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "retried successfully"},
+					},
+				},
+			},
+			map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":     "resp_retry_success",
+					"status": "completed",
+					"usage": map[string]any{
+						"input_tokens":  4,
+						"output_tokens": 2,
+						"total_tokens":  6,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hello"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportSSE,
+	})
+
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected retry path to succeed, got %+v", response)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected one retry before success, got %d attempts", attempts)
+	}
+}
+
+func TestCompleteSimpleOpenAICodexSSEFinalHTTPErrorUsesParsedMessage(t *testing.T) {
+	previousRetryCount := openAICodexRetryCount
+	previousRetryDelay := openAICodexBaseRetryDelay
+	openAICodexRetryCount = 1
+	openAICodexBaseRetryDelay = time.Millisecond
+	defer func() {
+		openAICodexRetryCount = previousRetryCount
+		openAICodexBaseRetryDelay = previousRetryDelay
+	}()
+
+	token := makeOpenAICodexToken("acc_test")
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"final parsed error"}}`))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hello"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportSSE,
+	})
+
+	if response.StopReason != StopReasonError {
+		t.Fatalf("expected final http error, got %+v", response)
+	}
+	if response.ErrorMessage != "final parsed error" {
+		t.Fatalf("expected parsed error message, got %q", response.ErrorMessage)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected non-retryable error to stop after first attempt, got %d", attempts)
+	}
+}
+
+func TestCompleteSimpleOpenAICodexAutoTransportDoesNotFallbackAfterWebSocketStarts(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	var websocketAttempts, sseAttempts int
+
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			websocketAttempts++
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				t.Fatalf("expected websocket upgrade: %v", err)
+			}
+			defer conn.Close()
+			var payload map[string]any
+			if err := conn.ReadJSON(&payload); err != nil {
+				t.Fatalf("expected websocket request payload: %v", err)
+			}
+			if got := payload["type"]; got != "response.create" {
+				t.Fatalf("expected websocket response.create payload, got %#v", got)
+			}
+			_ = conn.WriteJSON(map[string]any{
+				"type":    "error",
+				"message": "websocket broke after start",
+			})
+			return
+		}
+
+		sseAttempts++
+		http.Error(w, "sse should not be used", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hello"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportAuto,
+	})
+
+	if response.StopReason != StopReasonError {
+		t.Fatalf("expected websocket-started error to stop request, got %+v", response)
+	}
+	if response.ErrorMessage != "websocket broke after start" {
+		t.Fatalf("expected websocket error to surface, got %q", response.ErrorMessage)
+	}
+	if websocketAttempts != 1 {
+		t.Fatalf("expected one websocket attempt, got %d", websocketAttempts)
+	}
+	if sseAttempts != 0 {
+		t.Fatalf("expected no sse fallback after websocket start, got %d", sseAttempts)
+	}
+}
+
+func TestCompleteSimpleOpenAICodexWebSocketReusesSessionConnection(t *testing.T) {
+	clearOpenAICodexWebSocketSessionCache()
+	defer clearOpenAICodexWebSocketSessionCache()
+
+	previousTTL := openAICodexWebSocketCacheTTL
+	openAICodexWebSocketCacheTTL = time.Minute
+	defer func() {
+		openAICodexWebSocketCacheTTL = previousTTL
+	}()
+
+	token := makeOpenAICodexToken("acc_test")
+	sessionID := "ws-session-reuse"
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+	var (
+		mu           sync.Mutex
+		upgradeCount int
+		requestCount int
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			http.Error(w, "expected websocket", http.StatusBadRequest)
+			return
+		}
+
+		mu.Lock()
+		upgradeCount++
+		mu.Unlock()
+
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("expected websocket upgrade: %v", err)
+		}
+
+		go func() {
+			defer conn.Close()
+			for {
+				var payload map[string]any
+				if err := conn.ReadJSON(&payload); err != nil {
+					return
+				}
+
+				mu.Lock()
+				requestCount++
+				currentRequest := requestCount
+				mu.Unlock()
+
+				_ = conn.WriteJSON(map[string]any{
+					"type": "response.output_item.done",
+					"item": map[string]any{
+						"type": "message",
+						"id":   "msg_reuse",
+						"content": []map[string]any{
+							{"type": "output_text", "text": "reply"},
+						},
+					},
+				})
+				_ = conn.WriteJSON(map[string]any{
+					"type": "response.completed",
+					"response": map[string]any{
+						"id":     "resp_reuse_" + string(rune('0'+currentRequest)),
+						"status": "completed",
+						"usage": map[string]any{
+							"input_tokens":  4,
+							"output_tokens": 1,
+							"total_tokens":  5,
+							"input_tokens_details": map[string]any{
+								"cached_tokens": 0,
+							},
+						},
+					},
+				})
+			}
+		}()
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	first := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "one"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportWebSocket,
+		SessionID: sessionID,
+	})
+	second := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "two"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportWebSocket,
+		SessionID: sessionID,
+	})
+
+	if first.StopReason != StopReasonStop || second.StopReason != StopReasonStop {
+		t.Fatalf("expected websocket session requests to succeed, got first=%+v second=%+v", first, second)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if upgradeCount != 1 {
+		t.Fatalf("expected one websocket upgrade for reused session, got %d", upgradeCount)
+	}
+	if requestCount != 2 {
+		t.Fatalf("expected two response.create requests on reused websocket, got %d", requestCount)
+	}
+}
+
+func TestCompleteSimpleOpenAICodexWebSocketSessionExpiresAfterIdleTTL(t *testing.T) {
+	clearOpenAICodexWebSocketSessionCache()
+	defer clearOpenAICodexWebSocketSessionCache()
+
+	previousTTL := openAICodexWebSocketCacheTTL
+	openAICodexWebSocketCacheTTL = 20 * time.Millisecond
+	defer func() {
+		openAICodexWebSocketCacheTTL = previousTTL
+	}()
+
+	token := makeOpenAICodexToken("acc_test")
+	sessionID := "ws-session-expiry"
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+	var (
+		mu           sync.Mutex
+		upgradeCount int
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			http.Error(w, "expected websocket", http.StatusBadRequest)
+			return
+		}
+
+		mu.Lock()
+		upgradeCount++
+		mu.Unlock()
+
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("expected websocket upgrade: %v", err)
+		}
+
+		go func() {
+			defer conn.Close()
+			for {
+				var payload map[string]any
+				if err := conn.ReadJSON(&payload); err != nil {
+					return
+				}
+
+				_ = conn.WriteJSON(map[string]any{
+					"type": "response.output_item.done",
+					"item": map[string]any{
+						"type": "message",
+						"id":   "msg_expiry",
+						"content": []map[string]any{
+							{"type": "output_text", "text": "reply"},
+						},
+					},
+				})
+				_ = conn.WriteJSON(map[string]any{
+					"type": "response.completed",
+					"response": map[string]any{
+						"id":     "resp_expiry",
+						"status": "completed",
+						"usage": map[string]any{
+							"input_tokens":  4,
+							"output_tokens": 1,
+							"total_tokens":  5,
+							"input_tokens_details": map[string]any{
+								"cached_tokens": 0,
+							},
+						},
+					},
+				})
+			}
+		}()
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	first := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "one"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportWebSocket,
+		SessionID: sessionID,
+	})
+	if first.StopReason != StopReasonStop {
+		t.Fatalf("expected first websocket session request to succeed, got %+v", first)
+	}
+
+	time.Sleep(60 * time.Millisecond)
+
+	second := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "two"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportWebSocket,
+		SessionID: sessionID,
+	})
+	if second.StopReason != StopReasonStop {
+		t.Fatalf("expected second websocket session request to succeed, got %+v", second)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if upgradeCount != 2 {
+		t.Fatalf("expected websocket session to reconnect after idle expiry, got %d upgrades", upgradeCount)
 	}
 }
