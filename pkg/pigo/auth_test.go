@@ -20,13 +20,17 @@ func TestRequiresOAuth(t *testing.T) {
 	}
 }
 
-func TestGetEnvAPIKeyReadsKimiKey(t *testing.T) {
+func TestGetEnvAPIKeyReadsBuiltInProviderKeys(t *testing.T) {
 	t.Setenv("KIMI_API_KEY", "kimi-env-token")
+	t.Setenv("ANTHROPIC_API_KEY", "anthropic-env-token")
 	dotEnvOnce = syncOnceForTests()
 	dotEnvValues = nil
 
 	if got := GetEnvAPIKey("kimi-coding"); got != "kimi-env-token" {
 		t.Fatalf("expected kimi env token, got %q", got)
+	}
+	if got := GetEnvAPIKey("anthropic"); got != "anthropic-env-token" {
+		t.Fatalf("expected anthropic env token, got %q", got)
 	}
 	if got := GetEnvAPIKey("openai-codex"); got != "" {
 		t.Fatalf("expected no env api key for openai-codex, got %q", got)

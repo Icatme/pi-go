@@ -32,12 +32,9 @@ func TestSupportsXHighForGPT54(t *testing.T) {
 	}
 }
 
-func TestSupportsXHighForOpenRouterOpus46(t *testing.T) {
+func TestBuiltInsDoNotExposeOpenRouter(t *testing.T) {
 	model := GetModel("openrouter", "anthropic/claude-opus-4.6")
-	if model == nil {
-		t.Fatal("expected model to exist")
-	}
-	if !SupportsXHigh(*model) {
-		t.Fatal("expected openrouter opus 4.6 to support xhigh")
+	if model != nil {
+		t.Fatalf("expected openrouter model to be removed from built-ins, got %+v", *model)
 	}
 }

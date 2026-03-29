@@ -11,15 +11,25 @@ import (
 )
 
 type anthropicRequest struct {
-	Model       string               `json:"model"`
-	System      []anthropicTextBlock `json:"system,omitempty"`
-	Messages    []anthropicMessage   `json:"messages"`
-	Tools       []anthropicTool      `json:"tools,omitempty"`
-	MaxTokens   int                  `json:"max_tokens"`
-	Temperature *float64             `json:"temperature,omitempty"`
-	Thinking    any                  `json:"thinking,omitempty"`
-	ToolChoice  any                  `json:"tool_choice,omitempty"`
-	Stream      bool                 `json:"stream,omitempty"`
+	Model        string                 `json:"model"`
+	System       []anthropicTextBlock   `json:"system,omitempty"`
+	Messages     []anthropicMessage     `json:"messages"`
+	Tools        []anthropicTool        `json:"tools,omitempty"`
+	MaxTokens    int                    `json:"max_tokens"`
+	Temperature  *float64               `json:"temperature,omitempty"`
+	Thinking     any                    `json:"thinking,omitempty"`
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+	ToolChoice   any                    `json:"tool_choice,omitempty"`
+	Metadata     *anthropicMetadata     `json:"metadata,omitempty"`
+	Stream       bool                   `json:"stream,omitempty"`
+}
+
+type anthropicOutputConfig struct {
+	Effort string `json:"effort,omitempty"`
+}
+
+type anthropicMetadata struct {
+	UserID string `json:"user_id,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -169,7 +179,27 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 	go func() {
 		apiKey := options.APIKey
 		if apiKey == "" {
+			resolved, err := ResolveAuthorization(model.Provider, options.Auth, options.HTTPClient, options.RequestContext)
+			if err != nil {
+				response.StopReason = StopReasonError
+				response.ErrorMessage = err.Error()
+				stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
+				stream.finish(response)
+				return
+			}
+			apiKey = resolved
+		}
+		isOAuth := false
+		if apiKey == "" {
 			apiKey = ResolveAPIKey(model.Provider, options.Auth)
+		}
+		if model.Provider == "anthropic" {
+			if authConfig, ok := options.Auth[model.Provider]; ok && authConfig.Type == AuthTypeOAuth {
+				isOAuth = true
+			}
+			if isAnthropicOAuthToken(apiKey) {
+				isOAuth = true
+			}
 		}
 		if apiKey == "" {
 			response.StopReason = StopReasonError
@@ -180,18 +210,35 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 		}
 
 		cacheControl := resolveAnthropicCacheControl(model.BaseURL, anthropicOptions.CacheRetention)
+		thinkingConfig := buildAnthropicThinkingConfig(model, anthropicOptions)
 		requestBody := anthropicRequest{
-			Model:     model.ID,
-			Messages:  convertAnthropicMessagesWithCache(ctx.Messages, model, cacheControl),
-			Tools:     convertAnthropicTools(ctx.Tools),
-			MaxTokens: defaultMaxTokens(model, anthropicOptions.MaxTokens),
-			Thinking:  buildAnthropicThinkingOptions(model, anthropicOptions),
-			Stream:    true,
+			Model:        model.ID,
+			Messages:     convertAnthropicMessagesWithCache(ctx.Messages, model, cacheControl, isOAuth, ctx.Tools),
+			Tools:        convertAnthropicTools(ctx.Tools, isOAuth),
+			MaxTokens:    defaultMaxTokens(model, anthropicOptions.MaxTokens),
+			Thinking:     thinkingConfig.Thinking,
+			OutputConfig: thinkingConfig.OutputConfig,
+			ToolChoice:   buildAnthropicToolChoice(anthropicOptions.ToolChoice, ctx.Tools, isOAuth),
+			Metadata:     buildAnthropicMetadata(anthropicOptions.Metadata),
+			Stream:       true,
 		}
 		if ctx.SystemPrompt != "" {
 			requestBody.System = []anthropicTextBlock{{
 				Type:         "text",
 				Text:         ctx.SystemPrompt,
+				CacheControl: cacheControl,
+			}}
+			if isOAuth && model.Provider == "anthropic" {
+				requestBody.System = append([]anthropicTextBlock{{
+					Type:         "text",
+					Text:         "You are Claude Code, Anthropic's official CLI for Claude.",
+					CacheControl: cacheControl,
+				}}, requestBody.System...)
+			}
+		} else if isOAuth && model.Provider == "anthropic" {
+			requestBody.System = []anthropicTextBlock{{
+				Type:         "text",
+				Text:         "You are Claude Code, Anthropic's official CLI for Claude.",
 				CacheControl: cacheControl,
 			}}
 		}
@@ -235,7 +282,18 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 		request.Header.Set("content-type", "application/json")
 		request.Header.Set("accept", "text/event-stream")
 		request.Header.Set("anthropic-version", "2023-06-01")
-		request.Header.Set("x-api-key", apiKey)
+		if model.Provider == "anthropic" {
+			request.Header.Set("anthropic-beta", buildAnthropicBetaHeader(model, isOAuth))
+			if isOAuth {
+				request.Header.Set("authorization", "Bearer "+apiKey)
+				request.Header.Set("user-agent", "claude-cli/"+anthropicClaudeCodeVersion)
+				request.Header.Set("x-app", "cli")
+			} else {
+				request.Header.Set("x-api-key", apiKey)
+			}
+		} else {
+			request.Header.Set("x-api-key", apiKey)
+		}
 		for key, value := range anthropicOptions.Headers {
 			request.Header.Set(key, value)
 		}
@@ -271,7 +329,7 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 		terminalSeen := false
 		states := map[int]*anthropicStreamingBlockState{}
 		if err := readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
-			done, err := processAnthropicStreamEvent(data, model, &response, stream, states)
+			done, err := processAnthropicStreamEvent(data, model, &response, stream, states, isOAuth, ctx.Tools)
 			if done {
 				terminalSeen = true
 				return true, nil
@@ -304,6 +362,8 @@ func processAnthropicStreamEvent(
 	response *AssistantMessage,
 	stream *AssistantMessageEventStream,
 	states map[int]*anthropicStreamingBlockState,
+	isOAuth bool,
+	tools []Tool,
 ) (bool, error) {
 	if strings.TrimSpace(data) == "" || strings.TrimSpace(data) == "[DONE]" {
 		return false, nil
@@ -355,7 +415,7 @@ func processAnthropicStreamEvent(
 			}
 			response.Content = append(response.Content, ToolCall{
 				ID:        event.ContentBlock.ID,
-				Name:      event.ContentBlock.Name,
+				Name:      anthropicToolNameForInbound(event.ContentBlock.Name, tools, isOAuth),
 				Arguments: input,
 			})
 			states[event.Index] = &anthropicStreamingBlockState{ContentIndex: contentIndex, Kind: "tool", PartialJSON: string(event.ContentBlock.Input)}
@@ -517,7 +577,7 @@ func defaultMaxTokens(model Model, override int) int {
 }
 
 func convertAnthropicMessages(messages []Message, model Model) []anthropicMessage {
-	return convertAnthropicMessagesWithCache(messages, model, nil)
+	return convertAnthropicMessagesWithCache(messages, model, nil, false, nil)
 }
 
 func resolveAnthropicCacheControl(baseURL string, retention CacheRetention) *anthropicCacheControl {
@@ -541,9 +601,31 @@ func streamSimpleAnthropicMessages(model Model, ctx Context, options SimpleStrea
 	return streamAnthropicMessages(model, ctx, BuildProviderStreamOptions(model, options))
 }
 
-func buildAnthropicThinkingOptions(model Model, options AnthropicMessagesProviderOptions) any {
+type anthropicThinkingConfig struct {
+	Thinking     any
+	OutputConfig *anthropicOutputConfig
+}
+
+func buildAnthropicThinkingConfig(model Model, options AnthropicMessagesProviderOptions) anthropicThinkingConfig {
+	if !model.Reasoning {
+		return anthropicThinkingConfig{}
+	}
 	if options.Reasoning == "" {
-		return nil
+		return anthropicThinkingConfig{
+			Thinking: map[string]any{
+				"type": "disabled",
+			},
+		}
+	}
+	if supportsAdaptiveAnthropicThinking(model) {
+		return anthropicThinkingConfig{
+			Thinking: map[string]any{
+				"type": "adaptive",
+			},
+			OutputConfig: &anthropicOutputConfig{
+				Effort: mapAnthropicReasoningEffort(model, options.Reasoning),
+			},
+		}
 	}
 
 	budget := options.ThinkingBudgetTokens
@@ -573,16 +655,18 @@ func buildAnthropicThinkingOptions(model Model, options AnthropicMessagesProvide
 		budget = maxBudget
 	}
 	if budget <= 0 {
-		return nil
+		return anthropicThinkingConfig{}
 	}
 
-	return map[string]any{
-		"type":          "enabled",
-		"budget_tokens": budget,
+	return anthropicThinkingConfig{
+		Thinking: map[string]any{
+			"type":          "enabled",
+			"budget_tokens": budget,
+		},
 	}
 }
 
-func convertAnthropicMessagesWithCache(messages []Message, model Model, cacheControl *anthropicCacheControl) []anthropicMessage {
+func convertAnthropicMessagesWithCache(messages []Message, model Model, cacheControl *anthropicCacheControl, isOAuth bool, tools []Tool) []anthropicMessage {
 	transformed := TransformMessages(messages, model, func(id string, _ Model, _ AssistantMessage) string {
 		return NormalizeSimpleToolCallID(id)
 	})
@@ -600,7 +684,7 @@ func convertAnthropicMessagesWithCache(messages []Message, model Model, cacheCon
 				Content: content,
 			})
 		case AssistantMessage:
-			content := convertAssistantContent(typed.Content)
+			content := convertAssistantContent(typed.Content, isOAuth)
 			if len(content) == 0 {
 				continue
 			}
@@ -718,7 +802,7 @@ func convertUserContent(value any, model Model) any {
 	}
 }
 
-func convertAssistantContent(blocks []ContentBlock) []any {
+func convertAssistantContent(blocks []ContentBlock, isOAuth bool) []any {
 	result := make([]any, 0, len(blocks))
 	for _, block := range blocks {
 		switch typed := block.(type) {
@@ -757,7 +841,7 @@ func convertAssistantContent(blocks []ContentBlock) []any {
 			result = append(result, anthropicToolUseBlock{
 				Type:  "tool_use",
 				ID:    typed.ID,
-				Name:  typed.Name,
+				Name:  anthropicToolNameForOutbound(typed.Name, isOAuth),
 				Input: typed.Arguments,
 			})
 		}
@@ -831,7 +915,18 @@ func modelSupportsInput(model Model, inputType InputType) bool {
 	return false
 }
 
-func convertAnthropicTools(tools []Tool) []anthropicTool {
+func buildAnthropicMetadata(metadata map[string]any) *anthropicMetadata {
+	if len(metadata) == 0 {
+		return nil
+	}
+	userID, ok := metadata["user_id"].(string)
+	if !ok || strings.TrimSpace(userID) == "" {
+		return nil
+	}
+	return &anthropicMetadata{UserID: userID}
+}
+
+func convertAnthropicTools(tools []Tool, isOAuth bool) []anthropicTool {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -846,7 +941,7 @@ func convertAnthropicTools(tools []Tool) []anthropicTool {
 			}
 		}
 		result = append(result, anthropicTool{
-			Name:        tool.Name,
+			Name:        anthropicToolNameForOutbound(tool.Name, isOAuth),
 			Description: tool.Description,
 			InputSchema: toolSchema,
 		})

@@ -18,7 +18,6 @@ func registerBuiltInProviderModules() {
 	RegisterLazyProviderModule("anthropic", newAnthropicProviderModule)
 	RegisterLazyProviderModule("openai-codex", newOpenAICodexProviderModule)
 	RegisterLazyProviderModule("kimi-coding", newKimiCodingProviderModule)
-	RegisterLazyProviderModule("openrouter", newOpenRouterProviderModule)
 }
 
 func newAnthropicMessagesAPIModule() APIModule {
@@ -40,8 +39,14 @@ func newOpenAICodexResponsesAPIModule() APIModule {
 func newAnthropicProviderModule() ProviderModule {
 	return ProviderModule{
 		Provider: "anthropic",
+		Auth: ProviderAuth{
+			EnvAPIKeyName: "ANTHROPIC_API_KEY",
+		},
 		Capabilities: ProviderCapabilities{
-			SupportsStreaming: true,
+			SupportsStreaming:          true,
+			SupportsPromptCacheControl: true,
+			SupportsThinkingBudget:     true,
+			SupportsToolChoice:         true,
 		},
 		BuildOptions: buildAnthropicMessagesProviderStreamOptions,
 		Models: map[string]Model{
@@ -225,24 +230,6 @@ func newKimiCodingProviderModule() ProviderModule {
 				Cost:          UsageCost{},
 				ContextWindow: 262144,
 				MaxTokens:     32768,
-			},
-		},
-	}
-}
-
-func newOpenRouterProviderModule() ProviderModule {
-	return ProviderModule{
-		Provider: "openrouter",
-		Models: map[string]Model{
-			"anthropic/claude-opus-4.6": {
-				ID:            "anthropic/claude-opus-4.6",
-				Name:          "Claude Opus 4.6 via OpenRouter",
-				API:           "openai-completions",
-				BaseURL:       "https://openrouter.ai/api/v1",
-				Reasoning:     true,
-				Input:         []InputType{InputText, InputImage},
-				ContextWindow: 200000,
-				MaxTokens:     32000,
 			},
 		},
 	}

@@ -213,6 +213,14 @@ func TestRegisterProviderModuleDispatchesStreamThroughRegistry(t *testing.T) {
 }
 
 func TestGetProviderCapabilitiesReturnsBuiltInMetadata(t *testing.T) {
+	anthropic := GetProviderCapabilities("anthropic")
+	if !anthropic.SupportsStreaming || !anthropic.SupportsPromptCacheControl || !anthropic.SupportsThinkingBudget || !anthropic.SupportsToolChoice {
+		t.Fatalf("expected anthropic capabilities to be registered, got %+v", anthropic)
+	}
+	if anthropic.SupportsSession {
+		t.Fatalf("expected anthropic to not advertise sessions, got %+v", anthropic)
+	}
+
 	codex := GetProviderCapabilities("openai-codex")
 	if !codex.SupportsStreaming || !codex.SupportsSession || !codex.SupportsReasoningSummary || !codex.SupportsTextVerbosity || !codex.SupportsToolChoice {
 		t.Fatalf("expected openai-codex capabilities to be registered, got %+v", codex)

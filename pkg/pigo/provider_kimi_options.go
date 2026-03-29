@@ -4,6 +4,7 @@ type AnthropicMessagesProviderOptions struct {
 	CommonProviderOptions
 	Reasoning            ThinkingLevel
 	ThinkingBudgetTokens int
+	ToolChoice           string
 }
 
 type KimiCodingProviderOptions struct {
@@ -37,6 +38,7 @@ func resolveAnthropicMessagesProviderOptions(_ Model, options ProviderStreamOpti
 		CommonProviderOptions: commonProviderOptionsFromStream(options),
 		Reasoning:             options.Reasoning,
 		ThinkingBudgetTokens:  options.ThinkingBudgetTokens,
+		ToolChoice:            options.ToolChoice,
 	}
 }
 
@@ -53,6 +55,7 @@ func buildKimiCodingProviderOptions(model Model, options SimpleStreamOptions) Ki
 		AnthropicMessagesProviderOptions: buildAnthropicMessagesProviderOptions(model, options),
 	}
 	providerOptions.SessionID = ""
+	providerOptions.ToolChoice = ""
 	return providerOptions
 }
 
@@ -61,6 +64,7 @@ func resolveKimiCodingProviderOptions(model Model, options ProviderStreamOptions
 		AnthropicMessagesProviderOptions: resolveAnthropicMessagesProviderOptions(model, options),
 	}
 	providerOptions.SessionID = ""
+	providerOptions.ToolChoice = ""
 	return providerOptions
 }
 
@@ -68,6 +72,7 @@ func (options AnthropicMessagesProviderOptions) toProviderStreamOptions() Provid
 	streamOptions := options.CommonProviderOptions.toProviderStreamOptions()
 	streamOptions.Reasoning = options.Reasoning
 	streamOptions.ThinkingBudgetTokens = options.ThinkingBudgetTokens
+	streamOptions.ToolChoice = options.ToolChoice
 	return streamOptions
 }
 
