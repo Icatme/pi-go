@@ -24,6 +24,7 @@ type apiRegistryEntry struct {
 var (
 	apiRegistryMu sync.RWMutex
 	apiRegistry   = map[API]*apiRegistryEntry{}
+	apiResolveHook func(API)
 )
 
 func RegisterAPIModule(module APIModule) {
@@ -87,6 +88,9 @@ func resolveAPIModule(api API) *APIModule {
 
 	module := normalizeAPIModule(api, factory())
 	entry.module = &module
+	if apiResolveHook != nil {
+		apiResolveHook(api)
+	}
 	return entry.module
 }
 

@@ -47,6 +47,7 @@ type providerRegistryEntry struct {
 var (
 	providerRegistryMu sync.RWMutex
 	providerRegistry   = map[Provider]*providerRegistryEntry{}
+	providerResolveHook func(Provider)
 )
 
 func RegisterProviderModule(module ProviderModule) {
@@ -110,6 +111,9 @@ func resolveProviderModule(provider Provider) *ProviderModule {
 
 	module := normalizeProviderModule(provider, factory())
 	entry.module = &module
+	if providerResolveHook != nil {
+		providerResolveHook(provider)
+	}
 	return entry.module
 }
 

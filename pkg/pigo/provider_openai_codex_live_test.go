@@ -174,3 +174,86 @@ func TestCompleteSimpleOpenAICodexLiveRefresh(t *testing.T) {
 		t.Fatal("expected live codex refreshed response id")
 	}
 }
+
+func TestCompleteSimpleOpenAICodexLiveSkipsEmptyAssistantHistory(t *testing.T) {
+	if os.Getenv("PIGO_LIVE_TEST") != "1" {
+		t.Skip("set PIGO_LIVE_TEST=1 to run live openai-codex empty-history test")
+	}
+
+	token := loadOpenAICodexTestToken("01_auth.json")
+	if token == "" {
+		t.Skip("missing test-only openai codex token in 01_auth.json")
+	}
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected openai-codex model")
+	}
+
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{
+			UserMessage{Content: "Hello"},
+			AssistantMessage{
+				Content:    nil,
+				API:        model.API,
+				Provider:   model.Provider,
+				Model:      model.ID,
+				StopReason: StopReasonStop,
+			},
+			UserMessage{Content: "Reply with exactly OK."},
+		},
+	}, SimpleStreamOptions{
+		APIKey: token,
+	})
+
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected empty assistant history live call to succeed, got %q with error %q", response.StopReason, response.ErrorMessage)
+	}
+	if len(response.Content) == 0 {
+		t.Fatal("expected content from live codex empty-history response")
+	}
+}
+
+func TestCompleteSimpleOpenAICodexLiveSkipsAbortedReasoningOnlyHistory(t *testing.T) {
+	if os.Getenv("PIGO_LIVE_TEST") != "1" {
+		t.Skip("set PIGO_LIVE_TEST=1 to run live openai-codex reasoning-replay test")
+	}
+
+	token := loadOpenAICodexTestToken("01_auth.json")
+	if token == "" {
+		t.Skip("missing test-only openai codex token in 01_auth.json")
+	}
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected openai-codex model")
+	}
+
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{
+			UserMessage{Content: "Use the tool."},
+			AssistantMessage{
+				Content: []ContentBlock{
+					ThinkingContent{
+						Thinking:          "",
+						ThinkingSignature: `{"type":"reasoning","summary":[{"type":"summary_text","text":"partial"}]}`,
+					},
+				},
+				API:        "openai-codex-responses",
+				Provider:   "openai-codex",
+				Model:      "gpt-5.4",
+				StopReason: StopReasonAborted,
+			},
+			UserMessage{Content: "Reply with exactly OK to confirm you can continue."},
+		},
+	}, SimpleStreamOptions{
+		APIKey: token,
+	})
+
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected reasoning-replay live call to succeed, got %q with error %q", response.StopReason, response.ErrorMessage)
+	}
+	if len(response.Content) == 0 {
+		t.Fatal("expected content from live codex reasoning-replay response")
+	}
+}

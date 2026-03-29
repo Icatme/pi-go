@@ -231,6 +231,131 @@ func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForFailedResponse(t *
 	}
 }
 
+func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForCreatedThenTopLevelError(t *testing.T) {
+	fixture := runOpenAICodexFixture(t, "gpt-5.4", buildOpenAICodexSSE(
+		map[string]any{
+			"type": "response.created",
+			"response": map[string]any{
+				"id": "resp_fixture_top_error",
+			},
+		},
+		map[string]any{
+			"type":    "error",
+			"message": "transport broke",
+		},
+	))
+
+	if !reflect.DeepEqual(fixture.StreamResult, fixture.CompleteResult) {
+		t.Fatalf("expected top-level error fixture stream/complete parity, got stream=%+v complete=%+v", fixture.StreamResult, fixture.CompleteResult)
+	}
+	if fixture.StreamResult.StopReason != StopReasonError || fixture.StreamResult.ErrorMessage != "transport broke" {
+		t.Fatalf("expected top-level error fixture to propagate error, got %+v", fixture.StreamResult)
+	}
+	if fixture.StreamResult.ResponseID != "resp_fixture_top_error" {
+		t.Fatalf("expected response.created id to survive top-level error, got %q", fixture.StreamResult.ResponseID)
+	}
+}
+
+func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForTerminalOnlyReasoningAndFunctionCall(t *testing.T) {
+	fixture := runOpenAICodexFixture(t, "gpt-5.4", buildOpenAICodexSSE(
+		map[string]any{
+			"type": "response.done",
+			"response": map[string]any{
+				"id":     "resp_fixture_terminal_only",
+				"status": "completed",
+				"output": []map[string]any{
+					{
+						"type": "reasoning",
+						"id":   "rs_terminal",
+						"summary": []map[string]any{
+							{"type": "summary_text", "text": "think first"},
+						},
+					},
+					{
+						"type":      "function_call",
+						"id":        "fc_terminal",
+						"call_id":   "call_terminal",
+						"name":      "edit",
+						"arguments": `{"path":"README.md"}`,
+					},
+				},
+				"usage": map[string]any{
+					"input_tokens":  7,
+					"output_tokens": 3,
+					"total_tokens":  10,
+					"input_tokens_details": map[string]any{
+						"cached_tokens": 1,
+					},
+				},
+			},
+		},
+	))
+
+	if !reflect.DeepEqual(fixture.StreamResult, fixture.CompleteResult) {
+		t.Fatalf("expected terminal-only fixture stream/complete parity, got stream=%+v complete=%+v", fixture.StreamResult, fixture.CompleteResult)
+	}
+	if len(fixture.StreamResult.Content) != 2 {
+		t.Fatalf("expected reasoning + function call content blocks, got %+v", fixture.StreamResult.Content)
+	}
+	if fixture.StreamResult.StopReason != StopReasonToolUse {
+		t.Fatalf("expected terminal-only fixture to stop with toolUse, got %+v", fixture.StreamResult)
+	}
+}
+
+func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForTerminalArgumentOverride(t *testing.T) {
+	fixture := runOpenAICodexFixture(t, "gpt-5.4", buildOpenAICodexSSE(
+		map[string]any{
+			"type": "response.output_item.added",
+			"item": map[string]any{
+				"type":    "function_call",
+				"id":      "fc_override",
+				"call_id": "call_override",
+				"name":    "edit",
+			},
+		},
+		map[string]any{
+			"type":  "response.function_call_arguments.delta",
+			"delta": `{"path":"READ`,
+		},
+		map[string]any{
+			"type": "response.output_item.done",
+			"item": map[string]any{
+				"type":      "function_call",
+				"id":        "fc_override",
+				"call_id":   "call_override",
+				"name":      "edit",
+				"arguments": `{"path":"README.md"}`,
+			},
+		},
+		map[string]any{
+			"type": "response.completed",
+			"response": map[string]any{
+				"id":     "resp_fixture_arg_override",
+				"status": "completed",
+				"usage": map[string]any{
+					"input_tokens":  5,
+					"output_tokens": 2,
+					"total_tokens":  7,
+					"input_tokens_details": map[string]any{
+						"cached_tokens": 0,
+					},
+				},
+			},
+		},
+	))
+
+	if !reflect.DeepEqual(fixture.StreamResult, fixture.CompleteResult) {
+		t.Fatalf("expected argument override fixture stream/complete parity, got stream=%+v complete=%+v", fixture.StreamResult, fixture.CompleteResult)
+	}
+	call, ok := fixture.StreamResult.Content[0].(ToolCall)
+	if !ok {
+		t.Fatalf("expected tool call result, got %+v", fixture.StreamResult.Content)
+	}
+	if call.Arguments["path"] != "README.md" {
+		t.Fatalf("expected terminal arguments to override partial json, got %+v", call.Arguments)
+	}
+}
+
 func TestStreamSimpleOpenAICodexTerminalItemOverridesPartialMessageText(t *testing.T) {
 	fixture := runOpenAICodexFixture(t, "gpt-5.4", buildOpenAICodexSSE(
 		map[string]any{
