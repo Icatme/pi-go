@@ -214,4 +214,3 @@ func TestCrossProviderHandoffCodexToKimiBuildsReplaySafePayload(t *testing.T) {
 		t.Fatalf("expected tool result to reference normalized tool id %q, got %#v", toolUseID, toolResult)
 	}
 }
-

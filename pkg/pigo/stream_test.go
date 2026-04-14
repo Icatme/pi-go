@@ -1031,4 +1031,3 @@ func TestStreamSimpleEmitsAbortedErrorEvent(t *testing.T) {
 		t.Fatalf("expected aborted result, got %+v", result)
 	}
 }
-

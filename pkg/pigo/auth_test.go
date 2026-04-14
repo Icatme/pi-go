@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -201,7 +202,11 @@ func TestGetEnvAPIKeyFallsBackToDotEnvFile(t *testing.T) {
 		_ = os.Chdir(previousDir)
 	}()
 
-	if err := os.WriteFile(".env", []byte("KIMI_API_KEY=kimi-dotenv-token\n"), 0o600); err != nil {
+	if err := os.MkdirAll(".pigo", 0o700); err != nil {
+		t.Fatalf("expected local support dir: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(".pigo", ".env"), []byte("KIMI_API_KEY=kimi-dotenv-token\n"), 0o600); err != nil {
 		t.Fatalf("expected dotenv write: %v", err)
 	}
 

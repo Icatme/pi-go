@@ -4,6 +4,8 @@
 
 Repository layout:
 
+- `cmd/pigo`: CLI entrypoint
+- `internal/cli`: CLI-only login and credential-store logic
 - `pkg/pigo`: library code and tests
 - `docs`: project notes and repo-level documentation
 - repo root: module files and top-level docs only
@@ -60,6 +62,33 @@ API registration:
 
 Support-file boundaries:
 
-- `.env` is ignored by git and used only by tests/helpers
+- `.pigo/auth.json` is ignored by git and written by `pigo login`
+- `.pigo/.env` is ignored by git and used for local API-key lookup in tests/helpers
 - `01_auth.json` is ignored by git and used only by live tests
 - runtime auth must be passed explicitly and does not read those files
+
+CLI usage:
+
+```powershell
+go run .\cmd\pigo list
+go run .\cmd\pigo models openai-codex
+go run .\cmd\pigo login openai-codex
+go run .\cmd\pigo ask --provider kimi-coding "hello"
+go run .\cmd\pigo ask --provider openai-codex --model gpt-5.4 "hello"
+.\scripts\build.ps1
+```
+
+CLI behavior:
+
+- `list` shows OAuth-login providers only
+- `models` shows available models for a provider
+- `login` stores OAuth credentials in `.pigo/auth.json`
+- `ask` loads OAuth credentials from `.pigo/auth.json` and API keys from `.pigo/.env`
+
+Build scripts:
+
+- `.\scripts\test.ps1` runs `go test ./...`
+- `.\scripts\build.ps1` runs tests, then builds `bin/pigo.exe`
+- `.\scripts\build.ps1 -SkipTest` builds without re-running tests
+- `.\scripts\build.ps1 -Release` adds stripped release flags
+- `.\scripts\build.ps1 -GOOS linux -GOARCH amd64` cross-builds to `bin/pigo`

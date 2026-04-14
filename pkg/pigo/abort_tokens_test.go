@@ -255,4 +255,3 @@ func TestAbortedAssistantMessageCanBeReplayedOnFollowup(t *testing.T) {
 		t.Fatalf("expected successful followup after aborted replay, got %+v", followup)
 	}
 }
-

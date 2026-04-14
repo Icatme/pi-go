@@ -3,7 +3,10 @@
 bin/
 dist/
 coverage.out
+.data/
+.pigo/
 .env
 .env.*
+auth.json
 *_auth.json
 *_oauth.json

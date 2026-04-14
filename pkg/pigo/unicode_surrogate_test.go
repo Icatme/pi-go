@@ -96,4 +96,3 @@ func TestAnthropicRequestMarshalsEmojiAndUnpairedSurrogateToolResultText(t *test
 		t.Fatalf("expected marshaled payload to preserve unicode text, got %s", string(payload))
 	}
 }
-

@@ -113,4 +113,3 @@ func TestCompleteOpenAICodexDifferentModelReplayDropsRawReasoningButKeepsToolHis
 		t.Fatalf("expected replay payload to keep text, function_call, and function_call_output, got %#v", requestBody.Input)
 	}
 }
-

@@ -311,4 +311,3 @@ func TestCompleteSimpleKimiCodingFiltersToolCallWithoutResultOnFollowup(t *testi
 		t.Fatalf("expected textual followup answer, got %+v", second.Content)
 	}
 }
-

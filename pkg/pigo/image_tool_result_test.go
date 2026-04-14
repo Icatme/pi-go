@@ -55,4 +55,3 @@ func TestAnthropicToolResultContentWithTextAndImage(t *testing.T) {
 		t.Fatalf("expected second block to be image, got %#v", parts[1])
 	}
 }
-

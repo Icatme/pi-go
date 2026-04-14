@@ -157,4 +157,3 @@ func TestStreamSimpleKimiCodingReturnsAfterTerminalEventBeforeBodyCloses(t *test
 		t.Fatal("timed out waiting for kimi stream result after terminal event")
 	}
 }
-

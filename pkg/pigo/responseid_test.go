@@ -124,4 +124,3 @@ func TestCompleteSimpleOpenAICodexExposesResponseID(t *testing.T) {
 		t.Fatalf("expected response id resp_abc123, got %q", response.ResponseID)
 	}
 }
-

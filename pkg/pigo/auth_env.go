@@ -13,13 +13,15 @@ var (
 	dotEnvOnce   sync.Once
 )
 
+const localSupportDirName = ".pigo"
+
 func lookupEnvValue(name string) string {
 	if value, ok := os.LookupEnv(name); ok && value != "" {
 		return value
 	}
 
 	dotEnvOnce.Do(func() {
-		dotEnvValues = loadDotEnvFile(resolveSupportFilePath(".env"))
+		dotEnvValues = loadDotEnvFile(resolveLocalSupportFilePath(".env"))
 	})
 
 	return dotEnvValues[name]
@@ -83,4 +85,36 @@ func resolveSupportFilePath(name string) string {
 	}
 
 	return name
+}
+
+func resolveLocalSupportFilePath(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return ""
+	}
+
+	candidate := filepath.Join(localSupportDirName, name)
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+
+	workingDir, err := os.Getwd()
+	if err != nil {
+		return candidate
+	}
+
+	dir := workingDir
+	for {
+		candidate = filepath.Join(dir, localSupportDirName, name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir || parent == "" {
+			break
+		}
+		dir = parent
+	}
+
+	return filepath.Join(localSupportDirName, name)
 }

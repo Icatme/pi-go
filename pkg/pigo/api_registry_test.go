@@ -78,4 +78,3 @@ func TestRegisterLazyAPIModuleLoadsOnDemand(t *testing.T) {
 		t.Fatalf("expected lazy api module to stay cached after first load, got %d", loadCount)
 	}
 }
-

@@ -452,4 +452,3 @@ func TestStreamSimpleOpenAICodexMalformedJSONAfterCreatedPreservesResponseID(t *
 		t.Fatalf("expected malformed json error message, got %q", result.ErrorMessage)
 	}
 }
-

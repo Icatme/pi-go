@@ -204,4 +204,3 @@ func TestCompleteSimpleKimiCodingHandlesEmptyAssistantMessageInHistory(t *testin
 		t.Fatalf("expected empty assistant turn to be skipped, got %#v", requestBody.Messages)
 	}
 }
-

@@ -22,8 +22,8 @@ type apiRegistryEntry struct {
 }
 
 var (
-	apiRegistryMu sync.RWMutex
-	apiRegistry   = map[API]*apiRegistryEntry{}
+	apiRegistryMu  sync.RWMutex
+	apiRegistry    = map[API]*apiRegistryEntry{}
 	apiResolveHook func(API)
 )
 

@@ -218,4 +218,3 @@ func TestStreamSimpleKimiCodingLiveAbortAndReplay(t *testing.T) {
 		t.Fatalf("expected successful live follow-up after abort, got %+v", followup)
 	}
 }
-

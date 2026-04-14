@@ -45,8 +45,8 @@ type providerRegistryEntry struct {
 }
 
 var (
-	providerRegistryMu sync.RWMutex
-	providerRegistry   = map[Provider]*providerRegistryEntry{}
+	providerRegistryMu  sync.RWMutex
+	providerRegistry    = map[Provider]*providerRegistryEntry{}
 	providerResolveHook func(Provider)
 )
 
