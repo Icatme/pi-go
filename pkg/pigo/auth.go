@@ -76,11 +76,10 @@ func ResolveAuthorization(provider Provider, auth map[Provider]AuthConfig, httpC
 		}
 		module := resolveProviderModule(provider)
 		if module != nil && module.Auth.ResolveAuthorization != nil {
-			updated, token, err := module.Auth.ResolveAuthorization(provider, config, httpClient, requestContext)
+			token, err := module.Auth.ResolveAuthorization(provider, config, httpClient, requestContext)
 			if err != nil {
 				return "", err
 			}
-			auth[provider] = updated
 			return token, nil
 		}
 		return config.OAuth.AccessToken, nil

@@ -31,6 +31,7 @@ type StreamOptions struct {
 	CacheRetention CacheRetention
 	SessionID      string
 	OnPayload      func(payload any, model Model) any
+	ServiceTier    string
 	MaxRetryDelay  int
 	Metadata       map[string]any
 	RequestContext context.Context
@@ -47,6 +48,7 @@ type ProviderStreamOptions struct {
 	CacheRetention       CacheRetention
 	SessionID            string
 	OnPayload            func(payload any, model Model) any
+	ServiceTier          string
 	MaxRetryDelay        int
 	Metadata             map[string]any
 	RequestContext       context.Context
@@ -68,6 +70,7 @@ type SimpleStreamOptions struct {
 	CacheRetention  CacheRetention
 	SessionID       string
 	OnPayload       func(payload any, model Model) any
+	ServiceTier     string
 	MaxRetryDelay   int
 	Metadata        map[string]any
 	RequestContext  context.Context

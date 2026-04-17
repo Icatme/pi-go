@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-type ProviderAuthResolveFunc func(Provider, AuthConfig, *http.Client, context.Context) (AuthConfig, string, error)
+type ProviderAuthResolveFunc func(Provider, AuthConfig, *http.Client, context.Context) (string, error)
 type ProviderOptionsNormalizeFunc func(Model, ProviderStreamOptions) ProviderStreamOptions
 type ProviderOptionsBuildFunc func(Model, SimpleStreamOptions) ProviderStreamOptions
 

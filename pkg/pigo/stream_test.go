@@ -5,8 +5,110 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestAssistantMessageEventStreamResultDoesNotDependOnEventConsumption(t *testing.T) {
+	stream := newAssistantMessageEventStream()
+	done := make(chan struct{})
+
+	go func() {
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart})
+		for i := 0; i < 1500; i++ {
+			stream.push(AssistantMessageEvent{
+				Type:  AssistantMessageEventTextDelta,
+				Delta: strings.Repeat("x", 8),
+			})
+		}
+		stream.push(AssistantMessageEvent{
+			Type:    AssistantMessageEventDone,
+			Reason:  StopReasonStop,
+			Message: AssistantMessage{StopReason: StopReasonStop},
+		})
+		stream.finish(AssistantMessage{
+			Provider:   "test",
+			Model:      "fake",
+			StopReason: StopReasonStop,
+			Content: []ContentBlock{
+				TextContent{Text: "ok"},
+			},
+		})
+		close(done)
+	}()
+
+	result := stream.Result()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected producer to finish without event consumption")
+	}
+	if result.StopReason != StopReasonStop {
+		t.Fatalf("expected stop result, got %+v", result)
+	}
+	text, _ := result.Content[0].(TextContent)
+	if text.Text != "ok" {
+		t.Fatalf("expected final content to survive backpressure, got %+v", result)
+	}
+}
+
+func TestAssistantMessageEventStreamReportsDroppedDeltaEvents(t *testing.T) {
+	stream := newAssistantMessageEventStream()
+	done := make(chan struct{})
+
+	go func() {
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart})
+		for i := 0; i < 3000; i++ {
+			stream.push(AssistantMessageEvent{
+				Type:  AssistantMessageEventTextDelta,
+				Delta: "x",
+			})
+		}
+		stream.push(AssistantMessageEvent{
+			Type:         AssistantMessageEventTextEnd,
+			ContentIndex: 0,
+			Content:      "done",
+		})
+		stream.push(AssistantMessageEvent{
+			Type:    AssistantMessageEventDone,
+			Reason:  StopReasonStop,
+			Message: AssistantMessage{StopReason: StopReasonStop},
+		})
+		stream.finish(AssistantMessage{StopReason: StopReasonStop})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected producer to finish before events are consumed")
+	}
+
+	var (
+		events         []AssistantMessageEvent
+		sawDropped     bool
+		textDeltaCount int
+	)
+	for event := range stream.Events() {
+		events = append(events, event)
+		if event.DroppedEvents > 0 {
+			sawDropped = true
+		}
+		if event.Type == AssistantMessageEventTextDelta {
+			textDeltaCount++
+		}
+	}
+	if !sawDropped {
+		t.Fatal("expected dropped delta count to be reported on a later event")
+	}
+	if textDeltaCount >= 3000 {
+		t.Fatalf("expected some delta events to be dropped, got %d", textDeltaCount)
+	}
+	if len(events) == 0 || events[len(events)-1].Type != AssistantMessageEventDone {
+		t.Fatalf("expected done event to survive backpressure, got %+v", events)
+	}
+}
 
 func TestStreamSimpleKimiCodingEmitsTextLifecycle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -35,9 +35,14 @@ func buildOpenAICodexSSE(events ...map[string]any) string {
 
 func clearOpenAICodexWebSocketSessionCache() {
 	openAICodexWebSocketCacheMu.Lock()
-	defer openAICodexWebSocketCacheMu.Unlock()
+	entries := make([]*cachedOpenAICodexWebSocketConnection, 0, len(openAICodexWebSocketSessionCache))
 	for sessionID, entry := range openAICodexWebSocketSessionCache {
 		delete(openAICodexWebSocketSessionCache, sessionID)
+		entries = append(entries, entry)
+	}
+	openAICodexWebSocketCacheMu.Unlock()
+
+	for _, entry := range entries {
 		closeOpenAICodexWebSocket(entry)
 	}
 }
@@ -1012,6 +1017,67 @@ func TestCompleteSimpleOpenAICodexRefreshesExpiredOAuthBeforeRequest(t *testing.
 	}
 }
 
+func TestCompleteSimpleOpenAICodexUsesRequestedServiceTierWhenResponseEchoesDefault(t *testing.T) {
+	var requestBody openAICodexRequest
+	token := makeOpenAICodexToken("acc_test")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request body: %v", err)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_service_tier",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "priority"},
+					},
+				},
+			},
+			map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":           "resp_service_tier",
+					"status":       "completed",
+					"service_tier": "default",
+					"usage": map[string]any{
+						"input_tokens":  1000000,
+						"output_tokens": 1000000,
+						"total_tokens":  2000000,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hello"}},
+	}, SimpleStreamOptions{
+		APIKey:      token,
+		ServiceTier: "priority",
+	})
+
+	if requestBody.ServiceTier != "priority" {
+		t.Fatalf("expected service_tier priority in request body, got %q", requestBody.ServiceTier)
+	}
+	if response.Usage.Cost.Input != 5 || response.Usage.Cost.Output != 30 || response.Usage.Cost.Total != 35 {
+		t.Fatalf("expected priority pricing multiplier to apply, got %+v", response.Usage.Cost)
+	}
+}
+
 func TestCompleteSimpleOpenAICodexAutoTransportFallsBackToSSEWhenWebSocketSetupFails(t *testing.T) {
 	token := makeOpenAICodexToken("acc_test")
 	var websocketAttempts, sseAttempts int
@@ -1318,10 +1384,10 @@ func TestCompleteSimpleOpenAICodexWebSocketReusesSessionConnection(t *testing.T)
 	clearOpenAICodexWebSocketSessionCache()
 	defer clearOpenAICodexWebSocketSessionCache()
 
-	previousTTL := openAICodexWebSocketCacheTTL
-	openAICodexWebSocketCacheTTL = time.Minute
+	previousTTL := getOpenAICodexWebSocketCacheTTL()
+	setOpenAICodexWebSocketCacheTTL(time.Minute)
 	defer func() {
-		openAICodexWebSocketCacheTTL = previousTTL
+		setOpenAICodexWebSocketCacheTTL(previousTTL)
 	}()
 
 	token := makeOpenAICodexToken("acc_test")
@@ -1431,10 +1497,10 @@ func TestCompleteSimpleOpenAICodexWebSocketSessionExpiresAfterIdleTTL(t *testing
 	clearOpenAICodexWebSocketSessionCache()
 	defer clearOpenAICodexWebSocketSessionCache()
 
-	previousTTL := openAICodexWebSocketCacheTTL
-	openAICodexWebSocketCacheTTL = 20 * time.Millisecond
+	previousTTL := getOpenAICodexWebSocketCacheTTL()
+	setOpenAICodexWebSocketCacheTTL(20 * time.Millisecond)
 	defer func() {
-		openAICodexWebSocketCacheTTL = previousTTL
+		setOpenAICodexWebSocketCacheTTL(previousTTL)
 	}()
 
 	token := makeOpenAICodexToken("acc_test")

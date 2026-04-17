@@ -220,6 +220,17 @@ func newKimiCodingProviderModule() ProviderModule {
 				ContextWindow: 262144,
 				MaxTokens:     32768,
 			},
+			"k2p6": {
+				ID:            "k2p6",
+				Name:          "Kimi K2.6",
+				API:           "anthropic-messages",
+				BaseURL:       "https://api.kimi.com/coding",
+				Reasoning:     true,
+				Input:         []InputType{InputText, InputImage},
+				Cost:          UsageCost{},
+				ContextWindow: 262144,
+				MaxTokens:     32768,
+			},
 			"kimi-k2-thinking": {
 				ID:            "kimi-k2-thinking",
 				Name:          "Kimi K2 Thinking",

@@ -22,6 +22,7 @@ type openAICodexRequest struct {
 	ParallelToolCalls bool                         `json:"parallel_tool_calls,omitempty"`
 	Temperature       *float64                     `json:"temperature,omitempty"`
 	Reasoning         *openAICodexReasoningOptions `json:"reasoning,omitempty"`
+	ServiceTier       string                       `json:"service_tier,omitempty"`
 	Text              *openAICodexTextOptions      `json:"text,omitempty"`
 	Include           []string                     `json:"include,omitempty"`
 	PromptCacheKey    string                       `json:"prompt_cache_key,omitempty"`
@@ -37,11 +38,12 @@ type openAICodexTextOptions struct {
 }
 
 type openAICodexResponse struct {
-	ID     string                    `json:"id"`
-	Status string                    `json:"status"`
-	Output []openAICodexResponseItem `json:"output"`
-	Usage  openAICodexUsage          `json:"usage"`
-	Error  *openAICodexResponseError `json:"error,omitempty"`
+	ID          string                    `json:"id"`
+	Status      string                    `json:"status"`
+	ServiceTier string                    `json:"service_tier,omitempty"`
+	Output      []openAICodexResponseItem `json:"output"`
+	Usage       openAICodexUsage          `json:"usage"`
+	Error       *openAICodexResponseError `json:"error,omitempty"`
 }
 
 type openAICodexResponseItem struct {
@@ -198,6 +200,9 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 	if resolvedOptions.SessionID != "" {
 		requestBody.PromptCacheKey = resolvedOptions.SessionID
 	}
+	if strings.TrimSpace(resolvedOptions.ServiceTier) != "" {
+		requestBody.ServiceTier = resolvedOptions.ServiceTier
+	}
 
 	if effort := string(resolvedOptions.ReasoningEffort); effort != "" {
 		requestBody.Reasoning = &openAICodexReasoningOptions{
@@ -235,6 +240,39 @@ func defaultReasoningSummary(summary string) string {
 		return "auto"
 	}
 	return summary
+}
+
+func getOpenAICodexServiceTierCostMultiplier(serviceTier string) float64 {
+	switch serviceTier {
+	case "flex":
+		return 0.5
+	case "priority":
+		return 2
+	default:
+		return 1
+	}
+}
+
+func applyOpenAICodexServiceTierPricing(usage *Usage, serviceTier string) {
+	multiplier := getOpenAICodexServiceTierCostMultiplier(serviceTier)
+	if multiplier == 1 || usage == nil {
+		return
+	}
+	usage.Cost.Input *= multiplier
+	usage.Cost.Output *= multiplier
+	usage.Cost.CacheRead *= multiplier
+	usage.Cost.CacheWrite *= multiplier
+	usage.Cost.Total = usage.Cost.Input + usage.Cost.Output + usage.Cost.CacheRead + usage.Cost.CacheWrite
+}
+
+func resolveOpenAICodexServiceTier(responseServiceTier string, requestServiceTier string) string {
+	if responseServiceTier == "default" && (requestServiceTier == "flex" || requestServiceTier == "priority") {
+		return requestServiceTier
+	}
+	if strings.TrimSpace(responseServiceTier) != "" {
+		return responseServiceTier
+	}
+	return requestServiceTier
 }
 
 func clampOpenAICodexReasoningEffort(model Model, level ThinkingLevel) string {
@@ -503,6 +541,7 @@ func processOpenAICodexStreamEvent(
 	response *AssistantMessage,
 	stream *AssistantMessageEventStream,
 	state *openAICodexStreamingState,
+	requestServiceTier string,
 ) (bool, error) {
 	if strings.TrimSpace(data) == "" || strings.TrimSpace(data) == "[DONE]" {
 		return false, nil
@@ -632,7 +671,7 @@ func processOpenAICodexStreamEvent(
 			return false, err
 		}
 		emitOpenAICodexTerminalOutputIfNeeded(response, stream, state, terminal)
-		applyOpenAICodexTerminal(model, response, terminal)
+		applyOpenAICodexTerminal(model, response, terminal, requestServiceTier)
 		stream.push(AssistantMessageEvent{
 			Type:    AssistantMessageEventDone,
 			Reason:  response.StopReason,
@@ -986,7 +1025,7 @@ func combineOpenAICodexToolCallID(callID string, itemID string) string {
 	return callID + "|" + itemID
 }
 
-func applyOpenAICodexTerminal(model Model, response *AssistantMessage, terminal openAICodexResponse) {
+func applyOpenAICodexTerminal(model Model, response *AssistantMessage, terminal openAICodexResponse, requestServiceTier string) {
 	if terminal.ID != "" {
 		response.ResponseID = terminal.ID
 	}
@@ -1006,6 +1045,7 @@ func applyOpenAICodexTerminal(model Model, response *AssistantMessage, terminal 
 		TotalTokens: terminal.Usage.TotalTokens,
 	}
 	response.Usage.Cost = CalculateCost(model, response.Usage)
+	applyOpenAICodexServiceTierPricing(&response.Usage, resolveOpenAICodexServiceTier(terminal.ServiceTier, requestServiceTier))
 }
 
 func parseOpenAICodexResponseOutput(items []openAICodexResponseItem) []ContentBlock {

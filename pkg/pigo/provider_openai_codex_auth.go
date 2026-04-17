@@ -28,21 +28,19 @@ func resolveOpenAICodexAuthorization(
 	config AuthConfig,
 	httpClient *http.Client,
 	requestContext context.Context,
-) (AuthConfig, string, error) {
+) (string, error) {
 	if config.OAuth == nil {
-		return config, "", nil
+		return "", nil
 	}
 	if !oauthCredentialsNeedRefresh(config.OAuth) {
-		return config, config.OAuth.AccessToken, nil
+		return config.OAuth.AccessToken, nil
 	}
 
 	refreshed, err := refreshOpenAICodexOAuth(config.OAuth.RefreshToken, httpClient, requestContext)
 	if err != nil {
-		return config, "", err
+		return "", err
 	}
-
-	config.OAuth = refreshed
-	return config, refreshed.AccessToken, nil
+	return refreshed.AccessToken, nil
 }
 
 func oauthCredentialsNeedRefresh(credentials *OAuthCredentials) bool {

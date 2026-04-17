@@ -139,6 +139,7 @@ func TestResolveAuthorizationRefreshesExpiredOpenAICodexOAuth(t *testing.T) {
 	defer server.Close()
 
 	openAICodexOAuthTokenURL = server.URL + "/oauth/token"
+	expiredAt := time.Now().Unix() - 10
 
 	auth := map[Provider]AuthConfig{
 		"openai-codex": {
@@ -146,7 +147,7 @@ func TestResolveAuthorizationRefreshesExpiredOpenAICodexOAuth(t *testing.T) {
 			OAuth: &OAuthCredentials{
 				AccessToken:  "expired-token",
 				RefreshToken: "refresh-old",
-				ExpiresUnix:  time.Now().Unix() - 10,
+				ExpiresUnix:  expiredAt,
 			},
 		},
 	}
@@ -158,11 +159,11 @@ func TestResolveAuthorizationRefreshesExpiredOpenAICodexOAuth(t *testing.T) {
 	if token != refreshedToken {
 		t.Fatalf("expected refreshed access token, got %q", token)
 	}
-	if auth["openai-codex"].OAuth == nil || auth["openai-codex"].OAuth.RefreshToken != "refresh-new" {
-		t.Fatalf("expected auth map to be updated with refreshed credentials, got %+v", auth["openai-codex"].OAuth)
+	if auth["openai-codex"].OAuth == nil || auth["openai-codex"].OAuth.RefreshToken != "refresh-old" {
+		t.Fatalf("expected auth map to remain unchanged, got %+v", auth["openai-codex"].OAuth)
 	}
-	if auth["openai-codex"].OAuth.ExpiresUnix <= time.Now().Unix() {
-		t.Fatalf("expected refreshed expiry in the future, got %d", auth["openai-codex"].OAuth.ExpiresUnix)
+	if auth["openai-codex"].OAuth.ExpiresUnix != expiredAt {
+		t.Fatalf("expected expired credentials to remain unchanged in caller auth map, got %d", auth["openai-codex"].OAuth.ExpiresUnix)
 	}
 }
 
@@ -184,6 +185,60 @@ func TestResolveAuthorizationKeepsValidOpenAICodexOAuthWithoutRefresh(t *testing
 	}
 	if token != "still-valid" {
 		t.Fatalf("expected current access token, got %q", token)
+	}
+}
+
+func TestResolveAuthorizationRefreshDoesNotMutateSharedAuthMap(t *testing.T) {
+	previousURL := openAICodexOAuthTokenURL
+	defer func() {
+		openAICodexOAuthTokenURL = previousURL
+	}()
+
+	refreshedToken := makeOpenAICodexToken("acc_shared")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  refreshedToken,
+			"refresh_token": "refresh-updated",
+			"expires_in":    3600,
+		})
+	}))
+	defer server.Close()
+	openAICodexOAuthTokenURL = server.URL
+
+	originalExpiry := time.Now().Unix() - 10
+	auth := map[Provider]AuthConfig{
+		"openai-codex": {
+			Type: AuthTypeOAuth,
+			OAuth: &OAuthCredentials{
+				AccessToken:  "expired-token",
+				RefreshToken: "refresh-old",
+				ExpiresUnix:  originalExpiry,
+			},
+		},
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			token, err := ResolveAuthorization("openai-codex", auth, server.Client(), context.Background())
+			if err != nil {
+				t.Errorf("expected refresh to succeed, got %v", err)
+				return
+			}
+			if token != refreshedToken {
+				t.Errorf("expected refreshed token %q, got %q", refreshedToken, token)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if auth["openai-codex"].OAuth == nil {
+		t.Fatal("expected caller auth map credentials to remain present")
+	}
+	if auth["openai-codex"].OAuth.RefreshToken != "refresh-old" || auth["openai-codex"].OAuth.ExpiresUnix != originalExpiry {
+		t.Fatalf("expected shared auth map to remain unchanged, got %+v", auth["openai-codex"].OAuth)
 	}
 }
 

@@ -6,6 +6,7 @@ type OpenAICodexProviderOptions struct {
 	CommonProviderOptions
 	ReasoningEffort  ThinkingLevel
 	ReasoningSummary string
+	ServiceTier      string
 	TextVerbosity    string
 	ToolChoice       string
 }
@@ -21,6 +22,7 @@ func normalizeOpenAICodexProviderStreamOptions(model Model, options ProviderStre
 func buildOpenAICodexProviderOptions(model Model, options SimpleStreamOptions) OpenAICodexProviderOptions {
 	providerOptions := OpenAICodexProviderOptions{
 		CommonProviderOptions: buildCommonProviderOptions(model, options),
+		ServiceTier:           options.ServiceTier,
 		TextVerbosity:         defaultTextVerbosity(""),
 	}
 	if SupportsXHigh(model) {
@@ -40,6 +42,7 @@ func resolveOpenAICodexProviderOptions(model Model, options ProviderStreamOption
 		CommonProviderOptions: common,
 		ReasoningEffort:       options.Reasoning,
 		ReasoningSummary:      options.ReasoningSummary,
+		ServiceTier:           options.ServiceTier,
 		TextVerbosity:         options.TextVerbosity,
 		ToolChoice:            options.ToolChoice,
 	}
@@ -64,6 +67,7 @@ func (options OpenAICodexProviderOptions) toProviderStreamOptions() ProviderStre
 	streamOptions := options.CommonProviderOptions.toProviderStreamOptions()
 	streamOptions.Reasoning = options.ReasoningEffort
 	streamOptions.ReasoningSummary = options.ReasoningSummary
+	streamOptions.ServiceTier = options.ServiceTier
 	streamOptions.TextVerbosity = options.TextVerbosity
 	streamOptions.ToolChoice = options.ToolChoice
 	return streamOptions

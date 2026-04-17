@@ -42,7 +42,7 @@ func TestApplyOpenAICodexTerminalPreservesTotalTokensAndCachedSplit(t *testing.T
 				CachedTokens: 3,
 			},
 		},
-	})
+	}, "")
 
 	if response.Usage.Input != 7 || response.Usage.CacheRead != 3 || response.Usage.Output != 4 {
 		t.Fatalf("expected cached split to be preserved, got %+v", response.Usage)

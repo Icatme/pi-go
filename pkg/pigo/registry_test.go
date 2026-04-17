@@ -19,10 +19,13 @@ func TestGetProvidersIncludesTargetProviders(t *testing.T) {
 
 func TestGetModelsReturnsTargetProviderModels(t *testing.T) {
 	models := GetModels("kimi-coding")
-	if len(models) != 2 {
-		t.Fatalf("expected 2 kimi-coding models, got %d", len(models))
+	if len(models) < 2 {
+		t.Fatalf("expected kimi-coding models to be registered, got %d", len(models))
 	}
 
+	if GetModel("kimi-coding", "k2p5") == nil {
+		t.Fatal("expected k2p5 model to exist")
+	}
 	model := GetModel("kimi-coding", "kimi-k2-thinking")
 	if model == nil {
 		t.Fatal("expected kimi-k2-thinking model to exist")

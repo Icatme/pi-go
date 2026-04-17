@@ -193,15 +193,16 @@ const (
 )
 
 type AssistantMessageEvent struct {
-	Type         AssistantMessageEventType
-	ContentIndex int
-	Delta        string
-	Content      string
-	ToolCall     ToolCall
-	Partial      AssistantMessage
-	Reason       StopReason
-	Message      AssistantMessage
-	Error        AssistantMessage
+	Type          AssistantMessageEventType
+	ContentIndex  int
+	Delta         string
+	Content       string
+	ToolCall      ToolCall
+	Partial       AssistantMessage
+	Reason        StopReason
+	Message       AssistantMessage
+	Error         AssistantMessage
+	DroppedEvents int
 }
 
 type ToolArgumentsValidator interface {

@@ -146,7 +146,7 @@ func streamOpenAICodexSSE(
 		}
 		terminalSeen := false
 		err = readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
-			done, err := processOpenAICodexStreamEvent(data, model, response, stream, &state)
+			done, err := processOpenAICodexStreamEvent(data, model, response, stream, &state, options.ServiceTier)
 			if done {
 				terminalSeen = true
 				return true, nil
@@ -249,7 +249,7 @@ func streamOpenAICodexWebSocket(
 			return err
 		}
 
-		done, err := processOpenAICodexStreamEvent(string(message), model, response, stream, &state)
+		done, err := processOpenAICodexStreamEvent(string(message), model, response, stream, &state, options.ServiceTier)
 		if err != nil {
 			keepConnection = false
 			return err
@@ -287,7 +287,7 @@ func acquireOpenAICodexWebSocket(
 
 	openAICodexWebSocketCacheMu.Lock()
 	if cached := openAICodexWebSocketSessionCache[sessionID]; cached != nil {
-		stopOpenAICodexWebSocketTimer(cached)
+		stopOpenAICodexWebSocketTimerLocked(cached)
 		if !cached.busy && !cached.closed {
 			cached.busy = true
 			openAICodexWebSocketCacheMu.Unlock()
@@ -358,33 +358,56 @@ func releaseOpenAICodexSessionWebSocket(
 	}
 	if !keep || entry.closed {
 		delete(openAICodexWebSocketSessionCache, sessionID)
+		conn := detachOpenAICodexWebSocketConnLocked(entry)
 		openAICodexWebSocketCacheMu.Unlock()
-		closeOpenAICodexWebSocket(entry)
+		closeDetachedOpenAICodexWebSocket(conn)
 		return
 	}
 	entry.busy = false
+	scheduleOpenAICodexSessionWebSocketExpiryLocked(sessionID, entry)
 	openAICodexWebSocketCacheMu.Unlock()
-	scheduleOpenAICodexSessionWebSocketExpiry(sessionID, entry)
 }
 
-func scheduleOpenAICodexSessionWebSocketExpiry(
+func scheduleOpenAICodexSessionWebSocketExpiryLocked(
 	sessionID string,
 	entry *cachedOpenAICodexWebSocketConnection,
 ) {
-	stopOpenAICodexWebSocketTimer(entry)
+	stopOpenAICodexWebSocketTimerLocked(entry)
 	entry.idleTimer = time.AfterFunc(openAICodexWebSocketCacheTTL, func() {
 		openAICodexWebSocketCacheMu.Lock()
-		defer openAICodexWebSocketCacheMu.Unlock()
 		current := openAICodexWebSocketSessionCache[sessionID]
 		if current != entry || entry.busy {
+			openAICodexWebSocketCacheMu.Unlock()
 			return
 		}
 		delete(openAICodexWebSocketSessionCache, sessionID)
-		closeOpenAICodexWebSocket(entry)
+		conn := detachOpenAICodexWebSocketConnLocked(entry)
+		openAICodexWebSocketCacheMu.Unlock()
+		closeDetachedOpenAICodexWebSocket(conn)
 	})
 }
 
 func stopOpenAICodexWebSocketTimer(entry *cachedOpenAICodexWebSocketConnection) {
+	openAICodexWebSocketCacheMu.Lock()
+	defer openAICodexWebSocketCacheMu.Unlock()
+	stopOpenAICodexWebSocketTimerLocked(entry)
+}
+
+func markOpenAICodexWebSocketClosed(entry *cachedOpenAICodexWebSocketConnection) {
+	if entry == nil {
+		return
+	}
+	openAICodexWebSocketCacheMu.Lock()
+	defer openAICodexWebSocketCacheMu.Unlock()
+	stopOpenAICodexWebSocketTimerLocked(entry)
+	entry.closed = true
+}
+
+func closeOpenAICodexWebSocket(entry *cachedOpenAICodexWebSocketConnection) {
+	closeDetachedOpenAICodexWebSocket(detachOpenAICodexWebSocketConn(entry))
+}
+
+func stopOpenAICodexWebSocketTimerLocked(entry *cachedOpenAICodexWebSocketConnection) {
 	if entry == nil || entry.idleTimer == nil {
 		return
 	}
@@ -392,22 +415,39 @@ func stopOpenAICodexWebSocketTimer(entry *cachedOpenAICodexWebSocketConnection) 
 	entry.idleTimer = nil
 }
 
-func markOpenAICodexWebSocketClosed(entry *cachedOpenAICodexWebSocketConnection) {
-	if entry == nil {
-		return
-	}
-	entry.closed = true
+func detachOpenAICodexWebSocketConn(entry *cachedOpenAICodexWebSocketConnection) *websocket.Conn {
+	openAICodexWebSocketCacheMu.Lock()
+	defer openAICodexWebSocketCacheMu.Unlock()
+	return detachOpenAICodexWebSocketConnLocked(entry)
 }
 
-func closeOpenAICodexWebSocket(entry *cachedOpenAICodexWebSocketConnection) {
+func detachOpenAICodexWebSocketConnLocked(entry *cachedOpenAICodexWebSocketConnection) *websocket.Conn {
 	if entry == nil {
-		return
+		return nil
 	}
-	stopOpenAICodexWebSocketTimer(entry)
+	stopOpenAICodexWebSocketTimerLocked(entry)
 	entry.closed = true
-	if entry.conn != nil {
-		_ = entry.conn.Close()
+	conn := entry.conn
+	entry.conn = nil
+	return conn
+}
+
+func closeDetachedOpenAICodexWebSocket(conn *websocket.Conn) {
+	if conn != nil {
+		_ = conn.Close()
 	}
+}
+
+func getOpenAICodexWebSocketCacheTTL() time.Duration {
+	openAICodexWebSocketCacheMu.Lock()
+	defer openAICodexWebSocketCacheMu.Unlock()
+	return openAICodexWebSocketCacheTTL
+}
+
+func setOpenAICodexWebSocketCacheTTL(ttl time.Duration) {
+	openAICodexWebSocketCacheMu.Lock()
+	openAICodexWebSocketCacheTTL = ttl
+	openAICodexWebSocketCacheMu.Unlock()
 }
 
 func resolveOpenAICodexWebSocketURL(baseURL string) string {

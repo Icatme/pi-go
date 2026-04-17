@@ -16,6 +16,7 @@ type CommonProviderOptions struct {
 	CacheRetention CacheRetention
 	SessionID      string
 	OnPayload      func(payload any, model Model) any
+	ServiceTier    string
 	MaxRetryDelay  int
 	Metadata       map[string]any
 	RequestContext context.Context
@@ -38,6 +39,7 @@ func buildCommonProviderOptions(model Model, options SimpleStreamOptions) Common
 		CacheRetention: options.CacheRetention,
 		SessionID:      options.SessionID,
 		OnPayload:      options.OnPayload,
+		ServiceTier:    options.ServiceTier,
 		MaxRetryDelay:  options.MaxRetryDelay,
 		Metadata:       cloneMap(options.Metadata),
 		RequestContext: options.RequestContext,
@@ -56,6 +58,7 @@ func commonProviderOptionsFromStream(options ProviderStreamOptions) CommonProvid
 		CacheRetention: options.CacheRetention,
 		SessionID:      options.SessionID,
 		OnPayload:      options.OnPayload,
+		ServiceTier:    options.ServiceTier,
 		MaxRetryDelay:  options.MaxRetryDelay,
 		Metadata:       cloneMap(options.Metadata),
 		RequestContext: options.RequestContext,
@@ -74,6 +77,7 @@ func (options CommonProviderOptions) toProviderStreamOptions() ProviderStreamOpt
 		CacheRetention: options.CacheRetention,
 		SessionID:      options.SessionID,
 		OnPayload:      options.OnPayload,
+		ServiceTier:    options.ServiceTier,
 		MaxRetryDelay:  options.MaxRetryDelay,
 		Metadata:       cloneMap(options.Metadata),
 		RequestContext: options.RequestContext,
