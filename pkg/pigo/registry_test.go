@@ -242,6 +242,9 @@ func TestGetProviderCapabilitiesReturnsBuiltInMetadata(t *testing.T) {
 	if !kimi.HostedTools.WebSearch {
 		t.Fatalf("expected kimi to advertise hosted web search support, got %+v", kimi)
 	}
+	if !kimi.HostedTools.Fetch || !kimi.HostedTools.CodeRunner || !kimi.HostedTools.Excel {
+		t.Fatalf("expected kimi to advertise hosted fetch, code_runner, and excel support, got %+v", kimi)
+	}
 	if anthropic.HostedTools.WebSearch || codex.HostedTools.WebSearch {
 		t.Fatalf("expected built-in hosted web search support to remain kimi-only, got anthropic=%+v codex=%+v", anthropic, codex)
 	}
@@ -255,6 +258,15 @@ func TestSupportsHostedToolUsesModelAndProviderCapabilities(t *testing.T) {
 	if !SupportsHostedTool(*kimi, HostedToolTypeWebSearch) {
 		t.Fatalf("expected kimi model to support hosted web search, got %+v", kimi)
 	}
+	if !SupportsHostedTool(*kimi, HostedToolTypeFetch) {
+		t.Fatalf("expected kimi model to support hosted fetch, got %+v", kimi)
+	}
+	if !SupportsHostedTool(*kimi, HostedToolTypeCodeRunner) {
+		t.Fatalf("expected kimi model to support hosted code_runner, got %+v", kimi)
+	}
+	if !SupportsHostedTool(*kimi, HostedToolTypeExcel) {
+		t.Fatalf("expected kimi model to support hosted excel, got %+v", kimi)
+	}
 
 	codex := GetModel("openai-codex", "gpt-5.4")
 	if codex == nil {
@@ -262,6 +274,15 @@ func TestSupportsHostedToolUsesModelAndProviderCapabilities(t *testing.T) {
 	}
 	if SupportsHostedTool(*codex, HostedToolTypeWebSearch) {
 		t.Fatalf("expected codex model to not support hosted web search, got %+v", codex)
+	}
+	if SupportsHostedTool(*codex, HostedToolTypeFetch) {
+		t.Fatalf("expected codex model to not support hosted fetch, got %+v", codex)
+	}
+	if SupportsHostedTool(*codex, HostedToolTypeCodeRunner) {
+		t.Fatalf("expected codex model to not support hosted code_runner, got %+v", codex)
+	}
+	if SupportsHostedTool(*codex, HostedToolTypeExcel) {
+		t.Fatalf("expected codex model to not support hosted excel, got %+v", codex)
 	}
 }
 

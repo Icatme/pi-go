@@ -901,7 +901,7 @@ func TestStreamKimiCodingHostedWebSearchEmitsHostedToolLifecycle(t *testing.T) {
 	model.BaseURL = server.URL
 
 	stream := Stream(*model, Context{
-		Messages: []Message{UserMessage{Content: "Please search for Moonshot AI Context Caching and summarize it."}},
+		Messages:    []Message{UserMessage{Content: "Please search for Moonshot AI Context Caching and summarize it."}},
 		HostedTools: []HostedTool{{Type: HostedToolTypeWebSearch, Name: "web_search"}},
 	}, ProviderStreamOptions{APIKey: "kimi-test-key"})
 
@@ -1266,6 +1266,1090 @@ func TestSupportedHostedToolsLeavesGenericFallbackWhenModelDoesNotSupportHostedT
 
 	if len(converted) != 1 || converted[0].Name != "web_search" || converted[0].Function != nil {
 		t.Fatalf("expected generic web_search to remain when hosted support is unavailable, got %+v", converted)
+	}
+}
+
+func TestCompleteSimpleKimiCodingHostedFetchBuildsBuiltinFunctionAndAutoContinues(t *testing.T) {
+	requestBodies := make([]map[string]any, 0, 2)
+	requestCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		var requestBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request json: %v", err)
+		}
+		requestBodies = append(requestBodies, requestBody)
+
+		w.Header().Set("content-type", "text/event-stream")
+		switch requestCount {
+		case 1:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_fetch_1",
+						"usage": map[string]any{
+							"input_tokens":                21,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type":  "tool_use",
+						"id":    "call_fetch_1",
+						"name":  "$fetch",
+						"input": map[string]any{},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type":         "input_json_delta",
+						"partial_json": `{"url":"https://platform.kimi.com/docs/guide/use-web-search"}`,
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "tool_use",
+					},
+					"usage": map[string]any{
+						"output_tokens": 11,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		case 2:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_fetch_2",
+						"usage": map[string]any{
+							"input_tokens":                13080,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type": "text",
+						"text": "",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type": "text_delta",
+						"text": "The Kimi web search documentation explains how to use the built-in $web_search function.",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "end_turn",
+					},
+					"usage": map[string]any{
+						"output_tokens": 24,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+		}
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	response := Complete(*model, Context{
+		Messages: []Message{
+			UserMessage{Content: "Please fetch the Kimi web search documentation and summarize it."},
+		},
+		HostedTools: []HostedTool{{Type: HostedToolTypeFetch, Name: "fetch"}},
+	}, ProviderStreamOptions{
+		APIKey:    "kimi-test-key",
+		Reasoning: ThinkingLevelHigh,
+	})
+
+	if requestCount != 2 {
+		t.Fatalf("expected hosted fetch to auto-continue in two requests, got %d", requestCount)
+	}
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected stop response after hosted fetch continuation, got %+v", response)
+	}
+	text, ok := response.Content[0].(TextContent)
+	if !ok || !strings.Contains(text.Text, "web search documentation") {
+		t.Fatalf("expected final hosted fetch answer text, got %+v", response.Content)
+	}
+	if len(response.HostedToolExecutions) != 1 {
+		t.Fatalf("expected one hosted tool execution in response metadata, got %+v", response.HostedToolExecutions)
+	}
+	if response.HostedToolExecutions[0].Type != HostedToolTypeFetch || response.HostedToolExecutions[0].Name != "fetch" || response.HostedToolExecutions[0].ProviderToolName != "$fetch" {
+		t.Fatalf("expected hosted fetch execution metadata, got %+v", response.HostedToolExecutions[0])
+	}
+	if got := anyString(response.HostedToolExecutions[0].Arguments["url"]); got != "https://platform.kimi.com/docs/guide/use-web-search" {
+		t.Fatalf("expected hosted fetch url to be preserved, got %+v", response.HostedToolExecutions[0].Arguments)
+	}
+
+	firstTools, ok := requestBodies[0]["tools"].([]any)
+	if !ok || len(firstTools) != 1 {
+		t.Fatalf("expected one hosted tool declaration, got %#v", requestBodies[0]["tools"])
+	}
+	firstTool, ok := firstTools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected hosted tool declaration object, got %T", firstTools[0])
+	}
+	if firstTool["type"] != "builtin_function" {
+		t.Fatalf("expected builtin_function tool declaration, got %#v", firstTool)
+	}
+	function, ok := firstTool["function"].(map[string]any)
+	if !ok || function["name"] != "$fetch" {
+		t.Fatalf("expected builtin function name $fetch, got %#v", firstTool)
+	}
+	thinking, ok := requestBodies[0]["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("expected hosted fetch request to force thinking disabled, got %#v", requestBodies[0]["thinking"])
+	}
+
+	secondMessages, ok := requestBodies[1]["messages"].([]any)
+	if !ok || len(secondMessages) != 3 {
+		t.Fatalf("expected hosted continuation to append assistant + tool result messages, got %#v", requestBodies[1]["messages"])
+	}
+	toolMessage, ok := secondMessages[2].(map[string]any)
+	if !ok || toolMessage["role"] != "user" {
+		t.Fatalf("expected hosted tool result envelope as user message, got %#v", secondMessages[2])
+	}
+	toolBlocks, ok := toolMessage["content"].([]any)
+	if !ok || len(toolBlocks) != 1 {
+		t.Fatalf("expected one tool_result block in continuation request, got %#v", toolMessage["content"])
+	}
+	toolBlock, ok := toolBlocks[0].(map[string]any)
+	if !ok || toolBlock["type"] != "tool_result" || toolBlock["tool_use_id"] != "call_fetch_1" {
+		t.Fatalf("expected hosted tool_result echo block, got %#v", toolBlocks[0])
+	}
+	contentText, ok := toolBlock["content"].(string)
+	if !ok || contentText != `{"url":"https://platform.kimi.com/docs/guide/use-web-search"}` {
+		t.Fatalf("expected hosted tool_result continuation payload to carry serialized call arguments for provider-side execution, got %#v", toolBlock["content"])
+	}
+}
+
+func TestCompleteSimpleKimiCodingHostedCodeRunnerBuildsBuiltinFunctionAndAutoContinues(t *testing.T) {
+	requestBodies := make([]map[string]any, 0, 2)
+	requestCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		var requestBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request json: %v", err)
+		}
+		requestBodies = append(requestBodies, requestBody)
+
+		w.Header().Set("content-type", "text/event-stream")
+		switch requestCount {
+		case 1:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_code_1",
+						"usage": map[string]any{
+							"input_tokens":                21,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type":  "tool_use",
+						"id":    "call_code_1",
+						"name":  "$code_runner",
+						"input": map[string]any{},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type":         "input_json_delta",
+						"partial_json": `{"code":"print(3**3)"}`,
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "tool_use",
+					},
+					"usage": map[string]any{
+						"output_tokens": 11,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		case 2:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_code_2",
+						"usage": map[string]any{
+							"input_tokens":                13080,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type": "text",
+						"text": "",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type": "text_delta",
+						"text": "The result of 3 raised to the power of 3 is 27.",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "end_turn",
+					},
+					"usage": map[string]any{
+						"output_tokens": 24,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+		}
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	response := Complete(*model, Context{
+		Messages: []Message{
+			UserMessage{Content: "Please calculate 3^3 using the code runner."},
+		},
+		HostedTools: []HostedTool{{Type: HostedToolTypeCodeRunner, Name: "code_runner"}},
+	}, ProviderStreamOptions{
+		APIKey:    "kimi-test-key",
+		Reasoning: ThinkingLevelHigh,
+	})
+
+	if requestCount != 2 {
+		t.Fatalf("expected hosted code_runner to auto-continue in two requests, got %d", requestCount)
+	}
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected stop response after hosted code_runner continuation, got %+v", response)
+	}
+	text, ok := response.Content[0].(TextContent)
+	if !ok || !strings.Contains(text.Text, "27") {
+		t.Fatalf("expected final hosted code_runner answer text, got %+v", response.Content)
+	}
+	if len(response.HostedToolExecutions) != 1 {
+		t.Fatalf("expected one hosted tool execution in response metadata, got %+v", response.HostedToolExecutions)
+	}
+	if response.HostedToolExecutions[0].Type != HostedToolTypeCodeRunner || response.HostedToolExecutions[0].Name != "code_runner" || response.HostedToolExecutions[0].ProviderToolName != "$code_runner" {
+		t.Fatalf("expected hosted code_runner execution metadata, got %+v", response.HostedToolExecutions[0])
+	}
+	if got := anyString(response.HostedToolExecutions[0].Arguments["code"]); got != "print(3**3)" {
+		t.Fatalf("expected hosted code_runner code to be preserved, got %+v", response.HostedToolExecutions[0].Arguments)
+	}
+
+	firstTools, ok := requestBodies[0]["tools"].([]any)
+	if !ok || len(firstTools) != 1 {
+		t.Fatalf("expected one hosted tool declaration, got %#v", requestBodies[0]["tools"])
+	}
+	firstTool, ok := firstTools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected hosted tool declaration object, got %T", firstTools[0])
+	}
+	if firstTool["type"] != "builtin_function" {
+		t.Fatalf("expected builtin_function tool declaration, got %#v", firstTool)
+	}
+	function, ok := firstTool["function"].(map[string]any)
+	if !ok || function["name"] != "$code_runner" {
+		t.Fatalf("expected builtin function name $code_runner, got %#v", firstTool)
+	}
+}
+
+func TestCompleteSimpleKimiCodingHostedExcelBuildsBuiltinFunctionAndAutoContinues(t *testing.T) {
+	requestBodies := make([]map[string]any, 0, 2)
+	requestCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		var requestBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request json: %v", err)
+		}
+		requestBodies = append(requestBodies, requestBody)
+
+		w.Header().Set("content-type", "text/event-stream")
+		switch requestCount {
+		case 1:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_excel_1",
+						"usage": map[string]any{
+							"input_tokens":                21,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type":  "tool_use",
+						"id":    "call_excel_1",
+						"name":  "$excel",
+						"input": map[string]any{},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type":         "input_json_delta",
+						"partial_json": `{"file_url":"https://example.com/data.csv","operation":"summarize"}`,
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "tool_use",
+					},
+					"usage": map[string]any{
+						"output_tokens": 11,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		case 2:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_excel_2",
+						"usage": map[string]any{
+							"input_tokens":                13080,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type": "text",
+						"text": "",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type": "text_delta",
+						"text": "The CSV contains 100 rows with sales data totaling $50000.",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "end_turn",
+					},
+					"usage": map[string]any{
+						"output_tokens": 24,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+		}
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	response := Complete(*model, Context{
+		Messages: []Message{
+			UserMessage{Content: "Please analyze the sales CSV and summarize it."},
+		},
+		HostedTools: []HostedTool{{Type: HostedToolTypeExcel, Name: "excel"}},
+	}, ProviderStreamOptions{
+		APIKey:    "kimi-test-key",
+		Reasoning: ThinkingLevelHigh,
+	})
+
+	if requestCount != 2 {
+		t.Fatalf("expected hosted excel to auto-continue in two requests, got %d", requestCount)
+	}
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected stop response after hosted excel continuation, got %+v", response)
+	}
+	text, ok := response.Content[0].(TextContent)
+	if !ok || !strings.Contains(text.Text, "sales data") {
+		t.Fatalf("expected final hosted excel answer text, got %+v", response.Content)
+	}
+	if len(response.HostedToolExecutions) != 1 {
+		t.Fatalf("expected one hosted tool execution in response metadata, got %+v", response.HostedToolExecutions)
+	}
+	if response.HostedToolExecutions[0].Type != HostedToolTypeExcel || response.HostedToolExecutions[0].Name != "excel" || response.HostedToolExecutions[0].ProviderToolName != "$excel" {
+		t.Fatalf("expected hosted excel execution metadata, got %+v", response.HostedToolExecutions[0])
+	}
+	if got := anyString(response.HostedToolExecutions[0].Arguments["operation"]); got != "summarize" {
+		t.Fatalf("expected hosted excel operation to be preserved, got %+v", response.HostedToolExecutions[0].Arguments)
+	}
+
+	firstTools, ok := requestBodies[0]["tools"].([]any)
+	if !ok || len(firstTools) != 1 {
+		t.Fatalf("expected one hosted tool declaration, got %#v", requestBodies[0]["tools"])
+	}
+	firstTool, ok := firstTools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected hosted tool declaration object, got %T", firstTools[0])
+	}
+	if firstTool["type"] != "builtin_function" {
+		t.Fatalf("expected builtin_function tool declaration, got %#v", firstTool)
+	}
+	function, ok := firstTool["function"].(map[string]any)
+	if !ok || function["name"] != "$excel" {
+		t.Fatalf("expected builtin function name $excel, got %#v", firstTool)
+	}
+}
+
+func TestStreamKimiCodingHostedFetchEmitsHostedToolLifecycle(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("content-type", "text/event-stream")
+		switch requestCount {
+		case 1:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_stream_fetch_1",
+						"usage": map[string]any{
+							"input_tokens":                18,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type":  "tool_use",
+						"id":    "call_stream_fetch_1",
+						"name":  "$fetch",
+						"input": map[string]any{},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type":         "input_json_delta",
+						"partial_json": `{"url":"https://platform.kimi.com/docs"}`,
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "tool_use",
+					},
+					"usage": map[string]any{
+						"output_tokens": 9,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		case 2:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_stream_fetch_2",
+						"usage": map[string]any{
+							"input_tokens":                100,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type": "text",
+						"text": "",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type": "text_delta",
+						"text": "The documentation covers API usage and best practices.",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "end_turn",
+					},
+					"usage": map[string]any{
+						"output_tokens": 17,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+		}
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	stream := Stream(*model, Context{
+		Messages:    []Message{UserMessage{Content: "Please fetch the Kimi documentation and summarize it."}},
+		HostedTools: []HostedTool{{Type: HostedToolTypeFetch, Name: "fetch"}},
+	}, ProviderStreamOptions{APIKey: "kimi-test-key"})
+
+	var events []AssistantMessageEvent
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+	result := stream.Result()
+
+	if requestCount != 2 {
+		t.Fatalf("expected hosted stream path to auto-continue in two requests, got %d", requestCount)
+	}
+	if len(events) < 7 {
+		t.Fatalf("expected hosted stream path to emit tool lifecycle plus final text events, got %+v", events)
+	}
+	if events[0].Type != AssistantMessageEventStart {
+		t.Fatalf("expected first hosted stream event to be start, got %+v", events[0])
+	}
+	if events[1].Type != AssistantMessageEventToolCallStart || events[2].Type != AssistantMessageEventToolCallDelta || events[3].Type != AssistantMessageEventToolCallEnd {
+		t.Fatalf("expected hosted stream to expose tool call lifecycle before final text, got %+v", []AssistantMessageEventType{events[1].Type, events[2].Type, events[3].Type})
+	}
+	if events[3].ToolCall.Name != "fetch" || anyString(events[3].ToolCall.Arguments["url"]) != "https://platform.kimi.com/docs" {
+		t.Fatalf("expected hosted tool call event to preserve logical tool name and arguments, got %+v", events[3].ToolCall)
+	}
+	if events[len(events)-1].Type != AssistantMessageEventDone {
+		t.Fatalf("expected final hosted stream event to be done, got %+v", events[len(events)-1])
+	}
+	if len(events[len(events)-1].Message.HostedToolExecutions) != 1 {
+		t.Fatalf("expected done event to expose completed hosted execution metadata, got %+v", events[len(events)-1].Message)
+	}
+	if !strings.Contains(textFromContent(result.Content), "API usage") {
+		t.Fatalf("expected hosted stream result text to survive, got %+v", result.Content)
+	}
+	if len(result.HostedToolExecutions) != 1 || anyString(result.HostedToolExecutions[0].Arguments["url"]) != "https://platform.kimi.com/docs" {
+		t.Fatalf("expected result to keep hosted execution metadata, got %+v", result.HostedToolExecutions)
+	}
+}
+
+func TestStreamKimiCodingHostedCodeRunnerEmitsHostedToolLifecycle(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("content-type", "text/event-stream")
+		switch requestCount {
+		case 1:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_stream_code_1",
+						"usage": map[string]any{
+							"input_tokens":                18,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type":  "tool_use",
+						"id":    "call_stream_code_1",
+						"name":  "$code_runner",
+						"input": map[string]any{},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type":         "input_json_delta",
+						"partial_json": `{"code":"print('hello')"}`,
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "tool_use",
+					},
+					"usage": map[string]any{
+						"output_tokens": 9,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		case 2:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_stream_code_2",
+						"usage": map[string]any{
+							"input_tokens":                100,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type": "text",
+						"text": "",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type": "text_delta",
+						"text": "The code output is: hello",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "end_turn",
+					},
+					"usage": map[string]any{
+						"output_tokens": 17,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+		}
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	stream := Stream(*model, Context{
+		Messages:    []Message{UserMessage{Content: "Please run some code."}},
+		HostedTools: []HostedTool{{Type: HostedToolTypeCodeRunner, Name: "code_runner"}},
+	}, ProviderStreamOptions{APIKey: "kimi-test-key"})
+
+	var events []AssistantMessageEvent
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+	result := stream.Result()
+
+	if requestCount != 2 {
+		t.Fatalf("expected hosted stream path to auto-continue in two requests, got %d", requestCount)
+	}
+	if len(events) < 7 {
+		t.Fatalf("expected hosted stream path to emit tool lifecycle plus final text events, got %+v", events)
+	}
+	if events[3].ToolCall.Name != "code_runner" || anyString(events[3].ToolCall.Arguments["code"]) != "print('hello')" {
+		t.Fatalf("expected hosted tool call event to preserve logical tool name and arguments, got %+v", events[3].ToolCall)
+	}
+	if events[len(events)-1].Type != AssistantMessageEventDone {
+		t.Fatalf("expected final hosted stream event to be done, got %+v", events[len(events)-1])
+	}
+	if !strings.Contains(textFromContent(result.Content), "hello") {
+		t.Fatalf("expected hosted stream result text to survive, got %+v", result.Content)
+	}
+	if len(result.HostedToolExecutions) != 1 || anyString(result.HostedToolExecutions[0].Arguments["code"]) != "print('hello')" {
+		t.Fatalf("expected result to keep hosted execution metadata, got %+v", result.HostedToolExecutions)
+	}
+}
+
+func TestStreamKimiCodingHostedExcelEmitsHostedToolLifecycle(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("content-type", "text/event-stream")
+		switch requestCount {
+		case 1:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_stream_excel_1",
+						"usage": map[string]any{
+							"input_tokens":                18,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type":  "tool_use",
+						"id":    "call_stream_excel_1",
+						"name":  "$excel",
+						"input": map[string]any{},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type":         "input_json_delta",
+						"partial_json": `{"file_url":"https://example.com/sales.xlsx"}`,
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "tool_use",
+					},
+					"usage": map[string]any{
+						"output_tokens": 9,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		case 2:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_stream_excel_2",
+						"usage": map[string]any{
+							"input_tokens":                100,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type": "text",
+						"text": "",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type": "text_delta",
+						"text": "The spreadsheet has 50 rows of product data.",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "end_turn",
+					},
+					"usage": map[string]any{
+						"output_tokens": 17,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+		}
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	stream := Stream(*model, Context{
+		Messages:    []Message{UserMessage{Content: "Please analyze the spreadsheet."}},
+		HostedTools: []HostedTool{{Type: HostedToolTypeExcel, Name: "excel"}},
+	}, ProviderStreamOptions{APIKey: "kimi-test-key"})
+
+	var events []AssistantMessageEvent
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+	result := stream.Result()
+
+	if requestCount != 2 {
+		t.Fatalf("expected hosted stream path to auto-continue in two requests, got %d", requestCount)
+	}
+	if len(events) < 7 {
+		t.Fatalf("expected hosted stream path to emit tool lifecycle plus final text events, got %+v", events)
+	}
+	if events[3].ToolCall.Name != "excel" || anyString(events[3].ToolCall.Arguments["file_url"]) != "https://example.com/sales.xlsx" {
+		t.Fatalf("expected hosted tool call event to preserve logical tool name and arguments, got %+v", events[3].ToolCall)
+	}
+	if events[len(events)-1].Type != AssistantMessageEventDone {
+		t.Fatalf("expected final hosted stream event to be done, got %+v", events[len(events)-1])
+	}
+	if !strings.Contains(textFromContent(result.Content), "product data") {
+		t.Fatalf("expected hosted stream result text to survive, got %+v", result.Content)
+	}
+	if len(result.HostedToolExecutions) != 1 || anyString(result.HostedToolExecutions[0].Arguments["file_url"]) != "https://example.com/sales.xlsx" {
+		t.Fatalf("expected result to keep hosted execution metadata, got %+v", result.HostedToolExecutions)
+	}
+}
+
+func TestConvertAnthropicToolsDedupesHostedFetchAgainstGenericDeclaration(t *testing.T) {
+	converted := convertAnthropicTools([]Tool{
+		{
+			Name:        "fetch",
+			Description: "Fallback generic fetch tool",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"url": map[string]any{"type": "string"}},
+			},
+		},
+		{
+			Name:        "lookup_catalog",
+			Description: "Lookup catalog entries",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"sku": map[string]any{"type": "string"}},
+			},
+		},
+	}, []HostedTool{{Type: HostedToolTypeFetch}}, false)
+
+	if len(converted) != 2 {
+		t.Fatalf("expected hosted declaration plus unrelated generic tool after dedupe, got %+v", converted)
+	}
+	if converted[0].Type != "builtin_function" || converted[0].Function == nil || converted[0].Function.Name != "$fetch" {
+		t.Fatalf("expected first tool to be the hosted fetch builtin declaration, got %+v", converted[0])
+	}
+	if converted[1].Name != "lookup_catalog" {
+		t.Fatalf("expected unrelated generic tool to remain after hosted dedupe, got %+v", converted)
+	}
+	for _, tool := range converted {
+		if tool.Name == "fetch" {
+			t.Fatalf("expected generic fetch declaration to be removed once hosted fetch is present, got %+v", converted)
+		}
+	}
+}
+
+func TestConvertAnthropicToolsDedupesHostedCodeRunnerAgainstGenericDeclaration(t *testing.T) {
+	converted := convertAnthropicTools([]Tool{
+		{
+			Name:        "code_runner",
+			Description: "Fallback generic code runner",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"code": map[string]any{"type": "string"}},
+			},
+		},
+		{
+			Name:        "lookup_catalog",
+			Description: "Lookup catalog entries",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"sku": map[string]any{"type": "string"}},
+			},
+		},
+	}, []HostedTool{{Type: HostedToolTypeCodeRunner}}, false)
+
+	if len(converted) != 2 {
+		t.Fatalf("expected hosted declaration plus unrelated generic tool after dedupe, got %+v", converted)
+	}
+	if converted[0].Type != "builtin_function" || converted[0].Function == nil || converted[0].Function.Name != "$code_runner" {
+		t.Fatalf("expected first tool to be the hosted code_runner builtin declaration, got %+v", converted[0])
+	}
+	if converted[1].Name != "lookup_catalog" {
+		t.Fatalf("expected unrelated generic tool to remain after hosted dedupe, got %+v", converted)
+	}
+	for _, tool := range converted {
+		if tool.Name == "code_runner" {
+			t.Fatalf("expected generic code_runner declaration to be removed once hosted code_runner is present, got %+v", converted)
+		}
+	}
+}
+
+func TestConvertAnthropicToolsDedupesHostedExcelAgainstGenericDeclaration(t *testing.T) {
+	converted := convertAnthropicTools([]Tool{
+		{
+			Name:        "excel",
+			Description: "Fallback generic excel tool",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"file_url": map[string]any{"type": "string"}},
+			},
+		},
+		{
+			Name:        "lookup_catalog",
+			Description: "Lookup catalog entries",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"sku": map[string]any{"type": "string"}},
+			},
+		},
+	}, []HostedTool{{Type: HostedToolTypeExcel}}, false)
+
+	if len(converted) != 2 {
+		t.Fatalf("expected hosted declaration plus unrelated generic tool after dedupe, got %+v", converted)
+	}
+	if converted[0].Type != "builtin_function" || converted[0].Function == nil || converted[0].Function.Name != "$excel" {
+		t.Fatalf("expected first tool to be the hosted excel builtin declaration, got %+v", converted[0])
+	}
+	if converted[1].Name != "lookup_catalog" {
+		t.Fatalf("expected unrelated generic tool to remain after hosted dedupe, got %+v", converted)
+	}
+	for _, tool := range converted {
+		if tool.Name == "excel" {
+			t.Fatalf("expected generic excel declaration to be removed once hosted excel is present, got %+v", converted)
+		}
 	}
 }
 

@@ -42,7 +42,10 @@ const (
 	TransportWebSocket Transport = "websocket"
 	TransportAuto      Transport = "auto"
 
-	HostedToolTypeWebSearch HostedToolType = "web_search"
+	HostedToolTypeWebSearch  HostedToolType = "web_search"
+	HostedToolTypeFetch      HostedToolType = "fetch"
+	HostedToolTypeCodeRunner HostedToolType = "code_runner"
+	HostedToolTypeExcel      HostedToolType = "excel"
 )
 
 type Transport string
@@ -57,13 +60,22 @@ type ThinkingBudgets struct {
 type ThinkingLevelMap map[ModelThinkingLevel]string
 
 type HostedToolCapabilities struct {
-	WebSearch bool
+	WebSearch  bool
+	Fetch      bool
+	CodeRunner bool
+	Excel      bool
 }
 
 func (c HostedToolCapabilities) Supports(toolType HostedToolType) bool {
 	switch toolType {
 	case HostedToolTypeWebSearch:
 		return c.WebSearch
+	case HostedToolTypeFetch:
+		return c.Fetch
+	case HostedToolTypeCodeRunner:
+		return c.CodeRunner
+	case HostedToolTypeExcel:
+		return c.Excel
 	default:
 		return false
 	}

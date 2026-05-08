@@ -1296,6 +1296,12 @@ func normalizeHostedToolName(tool HostedTool) string {
 	switch tool.Type {
 	case HostedToolTypeWebSearch:
 		return "web_search"
+	case HostedToolTypeFetch:
+		return "fetch"
+	case HostedToolTypeCodeRunner:
+		return "code_runner"
+	case HostedToolTypeExcel:
+		return "excel"
 	default:
 		return ""
 	}
@@ -1305,6 +1311,12 @@ func anthropicHostedToolProviderName(toolType HostedToolType) string {
 	switch toolType {
 	case HostedToolTypeWebSearch:
 		return "$web_search"
+	case HostedToolTypeFetch:
+		return "$fetch"
+	case HostedToolTypeCodeRunner:
+		return "$code_runner"
+	case HostedToolTypeExcel:
+		return "$excel"
 	default:
 		return ""
 	}
