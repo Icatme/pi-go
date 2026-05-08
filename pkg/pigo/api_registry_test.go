@@ -177,6 +177,30 @@ func TestRegisterAPIModuleForSourceSupportsTargetedUnregister(t *testing.T) {
 	}
 }
 
+func TestRegisterLazyAPIModuleForSourceSupportsTargetedUnregister(t *testing.T) {
+	isolateAPIRegistry(t)
+
+	sourceID := "test-lazy-source-aware"
+	targetedAPI := API("test-lazy-source-aware-api")
+	staticAPI := API("test-lazy-static-api")
+
+	RegisterLazyAPIModuleForSource(sourceID, targetedAPI, func() APIModule {
+		return APIModule{API: targetedAPI}
+	})
+	RegisterLazyAPIModule(staticAPI, func() APIModule {
+		return APIModule{API: staticAPI}
+	})
+
+	UnregisterAPIModules(sourceID)
+
+	if GetAPIModule(targetedAPI) != nil {
+		t.Fatalf("expected lazy api %q to be removed by source-aware unregister", targetedAPI)
+	}
+	if GetAPIModule(staticAPI) == nil {
+		t.Fatalf("expected lazy api %q registered without a source id to remain installed", staticAPI)
+	}
+}
+
 func TestUnregisterAPIModulesIgnoresBlankSourceID(t *testing.T) {
 	isolateAPIRegistry(t)
 
