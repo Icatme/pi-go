@@ -273,6 +273,104 @@ func TestGetEnvAPIKeyFallsBackToDotEnvFile(t *testing.T) {
 	}
 }
 
+func TestFindEnvKeysReturnsConfiguredKeys(t *testing.T) {
+	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("ANTHROPIC_API_KEY", "api-key")
+	dotEnvOnce = syncOnceForTests()
+	dotEnvValues = nil
+
+	keys := FindEnvKeys("anthropic")
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 env keys, got %d: %v", len(keys), keys)
+	}
+	if keys[0] != "ANTHROPIC_OAUTH_TOKEN" {
+		t.Fatalf("expected first key to be ANTHROPIC_OAUTH_TOKEN, got %q", keys[0])
+	}
+	if keys[1] != "ANTHROPIC_API_KEY" {
+		t.Fatalf("expected second key to be ANTHROPIC_API_KEY, got %q", keys[1])
+	}
+}
+
+func TestFindEnvKeysReturnsOnlySetKeys(t *testing.T) {
+	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_API_KEY", "api-key")
+	dotEnvOnce = syncOnceForTests()
+	dotEnvValues = nil
+
+	keys := FindEnvKeys("anthropic")
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 env key, got %d: %v", len(keys), keys)
+	}
+	if keys[0] != "ANTHROPIC_API_KEY" {
+		t.Fatalf("expected ANTHROPIC_API_KEY, got %q", keys[0])
+	}
+}
+
+func TestFindEnvKeysReturnsNilForMissingProvider(t *testing.T) {
+	keys := FindEnvKeys("nonexistent-provider")
+	if keys != nil {
+		t.Fatalf("expected nil for unregistered provider, got %v", keys)
+	}
+}
+
+func TestFindEnvKeysFallsBackToDotEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	tempDir := t.TempDir()
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("expected working directory: %v", err)
+	}
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("expected chdir to temp dir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(previousDir)
+	}()
+
+	if err := os.MkdirAll(".pigo", 0o700); err != nil {
+		t.Fatalf("expected local support dir: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(".pigo", ".env"), []byte("ANTHROPIC_API_KEY=dotenv-api-key\n"), 0o600); err != nil {
+		t.Fatalf("expected dotenv write: %v", err)
+	}
+
+	dotEnvOnce = syncOnceForTests()
+	dotEnvValues = nil
+
+	keys := FindEnvKeys("anthropic")
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 env key from dotenv, got %d: %v", len(keys), keys)
+	}
+	if keys[0] != "ANTHROPIC_API_KEY" {
+		t.Fatalf("expected ANTHROPIC_API_KEY from dotenv, got %q", keys[0])
+	}
+}
+
+func TestGetEnvAPIKeyPrefersFirstEnvKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("ANTHROPIC_API_KEY", "api-key")
+	dotEnvOnce = syncOnceForTests()
+	dotEnvValues = nil
+
+	if got := GetEnvAPIKey("anthropic"); got != "oauth-token" {
+		t.Fatalf("expected oauth token (first env key), got %q", got)
+	}
+}
+
+func TestGetEnvAPIKeyFallsBackToSecondEnvKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_API_KEY", "api-key")
+	dotEnvOnce = syncOnceForTests()
+	dotEnvValues = nil
+
+	if got := GetEnvAPIKey("anthropic"); got != "api-key" {
+		t.Fatalf("expected api key (second env key), got %q", got)
+	}
+}
+
 func syncOnceForTests() sync.Once {
 	return sync.Once{}
 }

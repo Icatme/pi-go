@@ -4,6 +4,7 @@ import "regexp"
 
 var overflowPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)prompt is too long`),
+	regexp.MustCompile(`(?i)request_too_large`),
 	regexp.MustCompile(`(?i)input is too long for requested model`),
 	regexp.MustCompile(`(?i)exceeds the context window`),
 	regexp.MustCompile(`(?i)input token count.*exceeds the maximum`),
@@ -23,8 +24,19 @@ var overflowPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)token limit exceeded`),
 }
 
+var nonOverflowPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^(Throttling error|Service unavailable):`),
+	regexp.MustCompile(`(?i)rate limit`),
+	regexp.MustCompile(`(?i)too many requests`),
+}
+
 func IsContextOverflow(message AssistantMessage, contextWindow int) bool {
 	if message.StopReason == StopReasonError && message.ErrorMessage != "" {
+		for _, pattern := range nonOverflowPatterns {
+			if pattern.MatchString(message.ErrorMessage) {
+				return false
+			}
+		}
 		for _, pattern := range overflowPatterns {
 			if pattern.MatchString(message.ErrorMessage) {
 				return true
@@ -37,6 +49,12 @@ func IsContextOverflow(message AssistantMessage, contextWindow int) bool {
 	if contextWindow > 0 && message.StopReason == StopReasonStop {
 		inputTokens := message.Usage.Input + message.Usage.CacheRead
 		if inputTokens > contextWindow {
+			return true
+		}
+	}
+	if contextWindow > 0 && message.StopReason == StopReasonLength && message.Usage.Output == 0 {
+		inputTokens := message.Usage.Input + message.Usage.CacheRead
+		if inputTokens >= int(float64(contextWindow)*0.99) {
 			return true
 		}
 	}

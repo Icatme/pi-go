@@ -2,6 +2,46 @@ package pigo
 
 import "testing"
 
+func TestUnregisterAPIModulesBySourceID(t *testing.T) {
+	sourceID := "test-source"
+	api1 := API("test-api-1")
+	api2 := API("test-api-2")
+
+	registerAPIModule(api1, &APIModule{API: api1}, nil, sourceID)
+	registerAPIModule(api2, &APIModule{API: api2}, nil, sourceID)
+
+	apis := ListAPIModules()
+	if len(apis) < 2 {
+		t.Fatalf("expected at least 2 apis registered, got %d", len(apis))
+	}
+
+	UnregisterAPIModules(sourceID)
+
+	apis = ListAPIModules()
+	for _, api := range apis {
+		if api == api1 || api == api2 {
+			t.Fatalf("expected api %q to be unregistered", api)
+		}
+	}
+}
+
+func TestListAPIModulesReturnsRegisteredAPIs(t *testing.T) {
+	api := API("test-list-api")
+	registerAPIModule(api, &APIModule{API: api}, nil, "")
+
+	apis := ListAPIModules()
+	found := false
+	for _, a := range apis {
+		if a == api {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected api %q in list", api)
+	}
+}
+
 func TestRegisterLazyAPIModuleLoadsOnDemand(t *testing.T) {
 	api := API("test-lazy-api")
 	loadCount := 0

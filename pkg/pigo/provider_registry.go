@@ -14,6 +14,7 @@ type ProviderOptionsBuildFunc func(Model, SimpleStreamOptions) ProviderStreamOpt
 type ProviderAuth struct {
 	RequiresOAuth        bool
 	EnvAPIKeyName        string
+	EnvAPIKeyNames       []string
 	ResolveAuthorization ProviderAuthResolveFunc
 }
 

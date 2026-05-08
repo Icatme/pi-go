@@ -34,11 +34,55 @@ func RequiresOAuth(provider Provider) bool {
 }
 
 func GetEnvAPIKey(provider Provider) string {
-	module := resolveProviderModule(provider)
-	if module == nil || strings.TrimSpace(module.Auth.EnvAPIKeyName) == "" {
+	envKeys := FindEnvKeys(provider)
+	if len(envKeys) == 0 {
 		return ""
 	}
-	return lookupEnvValue(module.Auth.EnvAPIKeyName)
+	return lookupEnvValue(envKeys[0])
+}
+
+func FindEnvKeys(provider Provider) []string {
+	module := resolveProviderModule(provider)
+	if module == nil {
+		return nil
+	}
+
+	var names []string
+	if len(module.Auth.EnvAPIKeyNames) > 0 {
+		names = module.Auth.EnvAPIKeyNames
+	} else if strings.TrimSpace(module.Auth.EnvAPIKeyName) != "" {
+		names = []string{module.Auth.EnvAPIKeyName}
+	}
+
+	if len(names) == 0 {
+		return nil
+	}
+
+	var found []string
+	for _, name := range names {
+		if value, ok := osLookupEnv(name); ok && value != "" {
+			found = append(found, name)
+		}
+	}
+
+	if len(found) > 0 {
+		return found
+	}
+
+	dotEnvOnce.Do(func() {
+		dotEnvValues = loadDotEnvFile(resolveLocalSupportFilePath(".env"))
+	})
+
+	for _, name := range names {
+		if value, ok := dotEnvValues[name]; ok && value != "" {
+			found = append(found, name)
+		}
+	}
+
+	if len(found) > 0 {
+		return found
+	}
+	return nil
 }
 
 func ResolveAPIKey(provider Provider, auth map[Provider]AuthConfig) string {

@@ -60,3 +60,56 @@ func TestIsContextOverflowDetectsUsageOverflowOnSuccessfulResponse(t *testing.T)
 		t.Fatal("expected successful response with input usage above context window to be treated as overflow")
 	}
 }
+
+func TestIsContextOverflowExcludesThrottlingErrors(t *testing.T) {
+	message := createErrorMessage("Throttling error: Too many tokens, please wait before trying again.")
+	if IsContextOverflow(message, 32768) {
+		t.Fatal("expected throttling error to not be treated as overflow")
+	}
+}
+
+func TestIsContextOverflowExcludesRateLimitErrors(t *testing.T) {
+	message := createErrorMessage("Rate limit exceeded, retry after 60s")
+	if IsContextOverflow(message, 32768) {
+		t.Fatal("expected rate limit error to not be treated as overflow")
+	}
+}
+
+func TestIsContextOverflowDetectsXiaomiMiMoStyleLengthStop(t *testing.T) {
+	message := AssistantMessage{
+		StopReason: StopReasonLength,
+		Usage: Usage{
+			Input:     32700,
+			CacheRead: 0,
+			Output:    0,
+		},
+		Timestamp: time.Now().UTC(),
+	}
+
+	if !IsContextOverflow(message, 32768) {
+		t.Fatal("expected xiaomi mimo style length stop with zero output to be treated as overflow")
+	}
+}
+
+func TestIsContextOverflowIgnoresLengthStopWithOutput(t *testing.T) {
+	message := AssistantMessage{
+		StopReason: StopReasonLength,
+		Usage: Usage{
+			Input:     32700,
+			CacheRead: 0,
+			Output:    10,
+		},
+		Timestamp: time.Now().UTC(),
+	}
+
+	if IsContextOverflow(message, 32768) {
+		t.Fatal("expected length stop with non-zero output to not be treated as overflow")
+	}
+}
+
+func TestIsContextOverflowDetectsRequestTooLarge(t *testing.T) {
+	message := createErrorMessage("413 {\"error\":{\"type\":\"request_too_large\",\"message\":\"Request exceeds the maximum size\"}}")
+	if !IsContextOverflow(message, 200000) {
+		t.Fatal("expected request_too_large error to be treated as overflow")
+	}
+}

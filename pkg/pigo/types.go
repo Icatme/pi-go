@@ -8,6 +8,7 @@ type StopReason string
 type InputType string
 type CacheRetention string
 type ThinkingLevel string
+type ModelThinkingLevel string
 type HostedToolType string
 
 const (
@@ -30,8 +31,30 @@ const (
 	ThinkingLevelHigh    ThinkingLevel = "high"
 	ThinkingLevelXHigh   ThinkingLevel = "xhigh"
 
+	ModelThinkingLevelOff     ModelThinkingLevel = "off"
+	ModelThinkingLevelMinimal ModelThinkingLevel = "minimal"
+	ModelThinkingLevelLow     ModelThinkingLevel = "low"
+	ModelThinkingLevelMedium  ModelThinkingLevel = "medium"
+	ModelThinkingLevelHigh    ModelThinkingLevel = "high"
+	ModelThinkingLevelXHigh   ModelThinkingLevel = "xhigh"
+
+	TransportSSE       Transport = "sse"
+	TransportWebSocket Transport = "websocket"
+	TransportAuto      Transport = "auto"
+
 	HostedToolTypeWebSearch HostedToolType = "web_search"
 )
+
+type Transport string
+
+type ThinkingBudgets struct {
+	Minimal int
+	Low     int
+	Medium  int
+	High    int
+}
+
+type ThinkingLevelMap map[ModelThinkingLevel]string
 
 type HostedToolCapabilities struct {
 	WebSearch bool
@@ -131,17 +154,39 @@ func (m UserMessage) clone() Message {
 	}
 }
 
+type TextSignatureV1 struct {
+	V     int    `json:"v"`
+	ID    string `json:"id"`
+	Phase string `json:"phase,omitempty"`
+}
+
+type AssistantMessageDiagnostic struct {
+	Type      string
+	Timestamp time.Time
+	Error     *DiagnosticErrorInfo
+	Details   map[string]any
+}
+
+type DiagnosticErrorInfo struct {
+	Name    string
+	Message string
+	Stack   string
+	Code    any
+}
+
 type AssistantMessage struct {
-	Content               []ContentBlock
-	HostedToolExecutions  []HostedToolExecution
-	API                   API
-	Provider              Provider
-	Model                 string
-	ResponseID            string
-	Usage                 Usage
-	StopReason            StopReason
-	ErrorMessage          string
-	Timestamp             time.Time
+	Content              []ContentBlock
+	HostedToolExecutions []HostedToolExecution
+	API                  API
+	Provider             Provider
+	Model                string
+	ResponseModel        string
+	ResponseID           string
+	Usage                Usage
+	StopReason           StopReason
+	ErrorMessage         string
+	Diagnostics          []AssistantMessageDiagnostic
+	Timestamp            time.Time
 }
 
 func (AssistantMessage) messageRole() string { return "assistant" }
@@ -153,10 +198,12 @@ func (m AssistantMessage) clone() Message {
 		API:                  m.API,
 		Provider:             m.Provider,
 		Model:                m.Model,
+		ResponseModel:        m.ResponseModel,
 		ResponseID:           m.ResponseID,
 		Usage:                m.Usage,
 		StopReason:           m.StopReason,
 		ErrorMessage:         m.ErrorMessage,
+		Diagnostics:          cloneDiagnostics(m.Diagnostics),
 		Timestamp:            m.Timestamp,
 	}
 }
@@ -181,18 +228,24 @@ func (m ToolResultMessage) clone() Message {
 	}
 }
 
+type ProviderResponse struct {
+	Status  int
+	Headers map[string]string
+}
+
 type Model struct {
-	ID            string
-	Name          string
-	API           API
-	Provider      Provider
-	BaseURL       string
-	Reasoning     bool
-	Input         []InputType
-	HostedTools   HostedToolCapabilities
-	Cost          UsageCost
-	ContextWindow int
-	MaxTokens     int
+	ID               string
+	Name             string
+	API              API
+	Provider         Provider
+	BaseURL          string
+	Reasoning        bool
+	ThinkingLevelMap ThinkingLevelMap
+	Input            []InputType
+	HostedTools      HostedToolCapabilities
+	Cost             UsageCost
+	ContextWindow    int
+	MaxTokens        int
 }
 
 type Tool struct {
@@ -270,6 +323,30 @@ func cloneBlocks(blocks []ContentBlock) []ContentBlock {
 				ThoughtSignature: value.ThoughtSignature,
 			})
 		}
+	}
+	return out
+}
+
+func cloneDiagnostics(diagnostics []AssistantMessageDiagnostic) []AssistantMessageDiagnostic {
+	if len(diagnostics) == 0 {
+		return nil
+	}
+	out := make([]AssistantMessageDiagnostic, 0, len(diagnostics))
+	for _, d := range diagnostics {
+		cloned := AssistantMessageDiagnostic{
+			Type:      d.Type,
+			Timestamp: d.Timestamp,
+			Details:   cloneMap(d.Details),
+		}
+		if d.Error != nil {
+			cloned.Error = &DiagnosticErrorInfo{
+				Name:    d.Error.Name,
+				Message: d.Error.Message,
+				Stack:   d.Error.Stack,
+				Code:    d.Error.Code,
+			}
+		}
+		out = append(out, cloned)
 	}
 	return out
 }

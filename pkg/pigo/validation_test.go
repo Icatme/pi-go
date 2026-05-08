@@ -306,3 +306,113 @@ func TestValidateToolArgumentsSupportsAllOf(t *testing.T) {
 		t.Fatalf("expected validated value abc, got %#v", validated["value"])
 	}
 }
+
+func TestValidateToolArgumentsCoercesPrimitiveTypes(t *testing.T) {
+	passingCases := []struct {
+		schemaType string
+		input      any
+		expected   any
+	}{
+		{"number", "42", float64(42)},
+		{"number", true, float64(1)},
+		{"number", nil, float64(0)},
+		{"integer", "42", int(42)},
+		{"boolean", "true", true},
+		{"boolean", "false", false},
+		{"boolean", 1, true},
+		{"boolean", 0, false},
+		{"string", nil, ""},
+		{"string", true, "true"},
+		{"null", "", nil},
+		{"null", 0, nil},
+		{"null", false, nil},
+	}
+
+	for _, tc := range passingCases {
+		tool := Tool{
+			Name: "coerce_tool",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": map[string]any{"type": tc.schemaType},
+				},
+				"required": []string{"value"},
+			},
+		}
+		toolCall := ToolCall{
+			ID:        "tool-1",
+			Name:      "coerce_tool",
+			Arguments: map[string]any{"value": tc.input},
+		}
+
+		validated, err := ValidateToolArguments(tool, toolCall)
+		if err != nil {
+			t.Fatalf("expected coercion for %s from %#v to succeed, got error: %v", tc.schemaType, tc.input, err)
+		}
+		if validated["value"] != tc.expected {
+			t.Fatalf("expected %s coercion from %#v to produce %#v, got %#v", tc.schemaType, tc.input, tc.expected, validated["value"])
+		}
+	}
+}
+
+func TestValidateToolArgumentsRejectsInvalidCoercions(t *testing.T) {
+	failingCases := []struct {
+		schemaType string
+		input      any
+	}{
+		{"boolean", "1"},
+		{"boolean", "0"},
+		{"null", "null"},
+		{"integer", "42.1"},
+	}
+
+	for _, tc := range failingCases {
+		tool := Tool{
+			Name: "reject_tool",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": map[string]any{"type": tc.schemaType},
+				},
+				"required": []string{"value"},
+			},
+		}
+		toolCall := ToolCall{
+			ID:        "tool-1",
+			Name:      "reject_tool",
+			Arguments: map[string]any{"value": tc.input},
+		}
+
+		_, err := ValidateToolArguments(tool, toolCall)
+		if err == nil {
+			t.Fatalf("expected %s coercion from %#v to fail", tc.schemaType, tc.input)
+		}
+	}
+}
+
+func TestValidateToolArgumentsCoercesUnionType(t *testing.T) {
+	tool := Tool{
+		Name: "union_tool",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"value": map[string]any{
+					"type": []any{"number", "string"},
+				},
+			},
+			"required": []string{"value"},
+		},
+	}
+
+	validated, err := ValidateToolArguments(tool, ToolCall{
+		ID:        "tool-1",
+		Name:      "union_tool",
+		Arguments: map[string]any{"value": "1"},
+	})
+	if err != nil {
+		t.Fatalf("expected union type validation to succeed, got error: %v", err)
+	}
+	if validated["value"] != "1" {
+		t.Fatalf("expected union type to preserve string match, got %#v", validated["value"])
+	}
+}

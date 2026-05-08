@@ -16,7 +16,10 @@ type CommonProviderOptions struct {
 	CacheRetention CacheRetention
 	SessionID      string
 	OnPayload      func(payload any, model Model) any
+	OnResponse     func(response ProviderResponse, model Model)
 	ServiceTier    string
+	TimeoutMs      int
+	MaxRetries     int
 	MaxRetryDelay  int
 	Metadata       map[string]any
 	RequestContext context.Context
@@ -39,7 +42,10 @@ func buildCommonProviderOptions(model Model, options SimpleStreamOptions) Common
 		CacheRetention: options.CacheRetention,
 		SessionID:      options.SessionID,
 		OnPayload:      options.OnPayload,
+		OnResponse:     options.OnResponse,
 		ServiceTier:    options.ServiceTier,
+		TimeoutMs:      options.TimeoutMs,
+		MaxRetries:     options.MaxRetries,
 		MaxRetryDelay:  options.MaxRetryDelay,
 		Metadata:       cloneMap(options.Metadata),
 		RequestContext: options.RequestContext,
@@ -58,7 +64,10 @@ func commonProviderOptionsFromStream(options ProviderStreamOptions) CommonProvid
 		CacheRetention: options.CacheRetention,
 		SessionID:      options.SessionID,
 		OnPayload:      options.OnPayload,
+		OnResponse:     options.OnResponse,
 		ServiceTier:    options.ServiceTier,
+		TimeoutMs:      options.TimeoutMs,
+		MaxRetries:     options.MaxRetries,
 		MaxRetryDelay:  options.MaxRetryDelay,
 		Metadata:       cloneMap(options.Metadata),
 		RequestContext: options.RequestContext,
@@ -77,7 +86,10 @@ func (options CommonProviderOptions) toProviderStreamOptions() ProviderStreamOpt
 		CacheRetention: options.CacheRetention,
 		SessionID:      options.SessionID,
 		OnPayload:      options.OnPayload,
+		OnResponse:     options.OnResponse,
 		ServiceTier:    options.ServiceTier,
+		TimeoutMs:      options.TimeoutMs,
+		MaxRetries:     options.MaxRetries,
 		MaxRetryDelay:  options.MaxRetryDelay,
 		Metadata:       cloneMap(options.Metadata),
 		RequestContext: options.RequestContext,

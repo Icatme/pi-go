@@ -5,21 +5,6 @@ import (
 	"net/http"
 )
 
-type Transport string
-
-const (
-	TransportSSE       Transport = "sse"
-	TransportWebSocket Transport = "websocket"
-	TransportAuto      Transport = "auto"
-)
-
-type ThinkingBudgets struct {
-	Minimal int
-	Low     int
-	Medium  int
-	High    int
-}
-
 type StreamOptions struct {
 	APIKey         string
 	Auth           map[Provider]AuthConfig
@@ -31,7 +16,10 @@ type StreamOptions struct {
 	CacheRetention CacheRetention
 	SessionID      string
 	OnPayload      func(payload any, model Model) any
+	OnResponse     func(response ProviderResponse, model Model)
 	ServiceTier    string
+	TimeoutMs      int
+	MaxRetries     int
 	MaxRetryDelay  int
 	Metadata       map[string]any
 	RequestContext context.Context
@@ -48,7 +36,10 @@ type ProviderStreamOptions struct {
 	CacheRetention       CacheRetention
 	SessionID            string
 	OnPayload            func(payload any, model Model) any
+	OnResponse           func(response ProviderResponse, model Model)
 	ServiceTier          string
+	TimeoutMs            int
+	MaxRetries           int
 	MaxRetryDelay        int
 	Metadata             map[string]any
 	RequestContext       context.Context
@@ -70,7 +61,10 @@ type SimpleStreamOptions struct {
 	CacheRetention  CacheRetention
 	SessionID       string
 	OnPayload       func(payload any, model Model) any
+	OnResponse      func(response ProviderResponse, model Model)
 	ServiceTier     string
+	TimeoutMs       int
+	MaxRetries      int
 	MaxRetryDelay   int
 	Metadata        map[string]any
 	RequestContext  context.Context

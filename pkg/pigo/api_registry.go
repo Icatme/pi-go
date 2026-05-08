@@ -17,8 +17,9 @@ type APIModule struct {
 type APIModuleFactory func() APIModule
 
 type apiRegistryEntry struct {
-	module  *APIModule
-	factory APIModuleFactory
+	module   *APIModule
+	factory  APIModuleFactory
+	sourceID string
 }
 
 var (
@@ -28,14 +29,14 @@ var (
 )
 
 func RegisterAPIModule(module APIModule) {
-	registerAPIModule(module.API, &module, nil)
+	registerAPIModule(module.API, &module, nil, "")
 }
 
 func RegisterLazyAPIModule(api API, factory APIModuleFactory) {
-	registerAPIModule(api, nil, factory)
+	registerAPIModule(api, nil, factory, "")
 }
 
-func registerAPIModule(api API, module *APIModule, factory APIModuleFactory) {
+func registerAPIModule(api API, module *APIModule, factory APIModuleFactory, sourceID string) {
 	if api == "" {
 		panic("pigo: api registration requires api name")
 	}
@@ -55,9 +56,36 @@ func registerAPIModule(api API, module *APIModule, factory APIModuleFactory) {
 	}
 
 	apiRegistry[api] = &apiRegistryEntry{
-		module:  module,
-		factory: factory,
+		module:   module,
+		factory:  factory,
+		sourceID: sourceID,
 	}
+}
+
+func UnregisterAPIModules(sourceID string) {
+	apiRegistryMu.Lock()
+	defer apiRegistryMu.Unlock()
+
+	for api, entry := range apiRegistry {
+		if entry.sourceID == sourceID {
+			delete(apiRegistry, api)
+		}
+	}
+}
+
+func ListAPIModules() []API {
+	apiRegistryMu.RLock()
+	defer apiRegistryMu.RUnlock()
+
+	apis := make([]API, 0, len(apiRegistry))
+	for api := range apiRegistry {
+		apis = append(apis, api)
+	}
+	return apis
+}
+
+func GetAPIModule(api API) *APIModule {
+	return resolveAPIModule(api)
 }
 
 func resolveAPIModule(api API) *APIModule {

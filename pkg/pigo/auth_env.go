@@ -15,8 +15,12 @@ var (
 
 const localSupportDirName = ".pigo"
 
+func osLookupEnv(name string) (string, bool) {
+	return os.LookupEnv(name)
+}
+
 func lookupEnvValue(name string) string {
-	if value, ok := os.LookupEnv(name); ok && value != "" {
+	if value, ok := osLookupEnv(name); ok && value != "" {
 		return value
 	}
 

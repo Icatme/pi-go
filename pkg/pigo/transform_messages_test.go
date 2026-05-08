@@ -163,6 +163,159 @@ func TestTransformMessagesInsertsSyntheticToolResultForOrphanedToolCall(t *testi
 	}
 }
 
+func TestTransformMessagesDowngradesImagesForNonVisionModel(t *testing.T) {
+	nonVisionModel := Model{
+		ID:       "text-only",
+		Name:     "Text Only",
+		API:      "anthropic-messages",
+		Provider: "anthropic",
+		Input:    []InputType{InputText},
+	}
+
+	messages := []Message{
+		UserMessage{
+			Content: []ContentBlock{
+				TextContent{Text: "look at this"},
+				ImageContent{Data: "base64data", MIMEType: "image/png"},
+			},
+		},
+	}
+
+	result := TransformMessages(messages, nonVisionModel, nil)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+
+	user, ok := result[0].(UserMessage)
+	if !ok {
+		t.Fatalf("expected user message, got %T", result[0])
+	}
+
+	blocks, ok := user.Content.([]ContentBlock)
+	if !ok {
+		t.Fatalf("expected content blocks, got %T", user.Content)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 blocks, got %d", len(blocks))
+	}
+	text1, ok := blocks[0].(TextContent)
+	if !ok || text1.Text != "look at this" {
+		t.Fatalf("expected first block to be original text, got %+v", blocks[0])
+	}
+	text2, ok := blocks[1].(TextContent)
+	if !ok || text2.Text != nonVisionUserImagePlaceholder {
+		t.Fatalf("expected second block to be placeholder, got %+v", blocks[1])
+	}
+}
+
+func TestTransformMessagesMergesConsecutiveImagePlaceholders(t *testing.T) {
+	nonVisionModel := Model{
+		ID:       "text-only",
+		Name:     "Text Only",
+		API:      "anthropic-messages",
+		Provider: "anthropic",
+		Input:    []InputType{InputText},
+	}
+
+	messages := []Message{
+		UserMessage{
+			Content: []ContentBlock{
+				ImageContent{Data: "img1", MIMEType: "image/png"},
+				ImageContent{Data: "img2", MIMEType: "image/jpeg"},
+			},
+		},
+	}
+
+	result := TransformMessages(messages, nonVisionModel, nil)
+	user, ok := result[0].(UserMessage)
+	if !ok {
+		t.Fatalf("expected user message, got %T", result[0])
+	}
+
+	blocks, ok := user.Content.([]ContentBlock)
+	if !ok {
+		t.Fatalf("expected content blocks, got %T", user.Content)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 merged placeholder block, got %d", len(blocks))
+	}
+}
+
+func TestTransformMessagesDowngradesToolResultImagesForNonVisionModel(t *testing.T) {
+	nonVisionModel := Model{
+		ID:       "text-only",
+		Name:     "Text Only",
+		API:      "anthropic-messages",
+		Provider: "anthropic",
+		Input:    []InputType{InputText},
+	}
+
+	messages := []Message{
+		ToolResultMessage{
+			ToolCallID: "call_1",
+			ToolName:   "screenshot",
+			Content: []ContentBlock{
+				ImageContent{Data: "base64img", MIMEType: "image/png"},
+				TextContent{Text: "done"},
+			},
+		},
+	}
+
+	result := TransformMessages(messages, nonVisionModel, nil)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+
+	tr, ok := result[0].(ToolResultMessage)
+	if !ok {
+		t.Fatalf("expected tool result message, got %T", result[0])
+	}
+	if len(tr.Content) != 2 {
+		t.Fatalf("expected 2 blocks, got %d", len(tr.Content))
+	}
+	text1, ok := tr.Content[0].(TextContent)
+	if !ok || text1.Text != nonVisionToolImagePlaceholder {
+		t.Fatalf("expected first block to be placeholder, got %+v", tr.Content[0])
+	}
+}
+
+func TestTransformMessagesPreservesImagesForVisionModel(t *testing.T) {
+	visionModel := Model{
+		ID:       "vision",
+		Name:     "Vision",
+		API:      "anthropic-messages",
+		Provider: "anthropic",
+		Input:    []InputType{InputText, InputImage},
+	}
+
+	messages := []Message{
+		UserMessage{
+			Content: []ContentBlock{
+				TextContent{Text: "look at this"},
+				ImageContent{Data: "base64data", MIMEType: "image/png"},
+			},
+		},
+	}
+
+	result := TransformMessages(messages, visionModel, nil)
+	user, ok := result[0].(UserMessage)
+	if !ok {
+		t.Fatalf("expected user message, got %T", result[0])
+	}
+
+	blocks, ok := user.Content.([]ContentBlock)
+	if !ok {
+		t.Fatalf("expected content blocks, got %T", user.Content)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 blocks, got %d", len(blocks))
+	}
+	_, ok = blocks[1].(ImageContent)
+	if !ok {
+		t.Fatalf("expected image block to be preserved, got %T", blocks[1])
+	}
+}
+
 func findAssistantMessage(t *testing.T, messages []Message) AssistantMessage {
 	t.Helper()
 	for _, message := range messages {

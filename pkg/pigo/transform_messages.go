@@ -2,15 +2,85 @@ package pigo
 
 import "time"
 
+const (
+	nonVisionUserImagePlaceholder = "(image omitted: model does not support images)"
+	nonVisionToolImagePlaceholder = "(tool image omitted: model does not support images)"
+)
+
+func modelSupportsImages(model Model) bool {
+	for _, input := range model.Input {
+		if input == InputImage {
+			return true
+		}
+	}
+	return false
+}
+
+func replaceImagesWithPlaceholder(content []ContentBlock, placeholder string) []ContentBlock {
+	var result []ContentBlock
+	var previousWasPlaceholder bool
+
+	for _, block := range content {
+		_, ok := block.(ImageContent)
+		if ok {
+			if !previousWasPlaceholder {
+				result = append(result, TextContent{Text: placeholder})
+			}
+			previousWasPlaceholder = true
+			continue
+		}
+
+		result = append(result, block)
+		text, ok := block.(TextContent)
+		previousWasPlaceholder = ok && text.Text == placeholder
+	}
+
+	return result
+}
+
+func downgradeUnsupportedImages(messages []Message, model Model) []Message {
+	if modelSupportsImages(model) {
+		return messages
+	}
+
+	result := make([]Message, 0, len(messages))
+	for _, message := range messages {
+		switch typed := message.(type) {
+		case UserMessage:
+			contentBlocks, ok := typed.Content.([]ContentBlock)
+			if ok {
+				result = append(result, UserMessage{
+					Content:   replaceImagesWithPlaceholder(contentBlocks, nonVisionUserImagePlaceholder),
+					Timestamp: typed.Timestamp,
+				})
+				continue
+			}
+			result = append(result, typed.clone())
+		case ToolResultMessage:
+			result = append(result, ToolResultMessage{
+				ToolCallID: typed.ToolCallID,
+				ToolName:   typed.ToolName,
+				Content:    replaceImagesWithPlaceholder(typed.Content, nonVisionToolImagePlaceholder),
+				IsError:    typed.IsError,
+				Timestamp:  typed.Timestamp,
+			})
+		default:
+			result = append(result, typed.clone())
+		}
+	}
+	return result
+}
+
 func TransformMessages(
 	messages []Message,
 	model Model,
 	normalizeToolCallID func(string, Model, AssistantMessage) string,
 ) []Message {
 	toolCallIDMap := map[string]string{}
-	transformed := make([]Message, 0, len(messages))
+	imageAwareMessages := downgradeUnsupportedImages(messages, model)
+	transformed := make([]Message, 0, len(imageAwareMessages))
 
-	for _, message := range messages {
+	for _, message := range imageAwareMessages {
 		switch typed := message.(type) {
 		case UserMessage:
 			transformed = append(transformed, typed.clone())

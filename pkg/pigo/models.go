@@ -68,10 +68,80 @@ func SupportsXHigh(model Model) bool {
 	if contains(model.ID, "gpt-5.2") || contains(model.ID, "gpt-5.3") || contains(model.ID, "gpt-5.4") {
 		return true
 	}
-	if contains(model.ID, "opus-4-6") || contains(model.ID, "opus-4.6") {
+	if contains(model.ID, "opus-4-6") || contains(model.ID, "opus-4.6") || contains(model.ID, "sonnet-4-6") || contains(model.ID, "sonnet-4.6") {
 		return true
 	}
 	return false
+}
+
+var extendedThinkingLevels = []ModelThinkingLevel{
+	ModelThinkingLevelOff,
+	ModelThinkingLevelMinimal,
+	ModelThinkingLevelLow,
+	ModelThinkingLevelMedium,
+	ModelThinkingLevelHigh,
+	ModelThinkingLevelXHigh,
+}
+
+func GetSupportedThinkingLevels(model Model) []ModelThinkingLevel {
+	if !model.Reasoning {
+		return []ModelThinkingLevel{ModelThinkingLevelOff}
+	}
+
+	var result []ModelThinkingLevel
+	for _, level := range extendedThinkingLevels {
+		mapped, hasMapping := model.ThinkingLevelMap[level]
+		if mapped == "" && hasMapping {
+			continue
+		}
+		if level == ModelThinkingLevelXHigh && !hasMapping {
+			continue
+		}
+		result = append(result, level)
+	}
+	return result
+}
+
+func ClampThinkingLevel(model Model, level ModelThinkingLevel) ModelThinkingLevel {
+	available := GetSupportedThinkingLevels(model)
+	for _, candidate := range available {
+		if candidate == level {
+			return level
+		}
+	}
+
+	requestedIndex := -1
+	for i, candidate := range extendedThinkingLevels {
+		if candidate == level {
+			requestedIndex = i
+			break
+		}
+	}
+	if requestedIndex == -1 {
+		if len(available) > 0 {
+			return available[0]
+		}
+		return ModelThinkingLevelOff
+	}
+
+	for i := requestedIndex; i < len(extendedThinkingLevels); i++ {
+		for _, candidate := range available {
+			if candidate == extendedThinkingLevels[i] {
+				return candidate
+			}
+		}
+	}
+	for i := requestedIndex - 1; i >= 0; i-- {
+		for _, candidate := range available {
+			if candidate == extendedThinkingLevels[i] {
+				return candidate
+			}
+		}
+	}
+	if len(available) > 0 {
+		return available[0]
+	}
+	return ModelThinkingLevelOff
 }
 
 func SupportsHostedTool(model Model, toolType HostedToolType) bool {
@@ -85,6 +155,12 @@ func cloneModel(model Model) Model {
 	cloned := model
 	if len(model.Input) > 0 {
 		cloned.Input = append([]InputType(nil), model.Input...)
+	}
+	if len(model.ThinkingLevelMap) > 0 {
+		cloned.ThinkingLevelMap = make(ThinkingLevelMap, len(model.ThinkingLevelMap))
+		for k, v := range model.ThinkingLevelMap {
+			cloned.ThinkingLevelMap[k] = v
+		}
 	}
 	return cloned
 }

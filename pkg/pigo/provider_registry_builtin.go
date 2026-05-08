@@ -40,7 +40,7 @@ func newAnthropicProviderModule() ProviderModule {
 	return ProviderModule{
 		Provider: "anthropic",
 		Auth: ProviderAuth{
-			EnvAPIKeyName: "ANTHROPIC_API_KEY",
+			EnvAPIKeyNames: []string{"ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"},
 		},
 		Capabilities: ProviderCapabilities{
 			SupportsStreaming:          true,

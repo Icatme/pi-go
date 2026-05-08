@@ -192,11 +192,20 @@ func validateTypedSchema(schema map[string]any, schemaType any, value any, path 
 	case string:
 		return validateSingleType(schema, typed, value, path)
 	case []any:
+		// For union types, first check if the value already matches a member type
+		// without coercion. Only coerce if no member matches natively.
+		var candidateTypes []string
 		for _, candidate := range typed {
 			candidateType, ok := candidate.(string)
 			if !ok {
 				continue
 			}
+			candidateTypes = append(candidateTypes, candidateType)
+			if matchesJSONType(value, candidateType) {
+				return validateSingleType(schema, candidateType, value, path)
+			}
+		}
+		for _, candidateType := range candidateTypes {
 			validated, errors := validateSingleType(schema, candidateType, cloneAny(value), path)
 			if len(errors) == 0 {
 				return validated, nil
@@ -205,6 +214,33 @@ func validateTypedSchema(schema map[string]any, schemaType any, value any, path 
 		return nil, []schemaValidationError{{Path: path, Message: "must match one of the allowed types"}}
 	default:
 		return value, nil
+	}
+}
+
+func matchesJSONType(value any, schemaType string) bool {
+	switch schemaType {
+	case "number":
+		_, ok := value.(float64)
+		return ok
+	case "integer":
+		n, ok := value.(float64)
+		return ok && math.Trunc(n) == n
+	case "boolean":
+		_, ok := value.(bool)
+		return ok
+	case "string":
+		_, ok := value.(string)
+		return ok
+	case "null":
+		return value == nil
+	case "array":
+		_, ok := value.([]any)
+		return ok
+	case "object":
+		_, ok := value.(map[string]any)
+		return ok
+	default:
+		return false
 	}
 }
 
@@ -224,6 +260,15 @@ func validateSingleType(schema map[string]any, schemaType string, value any, pat
 		return validateBooleanSchema(schema, value, path)
 	case "null":
 		if value == nil {
+			return nil, nil
+		}
+		if s, ok := value.(string); ok && s == "" {
+			return nil, nil
+		}
+		if n, ok := toFloat64(value); ok && n == 0 {
+			return nil, nil
+		}
+		if b, ok := value.(bool); ok && !b {
 			return nil, nil
 		}
 		return nil, []schemaValidationError{{Path: path, Message: "must be null"}}
@@ -507,6 +552,9 @@ func joinSchemaPath(base string, part string) string {
 }
 
 func coerceString(value any) (string, bool) {
+	if value == nil {
+		return "", true
+	}
 	switch typed := value.(type) {
 	case string:
 		return typed, true
@@ -531,6 +579,9 @@ func coerceString(value any) (string, bool) {
 }
 
 func coerceNumber(value any, integerOnly bool) (float64, bool) {
+	if value == nil {
+		return 0, true
+	}
 	numberValue, ok := toFloat64(value)
 	if !ok {
 		return 0, false
@@ -584,6 +635,9 @@ func toFloat64(value any) (float64, bool) {
 }
 
 func coerceBoolean(value any) (bool, bool) {
+	if value == nil {
+		return false, true
+	}
 	switch typed := value.(type) {
 	case bool:
 		return typed, true
