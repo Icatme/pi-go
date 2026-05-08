@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func buildAnthropicSSE(events ...map[string]any) string {
@@ -16,6 +17,32 @@ func buildAnthropicSSE(events ...map[string]any) string {
 	}
 	lines = append(lines, "data: [DONE]")
 	return strings.Join(lines, "\n\n") + "\n\n"
+}
+
+func writeAnthropicSSEEvent(t *testing.T, w http.ResponseWriter, event map[string]any) {
+	t.Helper()
+
+	payload, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("expected event json to marshal: %v", err)
+	}
+	if _, err := w.Write([]byte("data: " + string(payload) + "\n\n")); err != nil {
+		t.Fatalf("expected event to be written: %v", err)
+	}
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func writeAnthropicSSEDone(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+
+	if _, err := w.Write([]byte("data: [DONE]\n\n")); err != nil {
+		t.Fatalf("expected done marker to be written: %v", err)
+	}
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func TestCompleteSimpleKimiCodingBuildsAnthropicRequestAndParsesText(t *testing.T) {
@@ -923,6 +950,174 @@ func TestStreamKimiCodingHostedWebSearchEmitsHostedToolLifecycle(t *testing.T) {
 	}
 	if len(result.HostedToolExecutions) != 1 || anyString(result.HostedToolExecutions[0].Arguments["query"]) != "Moonshot AI Context Caching" {
 		t.Fatalf("expected result to keep hosted execution metadata, got %+v", result.HostedToolExecutions)
+	}
+}
+
+func TestStreamKimiCodingHostedWebSearchStreamsTextBeforeCompletion(t *testing.T) {
+	requestCount := 0
+	secondTextDeltaSent := make(chan struct{})
+	releaseSecondResponse := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("content-type", "text/event-stream")
+		switch requestCount {
+		case 1:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_stream_realtime_1",
+						"usage": map[string]any{
+							"input_tokens":                18,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type":  "tool_use",
+						"id":    "call_stream_realtime_1",
+						"name":  "$web_search",
+						"input": map[string]any{},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type":         "input_json_delta",
+						"partial_json": `{"query":"Moonshot AI Context Caching"}`,
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "tool_use",
+					},
+					"usage": map[string]any{
+						"output_tokens": 9,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		case 2:
+			writeAnthropicSSEEvent(t, w, map[string]any{
+				"type": "message_start",
+				"message": map[string]any{
+					"id": "msg_stream_realtime_2",
+					"usage": map[string]any{
+						"input_tokens":                100,
+						"output_tokens":               0,
+						"cache_read_input_tokens":     0,
+						"cache_creation_input_tokens": 0,
+					},
+				},
+			})
+			writeAnthropicSSEEvent(t, w, map[string]any{
+				"type":  "content_block_start",
+				"index": 0,
+				"content_block": map[string]any{
+					"type": "text",
+					"text": "",
+				},
+			})
+			writeAnthropicSSEEvent(t, w, map[string]any{
+				"type":  "content_block_delta",
+				"index": 0,
+				"delta": map[string]any{
+					"type": "text_delta",
+					"text": "It reuses stable context across requests.",
+				},
+			})
+			close(secondTextDeltaSent)
+			<-releaseSecondResponse
+			writeAnthropicSSEEvent(t, w, map[string]any{
+				"type":  "content_block_stop",
+				"index": 0,
+			})
+			writeAnthropicSSEEvent(t, w, map[string]any{
+				"type": "message_delta",
+				"delta": map[string]any{
+					"stop_reason": "end_turn",
+				},
+				"usage": map[string]any{
+					"output_tokens": 17,
+				},
+			})
+			writeAnthropicSSEEvent(t, w, map[string]any{
+				"type": "message_stop",
+			})
+			writeAnthropicSSEDone(t, w)
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+		}
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	stream := Stream(*model, Context{
+		Messages:    []Message{UserMessage{Content: "Please search for Moonshot AI Context Caching and summarize it."}},
+		HostedTools: []HostedTool{{Type: HostedToolTypeWebSearch, Name: "web_search"}},
+	}, ProviderStreamOptions{APIKey: "kimi-test-key"})
+
+	var events []AssistantMessageEvent
+	select {
+	case <-secondTextDeltaSent:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected hosted continuation request to emit a text delta")
+	}
+
+	sawTextDelta := false
+	for !sawTextDelta {
+		select {
+		case event, ok := <-stream.Events():
+			if !ok {
+				t.Fatalf("expected hosted stream to stay open until realtime text arrived, got %+v", events)
+			}
+			events = append(events, event)
+			if event.Type == AssistantMessageEventDone || event.Type == AssistantMessageEventError {
+				t.Fatalf("expected realtime hosted text before terminal event, got %+v", events)
+			}
+			if event.Type == AssistantMessageEventTextDelta {
+				sawTextDelta = true
+				if event.Delta != "It reuses stable context across requests." {
+					t.Fatalf("expected realtime hosted text delta to match streamed content, got %+v", event)
+				}
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("expected realtime hosted text delta before completion, got %+v", events)
+		}
+	}
+
+	close(releaseSecondResponse)
+	for event := range stream.Events() {
+		events = append(events, event)
+	}
+	result := stream.Result()
+
+	if requestCount != 2 {
+		t.Fatalf("expected hosted stream path to auto-continue in two requests, got %d", requestCount)
+	}
+	if result.StopReason != StopReasonStop {
+		t.Fatalf("expected hosted stream result to complete successfully, got %+v", result)
+	}
+	if !strings.Contains(textFromContent(result.Content), "stable context") {
+		t.Fatalf("expected hosted stream result text to survive, got %+v", result.Content)
 	}
 }
 

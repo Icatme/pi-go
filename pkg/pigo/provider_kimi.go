@@ -306,7 +306,7 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 		terminalSeen := false
 		states := map[int]*anthropicStreamingBlockState{}
 		if err := readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
-			done, err := processAnthropicStreamEvent(data, model, &response, stream, states, isOAuth, ctx.Tools, nil)
+			done, err := processAnthropicStreamEvent(data, model, &response, stream, states, isOAuth, ctx.Tools, nil, true)
 			if done {
 				terminalSeen = true
 				return true, nil
@@ -357,7 +357,7 @@ func streamAnthropicMessagesWithHostedTools(model Model, ctx Context, options An
 
 		finalResponse, err := completeAnthropicHostedToolLoop(model, ctx, options, apiKey, isOAuth, func(partial AssistantMessage, call HostedToolExecution) {
 			emitHostedToolLifecycle(stream, partial, call)
-		})
+		}, stream)
 		if err != nil {
 			response.StopReason = StopReasonError
 			response.ErrorMessage = err.Error()
@@ -365,19 +365,10 @@ func streamAnthropicMessagesWithHostedTools(model Model, ctx Context, options An
 			stream.finish(response)
 			return
 		}
-
-		for index, block := range finalResponse.Content {
-			textBlock, ok := block.(TextContent)
-			if !ok {
-				continue
-			}
-			partial := finalResponse
-			partial.Content = cloneBlocks(finalResponse.Content[:index+1])
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventTextStart, ContentIndex: index, Partial: partial})
-			if textBlock.Text != "" {
-				stream.push(AssistantMessageEvent{Type: AssistantMessageEventTextDelta, ContentIndex: index, Delta: textBlock.Text, Partial: partial})
-			}
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventTextEnd, ContentIndex: index, Content: textBlock.Text, Partial: partial})
+		if finalResponse.StopReason == StopReasonError {
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: finalResponse.StopReason, Error: finalResponse})
+			stream.finish(finalResponse)
+			return
 		}
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventDone, Reason: finalResponse.StopReason, Message: finalResponse})
 		stream.finish(finalResponse)
@@ -386,14 +377,14 @@ func streamAnthropicMessagesWithHostedTools(model Model, ctx Context, options An
 	return stream
 }
 
-func completeAnthropicHostedToolLoop(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool, onHostedCall func(AssistantMessage, HostedToolExecution)) (AssistantMessage, error) {
+func completeAnthropicHostedToolLoop(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool, onHostedCall func(AssistantMessage, HostedToolExecution), stream *AssistantMessageEventStream) (AssistantMessage, error) {
 	messages := cloneMessages(ctx.Messages)
 	executions := make([]HostedToolExecution, 0, len(ctx.HostedTools))
 
 	for attempt := 0; attempt < 4; attempt++ {
 		loopCtx := ctx
 		loopCtx.Messages = messages
-		response, err := completeAnthropicOnce(model, loopCtx, options, apiKey, isOAuth)
+		response, err := completeAnthropicOnceWithStream(model, loopCtx, options, apiKey, isOAuth, stream, false)
 		if err != nil {
 			return AssistantMessage{}, err
 		}
@@ -473,6 +464,10 @@ func findToolCallContentIndex(content []ContentBlock, toolCallID string) int {
 }
 
 func completeAnthropicOnce(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool) (AssistantMessage, error) {
+	return completeAnthropicOnceWithStream(model, ctx, options, apiKey, isOAuth, nil, true)
+}
+
+func completeAnthropicOnceWithStream(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool, stream *AssistantMessageEventStream, emitTerminal bool) (AssistantMessage, error) {
 	response := AssistantMessage{
 		API:        model.API,
 		Provider:   model.Provider,
@@ -544,11 +539,10 @@ func completeAnthropicOnce(model Model, ctx Context, options AnthropicMessagesPr
 		}, nil
 	}
 
-	dummyStream := newAssistantMessageEventStream()
 	states := map[int]*anthropicStreamingBlockState{}
 	terminalSeen := false
 	if err := readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
-		done, err := processAnthropicStreamEvent(data, model, &response, dummyStream, states, isOAuth, ctx.Tools, ctx.HostedTools)
+		done, err := processAnthropicStreamEvent(data, model, &response, stream, states, isOAuth, ctx.Tools, ctx.HostedTools, emitTerminal)
 		if done {
 			terminalSeen = true
 			return true, nil
@@ -642,6 +636,7 @@ func processAnthropicStreamEvent(
 	isOAuth bool,
 	tools []Tool,
 	hostedTools []HostedTool,
+	emitTerminal bool,
 ) (bool, error) {
 	if strings.TrimSpace(data) == "" || strings.TrimSpace(data) == "[DONE]" {
 		return false, nil
@@ -672,11 +667,11 @@ func processAnthropicStreamEvent(
 		case "text":
 			response.Content = append(response.Content, TextContent{})
 			states[event.Index] = &anthropicStreamingBlockState{ContentIndex: contentIndex, Kind: "text"}
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventTextStart, ContentIndex: contentIndex, Partial: *response})
+			pushAssistantMessageEvent(stream, AssistantMessageEvent{Type: AssistantMessageEventTextStart, ContentIndex: contentIndex, Partial: *response})
 		case "thinking":
 			response.Content = append(response.Content, ThinkingContent{})
 			states[event.Index] = &anthropicStreamingBlockState{ContentIndex: contentIndex, Kind: "thinking"}
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingStart, ContentIndex: contentIndex, Partial: *response})
+			pushAssistantMessageEvent(stream, AssistantMessageEvent{Type: AssistantMessageEventThinkingStart, ContentIndex: contentIndex, Partial: *response})
 		case "redacted_thinking":
 			block := ThinkingContent{
 				Thinking:          "[Reasoning redacted]",
@@ -685,7 +680,7 @@ func processAnthropicStreamEvent(
 			}
 			response.Content = append(response.Content, block)
 			states[event.Index] = &anthropicStreamingBlockState{ContentIndex: contentIndex, Kind: "thinking"}
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingStart, ContentIndex: contentIndex, Partial: *response})
+			pushAssistantMessageEvent(stream, AssistantMessageEvent{Type: AssistantMessageEventThinkingStart, ContentIndex: contentIndex, Partial: *response})
 		case "tool_use":
 			var input map[string]any
 			partialJSON := strings.TrimSpace(string(event.ContentBlock.Input))
@@ -701,7 +696,7 @@ func processAnthropicStreamEvent(
 				Arguments: input,
 			})
 			states[event.Index] = &anthropicStreamingBlockState{ContentIndex: contentIndex, Kind: "tool", PartialJSON: partialJSON}
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallStart, ContentIndex: contentIndex, Partial: *response})
+			pushAssistantMessageEvent(stream, AssistantMessageEvent{Type: AssistantMessageEventToolCallStart, ContentIndex: contentIndex, Partial: *response})
 		}
 	case "content_block_delta":
 		state := states[event.Index]
@@ -713,7 +708,7 @@ func processAnthropicStreamEvent(
 			if block, ok := response.Content[state.ContentIndex].(TextContent); ok {
 				block.Text += event.Delta.Text
 				response.Content[state.ContentIndex] = block
-				stream.push(AssistantMessageEvent{
+				pushAssistantMessageEvent(stream, AssistantMessageEvent{
 					Type:         AssistantMessageEventTextDelta,
 					ContentIndex: state.ContentIndex,
 					Delta:        event.Delta.Text,
@@ -724,7 +719,7 @@ func processAnthropicStreamEvent(
 			if block, ok := response.Content[state.ContentIndex].(ThinkingContent); ok {
 				block.Thinking += event.Delta.Thinking
 				response.Content[state.ContentIndex] = block
-				stream.push(AssistantMessageEvent{
+				pushAssistantMessageEvent(stream, AssistantMessageEvent{
 					Type:         AssistantMessageEventThinkingDelta,
 					ContentIndex: state.ContentIndex,
 					Delta:        event.Delta.Thinking,
@@ -736,7 +731,7 @@ func processAnthropicStreamEvent(
 			if block, ok := response.Content[state.ContentIndex].(ToolCall); ok {
 				block.Arguments = parseStreamingJSONObject(state.PartialJSON)
 				response.Content[state.ContentIndex] = block
-				stream.push(AssistantMessageEvent{
+				pushAssistantMessageEvent(stream, AssistantMessageEvent{
 					Type:         AssistantMessageEventToolCallDelta,
 					ContentIndex: state.ContentIndex,
 					Delta:        event.Delta.PartialJSON,
@@ -756,14 +751,14 @@ func processAnthropicStreamEvent(
 		}
 		switch block := response.Content[state.ContentIndex].(type) {
 		case TextContent:
-			stream.push(AssistantMessageEvent{
+			pushAssistantMessageEvent(stream, AssistantMessageEvent{
 				Type:         AssistantMessageEventTextEnd,
 				ContentIndex: state.ContentIndex,
 				Content:      block.Text,
 				Partial:      *response,
 			})
 		case ThinkingContent:
-			stream.push(AssistantMessageEvent{
+			pushAssistantMessageEvent(stream, AssistantMessageEvent{
 				Type:         AssistantMessageEventThinkingEnd,
 				ContentIndex: state.ContentIndex,
 				Content:      block.Thinking,
@@ -774,7 +769,7 @@ func processAnthropicStreamEvent(
 				block.Arguments = parseStreamingJSONObject(state.PartialJSON)
 				response.Content[state.ContentIndex] = block
 			}
-			stream.push(AssistantMessageEvent{
+			pushAssistantMessageEvent(stream, AssistantMessageEvent{
 				Type:         AssistantMessageEventToolCallEnd,
 				ContentIndex: state.ContentIndex,
 				ToolCall:     block,
@@ -811,12 +806,14 @@ func processAnthropicStreamEvent(
 		}
 	case "message_stop":
 		response.Usage.Cost = CalculateCost(model, response.Usage)
-		stream.push(AssistantMessageEvent{
-			Type:    AssistantMessageEventDone,
-			Reason:  response.StopReason,
-			Message: *response,
-		})
-		stream.finish(*response)
+		if emitTerminal {
+			pushAssistantMessageEvent(stream, AssistantMessageEvent{
+				Type:    AssistantMessageEventDone,
+				Reason:  response.StopReason,
+				Message: *response,
+			})
+			finishAssistantMessageStream(stream, *response)
+		}
 		return true, nil
 	case "error":
 		response.StopReason = StopReasonError
@@ -825,16 +822,32 @@ func processAnthropicStreamEvent(
 		} else {
 			response.ErrorMessage = "anthropic stream error"
 		}
-		stream.push(AssistantMessageEvent{
-			Type:   AssistantMessageEventError,
-			Reason: response.StopReason,
-			Error:  *response,
-		})
-		stream.finish(*response)
+		if emitTerminal {
+			pushAssistantMessageEvent(stream, AssistantMessageEvent{
+				Type:   AssistantMessageEventError,
+				Reason: response.StopReason,
+				Error:  *response,
+			})
+			finishAssistantMessageStream(stream, *response)
+		}
 		return true, nil
 	}
 
 	return false, nil
+}
+
+func pushAssistantMessageEvent(stream *AssistantMessageEventStream, event AssistantMessageEvent) {
+	if stream == nil {
+		return
+	}
+	stream.push(event)
+}
+
+func finishAssistantMessageStream(stream *AssistantMessageEventStream, result AssistantMessage) {
+	if stream == nil {
+		return
+	}
+	stream.finish(result)
 }
 
 func applyAnthropicUsage(response *AssistantMessage, model Model, usage anthropicUsage) {

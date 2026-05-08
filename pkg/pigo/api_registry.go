@@ -2,6 +2,7 @@ package pigo
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -32,8 +33,16 @@ func RegisterAPIModule(module APIModule) {
 	registerAPIModule(module.API, &module, nil, "")
 }
 
+func RegisterAPIModuleForSource(sourceID string, module APIModule) {
+	registerAPIModule(module.API, &module, nil, normalizeAPIModuleSourceID(sourceID))
+}
+
 func RegisterLazyAPIModule(api API, factory APIModuleFactory) {
 	registerAPIModule(api, nil, factory, "")
+}
+
+func RegisterLazyAPIModuleForSource(sourceID string, api API, factory APIModuleFactory) {
+	registerAPIModule(api, nil, factory, normalizeAPIModuleSourceID(sourceID))
 }
 
 func registerAPIModule(api API, module *APIModule, factory APIModuleFactory, sourceID string) {
@@ -63,6 +72,11 @@ func registerAPIModule(api API, module *APIModule, factory APIModuleFactory, sou
 }
 
 func UnregisterAPIModules(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+
 	apiRegistryMu.Lock()
 	defer apiRegistryMu.Unlock()
 
@@ -71,6 +85,14 @@ func UnregisterAPIModules(sourceID string) {
 			delete(apiRegistry, api)
 		}
 	}
+}
+
+func normalizeAPIModuleSourceID(sourceID string) string {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		panic("pigo: api registration source id cannot be blank")
+	}
+	return sourceID
 }
 
 func ListAPIModules() []API {

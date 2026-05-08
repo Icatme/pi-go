@@ -7,31 +7,45 @@ import (
 
 type SessionResourceCleanup func(sessionID string)
 
+type sessionResourceCleanupEntry struct {
+	id      uint64
+	cleanup SessionResourceCleanup
+}
+
 var (
-	sessionResourceCleanups   []SessionResourceCleanup
-	sessionResourceCleanupsMu sync.RWMutex
+	sessionResourceCleanups       []sessionResourceCleanupEntry
+	sessionResourceCleanupsMu     sync.RWMutex
+	sessionResourceCleanupNextID  uint64
 )
 
 func RegisterSessionResourceCleanup(cleanup SessionResourceCleanup) func() {
 	sessionResourceCleanupsMu.Lock()
 	defer sessionResourceCleanupsMu.Unlock()
 
-	sessionResourceCleanups = append(sessionResourceCleanups, cleanup)
-	index := len(sessionResourceCleanups) - 1
+	sessionResourceCleanupNextID++
+	entry := sessionResourceCleanupEntry{
+		id:      sessionResourceCleanupNextID,
+		cleanup: cleanup,
+	}
+	sessionResourceCleanups = append(sessionResourceCleanups, entry)
 
 	return func() {
 		sessionResourceCleanupsMu.Lock()
 		defer sessionResourceCleanupsMu.Unlock()
 
-		if index < len(sessionResourceCleanups) {
+		for index, registered := range sessionResourceCleanups {
+			if registered.id != entry.id {
+				continue
+			}
 			sessionResourceCleanups = append(sessionResourceCleanups[:index], sessionResourceCleanups[index+1:]...)
+			break
 		}
 	}
 }
 
 func CleanupSessionResources(sessionID string) error {
 	sessionResourceCleanupsMu.RLock()
-	cleanups := make([]SessionResourceCleanup, len(sessionResourceCleanups))
+	cleanups := make([]sessionResourceCleanupEntry, len(sessionResourceCleanups))
 	copy(cleanups, sessionResourceCleanups)
 	sessionResourceCleanupsMu.RUnlock()
 
@@ -43,7 +57,7 @@ func CleanupSessionResources(sessionID string) error {
 					errs = append(errs, fmt.Errorf("session resource cleanup panicked: %v", r))
 				}
 			}()
-			cleanup(sessionID)
+			cleanup.cleanup(sessionID)
 		}()
 	}
 

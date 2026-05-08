@@ -2,7 +2,41 @@ package pigo
 
 import "testing"
 
+func isolateAPIRegistry(t *testing.T) {
+	t.Helper()
+
+	apiRegistryMu.Lock()
+	previousRegistry := cloneAPIRegistryEntries(apiRegistry)
+	apiRegistry = cloneAPIRegistryEntries(previousRegistry)
+	apiRegistryMu.Unlock()
+
+	t.Cleanup(func() {
+		apiRegistryMu.Lock()
+		defer apiRegistryMu.Unlock()
+		apiRegistry = previousRegistry
+	})
+}
+
+func cloneAPIRegistryEntries(entries map[API]*apiRegistryEntry) map[API]*apiRegistryEntry {
+	cloned := make(map[API]*apiRegistryEntry, len(entries))
+	for api, entry := range entries {
+		if entry == nil {
+			cloned[api] = nil
+			continue
+		}
+		copyEntry := *entry
+		if entry.module != nil {
+			moduleCopy := *entry.module
+			copyEntry.module = &moduleCopy
+		}
+		cloned[api] = &copyEntry
+	}
+	return cloned
+}
+
 func TestUnregisterAPIModulesBySourceID(t *testing.T) {
+	isolateAPIRegistry(t)
+
 	sourceID := "test-source"
 	api1 := API("test-api-1")
 	api2 := API("test-api-2")
@@ -26,6 +60,8 @@ func TestUnregisterAPIModulesBySourceID(t *testing.T) {
 }
 
 func TestListAPIModulesReturnsRegisteredAPIs(t *testing.T) {
+	isolateAPIRegistry(t)
+
 	api := API("test-list-api")
 	registerAPIModule(api, &APIModule{API: api}, nil, "")
 
@@ -43,6 +79,8 @@ func TestListAPIModulesReturnsRegisteredAPIs(t *testing.T) {
 }
 
 func TestRegisterLazyAPIModuleLoadsOnDemand(t *testing.T) {
+	isolateAPIRegistry(t)
+
 	api := API("test-lazy-api")
 	loadCount := 0
 
@@ -116,5 +154,45 @@ func TestRegisterLazyAPIModuleLoadsOnDemand(t *testing.T) {
 	}
 	if loadCount != 1 {
 		t.Fatalf("expected lazy api module to stay cached after first load, got %d", loadCount)
+	}
+}
+
+func TestRegisterAPIModuleForSourceSupportsTargetedUnregister(t *testing.T) {
+	isolateAPIRegistry(t)
+
+	sourceID := "test-source-aware"
+	targetedAPI := API("test-source-aware-api")
+	staticAPI := API("test-static-api")
+
+	RegisterAPIModuleForSource(sourceID, APIModule{API: targetedAPI})
+	RegisterAPIModule(APIModule{API: staticAPI})
+
+	UnregisterAPIModules(sourceID)
+
+	if GetAPIModule(targetedAPI) != nil {
+		t.Fatalf("expected api %q to be removed by source-aware unregister", targetedAPI)
+	}
+	if GetAPIModule(staticAPI) == nil {
+		t.Fatalf("expected api %q registered without a source id to remain installed", staticAPI)
+	}
+}
+
+func TestUnregisterAPIModulesIgnoresBlankSourceID(t *testing.T) {
+	isolateAPIRegistry(t)
+
+	staticAPI := API("test-blank-source-api")
+	RegisterAPIModule(APIModule{API: staticAPI})
+
+	if GetAPIModule("anthropic-messages") == nil {
+		t.Fatal("expected built-in anthropic api to be registered")
+	}
+
+	UnregisterAPIModules("")
+
+	if GetAPIModule(staticAPI) == nil {
+		t.Fatalf("expected api %q to remain after blank source unregister", staticAPI)
+	}
+	if GetAPIModule("anthropic-messages") == nil {
+		t.Fatal("expected blank source unregister to leave built-in apis installed")
 	}
 }

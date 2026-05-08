@@ -5,7 +5,27 @@ import (
 	"testing"
 )
 
+func isolateSessionResourceCleanups(t *testing.T) {
+	t.Helper()
+
+	sessionResourceCleanupsMu.Lock()
+	previousCleanups := append([]sessionResourceCleanupEntry(nil), sessionResourceCleanups...)
+	previousNextID := sessionResourceCleanupNextID
+	sessionResourceCleanups = nil
+	sessionResourceCleanupNextID = 0
+	sessionResourceCleanupsMu.Unlock()
+
+	t.Cleanup(func() {
+		sessionResourceCleanupsMu.Lock()
+		defer sessionResourceCleanupsMu.Unlock()
+		sessionResourceCleanups = previousCleanups
+		sessionResourceCleanupNextID = previousNextID
+	})
+}
+
 func TestRegisterSessionResourceCleanup(t *testing.T) {
+	isolateSessionResourceCleanups(t)
+
 	called := false
 	cleanup := func(sessionID string) {
 		called = true
@@ -23,6 +43,8 @@ func TestRegisterSessionResourceCleanup(t *testing.T) {
 }
 
 func TestUnregisterSessionResourceCleanup(t *testing.T) {
+	isolateSessionResourceCleanups(t)
+
 	called := false
 	cleanup := func(sessionID string) {
 		called = true
@@ -38,6 +60,8 @@ func TestUnregisterSessionResourceCleanup(t *testing.T) {
 }
 
 func TestCleanupSessionResourcesWithMultipleCleanups(t *testing.T) {
+	isolateSessionResourceCleanups(t)
+
 	var order []int
 	c1 := func(string) { order = append(order, 1) }
 	c2 := func(string) { order = append(order, 2) }
@@ -51,7 +75,26 @@ func TestCleanupSessionResourcesWithMultipleCleanups(t *testing.T) {
 	}
 }
 
+func TestUnregisterSessionResourceCleanupOutOfOrder(t *testing.T) {
+	isolateSessionResourceCleanups(t)
+
+	var order []int
+	unregisterFirst := RegisterSessionResourceCleanup(func(string) { order = append(order, 1) })
+	RegisterSessionResourceCleanup(func(string) { order = append(order, 2) })
+	unregisterThird := RegisterSessionResourceCleanup(func(string) { order = append(order, 3) })
+
+	unregisterFirst()
+	unregisterThird()
+
+	_ = CleanupSessionResources("test-session")
+	if len(order) != 1 || order[0] != 2 {
+		t.Fatalf("expected only middle cleanup to remain after out-of-order unregister, got %v", order)
+	}
+}
+
 func TestCleanupSessionResourcesRecoversFromPanic(t *testing.T) {
+	isolateSessionResourceCleanups(t)
+
 	called := false
 	panicky := func(string) { panic("intentional panic") }
 	normal := func(string) { called = true }
@@ -69,6 +112,8 @@ func TestCleanupSessionResourcesRecoversFromPanic(t *testing.T) {
 }
 
 func TestCleanupSessionResourcesPassesSessionID(t *testing.T) {
+	isolateSessionResourceCleanups(t)
+
 	var receivedID string
 	cleanup := func(sessionID string) {
 		receivedID = sessionID
@@ -83,6 +128,8 @@ func TestCleanupSessionResourcesPassesSessionID(t *testing.T) {
 }
 
 func TestCleanupSessionResourcesReturnsErrorForFailedCleanup(t *testing.T) {
+	isolateSessionResourceCleanups(t)
+
 	failing := func(string) { panic(errors.New("cleanup failed")) }
 
 	RegisterSessionResourceCleanup(failing)
