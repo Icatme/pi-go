@@ -2353,6 +2353,317 @@ func TestConvertAnthropicToolsDedupesHostedExcelAgainstGenericDeclaration(t *tes
 	}
 }
 
+func TestCompleteSimpleKimiCodingHostedFetchPreservesCustomLogicalName(t *testing.T) {
+	requestBodies := make([]map[string]any, 0, 2)
+	requestCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		var requestBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request json: %v", err)
+		}
+		requestBodies = append(requestBodies, requestBody)
+
+		w.Header().Set("content-type", "text/event-stream")
+		switch requestCount {
+		case 1:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_alias_fetch_1",
+						"usage": map[string]any{
+							"input_tokens":                21,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type":  "tool_use",
+						"id":    "call_alias_fetch_1",
+						"name":  "$fetch",
+						"input": map[string]any{},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type":         "input_json_delta",
+						"partial_json": `{"url":"https://platform.kimi.com/docs/guide/use-web-search"}`,
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "tool_use",
+					},
+					"usage": map[string]any{
+						"output_tokens": 11,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		case 2:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_alias_fetch_2",
+						"usage": map[string]any{
+							"input_tokens":                13080,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type": "text",
+						"text": "",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type": "text_delta",
+						"text": "The hosted fetch result was summarized successfully.",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "end_turn",
+					},
+					"usage": map[string]any{
+						"output_tokens": 18,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+		}
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	response := CompleteSimple(*model, Context{
+		Messages:     []Message{UserMessage{Content: "Please fetch the Kimi docs with the hosted tool."}},
+		HostedTools:  []HostedTool{{Type: HostedToolTypeFetch, Name: "docs_fetch"}},
+		SystemPrompt: "Use hosted tools when useful.",
+	}, SimpleStreamOptions{APIKey: "kimi-test-key"})
+
+	if requestCount != 2 {
+		t.Fatalf("expected hosted fetch alias to auto-continue in two requests, got %d", requestCount)
+	}
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected stop response after hosted fetch alias continuation, got %+v", response)
+	}
+	if len(response.HostedToolExecutions) != 1 {
+		t.Fatalf("expected one hosted execution, got %+v", response.HostedToolExecutions)
+	}
+	if response.HostedToolExecutions[0].Name != "docs_fetch" || response.HostedToolExecutions[0].ProviderToolName != "$fetch" {
+		t.Fatalf("expected hosted alias to be preserved alongside provider tool name, got %+v", response.HostedToolExecutions[0])
+	}
+
+	firstTools, ok := requestBodies[0]["tools"].([]any)
+	if !ok || len(firstTools) != 1 {
+		t.Fatalf("expected one hosted tool declaration, got %#v", requestBodies[0]["tools"])
+	}
+	firstTool, ok := firstTools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected hosted tool declaration object, got %T", firstTools[0])
+	}
+	function, ok := firstTool["function"].(map[string]any)
+	if !ok || function["name"] != "$fetch" {
+		t.Fatalf("expected provider builtin name $fetch for hosted alias, got %#v", firstTool)
+	}
+
+	secondMessages, ok := requestBodies[1]["messages"].([]any)
+	if !ok || len(secondMessages) != 3 {
+		t.Fatalf("expected hosted alias continuation to append assistant + tool result messages, got %#v", requestBodies[1]["messages"])
+	}
+	assistantMessage, ok := secondMessages[1].(map[string]any)
+	if !ok || assistantMessage["role"] != "assistant" {
+		t.Fatalf("expected continuation assistant message, got %#v", secondMessages[1])
+	}
+	assistantBlocks, ok := assistantMessage["content"].([]any)
+	if !ok || len(assistantBlocks) != 1 {
+		t.Fatalf("expected hosted alias assistant tool block, got %#v", assistantMessage["content"])
+	}
+	assistantBlock, ok := assistantBlocks[0].(map[string]any)
+	if !ok || assistantBlock["name"] != "$fetch" {
+		t.Fatalf("expected provider-side assistant tool call to stay on $fetch, got %#v", assistantBlocks[0])
+	}
+}
+
+func TestCompleteSimpleKimiCodingHostedFetchDoesNotAutoContinueMixedToolCalls(t *testing.T) {
+	var requestBody map[string]any
+	requestCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request json: %v", err)
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildAnthropicSSE(
+			map[string]any{
+				"type": "message_start",
+				"message": map[string]any{
+					"id": "msg_mixed_1",
+					"usage": map[string]any{
+						"input_tokens":                21,
+						"output_tokens":               0,
+						"cache_read_input_tokens":     0,
+						"cache_creation_input_tokens": 0,
+					},
+				},
+			},
+			map[string]any{
+				"type":  "content_block_start",
+				"index": 0,
+				"content_block": map[string]any{
+					"type":  "tool_use",
+					"id":    "call_fetch_mixed_1",
+					"name":  "$fetch",
+					"input": map[string]any{},
+				},
+			},
+			map[string]any{
+				"type":  "content_block_delta",
+				"index": 0,
+				"delta": map[string]any{
+					"type":         "input_json_delta",
+					"partial_json": `{"url":"https://platform.kimi.com/docs"}`,
+				},
+			},
+			map[string]any{
+				"type":  "content_block_stop",
+				"index": 0,
+			},
+			map[string]any{
+				"type":  "content_block_start",
+				"index": 1,
+				"content_block": map[string]any{
+					"type":  "tool_use",
+					"id":    "call_lookup_1",
+					"name":  "lookup_catalog",
+					"input": map[string]any{},
+				},
+			},
+			map[string]any{
+				"type":  "content_block_delta",
+				"index": 1,
+				"delta": map[string]any{
+					"type":         "input_json_delta",
+					"partial_json": `{"sku":"SKU-42"}`,
+				},
+			},
+			map[string]any{
+				"type":  "content_block_stop",
+				"index": 1,
+			},
+			map[string]any{
+				"type": "message_delta",
+				"delta": map[string]any{
+					"stop_reason": "tool_use",
+				},
+				"usage": map[string]any{
+					"output_tokens": 14,
+				},
+			},
+			map[string]any{
+				"type": "message_stop",
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "Use hosted fetch and then look up the catalog."}},
+		Tools: []Tool{{
+			Name:        "lookup_catalog",
+			Description: "Lookup catalog entries",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"sku": map[string]any{"type": "string"}},
+			},
+		}},
+		HostedTools: []HostedTool{{Type: HostedToolTypeFetch, Name: "fetch"}},
+	}, SimpleStreamOptions{APIKey: "kimi-test-key"})
+
+	if requestCount != 1 {
+		t.Fatalf("expected mixed hosted + generic tool response to stop without auto-continuation, got %d requests", requestCount)
+	}
+	if response.StopReason != StopReasonToolUse {
+		t.Fatalf("expected mixed hosted + generic tool response to stay as toolUse, got %+v", response)
+	}
+	if len(response.HostedToolExecutions) != 0 {
+		t.Fatalf("expected no hosted execution metadata when generic tool calls are mixed in, got %+v", response.HostedToolExecutions)
+	}
+	if len(response.Content) != 2 {
+		t.Fatalf("expected both tool calls to be preserved in response content, got %+v", response.Content)
+	}
+
+	hostedCall, ok := response.Content[0].(ToolCall)
+	if !ok || hostedCall.Name != "fetch" || anyString(hostedCall.Arguments["url"]) != "https://platform.kimi.com/docs" {
+		t.Fatalf("expected hosted fetch call to be preserved for caller handling, got %+v", response.Content[0])
+	}
+	genericCall, ok := response.Content[1].(ToolCall)
+	if !ok || genericCall.Name != "lookup_catalog" || anyString(genericCall.Arguments["sku"]) != "SKU-42" {
+		t.Fatalf("expected generic tool call to be preserved for caller handling, got %+v", response.Content[1])
+	}
+
+	firstTools, ok := requestBody["tools"].([]any)
+	if !ok || len(firstTools) != 2 {
+		t.Fatalf("expected hosted builtin plus generic declaration in request, got %#v", requestBody["tools"])
+	}
+	firstTool, ok := firstTools[0].(map[string]any)
+	if !ok || firstTool["type"] != "builtin_function" {
+		t.Fatalf("expected first tool to be hosted builtin declaration, got %#v", firstTools[0])
+	}
+	secondTool, ok := firstTools[1].(map[string]any)
+	if !ok || secondTool["name"] != "lookup_catalog" {
+		t.Fatalf("expected generic tool declaration to remain alongside hosted builtin, got %#v", firstTools[1])
+	}
+}
+
 func textFromContent(blocks []ContentBlock) string {
 	var builder strings.Builder
 	for _, block := range blocks {
