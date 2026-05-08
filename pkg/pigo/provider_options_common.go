@@ -6,23 +6,25 @@ import (
 )
 
 type CommonProviderOptions struct {
-	APIKey         string
-	Auth           map[Provider]AuthConfig
-	HTTPClient     *http.Client
-	Headers        map[string]string
-	MaxTokens      int
-	Temperature    *float64
-	Transport      Transport
-	CacheRetention CacheRetention
-	SessionID      string
-	OnPayload      func(payload any, model Model) any
-	OnResponse     func(response ProviderResponse, model Model)
-	ServiceTier    string
-	TimeoutMs      int
-	MaxRetries     int
-	MaxRetryDelay  int
-	Metadata       map[string]any
-	RequestContext context.Context
+	APIKey             string
+	Auth               map[Provider]AuthConfig
+	HTTPClient         *http.Client
+	Headers            map[string]string
+	MaxTokens          int
+	Temperature        *float64
+	Transport          Transport
+	CacheRetention     CacheRetention
+	SessionID          string
+	OnPayload          func(payload any, model Model) any
+	OnResponse         func(response ProviderResponse, model Model)
+	ServiceTier        string
+	TimeoutMs          int
+	MaxRetries         int
+	MaxRetryDelay      int
+	Metadata           map[string]any
+	RequestContext     context.Context
+	PreviousResponseID string
+	Truncation         string
 }
 
 func buildCommonProviderOptions(model Model, options SimpleStreamOptions) CommonProviderOptions {
@@ -32,66 +34,72 @@ func buildCommonProviderOptions(model Model, options SimpleStreamOptions) Common
 	}
 
 	return CommonProviderOptions{
-		APIKey:         options.APIKey,
-		Auth:           options.Auth,
-		HTTPClient:     options.HTTPClient,
-		Headers:        cloneStringMap(options.Headers),
-		MaxTokens:      maxTokens,
-		Temperature:    options.Temperature,
-		Transport:      options.Transport,
-		CacheRetention: options.CacheRetention,
-		SessionID:      options.SessionID,
-		OnPayload:      options.OnPayload,
-		OnResponse:     options.OnResponse,
-		ServiceTier:    options.ServiceTier,
-		TimeoutMs:      options.TimeoutMs,
-		MaxRetries:     options.MaxRetries,
-		MaxRetryDelay:  options.MaxRetryDelay,
-		Metadata:       cloneMap(options.Metadata),
-		RequestContext: options.RequestContext,
+		APIKey:             options.APIKey,
+		Auth:               options.Auth,
+		HTTPClient:         options.HTTPClient,
+		Headers:            cloneStringMap(options.Headers),
+		MaxTokens:          maxTokens,
+		Temperature:        options.Temperature,
+		Transport:          options.Transport,
+		CacheRetention:     options.CacheRetention,
+		SessionID:          options.SessionID,
+		OnPayload:          options.OnPayload,
+		OnResponse:         options.OnResponse,
+		ServiceTier:        options.ServiceTier,
+		TimeoutMs:          options.TimeoutMs,
+		MaxRetries:         options.MaxRetries,
+		MaxRetryDelay:      options.MaxRetryDelay,
+		Metadata:           cloneMap(options.Metadata),
+		RequestContext:     options.RequestContext,
+		PreviousResponseID: options.PreviousResponseID,
+		Truncation:         options.Truncation,
 	}
 }
 
 func commonProviderOptionsFromStream(options ProviderStreamOptions) CommonProviderOptions {
 	return CommonProviderOptions{
-		APIKey:         options.APIKey,
-		Auth:           options.Auth,
-		HTTPClient:     options.HTTPClient,
-		Headers:        cloneStringMap(options.Headers),
-		MaxTokens:      options.MaxTokens,
-		Temperature:    options.Temperature,
-		Transport:      options.Transport,
-		CacheRetention: options.CacheRetention,
-		SessionID:      options.SessionID,
-		OnPayload:      options.OnPayload,
-		OnResponse:     options.OnResponse,
-		ServiceTier:    options.ServiceTier,
-		TimeoutMs:      options.TimeoutMs,
-		MaxRetries:     options.MaxRetries,
-		MaxRetryDelay:  options.MaxRetryDelay,
-		Metadata:       cloneMap(options.Metadata),
-		RequestContext: options.RequestContext,
+		APIKey:             options.APIKey,
+		Auth:               options.Auth,
+		HTTPClient:         options.HTTPClient,
+		Headers:            cloneStringMap(options.Headers),
+		MaxTokens:          options.MaxTokens,
+		Temperature:        options.Temperature,
+		Transport:          options.Transport,
+		CacheRetention:     options.CacheRetention,
+		SessionID:          options.SessionID,
+		OnPayload:          options.OnPayload,
+		OnResponse:         options.OnResponse,
+		ServiceTier:        options.ServiceTier,
+		TimeoutMs:          options.TimeoutMs,
+		MaxRetries:         options.MaxRetries,
+		MaxRetryDelay:      options.MaxRetryDelay,
+		Metadata:           cloneMap(options.Metadata),
+		RequestContext:     options.RequestContext,
+		PreviousResponseID: options.PreviousResponseID,
+		Truncation:         options.Truncation,
 	}
 }
 
 func (options CommonProviderOptions) toProviderStreamOptions() ProviderStreamOptions {
 	return ProviderStreamOptions{
-		APIKey:         options.APIKey,
-		Auth:           options.Auth,
-		HTTPClient:     options.HTTPClient,
-		Headers:        cloneStringMap(options.Headers),
-		MaxTokens:      options.MaxTokens,
-		Temperature:    options.Temperature,
-		Transport:      options.Transport,
-		CacheRetention: options.CacheRetention,
-		SessionID:      options.SessionID,
-		OnPayload:      options.OnPayload,
-		OnResponse:     options.OnResponse,
-		ServiceTier:    options.ServiceTier,
-		TimeoutMs:      options.TimeoutMs,
-		MaxRetries:     options.MaxRetries,
-		MaxRetryDelay:  options.MaxRetryDelay,
-		Metadata:       cloneMap(options.Metadata),
-		RequestContext: options.RequestContext,
+		APIKey:             options.APIKey,
+		Auth:               options.Auth,
+		HTTPClient:         options.HTTPClient,
+		Headers:            cloneStringMap(options.Headers),
+		MaxTokens:          options.MaxTokens,
+		Temperature:        options.Temperature,
+		Transport:          options.Transport,
+		CacheRetention:     options.CacheRetention,
+		SessionID:          options.SessionID,
+		OnPayload:          options.OnPayload,
+		OnResponse:         options.OnResponse,
+		ServiceTier:        options.ServiceTier,
+		TimeoutMs:          options.TimeoutMs,
+		MaxRetries:         options.MaxRetries,
+		MaxRetryDelay:      options.MaxRetryDelay,
+		Metadata:           cloneMap(options.Metadata),
+		RequestContext:     options.RequestContext,
+		PreviousResponseID: options.PreviousResponseID,
+		Truncation:         options.Truncation,
 	}
 }

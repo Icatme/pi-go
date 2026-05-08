@@ -101,6 +101,11 @@ func streamOpenAICodexSSE(
 		request.Header.Set("chatgpt-account-id", accountID)
 		request.Header.Set("originator", "pi")
 		request.Header.Set("openai-beta", "responses=experimental")
+		requestID := options.SessionID
+		if strings.TrimSpace(requestID) == "" {
+			requestID = createOpenAICodexRequestID()
+		}
+		request.Header.Set("x-client-request-id", requestID)
 		if options.SessionID != "" {
 			request.Header.Set("conversation_id", options.SessionID)
 			request.Header.Set("session_id", options.SessionID)

@@ -4,11 +4,13 @@ import "strings"
 
 type OpenAICodexProviderOptions struct {
 	CommonProviderOptions
-	ReasoningEffort  ThinkingLevel
-	ReasoningSummary string
-	ServiceTier      string
-	TextVerbosity    string
-	ToolChoice       string
+	ReasoningEffort    ThinkingLevel
+	ReasoningSummary   string
+	ServiceTier        string
+	TextVerbosity      string
+	ToolChoice         string
+	PreviousResponseID string
+	Truncation         string
 }
 
 func buildOpenAICodexProviderStreamOptions(model Model, options SimpleStreamOptions) ProviderStreamOptions {
@@ -24,6 +26,8 @@ func buildOpenAICodexProviderOptions(model Model, options SimpleStreamOptions) O
 		CommonProviderOptions: buildCommonProviderOptions(model, options),
 		ServiceTier:           options.ServiceTier,
 		TextVerbosity:         defaultTextVerbosity(""),
+		PreviousResponseID:    options.PreviousResponseID,
+		Truncation:            options.Truncation,
 	}
 	if SupportsXHigh(model) {
 		providerOptions.ReasoningEffort = options.Reasoning
@@ -45,6 +49,8 @@ func resolveOpenAICodexProviderOptions(model Model, options ProviderStreamOption
 		ServiceTier:           options.ServiceTier,
 		TextVerbosity:         options.TextVerbosity,
 		ToolChoice:            options.ToolChoice,
+		PreviousResponseID:    options.PreviousResponseID,
+		Truncation:            options.Truncation,
 	}
 
 	if resolved.ReasoningEffort != "" {
@@ -67,5 +73,7 @@ func (options OpenAICodexProviderOptions) toProviderStreamOptions() ProviderStre
 	streamOptions.ServiceTier = options.ServiceTier
 	streamOptions.TextVerbosity = options.TextVerbosity
 	streamOptions.ToolChoice = options.ToolChoice
+	streamOptions.PreviousResponseID = options.PreviousResponseID
+	streamOptions.Truncation = options.Truncation
 	return streamOptions
 }

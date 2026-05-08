@@ -29,6 +29,8 @@ type openAICodexRequest struct {
 	PromptCacheRetention string                       `json:"prompt_cache_retention,omitempty"`
 	MaxOutputTokens      int                          `json:"max_output_tokens,omitempty"`
 	Metadata             map[string]any               `json:"metadata,omitempty"`
+	PreviousResponseID   string                       `json:"previous_response_id,omitempty"`
+	Truncation           string                       `json:"truncation,omitempty"`
 }
 
 type openAICodexReasoningOptions struct {
@@ -194,7 +196,7 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 		Instructions:      instructions,
 		Input:             convertOpenAICodexMessages(model, ctx),
 		Tools:             convertOpenAICodexTools(ctx.Tools),
-		ToolChoice:        "auto",
+		ToolChoice:        resolveOpenAICodexToolChoice(resolvedOptions.ToolChoice),
 		ParallelToolCalls: true,
 		Include:           []string{"reasoning.encrypted_content"},
 		Text: &openAICodexTextOptions{
@@ -220,6 +222,12 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 	if retention := resolveOpenAICodexCacheRetention(resolvedOptions.CacheRetention); retention != "" {
 		requestBody.PromptCacheRetention = retention
 	}
+	if strings.TrimSpace(resolvedOptions.PreviousResponseID) != "" {
+		requestBody.PreviousResponseID = resolvedOptions.PreviousResponseID
+	}
+	if strings.TrimSpace(resolvedOptions.Truncation) != "" {
+		requestBody.Truncation = resolvedOptions.Truncation
+	}
 
 	if effort := string(resolvedOptions.ReasoningEffort); effort != "" {
 		requestBody.Reasoning = &openAICodexReasoningOptions{
@@ -229,6 +237,13 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 	}
 
 	return requestBody
+}
+
+func resolveOpenAICodexToolChoice(toolChoice string) string {
+	if strings.TrimSpace(toolChoice) == "" {
+		return "auto"
+	}
+	return strings.TrimSpace(toolChoice)
 }
 
 func resolveOpenAICodexCacheRetention(retention CacheRetention) string {

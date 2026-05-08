@@ -1601,3 +1601,237 @@ func TestCompleteSimpleOpenAICodexWebSocketSessionExpiresAfterIdleTTL(t *testing
 		t.Fatalf("expected websocket session to reconnect after idle expiry, got %d upgrades", upgradeCount)
 	}
 }
+
+func TestCompleteSimpleOpenAICodexPassesToolChoiceFromOptions(t *testing.T) {
+	var requestBody openAICodexRequest
+	token := makeOpenAICodexToken("acc_test")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request body: %v", err)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_1",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "ok"},
+					},
+				},
+			},
+			map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":     "resp_toolchoice",
+					"status": "completed",
+					"usage": map[string]any{
+						"input_tokens":  5,
+						"output_tokens": 1,
+						"total_tokens":  6,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	_ = Complete(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+		Tools: []Tool{{
+			Name:        "noop",
+			Description: "Do nothing",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		}},
+	}, ProviderStreamOptions{
+		APIKey:     token,
+		ToolChoice: "required",
+	})
+
+	if requestBody.ToolChoice != "required" {
+		t.Fatalf("expected tool_choice 'required' from options, got %q", requestBody.ToolChoice)
+	}
+}
+
+func TestCompleteSimpleOpenAICodexDefaultsToolChoiceToAuto(t *testing.T) {
+	var requestBody openAICodexRequest
+	token := makeOpenAICodexToken("acc_test")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request body: %v", err)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_1",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "ok"},
+					},
+				},
+			},
+			map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":     "resp_default_auto",
+					"status": "completed",
+					"usage": map[string]any{
+						"input_tokens":  5,
+						"output_tokens": 1,
+						"total_tokens":  6,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	_ = CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+	}, SimpleStreamOptions{
+		APIKey: token,
+	})
+
+	if requestBody.ToolChoice != "auto" {
+		t.Fatalf("expected default tool_choice 'auto', got %q", requestBody.ToolChoice)
+	}
+}
+
+func TestCompleteSimpleOpenAICodexPassesPreviousResponseID(t *testing.T) {
+	var requestBody openAICodexRequest
+	token := makeOpenAICodexToken("acc_test")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request body: %v", err)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_1",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "ok"},
+					},
+				},
+			},
+			map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":     "resp_prev_id",
+					"status": "completed",
+					"usage": map[string]any{
+						"input_tokens":  5,
+						"output_tokens": 1,
+						"total_tokens":  6,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	_ = CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+	}, SimpleStreamOptions{
+		APIKey:             token,
+		PreviousResponseID: "prev_resp_123",
+	})
+
+	if requestBody.PreviousResponseID != "prev_resp_123" {
+		t.Fatalf("expected previous_response_id 'prev_resp_123', got %q", requestBody.PreviousResponseID)
+	}
+}
+
+func TestCompleteSimpleOpenAICodexOmitsEmptyPreviousResponseID(t *testing.T) {
+	var requestBody openAICodexRequest
+	token := makeOpenAICodexToken("acc_test")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request body: %v", err)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_1",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "ok"},
+					},
+				},
+			},
+			map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":     "resp_omit_prev",
+					"status": "completed",
+					"usage": map[string]any{
+						"input_tokens":  5,
+						"output_tokens": 1,
+						"total_tokens":  6,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	_ = CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hi"}},
+	}, SimpleStreamOptions{
+		APIKey: token,
+	})
+
+	if requestBody.PreviousResponseID != "" {
+		t.Fatalf("expected empty previous_response_id, got %q", requestBody.PreviousResponseID)
+	}
+}
