@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -26,6 +27,20 @@ func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptio
 
 	go func() {
 		apiKey := options.APIKey
+		if apiKey == "" {
+			resolved, err := ResolveAuthorization(model.Provider, options.Auth, options.HTTPClient, options.RequestContext)
+			if err != nil {
+				response.StopReason = StopReasonError
+				response.ErrorMessage = err.Error()
+				stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
+				stream.finish(response)
+				return
+			}
+			apiKey = resolved
+		}
+		if apiKey == "" {
+			apiKey = ResolveAPIKey(model.Provider, options.Auth)
+		}
 		if apiKey == "" {
 			apiKey = GetEnvAPIKey(model.Provider)
 		}
@@ -147,10 +162,16 @@ func resolveOpenAIResponsesCacheRetention(retention CacheRetention) string {
 func resolveOpenAIResponsesURL(baseURL string) string {
 	trimmed := strings.TrimRight(baseURL, "/")
 	if trimmed == "" {
-		trimmed = "https://api.openai.com"
+		trimmed = "https://api.openai.com/v1"
 	}
 	if strings.HasSuffix(trimmed, "/responses") {
 		return trimmed
+	}
+	if strings.HasSuffix(trimmed, "/v1") {
+		return trimmed + "/responses"
+	}
+	if parsed, err := url.Parse(trimmed); err == nil && (parsed.Path == "" || parsed.Path == "/") {
+		return trimmed + "/v1/responses"
 	}
 	return trimmed + "/responses"
 }
