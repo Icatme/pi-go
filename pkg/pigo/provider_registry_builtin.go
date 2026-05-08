@@ -12,11 +12,13 @@ func registerBuiltInModules() {
 func registerBuiltInAPIModules() {
 	RegisterLazyAPIModule("anthropic-messages", newAnthropicMessagesAPIModule)
 	RegisterLazyAPIModule("openai-codex-responses", newOpenAICodexResponsesAPIModule)
+	RegisterLazyAPIModule("openai-responses", newOpenAIResponsesAPIModule)
 }
 
 func registerBuiltInProviderModules() {
 	RegisterLazyProviderModule("anthropic", newAnthropicProviderModule)
 	RegisterLazyProviderModule("openai-codex", newOpenAICodexProviderModule)
+	RegisterLazyProviderModule("openai", newOpenAIResponsesProviderModule)
 	RegisterLazyProviderModule("kimi-coding", newKimiCodingProviderModule)
 }
 
@@ -33,6 +35,14 @@ func newOpenAICodexResponsesAPIModule() APIModule {
 		API:          "openai-codex-responses",
 		Stream:       streamOpenAICodex,
 		StreamSimple: streamSimpleOpenAICodex,
+	}
+}
+
+func newOpenAIResponsesAPIModule() APIModule {
+	return APIModule{
+		API:          "openai-responses",
+		Stream:       streamOpenAIResponses,
+		StreamSimple: streamSimpleOpenAIResponses,
 	}
 }
 
@@ -185,6 +195,70 @@ func newOpenAICodexProviderModule() ProviderModule {
 				Name:          "GPT-5.4 Mini",
 				API:           "openai-codex-responses",
 				BaseURL:       "https://chatgpt.com/backend-api",
+				Reasoning:     true,
+				Input:         []InputType{InputText, InputImage},
+				Cost:          UsageCost{Input: 0.75, Output: 4.5, CacheRead: 0.075},
+				ContextWindow: 272000,
+				MaxTokens:     128000,
+			},
+		},
+	}
+}
+
+func newOpenAIResponsesProviderModule() ProviderModule {
+	return ProviderModule{
+		Provider: "openai",
+		Auth: ProviderAuth{
+			EnvAPIKeyName: "OPENAI_API_KEY",
+		},
+		Capabilities: ProviderCapabilities{
+			SupportsStreaming:        true,
+			SupportsSession:          true,
+			SupportsPromptCacheKey:   true,
+			SupportsReasoningSummary: true,
+			SupportsToolChoice:       true,
+		},
+		BuildOptions:     buildOpenAIResponsesProviderStreamOptions,
+		NormalizeOptions: normalizeOpenAIResponsesProviderStreamOptions,
+		Models: map[string]Model{
+			"gpt-5.1": {
+				ID:            "gpt-5.1",
+				Name:          "GPT-5.1",
+				API:           "openai-responses",
+				BaseURL:       "https://api.openai.com",
+				Reasoning:     true,
+				Input:         []InputType{InputText, InputImage},
+				Cost:          UsageCost{Input: 1.25, Output: 10, CacheRead: 0.125},
+				ContextWindow: 272000,
+				MaxTokens:     128000,
+			},
+			"gpt-5.2": {
+				ID:            "gpt-5.2",
+				Name:          "GPT-5.2",
+				API:           "openai-responses",
+				BaseURL:       "https://api.openai.com",
+				Reasoning:     true,
+				Input:         []InputType{InputText, InputImage},
+				Cost:          UsageCost{Input: 1.75, Output: 14, CacheRead: 0.175},
+				ContextWindow: 272000,
+				MaxTokens:     128000,
+			},
+			"gpt-5.4": {
+				ID:            "gpt-5.4",
+				Name:          "GPT-5.4",
+				API:           "openai-responses",
+				BaseURL:       "https://api.openai.com",
+				Reasoning:     true,
+				Input:         []InputType{InputText, InputImage},
+				Cost:          UsageCost{Input: 2.5, Output: 15, CacheRead: 0.25},
+				ContextWindow: 272000,
+				MaxTokens:     128000,
+			},
+			"gpt-5.4-mini": {
+				ID:            "gpt-5.4-mini",
+				Name:          "GPT-5.4 Mini",
+				API:           "openai-responses",
+				BaseURL:       "https://api.openai.com",
 				Reasoning:     true,
 				Input:         []InputType{InputText, InputImage},
 				Cost:          UsageCost{Input: 0.75, Output: 4.5, CacheRead: 0.075},

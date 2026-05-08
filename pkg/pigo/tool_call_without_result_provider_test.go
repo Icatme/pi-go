@@ -45,7 +45,7 @@ func TestCompleteSimpleOpenAICodexFiltersToolCallWithoutResultOnFollowup(t *test
 				},
 			)))
 		case 2:
-			var requestBody openAICodexRequest
+			var requestBody openAIResponsesRequest
 			if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 				t.Fatalf("expected valid second request body: %v", err)
 			}

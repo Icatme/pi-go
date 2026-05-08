@@ -13,13 +13,13 @@ func TestConvertOpenAICodexMessagesSkipsEmptyStringAndWhitespaceUserMessages(t *
 		t.Fatal("expected codex model")
 	}
 
-	input := convertOpenAICodexMessages(*model, Context{
+	input := convertOpenAIResponsesMessages(*model, Context{
 		Messages: []Message{
 			UserMessage{Content: ""},
 			UserMessage{Content: "   \n\t  "},
 			UserMessage{Content: "respond this time"},
 		},
-	})
+	}, false)
 
 	if len(input) != 1 {
 		t.Fatalf("expected only one preserved user input item, got %#v", input)
@@ -50,7 +50,7 @@ func TestConvertAnthropicMessagesSkipsEmptyStringAndWhitespaceUserMessages(t *te
 }
 
 func TestCompleteSimpleOpenAICodexHandlesEmptyAssistantMessageInHistory(t *testing.T) {
-	var requestBody openAICodexRequest
+	var requestBody openAIResponsesRequest
 	token := makeOpenAICodexToken("acc_test")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

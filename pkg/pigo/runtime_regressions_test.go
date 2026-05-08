@@ -47,7 +47,7 @@ func TestConvertOpenAICodexMessagesInsertsMissingToolResultBeforeNextUserTurn(t 
 		t.Fatal("expected codex model")
 	}
 
-	input := convertOpenAICodexMessages(*model, Context{
+	input := convertOpenAIResponsesMessages(*model, Context{
 		Messages: []Message{
 			UserMessage{Content: "calculate"},
 			AssistantMessage{
@@ -65,7 +65,7 @@ func TestConvertOpenAICodexMessagesInsertsMissingToolResultBeforeNextUserTurn(t 
 			},
 			UserMessage{Content: "never mind, what is 2+2?"},
 		},
-	})
+	}, false)
 
 	if len(input) != 4 {
 		t.Fatalf("expected 4 input items after orphan tool call repair, got %d", len(input))
@@ -110,7 +110,7 @@ func TestConvertOpenAICodexMessagesSkipsEmptyTurnsAndPreservesFollowup(t *testin
 		t.Fatal("expected codex model")
 	}
 
-	input := convertOpenAICodexMessages(*model, Context{
+	input := convertOpenAIResponsesMessages(*model, Context{
 		Messages: []Message{
 			UserMessage{Content: []ContentBlock{}},
 			AssistantMessage{
@@ -122,7 +122,7 @@ func TestConvertOpenAICodexMessagesSkipsEmptyTurnsAndPreservesFollowup(t *testin
 			},
 			UserMessage{Content: "respond this time"},
 		},
-	})
+	}, false)
 
 	if len(input) != 1 {
 		t.Fatalf("expected only one input item, got %d", len(input))
@@ -138,7 +138,7 @@ func TestOpenAICodexToolResultOutputSupportsImages(t *testing.T) {
 		t.Fatal("expected codex model")
 	}
 
-	output := buildOpenAICodexToolResultOutput([]ContentBlock{
+	output := buildOpenAIResponsesToolResultOutput([]ContentBlock{
 		ImageContent{Data: "abcd", MIMEType: "image/png"},
 	}, *model)
 
@@ -176,10 +176,10 @@ func TestOpenAICodexRequestMarshalsWithInvalidToolResultText(t *testing.T) {
 		t.Fatal("expected codex model")
 	}
 
-	request := openAICodexRequest{
+	request := openAIResponsesRequest{
 		Model:  model.ID,
 		Stream: true,
-		Input: convertOpenAICodexMessages(*model, Context{
+		Input: convertOpenAIResponsesMessages(*model, Context{
 			Messages: []Message{
 				AssistantMessage{
 					Content: []ContentBlock{
@@ -202,7 +202,7 @@ func TestOpenAICodexRequestMarshalsWithInvalidToolResultText(t *testing.T) {
 					},
 				},
 			},
-		}),
+		}, false),
 	}
 
 	if _, err := json.Marshal(request); err != nil {

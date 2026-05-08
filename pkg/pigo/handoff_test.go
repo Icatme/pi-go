@@ -9,7 +9,7 @@ import (
 )
 
 func TestCrossProviderHandoffKimiToCodexBuildsReplaySafePayload(t *testing.T) {
-	var requestBody openAICodexRequest
+	var requestBody openAIResponsesRequest
 	token := makeOpenAICodexToken("acc_test")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -15,25 +15,25 @@ import (
 // ============================================================================
 
 type openAIResponsesRequest struct {
-	Model                string                          `json:"model"`
-	Store                bool                            `json:"store"`
-	Stream               bool                            `json:"stream"`
-	Instructions         string                          `json:"instructions,omitempty"`
-	Input                []map[string]any                `json:"input,omitempty"`
-	Tools                []map[string]any                `json:"tools,omitempty"`
-	ToolChoice           string                          `json:"tool_choice,omitempty"`
-	ParallelToolCalls    bool                            `json:"parallel_tool_calls,omitempty"`
-	Temperature          *float64                        `json:"temperature,omitempty"`
+	Model                string                           `json:"model"`
+	Store                bool                             `json:"store"`
+	Stream               bool                             `json:"stream"`
+	Instructions         string                           `json:"instructions,omitempty"`
+	Input                []map[string]any                 `json:"input,omitempty"`
+	Tools                []map[string]any                 `json:"tools,omitempty"`
+	ToolChoice           string                           `json:"tool_choice,omitempty"`
+	ParallelToolCalls    bool                             `json:"parallel_tool_calls,omitempty"`
+	Temperature          *float64                         `json:"temperature,omitempty"`
 	Reasoning            *openAIResponsesReasoningOptions `json:"reasoning,omitempty"`
-	ServiceTier          string                          `json:"service_tier,omitempty"`
+	ServiceTier          string                           `json:"service_tier,omitempty"`
 	Text                 *openAIResponsesTextOptions      `json:"text,omitempty"`
-	Include              []string                        `json:"include,omitempty"`
-	PromptCacheKey       string                          `json:"prompt_cache_key,omitempty"`
-	PromptCacheRetention string                          `json:"prompt_cache_retention,omitempty"`
-	MaxOutputTokens      int                             `json:"max_output_tokens,omitempty"`
-	Metadata             map[string]any                  `json:"metadata,omitempty"`
-	PreviousResponseID   string                          `json:"previous_response_id,omitempty"`
-	Truncation           string                          `json:"truncation,omitempty"`
+	Include              []string                         `json:"include,omitempty"`
+	PromptCacheKey       string                           `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention string                           `json:"prompt_cache_retention,omitempty"`
+	MaxOutputTokens      int                              `json:"max_output_tokens,omitempty"`
+	Metadata             map[string]any                   `json:"metadata,omitempty"`
+	PreviousResponseID   string                           `json:"previous_response_id,omitempty"`
+	Truncation           string                           `json:"truncation,omitempty"`
 }
 
 type openAIResponsesReasoningOptions struct {
@@ -46,9 +46,9 @@ type openAIResponsesTextOptions struct {
 }
 
 type openAIResponsesResponse struct {
-	ID          string                       `json:"id"`
-	Status      string                       `json:"status"`
-	ServiceTier string                       `json:"service_tier,omitempty"`
+	ID          string                        `json:"id"`
+	Status      string                        `json:"status"`
+	ServiceTier string                        `json:"service_tier,omitempty"`
 	Output      []openAIResponsesResponseItem `json:"output"`
 	Usage       openAIResponsesUsage          `json:"usage"`
 	Error       *openAIResponsesResponseError `json:"error,omitempty"`
@@ -76,10 +76,10 @@ type openAIResponsesResponseContentPart struct {
 }
 
 type openAIResponsesUsage struct {
-	InputTokens  int                               `json:"input_tokens"`
-	OutputTokens int                               `json:"output_tokens"`
-	TotalTokens  int                               `json:"total_tokens"`
-	InputDetails openAIResponsesInputTokenDetails  `json:"input_tokens_details"`
+	InputTokens  int                              `json:"input_tokens"`
+	OutputTokens int                              `json:"output_tokens"`
+	TotalTokens  int                              `json:"total_tokens"`
+	InputDetails openAIResponsesInputTokenDetails `json:"input_tokens_details"`
 }
 
 type openAIResponsesInputTokenDetails struct {
@@ -336,6 +336,18 @@ func processOpenAIResponsesStreamEvent(
 	state *openAIResponsesStreamingState,
 	requestServiceTier string,
 ) (bool, error) {
+	return processOpenAIResponsesStreamEventWithProvider(data, model, response, stream, state, requestServiceTier, "")
+}
+
+func processOpenAIResponsesStreamEventWithProvider(
+	data string,
+	model Model,
+	response *AssistantMessage,
+	stream *AssistantMessageEventStream,
+	state *openAIResponsesStreamingState,
+	requestServiceTier string,
+	providerName string,
+) (bool, error) {
 	if strings.TrimSpace(data) == "" || strings.TrimSpace(data) == "[DONE]" {
 		return false, nil
 	}
@@ -521,7 +533,11 @@ func processOpenAIResponsesStreamEvent(
 			response.ErrorMessage = terminal.Error.Message
 		} else {
 			response.StopReason = StopReasonError
-			response.ErrorMessage = "response failed"
+			if providerName == "codex" {
+				response.ErrorMessage = "codex response failed"
+			} else {
+				response.ErrorMessage = "response failed"
+			}
 		}
 		stream.push(AssistantMessageEvent{
 			Type:   AssistantMessageEventError,
@@ -969,9 +985,13 @@ func mapOpenAIResponsesStopReason(status string, content []ContentBlock) StopRea
 // ============================================================================
 
 func parseOpenAIResponsesError(body []byte, fallback string) string {
+	return parseOpenAIResponsesErrorWithProvider(body, fallback, "")
+}
+
+func parseOpenAIResponsesErrorWithProvider(body []byte, fallback string, providerName string) string {
 	var payload openAIResponsesResponse
 	if err := json.Unmarshal(body, &payload); err == nil && payload.Error != nil {
-		if friendly := buildOpenAIResponsesFriendlyErrorMessage(payload.Error, fallback); friendly != "" {
+		if friendly := buildOpenAIResponsesFriendlyErrorMessage(payload.Error, fallback, providerName); friendly != "" {
 			return friendly
 		}
 		if strings.TrimSpace(payload.Error.Message) != "" {
@@ -985,7 +1005,7 @@ func parseOpenAIResponsesError(body []byte, fallback string) string {
 	return text
 }
 
-func buildOpenAIResponsesFriendlyErrorMessage(err *openAIResponsesResponseError, fallback string) string {
+func buildOpenAIResponsesFriendlyErrorMessage(err *openAIResponsesResponseError, fallback string, providerName string) string {
 	if err == nil {
 		return ""
 	}
@@ -1012,7 +1032,12 @@ func buildOpenAIResponsesFriendlyErrorMessage(err *openAIResponsesResponseError,
 		when = fmt.Sprintf(" Try again in ~%d min.", minutes)
 	}
 
-	return strings.TrimSpace(fmt.Sprintf("You have hit your usage limit%s.%s", plan, when))
+	product := "your usage limit"
+	if providerName == "codex" {
+		product = "your ChatGPT usage limit"
+	}
+
+	return strings.TrimSpace(fmt.Sprintf("You have hit %s%s.%s", product, plan, when))
 }
 
 // ============================================================================

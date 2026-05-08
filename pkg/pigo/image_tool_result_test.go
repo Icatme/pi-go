@@ -8,7 +8,7 @@ func TestOpenAICodexToolResultOutputWithTextAndImage(t *testing.T) {
 		t.Fatal("expected codex model")
 	}
 
-	output := buildOpenAICodexToolResultOutput([]ContentBlock{
+	output := buildOpenAIResponsesToolResultOutput([]ContentBlock{
 		TextContent{Text: "Diameter is 100 pixels."},
 		ImageContent{Data: "abcd", MIMEType: "image/png"},
 	}, *model)

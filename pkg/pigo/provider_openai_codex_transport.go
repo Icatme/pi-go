@@ -116,7 +116,7 @@ func streamOpenAICodexSSE(
 
 		httpResponse, err := httpClient.Do(request)
 		if err != nil {
-			if shouldRetryOpenAICodexRequest(0, err.Error()) && attempt < openAICodexRetryCount {
+			if shouldRetryOpenAIResponsesRequest(0, err.Error()) && attempt < openAICodexRetryCount {
 				if waitErr := waitOpenAICodexRetryDelay(requestContext, options.MaxRetryDelay, attempt); waitErr != nil {
 					return waitErr
 				}
@@ -128,8 +128,8 @@ func streamOpenAICodexSSE(
 		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
 			body, _ := io.ReadAll(httpResponse.Body)
 			_ = httpResponse.Body.Close()
-			message := parseOpenAICodexError(body, httpResponse.Status)
-			if shouldRetryOpenAICodexRequest(httpResponse.StatusCode, message) && attempt < openAICodexRetryCount {
+			message := parseOpenAIResponsesErrorWithProvider(body, httpResponse.Status, "codex")
+			if shouldRetryOpenAIResponsesRequest(httpResponse.StatusCode, message) && attempt < openAICodexRetryCount {
 				if waitErr := waitOpenAICodexRetryDelay(requestContext, options.MaxRetryDelay, attempt); waitErr != nil {
 					return waitErr
 				}
@@ -143,7 +143,7 @@ func streamOpenAICodexSSE(
 			Partial: *response,
 		})
 
-		state := openAICodexStreamingState{
+		state := openAIResponsesStreamingState{
 			CurrentTextIndex:     -1,
 			CurrentThinkingIndex: -1,
 			CurrentToolIndex:     -1,
@@ -151,7 +151,7 @@ func streamOpenAICodexSSE(
 		}
 		terminalSeen := false
 		err = readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
-			done, err := processOpenAICodexStreamEvent(data, model, response, stream, &state, options.ServiceTier)
+			done, err := processOpenAIResponsesStreamEventWithProvider(data, model, response, stream, &state, options.ServiceTier, "codex")
 			if done {
 				terminalSeen = true
 				return true, nil
@@ -235,7 +235,7 @@ func streamOpenAICodexWebSocket(
 		Partial: *response,
 	})
 
-	state := openAICodexStreamingState{
+	state := openAIResponsesStreamingState{
 		CurrentTextIndex:     -1,
 		CurrentThinkingIndex: -1,
 		CurrentToolIndex:     -1,
@@ -254,7 +254,7 @@ func streamOpenAICodexWebSocket(
 			return err
 		}
 
-		done, err := processOpenAICodexStreamEvent(string(message), model, response, stream, &state, options.ServiceTier)
+		done, err := processOpenAIResponsesStreamEventWithProvider(string(message), model, response, stream, &state, options.ServiceTier, "codex")
 		if err != nil {
 			keepConnection = false
 			return err
@@ -468,24 +468,6 @@ func resolveOpenAICodexWebSocketURL(baseURL string) string {
 		parsed.Scheme = "ws"
 	}
 	return parsed.String()
-}
-
-func shouldRetryOpenAICodexRequest(status int, message string) bool {
-	if status == http.StatusTooManyRequests ||
-		status == http.StatusInternalServerError ||
-		status == http.StatusBadGateway ||
-		status == http.StatusServiceUnavailable ||
-		status == http.StatusGatewayTimeout {
-		return true
-	}
-
-	lower := strings.ToLower(message)
-	return strings.Contains(lower, "rate limit") ||
-		strings.Contains(lower, "ratelimit") ||
-		strings.Contains(lower, "overloaded") ||
-		strings.Contains(lower, "service unavailable") ||
-		strings.Contains(lower, "upstream connect") ||
-		strings.Contains(lower, "connection refused")
 }
 
 func waitOpenAICodexRetryDelay(ctx context.Context, maxRetryDelayMS int, attempt int) error {

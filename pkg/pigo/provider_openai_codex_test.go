@@ -48,7 +48,7 @@ func clearOpenAICodexWebSocketSessionCache() {
 }
 
 func TestCompleteSimpleOpenAICodexBuildsRequestAndParsesText(t *testing.T) {
-	var requestBody openAICodexRequest
+	var requestBody openAIResponsesRequest
 	token := makeOpenAICodexToken("acc_test")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +196,7 @@ func TestCompleteSimpleOpenAICodexParsesToolCallResponse(t *testing.T) {
 }
 
 func TestCompleteSimpleOpenAICodexNormalizesForeignToolCallIDsInRequest(t *testing.T) {
-	var requestBody openAICodexRequest
+	var requestBody openAIResponsesRequest
 	token := makeOpenAICodexToken("acc_test")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -325,10 +325,10 @@ func TestCompleteSimpleOpenAICodexReturnsProviderErrorMessage(t *testing.T) {
 }
 
 func TestParseOpenAICodexErrorBuildsFriendlyUsageLimitMessageWithPlanAndReset(t *testing.T) {
-	message := parseOpenAICodexError([]byte(fmt.Sprintf(
+	message := parseOpenAIResponsesErrorWithProvider([]byte(fmt.Sprintf(
 		`{"error":{"type":"usage_limit_reached","message":"usage limit reached","plan_type":"PRO","resets_at":%d}}`,
 		time.Now().Unix()+120,
-	)), "429 Too Many Requests")
+	)), "429 Too Many Requests", "codex")
 
 	if !strings.Contains(message, "You have hit your ChatGPT usage limit (pro plan).") {
 		t.Fatalf("expected friendly usage limit message with plan, got %q", message)
@@ -339,7 +339,7 @@ func TestParseOpenAICodexErrorBuildsFriendlyUsageLimitMessageWithPlanAndReset(t 
 }
 
 func TestParseOpenAICodexErrorFallsBackToProviderMessageForNonUsageErrors(t *testing.T) {
-	message := parseOpenAICodexError([]byte(`{"error":{"type":"invalid_request_error","message":"bad request body"}}`), "400 Bad Request")
+	message := parseOpenAIResponsesError([]byte(`{"error":{"type":"invalid_request_error","message":"bad request body"}}`), "400 Bad Request")
 	if message != "bad request body" {
 		t.Fatalf("expected provider message for non-usage error, got %q", message)
 	}
@@ -844,7 +844,7 @@ func TestCompleteSimpleOpenAICodexFailsOnMalformedTerminalResponse(t *testing.T)
 
 func TestCompleteSimpleOpenAICodexSetsSessionCacheAndReasoningOptions(t *testing.T) {
 	var (
-		requestBody openAICodexRequest
+		requestBody openAIResponsesRequest
 		headers     http.Header
 	)
 	token := makeOpenAICodexToken("acc_test")
@@ -1018,7 +1018,7 @@ func TestCompleteSimpleOpenAICodexRefreshesExpiredOAuthBeforeRequest(t *testing.
 }
 
 func TestCompleteSimpleOpenAICodexUsesRequestedServiceTierWhenResponseEchoesDefault(t *testing.T) {
-	var requestBody openAICodexRequest
+	var requestBody openAIResponsesRequest
 	token := makeOpenAICodexToken("acc_test")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1603,7 +1603,7 @@ func TestCompleteSimpleOpenAICodexWebSocketSessionExpiresAfterIdleTTL(t *testing
 }
 
 func TestCompleteSimpleOpenAICodexPassesToolChoiceFromOptions(t *testing.T) {
-	var requestBody openAICodexRequest
+	var requestBody openAIResponsesRequest
 	token := makeOpenAICodexToken("acc_test")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1668,7 +1668,7 @@ func TestCompleteSimpleOpenAICodexPassesToolChoiceFromOptions(t *testing.T) {
 }
 
 func TestCompleteSimpleOpenAICodexDefaultsToolChoiceToAuto(t *testing.T) {
-	var requestBody openAICodexRequest
+	var requestBody openAIResponsesRequest
 	token := makeOpenAICodexToken("acc_test")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1724,7 +1724,7 @@ func TestCompleteSimpleOpenAICodexDefaultsToolChoiceToAuto(t *testing.T) {
 }
 
 func TestCompleteSimpleOpenAICodexPassesPreviousResponseID(t *testing.T) {
-	var requestBody openAICodexRequest
+	var requestBody openAIResponsesRequest
 	token := makeOpenAICodexToken("acc_test")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1781,7 +1781,7 @@ func TestCompleteSimpleOpenAICodexPassesPreviousResponseID(t *testing.T) {
 }
 
 func TestCompleteSimpleOpenAICodexOmitsEmptyPreviousResponseID(t *testing.T) {
-	var requestBody openAICodexRequest
+	var requestBody openAIResponsesRequest
 	token := makeOpenAICodexToken("acc_test")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

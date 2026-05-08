@@ -8,7 +8,7 @@ func TestConvertOpenAICodexMessagesSkipsReasoningOnlyAbortedTurn(t *testing.T) {
 		t.Fatal("expected codex model")
 	}
 
-	input := convertOpenAICodexMessages(*model, Context{
+	input := convertOpenAIResponsesMessages(*model, Context{
 		Messages: []Message{
 			UserMessage{Content: "Use the tool."},
 			AssistantMessage{
@@ -25,7 +25,7 @@ func TestConvertOpenAICodexMessagesSkipsReasoningOnlyAbortedTurn(t *testing.T) {
 			},
 			UserMessage{Content: "Say hello to confirm you can continue."},
 		},
-	})
+	}, false)
 
 	if len(input) != 2 {
 		t.Fatalf("expected aborted reasoning-only turn to be dropped, got %d input items", len(input))
@@ -43,7 +43,7 @@ func TestConvertOpenAICodexMessagesDropsFunctionCallItemIDForDifferentModelRepla
 		t.Fatal("expected codex model")
 	}
 
-	input := convertOpenAICodexMessages(*model, Context{
+	input := convertOpenAIResponsesMessages(*model, Context{
 		Messages: []Message{
 			UserMessage{Content: "Use the tool."},
 			AssistantMessage{
@@ -70,7 +70,7 @@ func TestConvertOpenAICodexMessagesDropsFunctionCallItemIDForDifferentModelRepla
 			},
 			UserMessage{Content: "What was the result?"},
 		},
-	})
+	}, false)
 
 	var (
 		sawAssistantText  bool

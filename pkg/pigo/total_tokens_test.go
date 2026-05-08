@@ -31,14 +31,14 @@ func TestApplyOpenAICodexTerminalPreservesTotalTokensAndCachedSplit(t *testing.T
 	}
 
 	response := &AssistantMessage{}
-	applyOpenAICodexTerminal(*model, response, openAICodexResponse{
+	applyOpenAIResponsesTerminal(*model, response, openAIResponsesResponse{
 		ID:     "resp_total_tokens",
 		Status: "completed",
-		Usage: openAICodexUsage{
+		Usage: openAIResponsesUsage{
 			InputTokens:  10,
 			OutputTokens: 4,
 			TotalTokens:  14,
-			InputDetails: openAICodexInputTokenDetails{
+			InputDetails: openAIResponsesInputTokenDetails{
 				CachedTokens: 3,
 			},
 		},

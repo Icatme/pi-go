@@ -2,30 +2,28 @@ package pigo
 
 import "strings"
 
-type OpenAICodexProviderOptions struct {
+type OpenAIResponsesProviderOptions struct {
 	CommonProviderOptions
 	ReasoningEffort    ThinkingLevel
 	ReasoningSummary   string
 	ServiceTier        string
-	TextVerbosity      string
 	ToolChoice         string
 	PreviousResponseID string
 	Truncation         string
 }
 
-func buildOpenAICodexProviderStreamOptions(model Model, options SimpleStreamOptions) ProviderStreamOptions {
-	return buildOpenAICodexProviderOptions(model, options).toProviderStreamOptions()
+func buildOpenAIResponsesProviderStreamOptions(model Model, options SimpleStreamOptions) ProviderStreamOptions {
+	return buildOpenAIResponsesProviderOptions(model, options).toProviderStreamOptions()
 }
 
-func normalizeOpenAICodexProviderStreamOptions(model Model, options ProviderStreamOptions) ProviderStreamOptions {
-	return resolveOpenAICodexProviderOptions(model, options).toProviderStreamOptions()
+func normalizeOpenAIResponsesProviderStreamOptions(model Model, options ProviderStreamOptions) ProviderStreamOptions {
+	return resolveOpenAIResponsesProviderOptions(model, options).toProviderStreamOptions()
 }
 
-func buildOpenAICodexProviderOptions(model Model, options SimpleStreamOptions) OpenAICodexProviderOptions {
-	providerOptions := OpenAICodexProviderOptions{
+func buildOpenAIResponsesProviderOptions(model Model, options SimpleStreamOptions) OpenAIResponsesProviderOptions {
+	providerOptions := OpenAIResponsesProviderOptions{
 		CommonProviderOptions: buildCommonProviderOptions(model, options),
 		ServiceTier:           options.ServiceTier,
-		TextVerbosity:         defaultTextVerbosity(""),
 		PreviousResponseID:    options.PreviousResponseID,
 		Truncation:            options.Truncation,
 	}
@@ -37,17 +35,16 @@ func buildOpenAICodexProviderOptions(model Model, options SimpleStreamOptions) O
 	if providerOptions.ReasoningEffort != "" {
 		providerOptions.ReasoningSummary = defaultReasoningSummary("")
 	}
-	return resolveOpenAICodexProviderOptions(model, providerOptions.toProviderStreamOptions())
+	return resolveOpenAIResponsesProviderOptions(model, providerOptions.toProviderStreamOptions())
 }
 
-func resolveOpenAICodexProviderOptions(model Model, options ProviderStreamOptions) OpenAICodexProviderOptions {
+func resolveOpenAIResponsesProviderOptions(model Model, options ProviderStreamOptions) OpenAIResponsesProviderOptions {
 	common := commonProviderOptionsFromStream(options)
-	resolved := OpenAICodexProviderOptions{
+	resolved := OpenAIResponsesProviderOptions{
 		CommonProviderOptions: common,
 		ReasoningEffort:       options.Reasoning,
 		ReasoningSummary:      options.ReasoningSummary,
 		ServiceTier:           options.ServiceTier,
-		TextVerbosity:         options.TextVerbosity,
 		ToolChoice:            options.ToolChoice,
 		PreviousResponseID:    options.PreviousResponseID,
 		Truncation:            options.Truncation,
@@ -56,9 +53,6 @@ func resolveOpenAICodexProviderOptions(model Model, options ProviderStreamOption
 	if resolved.ReasoningEffort != "" {
 		resolved.ReasoningEffort = ThinkingLevel(clampOpenAIResponsesReasoningEffort(model, resolved.ReasoningEffort))
 	}
-	if strings.TrimSpace(resolved.TextVerbosity) == "" {
-		resolved.TextVerbosity = defaultTextVerbosity("")
-	}
 	if strings.TrimSpace(resolved.ReasoningSummary) == "" && resolved.ReasoningEffort != "" {
 		resolved.ReasoningSummary = defaultReasoningSummary("")
 	}
@@ -66,12 +60,11 @@ func resolveOpenAICodexProviderOptions(model Model, options ProviderStreamOption
 	return resolved
 }
 
-func (options OpenAICodexProviderOptions) toProviderStreamOptions() ProviderStreamOptions {
+func (options OpenAIResponsesProviderOptions) toProviderStreamOptions() ProviderStreamOptions {
 	streamOptions := options.CommonProviderOptions.toProviderStreamOptions()
 	streamOptions.Reasoning = options.ReasoningEffort
 	streamOptions.ReasoningSummary = options.ReasoningSummary
 	streamOptions.ServiceTier = options.ServiceTier
-	streamOptions.TextVerbosity = options.TextVerbosity
 	streamOptions.ToolChoice = options.ToolChoice
 	streamOptions.PreviousResponseID = options.PreviousResponseID
 	streamOptions.Truncation = options.Truncation
