@@ -355,7 +355,9 @@ func streamAnthropicMessagesWithHostedTools(model Model, ctx Context, options An
 			return
 		}
 
-		finalResponse, err := completeAnthropicHostedToolLoop(model, ctx, options, apiKey, isOAuth)
+		finalResponse, err := completeAnthropicHostedToolLoop(model, ctx, options, apiKey, isOAuth, func(partial AssistantMessage, call HostedToolExecution) {
+			emitHostedToolLifecycle(stream, partial, call)
+		})
 		if err != nil {
 			response.StopReason = StopReasonError
 			response.ErrorMessage = err.Error()
@@ -384,7 +386,7 @@ func streamAnthropicMessagesWithHostedTools(model Model, ctx Context, options An
 	return stream
 }
 
-func completeAnthropicHostedToolLoop(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool) (AssistantMessage, error) {
+func completeAnthropicHostedToolLoop(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool, onHostedCall func(AssistantMessage, HostedToolExecution)) (AssistantMessage, error) {
 	messages := cloneMessages(ctx.Messages)
 	executions := make([]HostedToolExecution, 0, len(ctx.HostedTools))
 
@@ -403,6 +405,9 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 
 		messages = append(messages, response)
 		for _, call := range hostedCalls {
+			if onHostedCall != nil {
+				onHostedCall(response, call)
+			}
 			payloadText, err := json.Marshal(call.Arguments)
 			if err != nil {
 				return AssistantMessage{}, err
@@ -418,7 +423,6 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 				Name:             call.Name,
 				ProviderToolName: anthropicHostedToolProviderName(call.Type),
 				Arguments:        cloneMap(call.Arguments),
-				Result:           cloneMap(call.Arguments),
 			})
 		}
 	}
@@ -431,6 +435,41 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 		ErrorMessage: "hosted tool continuation exceeded retry limit",
 		Timestamp:    time.Now().UTC(),
 	}, nil
+}
+
+func emitHostedToolLifecycle(stream *AssistantMessageEventStream, partial AssistantMessage, call HostedToolExecution) {
+	if stream == nil {
+		return
+	}
+	toolCall := ToolCall{
+		ID:        call.ID,
+		Name:      call.Name,
+		Arguments: cloneMap(call.Arguments),
+	}
+	contentIndex := findToolCallContentIndex(partial.Content, call.ID)
+	if contentIndex < 0 {
+		partial.Content = append(cloneBlocks(partial.Content), toolCall)
+		contentIndex = len(partial.Content) - 1
+	}
+	payloadText, _ := json.Marshal(toolCall.Arguments)
+	stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallStart, ContentIndex: contentIndex, Partial: partial})
+	if len(payloadText) > 0 {
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallDelta, ContentIndex: contentIndex, Delta: string(payloadText), Partial: partial})
+	}
+	stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallEnd, ContentIndex: contentIndex, ToolCall: toolCall, Partial: partial})
+}
+
+func findToolCallContentIndex(content []ContentBlock, toolCallID string) int {
+	for index, block := range content {
+		call, ok := block.(ToolCall)
+		if !ok {
+			continue
+		}
+		if call.ID == toolCallID {
+			return index
+		}
+	}
+	return -1
 }
 
 func completeAnthropicOnce(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool) (AssistantMessage, error) {
@@ -1175,11 +1214,21 @@ func convertAnthropicTools(tools []Tool, hostedTools []HostedTool, isOAuth bool)
 	}
 
 	result := make([]anthropicTool, 0, len(tools)+len(hostedTools))
+	hostedLogicalNames := map[string]struct{}{}
+	hostedProviderNames := map[string]struct{}{}
 	for _, hostedTool := range hostedTools {
+		logicalName := normalizeHostedToolName(hostedTool)
+		if logicalName != "" {
+			hostedLogicalNames[logicalName] = struct{}{}
+		}
 		providerName := anthropicHostedToolProviderName(hostedTool.Type)
 		if providerName == "" {
 			continue
 		}
+		if _, seen := hostedProviderNames[providerName]; seen {
+			continue
+		}
+		hostedProviderNames[providerName] = struct{}{}
 		result = append(result, anthropicTool{
 			Type: "builtin_function",
 			Function: &anthropicBuiltinFunction{
@@ -1188,6 +1237,9 @@ func convertAnthropicTools(tools []Tool, hostedTools []HostedTool, isOAuth bool)
 		})
 	}
 	for _, tool := range tools {
+		if _, shadowed := hostedLogicalNames[strings.TrimSpace(tool.Name)]; shadowed {
+			continue
+		}
 		toolSchema := tool.Parameters
 		if toolSchema == nil {
 			toolSchema = map[string]any{
