@@ -74,6 +74,13 @@ func SupportsXHigh(model Model) bool {
 	return false
 }
 
+func SupportsHostedTool(model Model, toolType HostedToolType) bool {
+	if model.HostedTools.Supports(toolType) {
+		return true
+	}
+	return GetProviderCapabilities(model.Provider).HostedTools.Supports(toolType)
+}
+
 func cloneModel(model Model) Model {
 	cloned := model
 	if len(model.Input) > 0 {

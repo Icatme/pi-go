@@ -239,6 +239,30 @@ func TestGetProviderCapabilitiesReturnsBuiltInMetadata(t *testing.T) {
 	if kimi.SupportsToolChoice {
 		t.Fatalf("expected kimi to not advertise tool choice support, got %+v", kimi)
 	}
+	if !kimi.HostedTools.WebSearch {
+		t.Fatalf("expected kimi to advertise hosted web search support, got %+v", kimi)
+	}
+	if anthropic.HostedTools.WebSearch || codex.HostedTools.WebSearch {
+		t.Fatalf("expected built-in hosted web search support to remain kimi-only, got anthropic=%+v codex=%+v", anthropic, codex)
+	}
+}
+
+func TestSupportsHostedToolUsesModelAndProviderCapabilities(t *testing.T) {
+	kimi := GetModel("kimi-coding", "k2p5")
+	if kimi == nil {
+		t.Fatal("expected kimi model")
+	}
+	if !SupportsHostedTool(*kimi, HostedToolTypeWebSearch) {
+		t.Fatalf("expected kimi model to support hosted web search, got %+v", kimi)
+	}
+
+	codex := GetModel("openai-codex", "gpt-5.4")
+	if codex == nil {
+		t.Fatal("expected codex model")
+	}
+	if SupportsHostedTool(*codex, HostedToolTypeWebSearch) {
+		t.Fatalf("expected codex model to not support hosted web search, got %+v", codex)
+	}
 }
 
 func TestNormalizeCompleteOptionsUsesProviderModuleRules(t *testing.T) {

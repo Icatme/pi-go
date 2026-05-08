@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -83,9 +84,15 @@ type anthropicToolResultBlock struct {
 }
 
 type anthropicTool struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	InputSchema any    `json:"input_schema,omitempty"`
+	Type        string                    `json:"type,omitempty"`
+	Name        string                    `json:"name,omitempty"`
+	Description string                    `json:"description,omitempty"`
+	InputSchema any                       `json:"input_schema,omitempty"`
+	Function    *anthropicBuiltinFunction `json:"function,omitempty"`
+}
+
+type anthropicBuiltinFunction struct {
+	Name string `json:"name"`
 }
 
 type anthropicCacheControl struct {
@@ -165,6 +172,11 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 	if model.Provider == "kimi-coding" {
 		anthropicOptions = resolveKimiCodingProviderOptions(model, options).AnthropicMessagesProviderOptions
 	}
+	hostedTools := supportedHostedTools(model, ctx.HostedTools)
+	if len(hostedTools) > 0 {
+		ctx.HostedTools = hostedTools
+		return streamAnthropicMessagesWithHostedTools(model, ctx, anthropicOptions)
+	}
 
 	stream := newAssistantMessageEventStream()
 
@@ -209,42 +221,7 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 			return
 		}
 
-		cacheControl := resolveAnthropicCacheControl(model.BaseURL, anthropicOptions.CacheRetention)
-		thinkingConfig := buildAnthropicThinkingConfig(model, anthropicOptions)
-		requestBody := anthropicRequest{
-			Model:        model.ID,
-			Messages:     convertAnthropicMessagesWithCache(ctx.Messages, model, cacheControl, isOAuth, ctx.Tools),
-			Tools:        convertAnthropicTools(ctx.Tools, isOAuth),
-			MaxTokens:    defaultMaxTokens(model, anthropicOptions.MaxTokens),
-			Thinking:     thinkingConfig.Thinking,
-			OutputConfig: thinkingConfig.OutputConfig,
-			ToolChoice:   buildAnthropicToolChoice(anthropicOptions.ToolChoice, ctx.Tools, isOAuth),
-			Metadata:     buildAnthropicMetadata(anthropicOptions.Metadata),
-			Stream:       true,
-		}
-		if ctx.SystemPrompt != "" {
-			requestBody.System = []anthropicTextBlock{{
-				Type:         "text",
-				Text:         ctx.SystemPrompt,
-				CacheControl: cacheControl,
-			}}
-			if isOAuth && model.Provider == "anthropic" {
-				requestBody.System = append([]anthropicTextBlock{{
-					Type:         "text",
-					Text:         "You are Claude Code, Anthropic's official CLI for Claude.",
-					CacheControl: cacheControl,
-				}}, requestBody.System...)
-			}
-		} else if isOAuth && model.Provider == "anthropic" {
-			requestBody.System = []anthropicTextBlock{{
-				Type:         "text",
-				Text:         "You are Claude Code, Anthropic's official CLI for Claude.",
-				CacheControl: cacheControl,
-			}}
-		}
-		if anthropicOptions.Temperature != nil && requestBody.Thinking == nil {
-			requestBody.Temperature = anthropicOptions.Temperature
-		}
+		requestBody := buildAnthropicRequest(model, ctx, anthropicOptions, isOAuth, true)
 		payload := any(requestBody)
 		if anthropicOptions.OnPayload != nil {
 			if next := anthropicOptions.OnPayload(payload, model); next != nil {
@@ -329,7 +306,7 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 		terminalSeen := false
 		states := map[int]*anthropicStreamingBlockState{}
 		if err := readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
-			done, err := processAnthropicStreamEvent(data, model, &response, stream, states, isOAuth, ctx.Tools)
+			done, err := processAnthropicStreamEvent(data, model, &response, stream, states, isOAuth, ctx.Tools, nil)
 			if done {
 				terminalSeen = true
 				return true, nil
@@ -356,6 +333,267 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 	return stream
 }
 
+func streamAnthropicMessagesWithHostedTools(model Model, ctx Context, options AnthropicMessagesProviderOptions) *AssistantMessageEventStream {
+	stream := newAssistantMessageEventStream()
+
+	go func() {
+		response := AssistantMessage{
+			API:        model.API,
+			Provider:   model.Provider,
+			Model:      model.ID,
+			StopReason: StopReasonStop,
+			Timestamp:  time.Now().UTC(),
+		}
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: response})
+
+		apiKey, isOAuth, err := resolveAnthropicAuthorization(model, options)
+		if err != nil {
+			response.StopReason = StopReasonError
+			response.ErrorMessage = err.Error()
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
+			stream.finish(response)
+			return
+		}
+
+		finalResponse, err := completeAnthropicHostedToolLoop(model, ctx, options, apiKey, isOAuth)
+		if err != nil {
+			response.StopReason = StopReasonError
+			response.ErrorMessage = err.Error()
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
+			stream.finish(response)
+			return
+		}
+
+		for index, block := range finalResponse.Content {
+			textBlock, ok := block.(TextContent)
+			if !ok {
+				continue
+			}
+			partial := finalResponse
+			partial.Content = cloneBlocks(finalResponse.Content[:index+1])
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventTextStart, ContentIndex: index, Partial: partial})
+			if textBlock.Text != "" {
+				stream.push(AssistantMessageEvent{Type: AssistantMessageEventTextDelta, ContentIndex: index, Delta: textBlock.Text, Partial: partial})
+			}
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventTextEnd, ContentIndex: index, Content: textBlock.Text, Partial: partial})
+		}
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventDone, Reason: finalResponse.StopReason, Message: finalResponse})
+		stream.finish(finalResponse)
+	}()
+
+	return stream
+}
+
+func completeAnthropicHostedToolLoop(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool) (AssistantMessage, error) {
+	messages := cloneMessages(ctx.Messages)
+	executions := make([]HostedToolExecution, 0, len(ctx.HostedTools))
+
+	for attempt := 0; attempt < 4; attempt++ {
+		loopCtx := ctx
+		loopCtx.Messages = messages
+		response, err := completeAnthropicOnce(model, loopCtx, options, apiKey, isOAuth)
+		if err != nil {
+			return AssistantMessage{}, err
+		}
+		hostedCalls, ok := extractAnthropicHostedToolCalls(response.Content, ctx.HostedTools)
+		if !ok || response.StopReason != StopReasonToolUse {
+			response.HostedToolExecutions = append(cloneHostedToolExecutions(executions), cloneHostedToolExecutions(response.HostedToolExecutions)...)
+			return response, nil
+		}
+
+		messages = append(messages, response)
+		for _, call := range hostedCalls {
+			payloadText, err := json.Marshal(call.Arguments)
+			if err != nil {
+				return AssistantMessage{}, err
+			}
+			messages = append(messages, ToolResultMessage{
+				ToolCallID: call.ID,
+				ToolName:   call.Name,
+				Content:    []ContentBlock{TextContent{Text: string(payloadText)}},
+			})
+			executions = append(executions, HostedToolExecution{
+				ID:               call.ID,
+				Type:             call.Type,
+				Name:             call.Name,
+				ProviderToolName: anthropicHostedToolProviderName(call.Type),
+				Arguments:        cloneMap(call.Arguments),
+				Result:           cloneMap(call.Arguments),
+			})
+		}
+	}
+
+	return AssistantMessage{
+		API:          model.API,
+		Provider:     model.Provider,
+		Model:        model.ID,
+		StopReason:   StopReasonError,
+		ErrorMessage: "hosted tool continuation exceeded retry limit",
+		Timestamp:    time.Now().UTC(),
+	}, nil
+}
+
+func completeAnthropicOnce(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool) (AssistantMessage, error) {
+	response := AssistantMessage{
+		API:        model.API,
+		Provider:   model.Provider,
+		Model:      model.ID,
+		StopReason: StopReasonStop,
+		Timestamp:  time.Now().UTC(),
+	}
+	payload := any(buildAnthropicRequest(model, ctx, options, isOAuth, true))
+	if options.OnPayload != nil {
+		if next := options.OnPayload(payload, model); next != nil {
+			payload = next
+		}
+	}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return AssistantMessage{}, err
+	}
+
+	requestContext := options.RequestContext
+	if requestContext == nil {
+		requestContext = context.Background()
+	}
+	request, err := http.NewRequestWithContext(
+		requestContext,
+		http.MethodPost,
+		strings.TrimRight(model.BaseURL, "/")+"/v1/messages",
+		bytes.NewReader(bodyBytes),
+	)
+	if err != nil {
+		return AssistantMessage{}, err
+	}
+	request.Header.Set("content-type", "application/json")
+	request.Header.Set("accept", "text/event-stream")
+	request.Header.Set("anthropic-version", "2023-06-01")
+	if model.Provider == "anthropic" {
+		request.Header.Set("anthropic-beta", buildAnthropicBetaHeader(model, isOAuth))
+		if isOAuth {
+			request.Header.Set("authorization", "Bearer "+apiKey)
+			request.Header.Set("user-agent", "claude-cli/"+anthropicClaudeCodeVersion)
+			request.Header.Set("x-app", "cli")
+		} else {
+			request.Header.Set("x-api-key", apiKey)
+		}
+	} else {
+		request.Header.Set("x-api-key", apiKey)
+	}
+	for key, value := range options.Headers {
+		request.Header.Set(key, value)
+	}
+
+	httpClient := options.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	httpResponse, err := httpClient.Do(request)
+	if err != nil {
+		return AssistantMessage{}, err
+	}
+	defer httpResponse.Body.Close()
+	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
+		body, _ := io.ReadAll(httpResponse.Body)
+		return AssistantMessage{
+			API:          model.API,
+			Provider:     model.Provider,
+			Model:        model.ID,
+			StopReason:   StopReasonError,
+			ErrorMessage: parseAnthropicError(body, httpResponse.Status),
+			Timestamp:    time.Now().UTC(),
+		}, nil
+	}
+
+	dummyStream := newAssistantMessageEventStream()
+	states := map[int]*anthropicStreamingBlockState{}
+	terminalSeen := false
+	if err := readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
+		done, err := processAnthropicStreamEvent(data, model, &response, dummyStream, states, isOAuth, ctx.Tools, ctx.HostedTools)
+		if done {
+			terminalSeen = true
+			return true, nil
+		}
+		return false, err
+	}); err != nil {
+		return AssistantMessage{}, err
+	}
+	if !terminalSeen {
+		response.Usage.Cost = CalculateCost(model, response.Usage)
+	}
+	return response, nil
+}
+
+func buildAnthropicRequest(model Model, ctx Context, options AnthropicMessagesProviderOptions, isOAuth bool, stream bool) anthropicRequest {
+	cacheControl := resolveAnthropicCacheControl(model.BaseURL, options.CacheRetention)
+	thinkingConfig := buildAnthropicThinkingConfig(model, options)
+	if len(ctx.HostedTools) > 0 && model.Provider == "kimi-coding" {
+		thinkingConfig = anthropicThinkingConfig{Thinking: map[string]any{"type": "disabled"}}
+	}
+	requestBody := anthropicRequest{
+		Model:        model.ID,
+		Messages:     convertAnthropicMessagesWithCache(ctx.Messages, model, cacheControl, isOAuth, ctx.Tools, ctx.HostedTools),
+		Tools:        convertAnthropicTools(ctx.Tools, ctx.HostedTools, isOAuth),
+		MaxTokens:    defaultMaxTokens(model, options.MaxTokens),
+		Thinking:     thinkingConfig.Thinking,
+		OutputConfig: thinkingConfig.OutputConfig,
+		ToolChoice:   buildAnthropicToolChoice(options.ToolChoice, ctx.Tools, isOAuth),
+		Metadata:     buildAnthropicMetadata(options.Metadata),
+		Stream:       stream,
+	}
+	if ctx.SystemPrompt != "" {
+		requestBody.System = []anthropicTextBlock{{
+			Type:         "text",
+			Text:         ctx.SystemPrompt,
+			CacheControl: cacheControl,
+		}}
+		if isOAuth && model.Provider == "anthropic" {
+			requestBody.System = append([]anthropicTextBlock{{
+				Type:         "text",
+				Text:         "You are Claude Code, Anthropic's official CLI for Claude.",
+				CacheControl: cacheControl,
+			}}, requestBody.System...)
+		}
+	} else if isOAuth && model.Provider == "anthropic" {
+		requestBody.System = []anthropicTextBlock{{
+			Type:         "text",
+			Text:         "You are Claude Code, Anthropic's official CLI for Claude.",
+			CacheControl: cacheControl,
+		}}
+	}
+	if options.Temperature != nil && requestBody.Thinking == nil {
+		requestBody.Temperature = options.Temperature
+	}
+	return requestBody
+}
+
+func resolveAnthropicAuthorization(model Model, options AnthropicMessagesProviderOptions) (string, bool, error) {
+	apiKey := options.APIKey
+	if apiKey == "" {
+		resolved, err := ResolveAuthorization(model.Provider, options.Auth, options.HTTPClient, options.RequestContext)
+		if err != nil {
+			return "", false, err
+		}
+		apiKey = resolved
+	}
+	isOAuth := false
+	if apiKey == "" {
+		apiKey = ResolveAPIKey(model.Provider, options.Auth)
+	}
+	if model.Provider == "anthropic" {
+		if authConfig, ok := options.Auth[model.Provider]; ok && authConfig.Type == AuthTypeOAuth {
+			isOAuth = true
+		}
+		if isAnthropicOAuthToken(apiKey) {
+			isOAuth = true
+		}
+	}
+	if apiKey == "" {
+		return "", false, errors.New("missing api key")
+	}
+	return apiKey, isOAuth, nil
+}
+
 func processAnthropicStreamEvent(
 	data string,
 	model Model,
@@ -364,6 +602,7 @@ func processAnthropicStreamEvent(
 	states map[int]*anthropicStreamingBlockState,
 	isOAuth bool,
 	tools []Tool,
+	hostedTools []HostedTool,
 ) (bool, error) {
 	if strings.TrimSpace(data) == "" || strings.TrimSpace(data) == "[DONE]" {
 		return false, nil
@@ -410,15 +649,19 @@ func processAnthropicStreamEvent(
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingStart, ContentIndex: contentIndex, Partial: *response})
 		case "tool_use":
 			var input map[string]any
+			partialJSON := strings.TrimSpace(string(event.ContentBlock.Input))
+			if partialJSON == "{}" || partialJSON == "null" {
+				partialJSON = ""
+			}
 			if len(event.ContentBlock.Input) > 0 {
 				input = parseStreamingJSONObject(string(event.ContentBlock.Input))
 			}
 			response.Content = append(response.Content, ToolCall{
 				ID:        event.ContentBlock.ID,
-				Name:      anthropicToolNameForInbound(event.ContentBlock.Name, tools, isOAuth),
+				Name:      anthropicToolNameForInbound(event.ContentBlock.Name, tools, hostedTools, isOAuth),
 				Arguments: input,
 			})
-			states[event.Index] = &anthropicStreamingBlockState{ContentIndex: contentIndex, Kind: "tool", PartialJSON: string(event.ContentBlock.Input)}
+			states[event.Index] = &anthropicStreamingBlockState{ContentIndex: contentIndex, Kind: "tool", PartialJSON: partialJSON}
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallStart, ContentIndex: contentIndex, Partial: *response})
 		}
 	case "content_block_delta":
@@ -577,7 +820,7 @@ func defaultMaxTokens(model Model, override int) int {
 }
 
 func convertAnthropicMessages(messages []Message, model Model) []anthropicMessage {
-	return convertAnthropicMessagesWithCache(messages, model, nil, false, nil)
+	return convertAnthropicMessagesWithCache(messages, model, nil, false, nil, nil)
 }
 
 func resolveAnthropicCacheControl(baseURL string, retention CacheRetention) *anthropicCacheControl {
@@ -666,7 +909,7 @@ func buildAnthropicThinkingConfig(model Model, options AnthropicMessagesProvider
 	}
 }
 
-func convertAnthropicMessagesWithCache(messages []Message, model Model, cacheControl *anthropicCacheControl, isOAuth bool, tools []Tool) []anthropicMessage {
+func convertAnthropicMessagesWithCache(messages []Message, model Model, cacheControl *anthropicCacheControl, isOAuth bool, tools []Tool, hostedTools []HostedTool) []anthropicMessage {
 	transformed := TransformMessages(messages, model, func(id string, _ Model, _ AssistantMessage) string {
 		return NormalizeSimpleToolCallID(id)
 	})
@@ -684,7 +927,7 @@ func convertAnthropicMessagesWithCache(messages []Message, model Model, cacheCon
 				Content: content,
 			})
 		case AssistantMessage:
-			content := convertAssistantContent(typed.Content, isOAuth)
+			content := convertAssistantContent(typed.Content, isOAuth, hostedTools)
 			if len(content) == 0 {
 				continue
 			}
@@ -802,7 +1045,7 @@ func convertUserContent(value any, model Model) any {
 	}
 }
 
-func convertAssistantContent(blocks []ContentBlock, isOAuth bool) []any {
+func convertAssistantContent(blocks []ContentBlock, isOAuth bool, hostedTools []HostedTool) []any {
 	result := make([]any, 0, len(blocks))
 	for _, block := range blocks {
 		switch typed := block.(type) {
@@ -841,7 +1084,7 @@ func convertAssistantContent(blocks []ContentBlock, isOAuth bool) []any {
 			result = append(result, anthropicToolUseBlock{
 				Type:  "tool_use",
 				ID:    typed.ID,
-				Name:  anthropicToolNameForOutbound(typed.Name, isOAuth),
+				Name:  anthropicToolNameForOutbound(typed.Name, isOAuth, hostedTools),
 				Input: typed.Arguments,
 			})
 		}
@@ -926,12 +1169,24 @@ func buildAnthropicMetadata(metadata map[string]any) *anthropicMetadata {
 	return &anthropicMetadata{UserID: userID}
 }
 
-func convertAnthropicTools(tools []Tool, isOAuth bool) []anthropicTool {
-	if len(tools) == 0 {
+func convertAnthropicTools(tools []Tool, hostedTools []HostedTool, isOAuth bool) []anthropicTool {
+	if len(tools) == 0 && len(hostedTools) == 0 {
 		return nil
 	}
 
-	result := make([]anthropicTool, 0, len(tools))
+	result := make([]anthropicTool, 0, len(tools)+len(hostedTools))
+	for _, hostedTool := range hostedTools {
+		providerName := anthropicHostedToolProviderName(hostedTool.Type)
+		if providerName == "" {
+			continue
+		}
+		result = append(result, anthropicTool{
+			Type: "builtin_function",
+			Function: &anthropicBuiltinFunction{
+				Name: providerName,
+			},
+		})
+	}
 	for _, tool := range tools {
 		toolSchema := tool.Parameters
 		if toolSchema == nil {
@@ -941,12 +1196,114 @@ func convertAnthropicTools(tools []Tool, isOAuth bool) []anthropicTool {
 			}
 		}
 		result = append(result, anthropicTool{
-			Name:        anthropicToolNameForOutbound(tool.Name, isOAuth),
+			Name:        anthropicToolNameForOutbound(tool.Name, isOAuth, hostedTools),
 			Description: tool.Description,
 			InputSchema: toolSchema,
 		})
 	}
 	return result
+}
+
+func supportedHostedTools(model Model, requested []HostedTool) []HostedTool {
+	if len(requested) == 0 {
+		return nil
+	}
+	result := make([]HostedTool, 0, len(requested))
+	for _, tool := range requested {
+		if !SupportsHostedTool(model, tool.Type) {
+			continue
+		}
+		result = append(result, HostedTool{
+			Type: tool.Type,
+			Name: normalizeHostedToolName(tool),
+		})
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func normalizeHostedToolName(tool HostedTool) string {
+	if strings.TrimSpace(tool.Name) != "" {
+		return strings.TrimSpace(tool.Name)
+	}
+	switch tool.Type {
+	case HostedToolTypeWebSearch:
+		return "web_search"
+	default:
+		return ""
+	}
+}
+
+func anthropicHostedToolProviderName(toolType HostedToolType) string {
+	switch toolType {
+	case HostedToolTypeWebSearch:
+		return "$web_search"
+	default:
+		return ""
+	}
+}
+
+func findHostedToolByProviderName(name string, hostedTools []HostedTool) (HostedTool, bool) {
+	for _, tool := range hostedTools {
+		if anthropicHostedToolProviderName(tool.Type) == strings.TrimSpace(name) {
+			return HostedTool{Type: tool.Type, Name: normalizeHostedToolName(tool)}, true
+		}
+	}
+	return HostedTool{}, false
+}
+
+func anthropicToolNameForOutbound(name string, isOAuth bool, hostedTools []HostedTool) string {
+	trimmed := strings.TrimSpace(name)
+	for _, hostedTool := range hostedTools {
+		if normalizeHostedToolName(hostedTool) == trimmed {
+			if providerName := anthropicHostedToolProviderName(hostedTool.Type); providerName != "" {
+				return providerName
+			}
+		}
+	}
+	return anthropicToolNameForOutboundLegacy(trimmed, isOAuth)
+}
+
+func anthropicToolNameForInbound(name string, tools []Tool, hostedTools []HostedTool, isOAuth bool) string {
+	if hostedTool, ok := findHostedToolByProviderName(name, hostedTools); ok {
+		return hostedTool.Name
+	}
+	return anthropicToolNameForInboundLegacy(name, tools, isOAuth)
+}
+
+func extractAnthropicHostedToolCalls(content []ContentBlock, hostedTools []HostedTool) ([]HostedToolExecution, bool) {
+	result := make([]HostedToolExecution, 0, len(content))
+	for _, block := range content {
+		call, ok := block.(ToolCall)
+		if !ok {
+			continue
+		}
+		hostedTool, found := findHostedToolByLogicalName(call.Name, hostedTools)
+		if !found {
+			return nil, false
+		}
+		result = append(result, HostedToolExecution{
+			ID:               call.ID,
+			Type:             hostedTool.Type,
+			Name:             hostedTool.Name,
+			ProviderToolName: anthropicHostedToolProviderName(hostedTool.Type),
+			Arguments:        cloneMap(call.Arguments),
+		})
+	}
+	return result, len(result) > 0
+}
+
+func findHostedToolByLogicalName(name string, hostedTools []HostedTool) (HostedTool, bool) {
+	trimmed := strings.TrimSpace(name)
+	for _, tool := range hostedTools {
+		normalized := normalizeHostedToolName(tool)
+		if normalized == trimmed {
+			return HostedTool{Type: tool.Type, Name: normalized}, true
+		}
+	}
+	return HostedTool{}, false
 }
 
 func parseAnthropicError(body []byte, fallback string) string {

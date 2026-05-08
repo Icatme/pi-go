@@ -58,7 +58,7 @@ func mapAnthropicReasoningEffort(model Model, level ThinkingLevel) string {
 	}
 }
 
-func anthropicToolNameForOutbound(name string, isOAuth bool) string {
+func anthropicToolNameForOutboundLegacy(name string, isOAuth bool) string {
 	if !isOAuth {
 		return name
 	}
@@ -68,7 +68,7 @@ func anthropicToolNameForOutbound(name string, isOAuth bool) string {
 	return name
 }
 
-func anthropicToolNameForInbound(name string, tools []Tool, isOAuth bool) string {
+func anthropicToolNameForInboundLegacy(name string, tools []Tool, isOAuth bool) string {
 	if !isOAuth {
 		return name
 	}
@@ -93,7 +93,7 @@ func buildAnthropicToolChoice(toolChoice string, tools []Tool, isOAuth bool) any
 	default:
 		return map[string]any{
 			"type": "tool",
-			"name": anthropicToolNameForOutbound(normalized, isOAuth),
+			"name": anthropicToolNameForOutboundLegacy(normalized, isOAuth),
 		}
 	}
 }

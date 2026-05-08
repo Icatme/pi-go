@@ -561,3 +561,289 @@ func TestCompleteSimpleKimiCodingOmitsCacheControlWhenDisabled(t *testing.T) {
 		t.Fatalf("expected plain string user content when cache is disabled, got %T", lastMessage.Content)
 	}
 }
+
+func TestCompleteSimpleKimiCodingHostedWebSearchBuildsBuiltinFunctionAndAutoContinues(t *testing.T) {
+	requestBodies := make([]map[string]any, 0, 2)
+	requestCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		var requestBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request json: %v", err)
+		}
+		requestBodies = append(requestBodies, requestBody)
+
+		w.Header().Set("content-type", "text/event-stream")
+		switch requestCount {
+		case 1:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_web_1",
+						"usage": map[string]any{
+							"input_tokens":                21,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type":  "tool_use",
+						"id":    "call_web_1",
+						"name":  "$web_search",
+						"input": map[string]any{},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type":         "input_json_delta",
+						"partial_json": `{"query":"Moonshot AI Context Caching","usage":{"total_tokens":13046}}`,
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "tool_use",
+					},
+					"usage": map[string]any{
+						"output_tokens": 11,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		case 2:
+			_, _ = w.Write([]byte(buildAnthropicSSE(
+				map[string]any{
+					"type": "message_start",
+					"message": map[string]any{
+						"id": "msg_web_2",
+						"usage": map[string]any{
+							"input_tokens":                13080,
+							"output_tokens":               0,
+							"cache_read_input_tokens":     0,
+							"cache_creation_input_tokens": 0,
+						},
+					},
+				},
+				map[string]any{
+					"type":  "content_block_start",
+					"index": 0,
+					"content_block": map[string]any{
+						"type": "text",
+						"text": "",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]any{
+						"type": "text_delta",
+						"text": "Moonshot AI Context Caching is a prompt caching capability that reuses stable context across requests.",
+					},
+				},
+				map[string]any{
+					"type":  "content_block_stop",
+					"index": 0,
+				},
+				map[string]any{
+					"type": "message_delta",
+					"delta": map[string]any{
+						"stop_reason": "end_turn",
+					},
+					"usage": map[string]any{
+						"output_tokens": 24,
+					},
+				},
+				map[string]any{
+					"type": "message_stop",
+				},
+			)))
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+		}
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	response := Complete(*model, Context{
+		Messages: []Message{
+			UserMessage{Content: "Please search for Moonshot AI Context Caching and explain what it is."},
+		},
+		HostedTools: []HostedTool{{Type: HostedToolTypeWebSearch, Name: "web_search"}},
+	}, ProviderStreamOptions{
+		APIKey:    "kimi-test-key",
+		Reasoning: ThinkingLevelHigh,
+	})
+
+	if requestCount != 2 {
+		t.Fatalf("expected hosted web search to auto-continue in two requests, got %d", requestCount)
+	}
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected stop response after hosted web search continuation, got %+v", response)
+	}
+	text, ok := response.Content[0].(TextContent)
+	if !ok || !strings.Contains(text.Text, "prompt caching") {
+		t.Fatalf("expected final hosted web search answer text, got %+v", response.Content)
+	}
+	if len(response.HostedToolExecutions) != 1 {
+		t.Fatalf("expected one hosted tool execution in response metadata, got %+v", response.HostedToolExecutions)
+	}
+	if response.HostedToolExecutions[0].Type != HostedToolTypeWebSearch || response.HostedToolExecutions[0].Name != "web_search" || response.HostedToolExecutions[0].ProviderToolName != "$web_search" {
+		t.Fatalf("expected hosted web search execution metadata, got %+v", response.HostedToolExecutions[0])
+	}
+	if got := anyString(response.HostedToolExecutions[0].Arguments["query"]); got != "Moonshot AI Context Caching" {
+		t.Fatalf("expected hosted web search query to be preserved, got %+v", response.HostedToolExecutions[0].Arguments)
+	}
+
+	firstTools, ok := requestBodies[0]["tools"].([]any)
+	if !ok || len(firstTools) != 1 {
+		t.Fatalf("expected one hosted tool declaration, got %#v", requestBodies[0]["tools"])
+	}
+	firstTool, ok := firstTools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected hosted tool declaration object, got %T", firstTools[0])
+	}
+	if firstTool["type"] != "builtin_function" {
+		t.Fatalf("expected builtin_function tool declaration, got %#v", firstTool)
+	}
+	function, ok := firstTool["function"].(map[string]any)
+	if !ok || function["name"] != "$web_search" {
+		t.Fatalf("expected builtin function name $web_search, got %#v", firstTool)
+	}
+	thinking, ok := requestBodies[0]["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("expected hosted web search request to force thinking disabled, got %#v", requestBodies[0]["thinking"])
+	}
+
+	secondMessages, ok := requestBodies[1]["messages"].([]any)
+	if !ok || len(secondMessages) != 3 {
+		t.Fatalf("expected hosted continuation to append assistant + tool result messages, got %#v", requestBodies[1]["messages"])
+	}
+	toolMessage, ok := secondMessages[2].(map[string]any)
+	if !ok || toolMessage["role"] != "user" {
+		t.Fatalf("expected hosted tool result envelope as user message, got %#v", secondMessages[2])
+	}
+	toolBlocks, ok := toolMessage["content"].([]any)
+	if !ok || len(toolBlocks) != 1 {
+		t.Fatalf("expected one tool_result block in continuation request, got %#v", toolMessage["content"])
+	}
+	toolBlock, ok := toolBlocks[0].(map[string]any)
+	if !ok || toolBlock["type"] != "tool_result" || toolBlock["tool_use_id"] != "call_web_1" {
+		t.Fatalf("expected hosted tool_result echo block, got %#v", toolBlocks[0])
+	}
+	contentText, ok := toolBlock["content"].(string)
+	if !ok || !strings.Contains(contentText, "Moonshot AI Context Caching") {
+		t.Fatalf("expected hosted tool_result to echo serialized arguments, got %#v", toolBlock["content"])
+	}
+}
+
+func TestCompleteSimpleKimiCodingHostedWebSearchDoesNotAffectGenericTools(t *testing.T) {
+	var requestBody anthropicRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("expected valid request json: %v", err)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildAnthropicSSE(
+			map[string]any{
+				"type": "message_start",
+				"message": map[string]any{
+					"id": "msg_generic_1",
+					"usage": map[string]any{
+						"input_tokens":                10,
+						"output_tokens":               0,
+						"cache_read_input_tokens":     0,
+						"cache_creation_input_tokens": 0,
+					},
+				},
+			},
+			map[string]any{
+				"type":  "content_block_start",
+				"index": 0,
+				"content_block": map[string]any{
+					"type":  "tool_use",
+					"id":    "call_generic_1",
+					"name":  "lookup_catalog",
+					"input": map[string]any{},
+				},
+			},
+			map[string]any{
+				"type":  "content_block_delta",
+				"index": 0,
+				"delta": map[string]any{
+					"type":         "input_json_delta",
+					"partial_json": `{"sku":"sku-123"}`,
+				},
+			},
+			map[string]any{
+				"type":  "content_block_stop",
+				"index": 0,
+			},
+			map[string]any{
+				"type": "message_delta",
+				"delta": map[string]any{
+					"stop_reason": "tool_use",
+				},
+				"usage": map[string]any{
+					"output_tokens": 4,
+				},
+			},
+			map[string]any{
+				"type": "message_stop",
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "kimi-k2-thinking")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{
+			UserMessage{Content: "Look up SKU 123 using the catalog tool."},
+		},
+		Tools: []Tool{{
+			Name:        "lookup_catalog",
+			Description: "Look up a catalog record",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"sku": map[string]any{"type": "string"},
+				},
+			},
+		}},
+	}, SimpleStreamOptions{APIKey: "kimi-test-key"})
+
+	if response.StopReason != StopReasonToolUse {
+		t.Fatalf("expected generic tool path to remain unchanged, got %+v", response)
+	}
+	if len(requestBody.Tools) != 1 || requestBody.Tools[0].Name != "lookup_catalog" {
+		t.Fatalf("expected generic tool declaration to remain anthropic-style, got %+v", requestBody.Tools)
+	}
+	if requestBody.Tools[0].Type != "" || requestBody.Tools[0].Function != nil {
+		t.Fatalf("expected no hosted builtin declaration for generic tool path, got %+v", requestBody.Tools[0])
+	}
+}

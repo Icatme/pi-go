@@ -8,6 +8,7 @@ type StopReason string
 type InputType string
 type CacheRetention string
 type ThinkingLevel string
+type HostedToolType string
 
 const (
 	StopReasonStop    StopReason = "stop"
@@ -28,7 +29,22 @@ const (
 	ThinkingLevelMedium  ThinkingLevel = "medium"
 	ThinkingLevelHigh    ThinkingLevel = "high"
 	ThinkingLevelXHigh   ThinkingLevel = "xhigh"
+
+	HostedToolTypeWebSearch HostedToolType = "web_search"
 )
+
+type HostedToolCapabilities struct {
+	WebSearch bool
+}
+
+func (c HostedToolCapabilities) Supports(toolType HostedToolType) bool {
+	switch toolType {
+	case HostedToolTypeWebSearch:
+		return c.WebSearch
+	default:
+		return false
+	}
+}
 
 type UsageCost struct {
 	Input      float64
@@ -82,6 +98,20 @@ type ToolCall struct {
 
 func (ToolCall) isContentBlock() {}
 
+type HostedTool struct {
+	Type HostedToolType
+	Name string
+}
+
+type HostedToolExecution struct {
+	ID               string
+	Type             HostedToolType
+	Name             string
+	ProviderToolName string
+	Arguments        map[string]any
+	Result           map[string]any
+}
+
 type Message interface {
 	messageRole() string
 	clone() Message
@@ -102,30 +132,32 @@ func (m UserMessage) clone() Message {
 }
 
 type AssistantMessage struct {
-	Content      []ContentBlock
-	API          API
-	Provider     Provider
-	Model        string
-	ResponseID   string
-	Usage        Usage
-	StopReason   StopReason
-	ErrorMessage string
-	Timestamp    time.Time
+	Content               []ContentBlock
+	HostedToolExecutions  []HostedToolExecution
+	API                   API
+	Provider              Provider
+	Model                 string
+	ResponseID            string
+	Usage                 Usage
+	StopReason            StopReason
+	ErrorMessage          string
+	Timestamp             time.Time
 }
 
 func (AssistantMessage) messageRole() string { return "assistant" }
 
 func (m AssistantMessage) clone() Message {
 	return AssistantMessage{
-		Content:      cloneBlocks(m.Content),
-		API:          m.API,
-		Provider:     m.Provider,
-		Model:        m.Model,
-		ResponseID:   m.ResponseID,
-		Usage:        m.Usage,
-		StopReason:   m.StopReason,
-		ErrorMessage: m.ErrorMessage,
-		Timestamp:    m.Timestamp,
+		Content:              cloneBlocks(m.Content),
+		HostedToolExecutions: cloneHostedToolExecutions(m.HostedToolExecutions),
+		API:                  m.API,
+		Provider:             m.Provider,
+		Model:                m.Model,
+		ResponseID:           m.ResponseID,
+		Usage:                m.Usage,
+		StopReason:           m.StopReason,
+		ErrorMessage:         m.ErrorMessage,
+		Timestamp:            m.Timestamp,
 	}
 }
 
@@ -157,6 +189,7 @@ type Model struct {
 	BaseURL       string
 	Reasoning     bool
 	Input         []InputType
+	HostedTools   HostedToolCapabilities
 	Cost          UsageCost
 	ContextWindow int
 	MaxTokens     int
@@ -173,6 +206,7 @@ type Context struct {
 	SystemPrompt string
 	Messages     []Message
 	Tools        []Tool
+	HostedTools  []HostedTool
 }
 
 type AssistantMessageEventType string
@@ -240,6 +274,38 @@ func cloneBlocks(blocks []ContentBlock) []ContentBlock {
 	return out
 }
 
+func cloneHostedToolExecutions(items []HostedToolExecution) []HostedToolExecution {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]HostedToolExecution, 0, len(items))
+	for _, item := range items {
+		out = append(out, HostedToolExecution{
+			ID:               item.ID,
+			Type:             item.Type,
+			Name:             item.Name,
+			ProviderToolName: item.ProviderToolName,
+			Arguments:        cloneMap(item.Arguments),
+			Result:           cloneMap(item.Result),
+		})
+	}
+	return out
+}
+
+func cloneMessages(messages []Message) []Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]Message, 0, len(messages))
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		out = append(out, message.clone())
+	}
+	return out
+}
+
 func cloneMap(values map[string]any) map[string]any {
 	if len(values) == 0 {
 		return nil
@@ -264,4 +330,9 @@ func cloneAny(value any) any {
 	default:
 		return typed
 	}
+}
+
+func anyString(value any) string {
+	text, _ := value.(string)
+	return text
 }

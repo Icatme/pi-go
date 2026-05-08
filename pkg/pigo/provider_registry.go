@@ -26,6 +26,7 @@ type ProviderCapabilities struct {
 	SupportsTextVerbosity      bool
 	SupportsThinkingBudget     bool
 	SupportsToolChoice         bool
+	HostedTools                HostedToolCapabilities
 }
 
 type ProviderModule struct {
