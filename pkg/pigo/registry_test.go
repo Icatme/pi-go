@@ -284,8 +284,8 @@ func TestNormalizeCompleteOptionsUsesProviderModuleRules(t *testing.T) {
 	if codexOptions.TextVerbosity != "medium" {
 		t.Fatalf("expected codex verbosity default, got %q", codexOptions.TextVerbosity)
 	}
-	if codexOptions.CacheRetention != CacheRetentionNone {
-		t.Fatalf("expected codex cache retention to be cleared, got %q", codexOptions.CacheRetention)
+	if codexOptions.CacheRetention != CacheRetentionLong {
+		t.Fatalf("expected codex cache retention to be preserved, got %q", codexOptions.CacheRetention)
 	}
 
 	kimi := GetModel("kimi-coding", "kimi-k2-thinking")
@@ -320,8 +320,8 @@ func TestBuildProviderStreamOptionsUsesProviderModuleBuilders(t *testing.T) {
 	if codexOptions.ReasoningSummary != "auto" || codexOptions.TextVerbosity != "medium" {
 		t.Fatalf("expected codex builder defaults, got %+v", codexOptions)
 	}
-	if codexOptions.CacheRetention != CacheRetentionNone {
-		t.Fatalf("expected codex builder to clear cache retention, got %q", codexOptions.CacheRetention)
+	if codexOptions.CacheRetention != CacheRetentionLong {
+		t.Fatalf("expected codex builder to preserve cache retention, got %q", codexOptions.CacheRetention)
 	}
 
 	kimi := GetModel("kimi-coding", "kimi-k2-thinking")

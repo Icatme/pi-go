@@ -12,20 +12,23 @@ import (
 )
 
 type openAICodexRequest struct {
-	Model             string                       `json:"model"`
-	Store             bool                         `json:"store"`
-	Stream            bool                         `json:"stream"`
-	Instructions      string                       `json:"instructions,omitempty"`
-	Input             []map[string]any             `json:"input,omitempty"`
-	Tools             []map[string]any             `json:"tools,omitempty"`
-	ToolChoice        string                       `json:"tool_choice,omitempty"`
-	ParallelToolCalls bool                         `json:"parallel_tool_calls,omitempty"`
-	Temperature       *float64                     `json:"temperature,omitempty"`
-	Reasoning         *openAICodexReasoningOptions `json:"reasoning,omitempty"`
-	ServiceTier       string                       `json:"service_tier,omitempty"`
-	Text              *openAICodexTextOptions      `json:"text,omitempty"`
-	Include           []string                     `json:"include,omitempty"`
-	PromptCacheKey    string                       `json:"prompt_cache_key,omitempty"`
+	Model                string                       `json:"model"`
+	Store                bool                         `json:"store"`
+	Stream               bool                         `json:"stream"`
+	Instructions         string                       `json:"instructions,omitempty"`
+	Input                []map[string]any             `json:"input,omitempty"`
+	Tools                []map[string]any             `json:"tools,omitempty"`
+	ToolChoice           string                       `json:"tool_choice,omitempty"`
+	ParallelToolCalls    bool                         `json:"parallel_tool_calls,omitempty"`
+	Temperature          *float64                     `json:"temperature,omitempty"`
+	Reasoning            *openAICodexReasoningOptions `json:"reasoning,omitempty"`
+	ServiceTier          string                       `json:"service_tier,omitempty"`
+	Text                 *openAICodexTextOptions      `json:"text,omitempty"`
+	Include              []string                     `json:"include,omitempty"`
+	PromptCacheKey       string                       `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention string                       `json:"prompt_cache_retention,omitempty"`
+	MaxOutputTokens      int                          `json:"max_output_tokens,omitempty"`
+	Metadata             map[string]any               `json:"metadata,omitempty"`
 }
 
 type openAICodexReasoningOptions struct {
@@ -179,11 +182,16 @@ func streamSimpleOpenAICodex(model Model, ctx Context, options SimpleStreamOptio
 func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOptions) openAICodexRequest {
 	resolvedOptions := resolveOpenAICodexProviderOptions(model, options)
 
+	instructions := ctx.SystemPrompt
+	if strings.TrimSpace(instructions) == "" {
+		instructions = "You are a helpful assistant."
+	}
+
 	requestBody := openAICodexRequest{
 		Model:             model.ID,
 		Store:             false,
 		Stream:            true,
-		Instructions:      ctx.SystemPrompt,
+		Instructions:      instructions,
 		Input:             convertOpenAICodexMessages(model, ctx),
 		Tools:             convertOpenAICodexTools(ctx.Tools),
 		ToolChoice:        "auto",
@@ -203,6 +211,15 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 	if strings.TrimSpace(resolvedOptions.ServiceTier) != "" {
 		requestBody.ServiceTier = resolvedOptions.ServiceTier
 	}
+	if resolvedOptions.MaxTokens > 0 {
+		requestBody.MaxOutputTokens = resolvedOptions.MaxTokens
+	}
+	if len(resolvedOptions.Metadata) > 0 {
+		requestBody.Metadata = cloneMap(resolvedOptions.Metadata)
+	}
+	if retention := resolveOpenAICodexCacheRetention(resolvedOptions.CacheRetention); retention != "" {
+		requestBody.PromptCacheRetention = retention
+	}
 
 	if effort := string(resolvedOptions.ReasoningEffort); effort != "" {
 		requestBody.Reasoning = &openAICodexReasoningOptions{
@@ -212,6 +229,19 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 	}
 
 	return requestBody
+}
+
+func resolveOpenAICodexCacheRetention(retention CacheRetention) string {
+	switch retention {
+	case CacheRetentionShort:
+		return "24h"
+	case CacheRetentionLong:
+		return "7d"
+	case CacheRetentionNone:
+		return "0s"
+	default:
+		return ""
+	}
 }
 
 func resolveOpenAICodexURL(baseURL string) string {
@@ -574,7 +604,7 @@ func processOpenAICodexStreamEvent(
 			return false, err
 		}
 		startOpenAICodexStreamItem(response, stream, state, item)
-	case "response.reasoning_summary_text.delta":
+	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		if state.CurrentThinkingIndex < 0 {
 			startOpenAICodexThinkingBlock(response, stream, state)
 		}
@@ -587,6 +617,22 @@ func processOpenAICodexStreamEvent(
 				Type:         AssistantMessageEventThinkingDelta,
 				ContentIndex: state.CurrentThinkingIndex,
 				Delta:        delta,
+				Partial:      *response,
+			})
+		}
+	case "response.reasoning_summary_part.added":
+		if state.CurrentThinkingIndex < 0 {
+			startOpenAICodexThinkingBlock(response, stream, state)
+		}
+	case "response.reasoning_summary_part.done":
+		if state.CurrentThinkingIndex >= 0 {
+			block, _ := response.Content[state.CurrentThinkingIndex].(ThinkingContent)
+			block.Thinking += "\n\n"
+			response.Content[state.CurrentThinkingIndex] = block
+			stream.push(AssistantMessageEvent{
+				Type:         AssistantMessageEventThinkingDelta,
+				ContentIndex: state.CurrentThinkingIndex,
+				Delta:        "\n\n",
 				Partial:      *response,
 			})
 		}
@@ -638,10 +684,22 @@ func processOpenAICodexStreamEvent(
 		}
 		arguments, _ := event["arguments"].(string)
 		if arguments != "" {
+			previousJSON := state.CurrentToolJSON
 			state.CurrentToolJSON = arguments
 			block, _ := response.Content[state.CurrentToolIndex].(ToolCall)
 			block.Arguments = parseStreamingJSONObject(state.CurrentToolJSON)
 			response.Content[state.CurrentToolIndex] = block
+			if strings.HasPrefix(arguments, previousJSON) {
+				delta := arguments[len(previousJSON):]
+				if delta != "" {
+					stream.push(AssistantMessageEvent{
+						Type:         AssistantMessageEventToolCallDelta,
+						ContentIndex: state.CurrentToolIndex,
+						Delta:        delta,
+						Partial:      *response,
+					})
+				}
+			}
 		}
 	case "response.output_item.done":
 		itemMap, ok := event["item"].(map[string]any)
@@ -915,6 +973,15 @@ func startOpenAICodexThinkingBlock(response *AssistantMessage, stream *Assistant
 	})
 }
 
+func encodeOpenAICodexTextSignatureV1(id string, phase string) string {
+	sig := TextSignatureV1{V: 1, ID: id}
+	if phase != "" {
+		sig.Phase = phase
+	}
+	bytes, _ := json.Marshal(sig)
+	return string(bytes)
+}
+
 func finalizeOpenAICodexStreamItem(
 	response *AssistantMessage,
 	stream *AssistantMessageEventStream,
@@ -943,6 +1010,9 @@ func finalizeOpenAICodexStreamItem(
 		}
 		if len(parts) > 0 {
 			block.Text = strings.Join(parts, "")
+		}
+		if strings.TrimSpace(item.ID) != "" {
+			block.TextSignature = encodeOpenAICodexTextSignatureV1(item.ID, "")
 		}
 		response.Content[state.CurrentTextIndex] = block
 		stream.push(AssistantMessageEvent{

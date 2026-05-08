@@ -300,6 +300,7 @@ func TestStreamSimpleOpenAICodexEmitsThinkingAndToolCallLifecycle(t *testing.T) 
 		AssistantMessageEventThinkingEnd,
 		AssistantMessageEventToolCallStart,
 		AssistantMessageEventToolCallDelta,
+		AssistantMessageEventToolCallDelta,
 		AssistantMessageEventToolCallEnd,
 		AssistantMessageEventDone,
 	}
@@ -317,11 +318,14 @@ func TestStreamSimpleOpenAICodexEmitsThinkingAndToolCallLifecycle(t *testing.T) 
 	if events[5].Delta != `{"path":"README.md",` {
 		t.Fatalf("expected incremental tool call delta json, got %q", events[5].Delta)
 	}
-	if events[6].ToolCall.ID != "call_1|fc_1" {
-		t.Fatalf("expected tool call id to include item id, got %q", events[6].ToolCall.ID)
+	if events[6].Delta != `"content":"hi"}` {
+		t.Fatalf("expected final tool call delta json, got %q", events[6].Delta)
 	}
-	if events[7].Reason != StopReasonToolUse {
-		t.Fatalf("expected done reason toolUse, got %q", events[7].Reason)
+	if events[7].ToolCall.ID != "call_1|fc_1" {
+		t.Fatalf("expected tool call id to include item id, got %q", events[7].ToolCall.ID)
+	}
+	if events[8].Reason != StopReasonToolUse {
+		t.Fatalf("expected done reason toolUse, got %q", events[8].Reason)
 	}
 	if result.ResponseID != "resp_stream_1" {
 		t.Fatalf("expected response id resp_stream_1, got %q", result.ResponseID)

@@ -56,9 +56,6 @@ func resolveOpenAICodexProviderOptions(model Model, options ProviderStreamOption
 	if strings.TrimSpace(resolved.ReasoningSummary) == "" && resolved.ReasoningEffort != "" {
 		resolved.ReasoningSummary = defaultReasoningSummary("")
 	}
-	if resolved.CacheRetention != "" {
-		resolved.CacheRetention = CacheRetentionNone
-	}
 
 	return resolved
 }
