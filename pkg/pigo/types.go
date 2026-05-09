@@ -38,9 +38,10 @@ const (
 	ModelThinkingLevelHigh    ModelThinkingLevel = "high"
 	ModelThinkingLevelXHigh   ModelThinkingLevel = "xhigh"
 
-	TransportSSE       Transport = "sse"
-	TransportWebSocket Transport = "websocket"
-	TransportAuto      Transport = "auto"
+	TransportSSE          Transport = "sse"
+	TransportWebSocket    Transport = "websocket"
+	TransportWebSocketCached Transport = "websocket-cached"
+	TransportAuto         Transport = "auto"
 
 	HostedToolTypeWebSearch  HostedToolType = "web_search"
 	HostedToolTypeFetch      HostedToolType = "fetch"
@@ -224,6 +225,7 @@ type ToolResultMessage struct {
 	ToolCallID string
 	ToolName   string
 	Content    []ContentBlock
+	Details    any
 	IsError    bool
 	Timestamp  time.Time
 }
@@ -235,6 +237,7 @@ func (m ToolResultMessage) clone() Message {
 		ToolCallID: m.ToolCallID,
 		ToolName:   m.ToolName,
 		Content:    cloneBlocks(m.Content),
+		Details:    cloneAny(m.Details),
 		IsError:    m.IsError,
 		Timestamp:  m.Timestamp,
 	}
@@ -258,6 +261,7 @@ type Model struct {
 	Cost             UsageCost
 	ContextWindow    int
 	MaxTokens        int
+	Headers          map[string]string
 }
 
 type Tool struct {

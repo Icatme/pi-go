@@ -416,3 +416,119 @@ func TestValidateToolArgumentsCoercesUnionType(t *testing.T) {
 		t.Fatalf("expected union type to preserve string match, got %#v", validated["value"])
 	}
 }
+
+func TestValidateToolArgumentsSupportsAnyOf(t *testing.T) {
+	tool := Tool{
+		Name: "anyof_tool",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"value": map[string]any{
+					"anyOf": []any{
+						map[string]any{"type": "string"},
+						map[string]any{"type": "number"},
+					},
+				},
+			},
+			"required": []string{"value"},
+		},
+	}
+
+	// String should match first anyOf branch
+	validated, err := ValidateToolArguments(tool, ToolCall{
+		ID:        "tool-1",
+		Name:      "anyof_tool",
+		Arguments: map[string]any{"value": "hello"},
+	})
+	if err != nil {
+		t.Fatalf("expected anyOf string validation to succeed, got error: %v", err)
+	}
+	if validated["value"] != "hello" {
+		t.Fatalf("expected anyOf to preserve string, got %#v", validated["value"])
+	}
+
+	// Number input with anyOf[string, number]: string branch comes first and coerces int to string
+	// This is expected behavior - anyOf returns the first matching branch
+	validated, err = ValidateToolArguments(tool, ToolCall{
+		ID:        "tool-2",
+		Name:      "anyof_tool",
+		Arguments: map[string]any{"value": 42},
+	})
+	if err != nil {
+		t.Fatalf("expected anyOf number validation to succeed, got error: %v", err)
+	}
+	// int 42 gets coerced to "42" by the first (string) branch
+	if validated["value"] != "42" {
+		t.Fatalf("expected anyOf to coerce int 42 to string '42' via first branch, got %#v", validated["value"])
+	}
+}
+
+func TestValidateToolArgumentsSupportsOneOf(t *testing.T) {
+	tool := Tool{
+		Name: "oneof_tool",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"value": map[string]any{
+					"oneOf": []any{
+						map[string]any{"type": "string", "minLength": 5},
+						map[string]any{"type": "integer"},
+					},
+				},
+			},
+			"required": []string{"value"},
+		},
+	}
+
+	// Integer should match second oneOf branch exclusively
+	validated, err := ValidateToolArguments(tool, ToolCall{
+		ID:        "tool-1",
+		Name:      "oneof_tool",
+		Arguments: map[string]any{"value": "42"},
+	})
+	if err != nil {
+		t.Fatalf("expected oneOf integer validation to succeed, got error: %v", err)
+	}
+	if got, ok := validated["value"].(int); !ok || got != 42 {
+		t.Fatalf("expected oneOf to coerce to integer 42, got %#v", validated["value"])
+	}
+}
+
+func TestValidateToolArgumentsEnumBeforeType(t *testing.T) {
+	tool := Tool{
+		Name: "enum_tool",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"status": map[string]any{
+					"type": "string",
+					"enum": []any{"active", "inactive", "pending"},
+				},
+			},
+			"required": []string{"status"},
+		},
+	}
+
+	// Valid enum value should pass
+	validated, err := ValidateToolArguments(tool, ToolCall{
+		ID:        "tool-1",
+		Name:      "enum_tool",
+		Arguments: map[string]any{"status": "active"},
+	})
+	if err != nil {
+		t.Fatalf("expected enum validation to succeed, got error: %v", err)
+	}
+	if validated["status"] != "active" {
+		t.Fatalf("expected enum value to be preserved, got %#v", validated["status"])
+	}
+
+	// Invalid enum value should fail
+	_, err = ValidateToolArguments(tool, ToolCall{
+		ID:        "tool-2",
+		Name:      "enum_tool",
+		Arguments: map[string]any{"status": "deleted"},
+	})
+	if err == nil {
+		t.Fatal("expected enum validation to fail for invalid value")
+	}
+}

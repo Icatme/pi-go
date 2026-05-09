@@ -162,6 +162,12 @@ func cloneModel(model Model) Model {
 			cloned.ThinkingLevelMap[k] = v
 		}
 	}
+	if len(model.Headers) > 0 {
+		cloned.Headers = make(map[string]string, len(model.Headers))
+		for k, v := range model.Headers {
+			cloned.Headers[k] = v
+		}
+	}
 	return cloned
 }
 

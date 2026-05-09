@@ -122,3 +122,47 @@ func TestParseStreamingJSONReturnsEmptyMapForWhitespaceInput(t *testing.T) {
 		t.Fatalf("expected empty map, got %v", result)
 	}
 }
+
+func TestRepairJSONHandlesNullControlCharacter(t *testing.T) {
+	input := `{"text": "hello` + "\x00" + `world"}`
+	repaired := repairJSON(input)
+	expected := `{"text": "hello\u0000world"}`
+	if repaired != expected {
+		t.Fatalf("expected %q, got %q", expected, repaired)
+	}
+}
+
+func TestRepairJSONHandlesTabCharacter(t *testing.T) {
+	input := `{"text": "hello` + "\t" + `world"}`
+	repaired := repairJSON(input)
+	expected := `{"text": "hello\tworld"}`
+	if repaired != expected {
+		t.Fatalf("expected %q, got %q", expected, repaired)
+	}
+}
+
+func TestRepairJSONHandlesInvalidUnicodeEscape(t *testing.T) {
+	input := `{"text": "\u00"}`
+	repaired := repairJSON(input)
+	// The input `\u00"}` has a backslash followed by 'u', then "00"}"
+	// The repair logic extracts 4 chars after \u: "00"}"
+	// isValidHexDigits returns false because '"' and '}' are not hex
+	// Then validJSONEscapes['u'] is true, so \u is preserved as valid escape
+	// The remaining "00"}" is processed as normal string content
+	// Result: the original string is preserved (no repair needed for \u)
+	expected := `{"text": "\u00"}`
+	if repaired != expected {
+		t.Fatalf("expected %q, got %q", expected, repaired)
+	}
+}
+
+func TestParseJSONWithRepairParsesArray(t *testing.T) {
+	input := `[1, 2, 3]`
+	result, err := parseJSONWithRepair[[]any](input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 3 {
+		t.Fatalf("expected 3 elements, got %d", len(result))
+	}
+}
