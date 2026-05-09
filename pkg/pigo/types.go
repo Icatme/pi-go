@@ -38,10 +38,10 @@ const (
 	ModelThinkingLevelHigh    ModelThinkingLevel = "high"
 	ModelThinkingLevelXHigh   ModelThinkingLevel = "xhigh"
 
-	TransportSSE          Transport = "sse"
-	TransportWebSocket    Transport = "websocket"
+	TransportSSE             Transport = "sse"
+	TransportWebSocket       Transport = "websocket"
 	TransportWebSocketCached Transport = "websocket-cached"
-	TransportAuto         Transport = "auto"
+	TransportAuto            Transport = "auto"
 
 	HostedToolTypeWebSearch  HostedToolType = "web_search"
 	HostedToolTypeFetch      HostedToolType = "fetch"

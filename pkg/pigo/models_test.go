@@ -181,9 +181,9 @@ func TestClampThinkingLevelClampsToNearestAvailable(t *testing.T) {
 	model := Model{
 		Reasoning: true,
 		ThinkingLevelMap: ThinkingLevelMap{
-			ModelThinkingLevelLow:     "low",
-			ModelThinkingLevelMedium:  "",
-			ModelThinkingLevelHigh:    "high",
+			ModelThinkingLevelLow:    "low",
+			ModelThinkingLevelMedium: "",
+			ModelThinkingLevelHigh:   "high",
 		},
 	}
 	// medium is explicitly excluded (mapped to empty string), should clamp to high
