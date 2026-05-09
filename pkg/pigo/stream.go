@@ -1,7 +1,10 @@
 package pigo
 
 import (
+	"context"
+	"errors"
 	"sync"
+	"time"
 )
 
 const assistantMessageEventDeltaBuffer = 1024
@@ -21,6 +24,19 @@ type AssistantMessageEventStream struct {
 	pendingDelta int
 	droppedDelta int
 	closing      bool
+
+	observer   Observer
+	model      Model
+	startTime  time.Time
+	requestCtx context.Context
+	eventCount int64
+}
+
+func (s *AssistantMessageEventStream) setObserver(obs Observer, m Model) {
+	s.observer = obs
+	s.model = m
+	s.startTime = time.Now()
+	s.requestCtx = context.Background()
 }
 
 func newAssistantMessageEventStream() *AssistantMessageEventStream {
@@ -112,17 +128,30 @@ func (s *AssistantMessageEventStream) push(event AssistantMessageEvent) {
 		s.pendingDelta++
 	}
 	s.pending = append(s.pending, queued)
+	s.eventCount++
 	s.queueCond.Signal()
 }
 
 func (s *AssistantMessageEventStream) finish(result AssistantMessage) {
 	s.finalizeOnce.Do(func() {
-		s.result <- cloneAssistantMessage(result)
+		cloned := cloneAssistantMessage(result)
+		s.result <- cloned
 		close(s.result)
 		s.queueMu.Lock()
 		s.closing = true
 		s.queueCond.Broadcast()
+		dropped := s.droppedDelta
 		s.queueMu.Unlock()
+
+		if s.observer != nil {
+			duration := time.Since(s.startTime)
+			if result.StopReason == StopReasonError || result.StopReason == StopReasonAborted {
+				s.observer.OnRequestError(s.requestCtx, s.model, errors.New(result.ErrorMessage), duration)
+			} else {
+				s.observer.OnRequestComplete(s.requestCtx, s.model, cloned, duration)
+			}
+			s.observer.OnStreamFinish(s.requestCtx, s.model, cloned, int(s.eventCount), dropped, duration)
+		}
 	})
 }
 

@@ -23,6 +23,7 @@ type StreamOptions struct {
 	MaxRetryDelay  int
 	Metadata       map[string]any
 	RequestContext context.Context
+	Observer       Observer
 }
 
 type ProviderStreamOptions struct {
@@ -50,6 +51,7 @@ type ProviderStreamOptions struct {
 	ToolChoice           string
 	PreviousResponseID   string
 	Truncation           string
+	Observer             Observer
 }
 
 type SimpleStreamOptions struct {
@@ -74,4 +76,5 @@ type SimpleStreamOptions struct {
 	ThinkingBudgets    ThinkingBudgets
 	PreviousResponseID string
 	Truncation         string
+	Observer           Observer
 }

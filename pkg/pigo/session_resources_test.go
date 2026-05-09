@@ -139,3 +139,38 @@ func TestCleanupSessionResourcesReturnsErrorForFailedCleanup(t *testing.T) {
 		t.Fatal("expected error from failing cleanup")
 	}
 }
+
+func TestRegisterSessionResourceCleanupOptional(t *testing.T) {
+	isolateSessionResourceCleanups(t)
+
+	called := false
+	cleanup := func() {
+		called = true
+	}
+
+	unregister := RegisterSessionResourceCleanupOptional(cleanup)
+	if unregister == nil {
+		t.Fatal("expected unregister function")
+	}
+
+	_ = CleanupSessionResources("test-session")
+	if !called {
+		t.Fatal("expected optional cleanup to be called")
+	}
+}
+
+func TestRegisterSessionResourceCleanupOptionalIgnoresSessionID(t *testing.T) {
+	isolateSessionResourceCleanups(t)
+
+	var receivedID string
+	cleanup := func() {
+		receivedID = "was-called"
+	}
+
+	RegisterSessionResourceCleanupOptional(cleanup)
+	_ = CleanupSessionResources("any-session-id")
+
+	if receivedID != "was-called" {
+		t.Fatal("expected optional cleanup to be called regardless of sessionID")
+	}
+}

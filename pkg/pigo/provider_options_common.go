@@ -25,6 +25,7 @@ type CommonProviderOptions struct {
 	RequestContext     context.Context
 	PreviousResponseID string
 	Truncation         string
+	Observer           Observer
 }
 
 func buildCommonProviderOptions(model Model, options SimpleStreamOptions) CommonProviderOptions {
@@ -53,6 +54,7 @@ func buildCommonProviderOptions(model Model, options SimpleStreamOptions) Common
 		RequestContext:     options.RequestContext,
 		PreviousResponseID: options.PreviousResponseID,
 		Truncation:         options.Truncation,
+		Observer:           options.Observer,
 	}
 }
 
@@ -77,6 +79,7 @@ func commonProviderOptionsFromStream(options ProviderStreamOptions) CommonProvid
 		RequestContext:     options.RequestContext,
 		PreviousResponseID: options.PreviousResponseID,
 		Truncation:         options.Truncation,
+		Observer:           options.Observer,
 	}
 }
 
@@ -101,5 +104,6 @@ func (options CommonProviderOptions) toProviderStreamOptions() ProviderStreamOpt
 		RequestContext:     options.RequestContext,
 		PreviousResponseID: options.PreviousResponseID,
 		Truncation:         options.Truncation,
+		Observer:           options.Observer,
 	}
 }

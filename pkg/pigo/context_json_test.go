@@ -162,3 +162,84 @@ func TestDeserializeContextErrorsOnUnknownRole(t *testing.T) {
 		t.Fatal("expected unknown message role error")
 	}
 }
+
+func TestContextJSONTimestampRoundTrip(t *testing.T) {
+	now := time.Date(2026, 5, 9, 12, 30, 45, 123456789, time.UTC)
+	context := Context{
+		Messages: []Message{
+			UserMessage{Content: "hello", Timestamp: now},
+			AssistantMessage{Content: []ContentBlock{TextContent{Text: "world"}}, StopReason: StopReasonStop, Timestamp: now.Add(time.Second)},
+			ToolResultMessage{ToolCallID: "call_1", ToolName: "test", Content: []ContentBlock{TextContent{Text: "result"}}, Timestamp: now.Add(2 * time.Second)},
+		},
+	}
+
+	payload, err := json.Marshal(context)
+	if err != nil {
+		t.Fatalf("expected context to marshal, got %v", err)
+	}
+
+	var wire map[string]any
+	if err := json.Unmarshal(payload, &wire); err != nil {
+		t.Fatalf("expected payload to unmarshal to generic map, got %v", err)
+	}
+	messages, ok := wire["messages"].([]any)
+	if !ok || len(messages) != 3 {
+		t.Fatalf("expected 3 messages in wire format, got %#v", wire["messages"])
+	}
+
+	userMsg := messages[0].(map[string]any)
+	timestampStr, ok := userMsg["timestamp"].(string)
+	if !ok {
+		t.Fatalf("expected timestamp to be serialized as string, got %T", userMsg["timestamp"])
+	}
+	if timestampStr == "" {
+		t.Fatal("expected non-empty timestamp string")
+	}
+
+	var restored Context
+	if err := json.Unmarshal(payload, &restored); err != nil {
+		t.Fatalf("expected context to unmarshal, got %v", err)
+	}
+
+	user, ok := restored.Messages[0].(UserMessage)
+	if !ok {
+		t.Fatalf("expected first message to be user, got %T", restored.Messages[0])
+	}
+	if !user.Timestamp.Equal(now) {
+		t.Fatalf("expected user timestamp to round-trip, got %v, want %v", user.Timestamp, now)
+	}
+
+	assistant, ok := restored.Messages[1].(AssistantMessage)
+	if !ok {
+		t.Fatalf("expected second message to be assistant, got %T", restored.Messages[1])
+	}
+	if !assistant.Timestamp.Equal(now.Add(time.Second)) {
+		t.Fatalf("expected assistant timestamp to round-trip, got %v, want %v", assistant.Timestamp, now.Add(time.Second))
+	}
+
+	toolResult, ok := restored.Messages[2].(ToolResultMessage)
+	if !ok {
+		t.Fatalf("expected third message to be toolResult, got %T", restored.Messages[2])
+	}
+	if !toolResult.Timestamp.Equal(now.Add(2 * time.Second)) {
+		t.Fatalf("expected tool result timestamp to round-trip, got %v, want %v", toolResult.Timestamp, now.Add(2*time.Second))
+	}
+}
+
+func TestContextJSONTimestampHandlesUnixMillisInput(t *testing.T) {
+	// TS side sends timestamp as Unix milliseconds (number).
+	// Verify Go can handle numeric timestamp input gracefully.
+	payload := []byte(`{"messages":[{"role":"user","content":"hello","timestamp":1746791445123}]}`)
+
+	var restored Context
+	err := json.Unmarshal(payload, &restored)
+	// Current implementation uses RFC3339Nano string format.
+	// Numeric timestamps from TS will fail to parse with the current layout.
+	// This test documents the current behavior.
+	if err == nil {
+		user, ok := restored.Messages[0].(UserMessage)
+		if ok && !user.Timestamp.IsZero() {
+			t.Fatalf("expected numeric timestamp to be rejected or zero, got %v", user.Timestamp)
+		}
+	}
+}

@@ -12,6 +12,7 @@ import (
 func streamOpenAICodex(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
 	options = resolveOpenAICodexProviderOptions(model, NormalizeProviderStreamOptions(model, options)).toProviderStreamOptions()
 	stream := newAssistantMessageEventStream()
+	stream.setObserver(options.Observer, model)
 
 	response := AssistantMessage{
 		API:        model.API,

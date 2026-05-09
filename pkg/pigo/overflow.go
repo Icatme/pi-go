@@ -30,6 +30,14 @@ var nonOverflowPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)too many requests`),
 }
 
+// GetOverflowPatterns returns a copy of the overflow detection patterns
+// for testing and debugging purposes.
+func GetOverflowPatterns() []*regexp.Regexp {
+	result := make([]*regexp.Regexp, len(overflowPatterns))
+	copy(result, overflowPatterns)
+	return result
+}
+
 func IsContextOverflow(message AssistantMessage, contextWindow int) bool {
 	if message.StopReason == StopReasonError && message.ErrorMessage != "" {
 		for _, pattern := range nonOverflowPatterns {

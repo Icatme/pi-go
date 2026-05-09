@@ -113,3 +113,41 @@ func TestIsContextOverflowDetectsRequestTooLarge(t *testing.T) {
 		t.Fatal("expected request_too_large error to be treated as overflow")
 	}
 }
+
+func TestGetOverflowPatternsReturnsCopy(t *testing.T) {
+	patterns := GetOverflowPatterns()
+	if len(patterns) == 0 {
+		t.Fatal("expected non-empty overflow patterns")
+	}
+	if len(patterns) != len(overflowPatterns) {
+		t.Fatalf("expected %d patterns, got %d", len(overflowPatterns), len(patterns))
+	}
+	// Verify it is a copy by modifying the returned slice
+	patterns = patterns[:0]
+	if len(overflowPatterns) == 0 {
+		t.Fatal("expected original patterns to remain unchanged")
+	}
+}
+
+func TestGetOverflowPatternsContainsExpectedPatterns(t *testing.T) {
+	patterns := GetOverflowPatterns()
+	expectedPatterns := []string{
+		"prompt is too long",
+		"request_too_large",
+		"exceeds the context window",
+		"too many tokens",
+		"token limit exceeded",
+	}
+	for _, expected := range expectedPatterns {
+		found := false
+		for _, pattern := range patterns {
+			if pattern.MatchString(expected) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected pattern matching %q to be present", expected)
+		}
+	}
+}

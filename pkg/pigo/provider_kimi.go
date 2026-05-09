@@ -179,6 +179,7 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 	}
 
 	stream := newAssistantMessageEventStream()
+	stream.setObserver(options.Observer, model)
 
 	response := AssistantMessage{
 		API:        model.API,
@@ -335,6 +336,7 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 
 func streamAnthropicMessagesWithHostedTools(model Model, ctx Context, options AnthropicMessagesProviderOptions) *AssistantMessageEventStream {
 	stream := newAssistantMessageEventStream()
+	stream.setObserver(options.Observer, model)
 
 	go func() {
 		response := AssistantMessage{

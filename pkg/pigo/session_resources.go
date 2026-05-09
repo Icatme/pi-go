@@ -7,6 +7,10 @@ import (
 
 type SessionResourceCleanup func(sessionID string)
 
+// SessionResourceCleanupOptional is the variant that allows omitting sessionID.
+// Use this when registering cleanups that do not need a session identifier.
+type SessionResourceCleanupOptional func()
+
 type sessionResourceCleanupEntry struct {
 	id      uint64
 	cleanup SessionResourceCleanup
@@ -19,6 +23,17 @@ var (
 )
 
 func RegisterSessionResourceCleanup(cleanup SessionResourceCleanup) func() {
+	return registerSessionResourceCleanupInternal(cleanup)
+}
+
+// RegisterSessionResourceCleanupOptional registers a cleanup that does not
+// require a sessionID. It wraps the cleanup so it can be stored alongside
+// session-aware cleanups.
+func RegisterSessionResourceCleanupOptional(cleanup SessionResourceCleanupOptional) func() {
+	return registerSessionResourceCleanupInternal(func(string) { cleanup() })
+}
+
+func registerSessionResourceCleanupInternal(cleanup SessionResourceCleanup) func() {
 	sessionResourceCleanupsMu.Lock()
 	defer sessionResourceCleanupsMu.Unlock()
 
