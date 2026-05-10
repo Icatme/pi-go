@@ -103,10 +103,16 @@ Main package validation commands:
 
 ```powershell
 go test ./pkg/pigo/... -v -count=1
-go test ./pkg/pigo/... -coverprofile=coverage.out
-go tool cover -func=coverage.out
+.\scripts\test.ps1 -Coverage
 go vet ./pkg/pigo/...
 gofmt -l pkg/pigo/
+```
+
+For direct coverage commands, prefer a forced rebuild after package file moves or splits so the profile does not reuse stale cover metadata from the Go build cache:
+
+```powershell
+go test -a ./pkg/pigo/... -coverprofile=coverage.out -count=1
+go tool cover -func coverage.out
 ```
 
 Race testing:

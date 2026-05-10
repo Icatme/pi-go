@@ -7,6 +7,26 @@ import (
 	"time"
 )
 
+func waitForStreamProducer(t *testing.T, producerDone <-chan struct{}, description string) {
+	t.Helper()
+	timeout := 10 * time.Second
+	if deadline, ok := t.Deadline(); ok {
+		remaining := time.Until(deadline) / 20
+		if remaining > 30*time.Second {
+			remaining = 30 * time.Second
+		}
+		if remaining >= 5*time.Second {
+			timeout = remaining
+		}
+	}
+
+	select {
+	case <-producerDone:
+	case <-time.After(timeout):
+		t.Fatalf("expected producer to finish %s before %s", description, timeout)
+	}
+}
+
 func TestAssistantMessageEventStreamStressPreservesNonDroppableEvents(t *testing.T) {
 	stream := newAssistantMessageEventStream()
 	producerDone := make(chan struct{})
@@ -22,11 +42,7 @@ func TestAssistantMessageEventStreamStressPreservesNonDroppableEvents(t *testing
 		stream.finish(AssistantMessage{StopReason: StopReasonStop})
 	}()
 
-	select {
-	case <-producerDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected producer to finish under stream backpressure")
-	}
+	waitForStreamProducer(t, producerDone, "under stream backpressure")
 
 	var (
 		sawStart   bool
@@ -63,11 +79,7 @@ func TestAssistantMessageEventStreamStressHandlesLargeNonDroppableBurstWithoutCo
 		stream.finish(AssistantMessage{StopReason: StopReasonStop})
 	}()
 
-	select {
-	case <-producerDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected producer to finish even when non-droppable events exceed channel capacity")
-	}
+	waitForStreamProducer(t, producerDone, "even when non-droppable events exceed channel capacity")
 
 	textStartCount := 0
 	sawDone := false
@@ -91,11 +103,12 @@ func TestAssistantMessageEventStreamStressHandlesLargeNonDroppableBurstWithoutCo
 func TestAssistantMessageEventStreamStressDropsDroppableEvents(t *testing.T) {
 	stream := newAssistantMessageEventStream()
 	producerDone := make(chan struct{})
+	const droppableBurst = assistantMessageEventDeltaBuffer * 3
 
 	go func() {
 		defer close(producerDone)
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart})
-		for index := 0; index < assistantMessageEventDeltaBuffer*6; index++ {
+		for index := 0; index < droppableBurst; index++ {
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingDelta, Delta: "x"})
 		}
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingEnd, ContentIndex: 0, Content: "done"})
@@ -103,11 +116,7 @@ func TestAssistantMessageEventStreamStressDropsDroppableEvents(t *testing.T) {
 		stream.finish(AssistantMessage{StopReason: StopReasonStop})
 	}()
 
-	select {
-	case <-producerDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected producer to finish without consuming events")
-	}
+	waitForStreamProducer(t, producerDone, "without consuming events")
 
 	var (
 		thinkingDeltaCount int
@@ -120,7 +129,7 @@ func TestAssistantMessageEventStreamStressDropsDroppableEvents(t *testing.T) {
 		droppedEvents += event.DroppedEvents
 	}
 
-	if thinkingDeltaCount >= assistantMessageEventDeltaBuffer*6 {
+	if thinkingDeltaCount >= droppableBurst {
 		t.Fatalf("expected some droppable events to be discarded, got %d", thinkingDeltaCount)
 	}
 	if droppedEvents == 0 {

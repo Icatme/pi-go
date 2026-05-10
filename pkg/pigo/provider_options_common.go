@@ -86,8 +86,7 @@ func streamOptionsFromSimple(model Model, options SimpleStreamOptions) StreamOpt
 		ThinkingBudgets:    options.ThinkingBudgets,
 		Observer:           options.Observer,
 	}
-	streamOptions.Common = streamOptions.commonProviderOptions(model)
-	return streamOptions.syncLegacyFromCommon()
+	return streamOptions.withCommonSnapshot(model)
 }
 
 func streamOptionsFromProvider(model Model, options ProviderStreamOptions) StreamOptions {
@@ -118,104 +117,119 @@ func streamOptionsFromProvider(model Model, options ProviderStreamOptions) Strea
 		Truncation:           options.Truncation,
 		Observer:             options.Observer,
 	}
-	streamOptions.Common = streamOptions.commonProviderOptions(model)
-	return streamOptions.syncLegacyFromCommon()
+	return streamOptions.withCommonSnapshot(model)
 }
 
-func (options StreamOptions) syncLegacyFromCommon() StreamOptions {
-	options.APIKey = options.Common.APIKey
-	options.Auth = options.Common.Auth
-	options.HTTPClient = options.Common.HTTPClient
-	options.Headers = cloneStringMap(options.Common.Headers)
-	options.MaxTokens = options.Common.MaxTokens
-	options.Temperature = options.Common.Temperature
-	options.Transport = options.Common.Transport
-	options.CacheRetention = options.Common.CacheRetention
-	options.SessionID = options.Common.SessionID
-	options.OnPayload = options.Common.OnPayload
-	options.OnResponse = options.Common.OnResponse
-	options.ServiceTier = options.Common.ServiceTier
-	options.TimeoutMs = options.Common.TimeoutMs
-	options.MaxRetries = options.Common.MaxRetries
-	options.MaxRetryDelay = options.Common.MaxRetryDelay
-	options.Metadata = cloneMap(options.Common.Metadata)
-	options.RequestContext = options.Common.RequestContext
-	options.PreviousResponseID = options.Common.PreviousResponseID
-	options.Truncation = options.Common.Truncation
-	options.Observer = options.Common.Observer
+func (options StreamOptions) withLegacyCommonSnapshot(model Model) StreamOptions {
+	options = options.normalizeLegacyCommonFallback()
+	return options.withCommonSnapshot(model)
+}
+
+func (options StreamOptions) withCommonSnapshot(model Model) StreamOptions {
+	options.Common = options.commonSnapshot(model)
 	return options
 }
 
-func (options StreamOptions) commonProviderOptions(model Model) CommonProviderOptions {
-	common := options.Common
-	if common.APIKey == "" {
-		common.APIKey = options.APIKey
+func (options StreamOptions) normalizeLegacyCommonFallback() StreamOptions {
+	if options.APIKey == "" {
+		options.APIKey = options.Common.APIKey
 	}
-	if common.Auth == nil {
-		common.Auth = options.Auth
+	if options.Auth == nil {
+		options.Auth = options.Common.Auth
 	}
-	if common.HTTPClient == nil {
-		common.HTTPClient = options.HTTPClient
+	if options.HTTPClient == nil {
+		options.HTTPClient = options.Common.HTTPClient
 	}
-	if len(common.Headers) == 0 {
-		common.Headers = cloneStringMap(options.Headers)
+	if len(options.Headers) == 0 {
+		options.Headers = cloneStringMap(options.Common.Headers)
 	} else {
-		common.Headers = cloneStringMap(common.Headers)
+		options.Headers = cloneStringMap(options.Headers)
 	}
-	if common.MaxTokens <= 0 {
-		common.MaxTokens = options.MaxTokens
+	if options.MaxTokens <= 0 {
+		options.MaxTokens = options.Common.MaxTokens
+	}
+	if options.Temperature == nil {
+		options.Temperature = options.Common.Temperature
+	}
+	if options.Transport == "" {
+		options.Transport = options.Common.Transport
+	}
+	if options.CacheRetention == "" {
+		options.CacheRetention = options.Common.CacheRetention
+	}
+	if options.SessionID == "" {
+		options.SessionID = options.Common.SessionID
+	}
+	if options.OnPayload == nil {
+		options.OnPayload = options.Common.OnPayload
+	}
+	if options.OnResponse == nil {
+		options.OnResponse = options.Common.OnResponse
+	}
+	if options.ServiceTier == "" {
+		options.ServiceTier = options.Common.ServiceTier
+	}
+	if options.TimeoutMs == 0 {
+		options.TimeoutMs = options.Common.TimeoutMs
+	}
+	if options.MaxRetries == 0 {
+		options.MaxRetries = options.Common.MaxRetries
+	}
+	if options.MaxRetryDelay == 0 {
+		options.MaxRetryDelay = options.Common.MaxRetryDelay
+	}
+	if len(options.Metadata) == 0 {
+		options.Metadata = cloneMap(options.Common.Metadata)
+	} else {
+		options.Metadata = cloneMap(options.Metadata)
+	}
+	if options.RequestContext == nil {
+		options.RequestContext = options.Common.RequestContext
+	}
+	if options.PreviousResponseID == "" {
+		options.PreviousResponseID = options.Common.PreviousResponseID
+	}
+	if options.Truncation == "" {
+		options.Truncation = options.Common.Truncation
+	}
+	if options.Observer == nil {
+		options.Observer = options.Common.Observer
+	}
+	return options
+}
+
+func (options StreamOptions) commonSnapshot(model Model) CommonProviderOptions {
+	common := CommonProviderOptions{
+		APIKey:             options.APIKey,
+		Auth:               options.Auth,
+		HTTPClient:         options.HTTPClient,
+		Headers:            cloneStringMap(options.Headers),
+		MaxTokens:          options.MaxTokens,
+		Temperature:        options.Temperature,
+		Transport:          options.Transport,
+		CacheRetention:     options.CacheRetention,
+		SessionID:          options.SessionID,
+		OnPayload:          options.OnPayload,
+		OnResponse:         options.OnResponse,
+		ServiceTier:        options.ServiceTier,
+		TimeoutMs:          options.TimeoutMs,
+		MaxRetries:         options.MaxRetries,
+		MaxRetryDelay:      options.MaxRetryDelay,
+		Metadata:           cloneMap(options.Metadata),
+		RequestContext:     options.RequestContext,
+		PreviousResponseID: options.PreviousResponseID,
+		Truncation:         options.Truncation,
+		Observer:           options.Observer,
 	}
 	if common.MaxTokens <= 0 {
 		common.MaxTokens = minInt(model.MaxTokens, 32000)
 	}
-	if common.Temperature == nil {
-		common.Temperature = options.Temperature
-	}
-	if common.Transport == "" {
-		common.Transport = options.Transport
-	}
-	if common.CacheRetention == "" {
-		common.CacheRetention = options.CacheRetention
-	}
-	if common.SessionID == "" {
-		common.SessionID = options.SessionID
-	}
-	if common.OnPayload == nil {
-		common.OnPayload = options.OnPayload
-	}
-	if common.OnResponse == nil {
-		common.OnResponse = options.OnResponse
-	}
-	if common.ServiceTier == "" {
-		common.ServiceTier = options.ServiceTier
-	}
-	if common.TimeoutMs == 0 {
-		common.TimeoutMs = options.TimeoutMs
-	}
-	if common.MaxRetries == 0 {
-		common.MaxRetries = options.MaxRetries
-	}
-	if common.MaxRetryDelay == 0 {
-		common.MaxRetryDelay = options.MaxRetryDelay
-	}
-	if len(common.Metadata) == 0 {
-		common.Metadata = cloneMap(options.Metadata)
-	} else {
-		common.Metadata = cloneMap(common.Metadata)
-	}
-	if common.RequestContext == nil {
-		common.RequestContext = options.RequestContext
-	}
-	if common.PreviousResponseID == "" {
-		common.PreviousResponseID = options.PreviousResponseID
-	}
-	if common.Truncation == "" {
-		common.Truncation = options.Truncation
-	}
-	if common.Observer == nil {
-		common.Observer = options.Observer
-	}
 	return common
+}
+
+func (options StreamOptions) commonProviderOptions(model Model) CommonProviderOptions {
+	options = options.normalizeLegacyCommonFallback()
+	return options.commonSnapshot(model)
 }
 
 func (options StreamOptions) providerStreamOptions(model Model) ProviderStreamOptions {

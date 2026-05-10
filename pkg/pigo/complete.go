@@ -6,9 +6,11 @@ import (
 )
 
 type StreamOptions struct {
+	// Common remains as a legacy compatibility snapshot. Flat fields are the
+	// authoritative state and Common is rebuilt from them at conversion boundaries.
 	Common CommonProviderOptions
 
-	// Legacy flat common fields remain for compatibility with older callers.
+	// Legacy flat common fields remain the direct access path for callers.
 	APIKey               string
 	Auth                 map[Provider]AuthConfig
 	HTTPClient           *http.Client
@@ -49,14 +51,12 @@ func NewStreamOptions(options ...Option) StreamOptions {
 		}
 		option(&streamOptions)
 	}
-	streamOptions.Common = streamOptions.commonProviderOptions(Model{})
-	return streamOptions.syncLegacyFromCommon()
+	return streamOptions.withLegacyCommonSnapshot(Model{})
 }
 
 // WithTemperature sets the shared temperature field on StreamOptions.
 func WithTemperature(temperature float64) Option {
 	return func(options *StreamOptions) {
-		options.Common.Temperature = &temperature
 		options.Temperature = &temperature
 	}
 }
@@ -64,7 +64,6 @@ func WithTemperature(temperature float64) Option {
 // WithMaxTokens sets the shared max token limit on StreamOptions.
 func WithMaxTokens(maxTokens int) Option {
 	return func(options *StreamOptions) {
-		options.Common.MaxTokens = maxTokens
 		options.MaxTokens = maxTokens
 	}
 }

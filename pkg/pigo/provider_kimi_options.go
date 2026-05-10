@@ -26,6 +26,7 @@ func buildAnthropicMessagesProviderOptions(model Model, options SimpleStreamOpti
 		providerOptions.MaxTokens = maxTokens
 		providerOptions.ThinkingBudgetTokens = thinkingBudget
 	}
+	providerOptions.StreamOptions = providerOptions.StreamOptions.withCommonSnapshot(model)
 	return providerOptions
 }
 
@@ -47,11 +48,11 @@ func buildKimiCodingProviderOptions(model Model, options SimpleStreamOptions) Ki
 	providerOptions := KimiCodingProviderOptions{
 		AnthropicMessagesProviderOptions: buildAnthropicMessagesProviderOptions(model, options),
 	}
-	providerOptions.Common.SessionID = ""
 	providerOptions.SessionID = ""
 	providerOptions.ReasoningSummary = ""
 	providerOptions.TextVerbosity = ""
 	providerOptions.ToolChoice = ""
+	providerOptions.StreamOptions = providerOptions.StreamOptions.withCommonSnapshot(model)
 	return providerOptions
 }
 
@@ -59,11 +60,11 @@ func resolveKimiCodingProviderOptions(model Model, options ProviderStreamOptions
 	providerOptions := KimiCodingProviderOptions{
 		AnthropicMessagesProviderOptions: resolveAnthropicMessagesProviderOptions(model, options),
 	}
-	providerOptions.Common.SessionID = ""
 	providerOptions.SessionID = ""
 	providerOptions.ReasoningSummary = ""
 	providerOptions.TextVerbosity = ""
 	providerOptions.ToolChoice = ""
+	providerOptions.StreamOptions = providerOptions.StreamOptions.withCommonSnapshot(model)
 	return providerOptions
 }
 

@@ -52,6 +52,29 @@ func TestNewStreamOptionsPreservesCustomFlatFieldOptions(t *testing.T) {
 	}
 }
 
+func TestNewStreamOptionsUsesCommonAsLegacyFallbackOnly(t *testing.T) {
+	requestContext := context.Background()
+	options := NewStreamOptions(func(options *StreamOptions) {
+		options.Common.APIKey = "legacy-key"
+		options.Common.SessionID = "legacy-session"
+		options.Common.Headers = map[string]string{"x-legacy": "value"}
+		options.Common.RequestContext = requestContext
+	})
+
+	if options.APIKey != "legacy-key" || options.Common.APIKey != "legacy-key" {
+		t.Fatalf("expected common-only input to populate api key fallback, got %+v", options)
+	}
+	if options.SessionID != "legacy-session" || options.Common.SessionID != "legacy-session" {
+		t.Fatalf("expected common-only input to populate session id fallback, got %+v", options)
+	}
+	if options.Headers["x-legacy"] != "value" || options.Common.Headers["x-legacy"] != "value" {
+		t.Fatalf("expected common-only input to populate headers fallback, got %+v", options)
+	}
+	if options.RequestContext != requestContext || options.Common.RequestContext != requestContext {
+		t.Fatalf("expected common-only input to populate request context fallback, got %+v", options)
+	}
+}
+
 func TestStreamOptionsFromSimplePreservesDefaultsAndProviderFields(t *testing.T) {
 	model := Model{MaxTokens: 8192}
 	options := streamOptionsFromSimple(model, SimpleStreamOptions{
@@ -100,5 +123,66 @@ func TestStreamOptionsFromProviderPreservesLegacyCallingStyle(t *testing.T) {
 	}
 	if options.ThinkingBudgetTokens != 512 || options.PreviousResponseID != "resp-1" || options.Truncation != "disabled" {
 		t.Fatalf("expected provider conversion to preserve streaming-specific fields, got %+v", options)
+	}
+}
+
+func TestStreamOptionsProviderStreamOptionsPrefersFlatFieldsOverStaleCommon(t *testing.T) {
+	legacyTemperature := 0.2
+	flatTemperature := 0.7
+	options := StreamOptions{
+		Common: CommonProviderOptions{
+			APIKey:         "legacy-key",
+			Headers:        map[string]string{"x-source": "legacy"},
+			MaxTokens:      128,
+			Temperature:    &legacyTemperature,
+			SessionID:      "legacy-session",
+			RequestContext: context.Background(),
+		},
+		APIKey:         "flat-key",
+		Headers:        map[string]string{"x-source": "flat"},
+		MaxTokens:      256,
+		Temperature:    &flatTemperature,
+		SessionID:      "flat-session",
+		RequestContext: context.TODO(),
+	}
+
+	providerOptions := options.providerStreamOptions(Model{MaxTokens: 4096})
+	if providerOptions.APIKey != "flat-key" {
+		t.Fatalf("expected provider conversion to use flat api key, got %+v", providerOptions)
+	}
+	if providerOptions.MaxTokens != 256 {
+		t.Fatalf("expected provider conversion to use flat max tokens, got %+v", providerOptions)
+	}
+	if providerOptions.Temperature == nil || *providerOptions.Temperature != flatTemperature {
+		t.Fatalf("expected provider conversion to use flat temperature, got %+v", providerOptions)
+	}
+	if providerOptions.Headers["x-source"] != "flat" {
+		t.Fatalf("expected provider conversion to use flat headers, got %+v", providerOptions)
+	}
+	if providerOptions.SessionID != "flat-session" {
+		t.Fatalf("expected provider conversion to use flat session id, got %+v", providerOptions)
+	}
+
+	refreshed := options.withCommonSnapshot(Model{MaxTokens: 4096})
+	if refreshed.Common.APIKey != "flat-key" || refreshed.Common.SessionID != "flat-session" {
+		t.Fatalf("expected common snapshot to be rebuilt from flat state, got %+v", refreshed.Common)
+	}
+	if refreshed.Common.Headers["x-source"] != "flat" {
+		t.Fatalf("expected common headers snapshot to track flat state, got %+v", refreshed.Common)
+	}
+}
+
+func TestBuildKimiCodingProviderOptionsRefreshesCommonSnapshot(t *testing.T) {
+	model := Model{MaxTokens: 4096}
+	options := buildKimiCodingProviderOptions(model, SimpleStreamOptions{
+		SessionID: "session-1",
+		Reasoning: ThinkingLevelHigh,
+	})
+
+	if options.SessionID != "" || options.Common.SessionID != "" {
+		t.Fatalf("expected kimi provider options to clear session id in both flat and common snapshots, got %+v", options)
+	}
+	if options.Common.MaxTokens != options.MaxTokens {
+		t.Fatalf("expected kimi provider options to keep common max tokens in sync, got flat=%d common=%d", options.MaxTokens, options.Common.MaxTokens)
 	}
 }
