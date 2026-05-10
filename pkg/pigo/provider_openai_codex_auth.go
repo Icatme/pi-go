@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -47,10 +48,11 @@ func oauthCredentialsNeedRefresh(credentials *OAuthCredentials) bool {
 	if credentials == nil {
 		return false
 	}
+	refreshToken := strings.TrimSpace(credentials.RefreshToken)
 	if strings.TrimSpace(credentials.AccessToken) == "" {
-		return false
+		return refreshToken != ""
 	}
-	if credentials.ExpiresUnix <= 0 || strings.TrimSpace(credentials.RefreshToken) == "" {
+	if credentials.ExpiresUnix <= 0 || refreshToken == "" {
 		return false
 	}
 	return time.Now().Unix() >= credentials.ExpiresUnix-oauthRefreshSkew
@@ -90,12 +92,17 @@ func refreshOpenAICodexOAuth(refreshToken string, httpClient *http.Client, reque
 	}
 	defer response.Body.Close()
 
-	var payload openAICodexRefreshResponse
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
 		return nil, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, fmt.Errorf("openai codex oauth refresh failed: %s", response.Status)
+	}
+
+	var payload openAICodexRefreshResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(payload.AccessToken) == "" || strings.TrimSpace(payload.RefreshToken) == "" || payload.ExpiresIn <= 0 {
 		return nil, fmt.Errorf("openai codex oauth refresh returned incomplete credentials")

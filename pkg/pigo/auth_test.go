@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -167,6 +168,49 @@ func TestResolveAuthorizationRefreshesExpiredOpenAICodexOAuth(t *testing.T) {
 	}
 }
 
+func TestResolveAuthorizationRefreshesOpenAICodexOAuthWithoutAccessToken(t *testing.T) {
+	previousURL := openAICodexOAuthTokenURL
+	defer func() {
+		openAICodexOAuthTokenURL = previousURL
+	}()
+
+	refreshedToken := makeOpenAICodexToken("acc_refresh_only")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("expected refresh form body: %v", err)
+		}
+		if r.Form.Get("refresh_token") != "refresh-only" {
+			t.Fatalf("expected refresh-only token in form, got %q", r.Form.Get("refresh_token"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  refreshedToken,
+			"refresh_token": "refresh-new",
+			"expires_in":    3600,
+		})
+	}))
+	defer server.Close()
+
+	openAICodexOAuthTokenURL = server.URL
+	auth := map[Provider]AuthConfig{
+		"openai-codex": {
+			Type: AuthTypeOAuth,
+			OAuth: &OAuthCredentials{
+				AccessToken:  "",
+				RefreshToken: "refresh-only",
+				ExpiresUnix:  time.Now().Unix() + 3600,
+			},
+		},
+	}
+
+	token, err := ResolveAuthorization("openai-codex", auth, server.Client(), context.Background())
+	if err != nil {
+		t.Fatalf("expected refresh to recover missing access token, got error: %v", err)
+	}
+	if token != refreshedToken {
+		t.Fatalf("expected refreshed access token, got %q", token)
+	}
+}
+
 func TestResolveAuthorizationKeepsValidOpenAICodexOAuthWithoutRefresh(t *testing.T) {
 	auth := map[Provider]AuthConfig{
 		"openai-codex": {
@@ -239,6 +283,39 @@ func TestResolveAuthorizationRefreshDoesNotMutateSharedAuthMap(t *testing.T) {
 	}
 	if auth["openai-codex"].OAuth.RefreshToken != "refresh-old" || auth["openai-codex"].OAuth.ExpiresUnix != originalExpiry {
 		t.Fatalf("expected shared auth map to remain unchanged, got %+v", auth["openai-codex"].OAuth)
+	}
+}
+
+func TestResolveAuthorizationReturnsRefreshHTTPStatusBeforeDecodeError(t *testing.T) {
+	previousURL := openAICodexOAuthTokenURL
+	defer func() {
+		openAICodexOAuthTokenURL = previousURL
+	}()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("not-json"))
+	}))
+	defer server.Close()
+
+	openAICodexOAuthTokenURL = server.URL
+	auth := map[Provider]AuthConfig{
+		"openai-codex": {
+			Type: AuthTypeOAuth,
+			OAuth: &OAuthCredentials{
+				AccessToken:  "expired-token",
+				RefreshToken: "refresh-old",
+				ExpiresUnix:  time.Now().Unix() - 10,
+			},
+		},
+	}
+
+	_, err := ResolveAuthorization("openai-codex", auth, server.Client(), context.Background())
+	if err == nil {
+		t.Fatal("expected oauth refresh failure")
+	}
+	if !strings.Contains(err.Error(), "401 Unauthorized") {
+		t.Fatalf("expected refresh error to preserve http status, got %q", err.Error())
 	}
 }
 

@@ -50,7 +50,7 @@ func IsContextOverflow(message AssistantMessage, contextWindow int) bool {
 				return true
 			}
 		}
-		if regexp.MustCompile(`(?i)^4(00|13)\s*(status code)?\s*\(no body\)`).MatchString(message.ErrorMessage) {
+		if regexp.MustCompile(`(?i)^413\s*(status code)?\s*\(no body\)`).MatchString(message.ErrorMessage) {
 			return true
 		}
 	}

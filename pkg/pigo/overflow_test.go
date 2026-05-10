@@ -46,6 +46,13 @@ func TestIsContextOverflowDetects413WithoutBody(t *testing.T) {
 	}
 }
 
+func TestIsContextOverflowIgnores400WithoutBody(t *testing.T) {
+	message := createErrorMessage("400 status code (no body)")
+	if IsContextOverflow(message, 32768) {
+		t.Fatal("expected 400 without body to not be treated as overflow")
+	}
+}
+
 func TestIsContextOverflowDetectsUsageOverflowOnSuccessfulResponse(t *testing.T) {
 	message := AssistantMessage{
 		StopReason: StopReasonStop,
