@@ -205,3 +205,71 @@ func TestCompleteOpenAIResponsesForwardsSessionHeadersAndOnResponse(t *testing.T
 		t.Fatalf("expected successful response, got %+v", response)
 	}
 }
+
+func TestCompleteOpenAIResponsesRetriesTransientFailure(t *testing.T) {
+	attempts := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":{"message":"temporary upstream failure"}}`))
+			return
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(
+			map[string]any{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type": "message",
+					"id":   "msg_openai_retry",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "retried ok"},
+					},
+				},
+			},
+			map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":     "resp_openai_retry",
+					"status": "completed",
+					"usage": map[string]any{
+						"input_tokens":  3,
+						"output_tokens": 2,
+						"total_tokens":  5,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected openai model")
+	}
+	model.BaseURL = server.URL
+
+	response := Complete(*model, Context{
+		Messages: []Message{UserMessage{Content: "retry please"}},
+	}, ProviderStreamOptions{
+		Auth: map[Provider]AuthConfig{
+			"openai": {
+				Type:   AuthTypeAPIKey,
+				APIKey: "openai-retry-key",
+			},
+		},
+		MaxRetries: 1,
+	})
+
+	if attempts != 2 {
+		t.Fatalf("expected one retry after transient failure, got %d attempts", attempts)
+	}
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected retry to recover successfully, got %+v", response)
+	}
+}
