@@ -8,16 +8,23 @@ import (
 )
 
 const assistantMessageEventDeltaBuffer = 1024
-const assistantMessageEventReservedNonDroppableSlots = 32
+
+type queuedAssistantMessageEvent struct {
+	event     AssistantMessageEvent
+	droppable bool
+}
 
 type AssistantMessageEventStream struct {
 	events       chan AssistantMessageEvent
 	result       chan AssistantMessage
 	finalizeOnce sync.Once
 
-	mu      sync.Mutex
-	closed  bool
-	dropped int
+	queueMu      sync.Mutex
+	queueCond    *sync.Cond
+	pending      []queuedAssistantMessageEvent
+	pendingDelta int
+	droppedDelta int
+	closing      bool
 
 	observer   Observer
 	model      Model
@@ -34,10 +41,13 @@ func (s *AssistantMessageEventStream) setObserver(obs Observer, m Model) {
 }
 
 func newAssistantMessageEventStream() *AssistantMessageEventStream {
-	return &AssistantMessageEventStream{
+	stream := &AssistantMessageEventStream{
 		events: make(chan AssistantMessageEvent, 1024),
 		result: make(chan AssistantMessage, 1),
 	}
+	stream.queueCond = sync.NewCond(&stream.queueMu)
+	go stream.dispatchEvents()
+	return stream
 }
 
 func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
@@ -101,35 +111,26 @@ func (s *AssistantMessageEventStream) Result() AssistantMessage {
 }
 
 func (s *AssistantMessageEventStream) push(event AssistantMessageEvent) {
-	cloned := cloneAssistantMessageEvent(event)
-	droppable := isDroppableAssistantMessageEvent(event.Type)
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.closed {
-		return
-	}
-	if droppable && len(s.events) >= cap(s.events)-assistantMessageEventReservedNonDroppableSlots {
-		s.dropped++
-		return
-	}
-	if s.dropped > 0 {
-		cloned.DroppedEvents += s.dropped
-		s.dropped = 0
-	}
-	if droppable {
-		select {
-		case s.events <- cloned:
-			s.eventCount++
-		default:
-			s.dropped++
-		}
-		return
+	queued := queuedAssistantMessageEvent{
+		event:     cloneAssistantMessageEvent(event),
+		droppable: isDroppableAssistantMessageEvent(event.Type),
 	}
 
-	s.events <- cloned
+	s.queueMu.Lock()
+	defer s.queueMu.Unlock()
+
+	if s.closing {
+		return
+	}
+	if queued.droppable && s.pendingDelta >= assistantMessageEventDeltaBuffer {
+		s.dropOldestPendingDeltaLocked()
+	}
+	if queued.droppable {
+		s.pendingDelta++
+	}
+	s.pending = append(s.pending, queued)
 	s.eventCount++
+	s.queueCond.Signal()
 }
 
 func (s *AssistantMessageEventStream) finish(result AssistantMessage) {
@@ -138,12 +139,12 @@ func (s *AssistantMessageEventStream) finish(result AssistantMessage) {
 		s.result <- cloned
 		close(s.result)
 
-		s.mu.Lock()
-		s.closed = true
-		dropped := s.dropped
+		s.queueMu.Lock()
+		s.closing = true
+		s.queueCond.Broadcast()
+		dropped := s.droppedDelta
 		eventCount := int(s.eventCount)
-		close(s.events)
-		s.mu.Unlock()
+		s.queueMu.Unlock()
 
 		if s.observer != nil {
 			duration := time.Since(s.startTime)
@@ -185,5 +186,44 @@ func isDroppableAssistantMessageEvent(eventType AssistantMessageEventType) bool 
 		return true
 	default:
 		return false
+	}
+}
+
+func (s *AssistantMessageEventStream) dispatchEvents() {
+	for {
+		s.queueMu.Lock()
+		for len(s.pending) == 0 && !s.closing {
+			s.queueCond.Wait()
+		}
+		if len(s.pending) == 0 && s.closing {
+			close(s.events)
+			s.queueMu.Unlock()
+			return
+		}
+
+		queued := s.pending[0]
+		s.pending = s.pending[1:]
+		if queued.droppable {
+			s.pendingDelta--
+		}
+		if s.droppedDelta > 0 {
+			queued.event.DroppedEvents += s.droppedDelta
+			s.droppedDelta = 0
+		}
+		s.queueMu.Unlock()
+
+		s.events <- queued.event
+	}
+}
+
+func (s *AssistantMessageEventStream) dropOldestPendingDeltaLocked() {
+	for index, queued := range s.pending {
+		if !queued.droppable {
+			continue
+		}
+		s.pending = append(s.pending[:index], s.pending[index+1:]...)
+		s.pendingDelta--
+		s.droppedDelta++
+		return
 	}
 }

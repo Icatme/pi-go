@@ -9,12 +9,12 @@ func isolateAPIRegistry(t *testing.T) {
 	previousSourceIDs := cloneAPIRegistrySourceIDs()
 	previousHook := cloneAPIResolveHook()
 	apiRegistry.restore(cloneAPIRegistryEntries(previousRegistry))
-	apiRegistrySourceIDs = cloneAPIRegistrySourceIDs()
+	restoreAPIRegistrySourceIDs(previousSourceIDs)
 	apiRegistry.SetResolveHook(nil)
 
 	t.Cleanup(func() {
 		apiRegistry.restore(previousRegistry)
-		apiRegistrySourceIDs = previousSourceIDs
+		restoreAPIRegistrySourceIDs(previousSourceIDs)
 		apiRegistry.SetResolveHook(previousHook)
 	})
 }

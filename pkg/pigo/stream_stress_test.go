@@ -49,6 +49,45 @@ func TestAssistantMessageEventStreamStressPreservesNonDroppableEvents(t *testing
 	}
 }
 
+func TestAssistantMessageEventStreamStressHandlesLargeNonDroppableBurstWithoutConsumers(t *testing.T) {
+	stream := newAssistantMessageEventStream()
+	producerDone := make(chan struct{})
+	const nonDroppableBurst = assistantMessageEventDeltaBuffer + 128
+
+	go func() {
+		defer close(producerDone)
+		for index := 0; index < nonDroppableBurst; index++ {
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventTextStart, ContentIndex: index})
+		}
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventDone, Reason: StopReasonStop, Message: AssistantMessage{StopReason: StopReasonStop}})
+		stream.finish(AssistantMessage{StopReason: StopReasonStop})
+	}()
+
+	select {
+	case <-producerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected producer to finish even when non-droppable events exceed channel capacity")
+	}
+
+	textStartCount := 0
+	sawDone := false
+	for event := range stream.Events() {
+		if event.Type == AssistantMessageEventTextStart {
+			textStartCount++
+		}
+		if event.Type == AssistantMessageEventDone {
+			sawDone = true
+		}
+	}
+
+	if textStartCount != nonDroppableBurst {
+		t.Fatalf("expected all non-droppable events to survive, got %d of %d", textStartCount, nonDroppableBurst)
+	}
+	if !sawDone {
+		t.Fatal("expected done event to survive after a large non-droppable burst")
+	}
+}
+
 func TestAssistantMessageEventStreamStressDropsDroppableEvents(t *testing.T) {
 	stream := newAssistantMessageEventStream()
 	producerDone := make(chan struct{})

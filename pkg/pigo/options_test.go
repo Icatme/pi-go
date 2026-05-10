@@ -1,6 +1,9 @@
 package pigo
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestNewStreamOptionsAppliesFunctionalOptions(t *testing.T) {
 	temperature := 0.7
@@ -23,6 +26,29 @@ func TestNewStreamOptionsAppliesFunctionalOptions(t *testing.T) {
 	providerOptions := options.providerStreamOptions(Model{MaxTokens: 4096})
 	if providerOptions.MaxTokens != 256 || providerOptions.ToolChoice != "required" {
 		t.Fatalf("expected provider conversion to preserve functional options, got %+v", providerOptions)
+	}
+}
+
+func TestNewStreamOptionsPreservesCustomFlatFieldOptions(t *testing.T) {
+	requestContext := context.Background()
+	options := NewStreamOptions(func(options *StreamOptions) {
+		options.APIKey = "test-key"
+		options.SessionID = "session-1"
+		options.Headers = map[string]string{"x-test": "value"}
+		options.RequestContext = requestContext
+	})
+
+	if options.APIKey != "test-key" || options.Common.APIKey != "test-key" {
+		t.Fatalf("expected custom option to preserve api key across common and flat fields, got %+v", options)
+	}
+	if options.SessionID != "session-1" || options.Common.SessionID != "session-1" {
+		t.Fatalf("expected custom option to preserve session id across common and flat fields, got %+v", options)
+	}
+	if options.Headers["x-test"] != "value" || options.Common.Headers["x-test"] != "value" {
+		t.Fatalf("expected custom option to preserve headers across common and flat fields, got %+v", options)
+	}
+	if options.RequestContext != requestContext || options.Common.RequestContext != requestContext {
+		t.Fatalf("expected custom option to preserve request context across common and flat fields, got %+v", options)
 	}
 }
 

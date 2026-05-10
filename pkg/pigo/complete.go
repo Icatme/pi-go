@@ -49,6 +49,7 @@ func NewStreamOptions(options ...Option) StreamOptions {
 		}
 		option(&streamOptions)
 	}
+	streamOptions.Common = streamOptions.commonProviderOptions(Model{})
 	return streamOptions.syncLegacyFromCommon()
 }
 

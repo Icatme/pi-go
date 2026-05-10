@@ -3,6 +3,7 @@ package pigo
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 type APIStreamFunc func(Model, Context, ProviderStreamOptions) *AssistantMessageEventStream
@@ -17,8 +18,9 @@ type APIModule struct {
 type APIModuleFactory func() APIModule
 
 var (
-	apiRegistry          = NewRegistry[API, APIModule]()
-	apiRegistrySourceIDs = map[API]string{}
+	apiRegistry            = NewRegistry[API, APIModule]()
+	apiRegistrySourceIDsMu sync.RWMutex
+	apiRegistrySourceIDs   = map[API]string{}
 )
 
 func RegisterAPIModule(module APIModule) {
@@ -60,6 +62,8 @@ func registerAPIModule(api API, module *APIModule, factory APIModuleFactory, sou
 			panic(fmt.Sprintf("pigo: api %q already registered", api))
 		}
 	}()
+	apiRegistrySourceIDsMu.Lock()
+	defer apiRegistrySourceIDsMu.Unlock()
 	apiRegistry.Register(api, module, factory)
 	apiRegistrySourceIDs[api] = sourceID
 }
@@ -70,7 +74,9 @@ func UnregisterAPIModules(sourceID string) {
 		return
 	}
 
-	for api, registeredSourceID := range cloneAPIRegistrySourceIDs() {
+	apiRegistrySourceIDsMu.Lock()
+	defer apiRegistrySourceIDsMu.Unlock()
+	for api, registeredSourceID := range apiRegistrySourceIDs {
 		if registeredSourceID == sourceID {
 			apiRegistry.Delete(api)
 			delete(apiRegistrySourceIDs, api)
@@ -109,9 +115,23 @@ func normalizeAPIModule(api API, module APIModule) APIModule {
 }
 
 func cloneAPIRegistrySourceIDs() map[API]string {
+	apiRegistrySourceIDsMu.RLock()
+	defer apiRegistrySourceIDsMu.RUnlock()
+
 	cloned := make(map[API]string, len(apiRegistrySourceIDs))
 	for api, sourceID := range apiRegistrySourceIDs {
 		cloned[api] = sourceID
 	}
 	return cloned
+}
+
+func restoreAPIRegistrySourceIDs(sourceIDs map[API]string) {
+	apiRegistrySourceIDsMu.Lock()
+	defer apiRegistrySourceIDsMu.Unlock()
+
+	cloned := make(map[API]string, len(sourceIDs))
+	for api, sourceID := range sourceIDs {
+		cloned[api] = sourceID
+	}
+	apiRegistrySourceIDs = cloned
 }

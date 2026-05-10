@@ -173,3 +173,34 @@ func TestAPIRegistryConcurrentLazyResolveLoadsFactoryOnce(t *testing.T) {
 		t.Fatalf("expected resolve to preserve api registration count, got %d", len(ListAPIModules()))
 	}
 }
+
+func TestAPIRegistryConcurrentSourceAwareRegisterAndUnregister(t *testing.T) {
+	isolateAPIRegistry(t)
+
+	const registrations = 32
+	var wait sync.WaitGroup
+
+	for index := 0; index < registrations; index++ {
+		index := index
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			sourceID := fmt.Sprintf("test-source-%d", index)
+			api := API(fmt.Sprintf("test-source-aware-api-%d", index))
+
+			RegisterAPIModuleForSource(sourceID, APIModule{API: api})
+			if module := GetAPIModule(api); module == nil || module.API != api {
+				t.Errorf("expected source-aware api %q to resolve after registration", api)
+			}
+			UnregisterAPIModules(sourceID)
+		}()
+	}
+	wait.Wait()
+
+	for index := 0; index < registrations; index++ {
+		api := API(fmt.Sprintf("test-source-aware-api-%d", index))
+		if module := GetAPIModule(api); module != nil {
+			t.Fatalf("expected source-aware api %q to be removed after unregister", api)
+		}
+	}
+}
