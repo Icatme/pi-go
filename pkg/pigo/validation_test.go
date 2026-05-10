@@ -532,3 +532,31 @@ func TestValidateToolArgumentsEnumBeforeType(t *testing.T) {
 		t.Fatal("expected enum validation to fail for invalid value")
 	}
 }
+
+func TestValidateToolArgumentsIgnoresUnsupportedKeywords(t *testing.T) {
+	tool := Tool{
+		Name: "unsupported_keyword_tool",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"value": map[string]any{
+					"$ref": "#/definitions/value",
+				},
+			},
+			"required": []string{"value"},
+		},
+	}
+
+	validated, err := ValidateToolArguments(tool, ToolCall{
+		ID:        "tool-1",
+		Name:      "unsupported_keyword_tool",
+		Arguments: map[string]any{"value": map[string]any{"nested": true}},
+	})
+	if err != nil {
+		t.Fatalf("expected unsupported keywords to be ignored, got %v", err)
+	}
+	value, ok := validated["value"].(map[string]any)
+	if !ok || value["nested"] != true {
+		t.Fatalf("expected unsupported keyword path to preserve raw value, got %#v", validated["value"])
+	}
+}

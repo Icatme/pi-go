@@ -3,77 +3,51 @@ package pigo
 import "strings"
 
 type OpenAICodexProviderOptions struct {
-	CommonProviderOptions
-	ReasoningEffort    ThinkingLevel
-	ReasoningSummary   string
-	ServiceTier        string
-	TextVerbosity      string
-	ToolChoice         string
-	PreviousResponseID string
-	Truncation         string
+	StreamOptions
 }
 
 func buildOpenAICodexProviderStreamOptions(model Model, options SimpleStreamOptions) ProviderStreamOptions {
-	return buildOpenAICodexProviderOptions(model, options).toProviderStreamOptions()
+	return buildOpenAICodexProviderOptions(model, options).toProviderStreamOptions(model)
 }
 
 func normalizeOpenAICodexProviderStreamOptions(model Model, options ProviderStreamOptions) ProviderStreamOptions {
-	return resolveOpenAICodexProviderOptions(model, options).toProviderStreamOptions()
+	return resolveOpenAICodexProviderOptions(model, options).toProviderStreamOptions(model)
 }
 
 func buildOpenAICodexProviderOptions(model Model, options SimpleStreamOptions) OpenAICodexProviderOptions {
 	providerOptions := OpenAICodexProviderOptions{
-		CommonProviderOptions: buildCommonProviderOptions(model, options),
-		ServiceTier:           options.ServiceTier,
-		TextVerbosity:         defaultTextVerbosity(""),
-		PreviousResponseID:    options.PreviousResponseID,
-		Truncation:            options.Truncation,
+		StreamOptions: streamOptionsFromSimple(model, options),
 	}
+	providerOptions.TextVerbosity = defaultTextVerbosity("")
 	if SupportsXHigh(model) {
-		providerOptions.ReasoningEffort = options.Reasoning
+		providerOptions.Reasoning = options.Reasoning
 	} else {
-		providerOptions.ReasoningEffort = clampReasoning(options.Reasoning)
+		providerOptions.Reasoning = clampReasoning(options.Reasoning)
 	}
-	if providerOptions.ReasoningEffort != "" {
+	if providerOptions.Reasoning != "" {
 		providerOptions.ReasoningSummary = defaultReasoningSummary("")
 	}
-	return resolveOpenAICodexProviderOptions(model, providerOptions.toProviderStreamOptions())
+	return resolveOpenAICodexProviderOptions(model, providerOptions.toProviderStreamOptions(model))
 }
 
 func resolveOpenAICodexProviderOptions(model Model, options ProviderStreamOptions) OpenAICodexProviderOptions {
-	common := commonProviderOptionsFromStream(options)
 	resolved := OpenAICodexProviderOptions{
-		CommonProviderOptions: common,
-		ReasoningEffort:       options.Reasoning,
-		ReasoningSummary:      options.ReasoningSummary,
-		ServiceTier:           options.ServiceTier,
-		TextVerbosity:         options.TextVerbosity,
-		ToolChoice:            options.ToolChoice,
-		PreviousResponseID:    options.PreviousResponseID,
-		Truncation:            options.Truncation,
+		StreamOptions: streamOptionsFromProvider(model, options),
 	}
 
-	if resolved.ReasoningEffort != "" {
-		resolved.ReasoningEffort = ThinkingLevel(clampOpenAIResponsesReasoningEffort(model, resolved.ReasoningEffort))
+	if resolved.Reasoning != "" {
+		resolved.Reasoning = ThinkingLevel(clampOpenAIResponsesReasoningEffort(model, resolved.Reasoning))
 	}
 	if strings.TrimSpace(resolved.TextVerbosity) == "" {
 		resolved.TextVerbosity = defaultTextVerbosity("")
 	}
-	if strings.TrimSpace(resolved.ReasoningSummary) == "" && resolved.ReasoningEffort != "" {
+	if strings.TrimSpace(resolved.ReasoningSummary) == "" && resolved.Reasoning != "" {
 		resolved.ReasoningSummary = defaultReasoningSummary("")
 	}
 
 	return resolved
 }
 
-func (options OpenAICodexProviderOptions) toProviderStreamOptions() ProviderStreamOptions {
-	streamOptions := options.CommonProviderOptions.toProviderStreamOptions()
-	streamOptions.Reasoning = options.ReasoningEffort
-	streamOptions.ReasoningSummary = options.ReasoningSummary
-	streamOptions.ServiceTier = options.ServiceTier
-	streamOptions.TextVerbosity = options.TextVerbosity
-	streamOptions.ToolChoice = options.ToolChoice
-	streamOptions.PreviousResponseID = options.PreviousResponseID
-	streamOptions.Truncation = options.Truncation
-	return streamOptions
+func (options OpenAICodexProviderOptions) toProviderStreamOptions(model Model) ProviderStreamOptions {
+	return options.StreamOptions.providerStreamOptions(model)
 }

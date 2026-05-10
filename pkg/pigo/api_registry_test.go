@@ -5,33 +5,47 @@ import "testing"
 func isolateAPIRegistry(t *testing.T) {
 	t.Helper()
 
-	apiRegistryMu.Lock()
-	previousRegistry := cloneAPIRegistryEntries(apiRegistry)
-	apiRegistry = cloneAPIRegistryEntries(previousRegistry)
-	apiRegistryMu.Unlock()
+	previousRegistry := cloneAPIRegistryEntries(apiRegistry.snapshot(cloneAPIModulePointer))
+	previousSourceIDs := cloneAPIRegistrySourceIDs()
+	previousHook := cloneAPIResolveHook()
+	apiRegistry.restore(cloneAPIRegistryEntries(previousRegistry))
+	apiRegistrySourceIDs = cloneAPIRegistrySourceIDs()
+	apiRegistry.SetResolveHook(nil)
 
 	t.Cleanup(func() {
-		apiRegistryMu.Lock()
-		defer apiRegistryMu.Unlock()
-		apiRegistry = previousRegistry
+		apiRegistry.restore(previousRegistry)
+		apiRegistrySourceIDs = previousSourceIDs
+		apiRegistry.SetResolveHook(previousHook)
 	})
 }
 
-func cloneAPIRegistryEntries(entries map[API]*apiRegistryEntry) map[API]*apiRegistryEntry {
-	cloned := make(map[API]*apiRegistryEntry, len(entries))
+func cloneAPIRegistryEntries(entries map[API]*registryEntry[APIModule]) map[API]*registryEntry[APIModule] {
+	cloned := make(map[API]*registryEntry[APIModule], len(entries))
 	for api, entry := range entries {
 		if entry == nil {
 			cloned[api] = nil
 			continue
 		}
-		copyEntry := *entry
-		if entry.module != nil {
-			moduleCopy := *entry.module
-			copyEntry.module = &moduleCopy
+		entryCopy := *entry
+		if entry.value != nil {
+			entryCopy.value = cloneAPIModulePointer(entry.value)
 		}
-		cloned[api] = &copyEntry
+		cloned[api] = &entryCopy
 	}
 	return cloned
+}
+
+func cloneAPIModulePointer(module *APIModule) *APIModule {
+	if module == nil {
+		return nil
+	}
+	cloned := *module
+	return &cloned
+}
+
+func cloneAPIResolveHook() func(API) {
+	resolved := apiRegistry.resolveHook
+	return resolved
 }
 
 func TestUnregisterAPIModulesBySourceID(t *testing.T) {

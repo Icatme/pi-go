@@ -93,6 +93,8 @@ func marshalIndentedJSON(value any) string {
 	return string(bytes)
 }
 
+// validateSchemaValue intentionally supports a small JSON-Schema-like subset.
+// Keywords outside the implemented set, including $ref, are ignored instead of resolved.
 func validateSchemaValue(schema map[string]any, value any, path string) (any, []schemaValidationError) {
 	if len(schema) == 0 {
 		return value, nil

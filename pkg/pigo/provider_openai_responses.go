@@ -1,12 +1,9 @@
 package pigo
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,7 +11,7 @@ import (
 )
 
 func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
-	options = resolveOpenAIResponsesProviderOptions(model, NormalizeProviderStreamOptions(model, options)).toProviderStreamOptions()
+	options = resolveOpenAIResponsesProviderOptions(model, NormalizeProviderStreamOptions(model, options)).toProviderStreamOptions(model)
 	stream := newAssistantMessageEventStream()
 	stream.setObserver(options.Observer, model)
 
@@ -134,7 +131,7 @@ func buildOpenAIResponsesRequest(model Model, ctx Context, options ProviderStrea
 		requestBody.Truncation = resolvedOptions.Truncation
 	}
 
-	if effort := string(resolvedOptions.ReasoningEffort); effort != "" {
+	if effort := string(resolvedOptions.Reasoning); effort != "" {
 		requestBody.Reasoning = &openAIResponsesReasoningOptions{
 			Effort:  effort,
 			Summary: resolvedOptions.ReasoningSummary,
@@ -187,46 +184,26 @@ func streamOpenAIResponsesSSE(
 	response *AssistantMessage,
 	stream *AssistantMessageEventStream,
 ) error {
-	retryCount := options.MaxRetries
-	if retryCount <= 0 {
-		retryCount = 3
+	client := HTTPStreamClient{
+		HTTPClient:     httpClient,
+		MaxRetries:     maxInt(options.MaxRetries, 3),
+		BaseRetryDelay: time.Second,
+		MaxRetryDelay:  time.Duration(options.MaxRetryDelay) * time.Millisecond,
 	}
-	baseRetryDelay := time.Second
-
-	for attempt := 0; attempt <= retryCount; attempt++ {
-		request, err := http.NewRequestWithContext(
-			requestContext,
-			http.MethodPost,
-			resolveOpenAIResponsesURL(model.BaseURL),
-			bytes.NewReader(bodyBytes),
-		)
-		if err != nil {
-			return err
-		}
-
-		request.Header.Set("content-type", "application/json")
-		request.Header.Set("accept", "text/event-stream")
-		request.Header.Set("authorization", "Bearer "+apiKey)
-		if options.SessionID != "" {
-			request.Header.Set("session_id", options.SessionID)
-			request.Header.Set("x-client-request-id", options.SessionID)
-		}
-		for key, value := range options.Headers {
-			request.Header.Set(key, value)
-		}
-
-		httpResponse, err := httpClient.Do(request)
-		if err != nil {
-			if shouldRetryOpenAIResponsesRequest(0, err.Error()) && attempt < retryCount {
-				if waitErr := waitOpenAIResponsesRetryDelay(requestContext, options.MaxRetryDelay, attempt, baseRetryDelay); waitErr != nil {
-					return waitErr
-				}
-				continue
+	state := openAIResponsesStreamingState{
+		CurrentTextIndex:     -1,
+		CurrentThinkingIndex: -1,
+		CurrentToolIndex:     -1,
+		FinalizedItemKeys:    map[string]bool{},
+	}
+	terminalSeen := false
+	err := client.postStream(requestContext, resolveOpenAIResponsesURL(model.BaseURL), httpStreamRequest{
+		Headers: buildOpenAIResponsesSSEHeaders(options, apiKey),
+		Body:    bodyBytes,
+		OnResponse: func(httpResponse *http.Response) {
+			if options.OnResponse == nil {
+				return
 			}
-			return err
-		}
-
-		if options.OnResponse != nil {
 			headers := make(map[string]string)
 			for key, values := range httpResponse.Header {
 				if len(values) > 0 {
@@ -234,52 +211,46 @@ func streamOpenAIResponsesSSE(
 				}
 			}
 			options.OnResponse(ProviderResponse{Status: httpResponse.StatusCode, Headers: headers}, model)
-		}
-
-		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
-			body, _ := io.ReadAll(httpResponse.Body)
-			_ = httpResponse.Body.Close()
-			message := parseOpenAIResponsesError(body, httpResponse.Status)
-			if shouldRetryOpenAIResponsesRequest(httpResponse.StatusCode, message) && attempt < retryCount {
-				if waitErr := waitOpenAIResponsesRetryDelay(requestContext, options.MaxRetryDelay, attempt, baseRetryDelay); waitErr != nil {
-					return waitErr
-				}
-				continue
-			}
-			return errors.New(message)
-		}
-
-		stream.push(AssistantMessageEvent{
-			Type:    AssistantMessageEventStart,
-			Partial: *response,
-		})
-
-		state := openAIResponsesStreamingState{
-			CurrentTextIndex:     -1,
-			CurrentThinkingIndex: -1,
-			CurrentToolIndex:     -1,
-			FinalizedItemKeys:    map[string]bool{},
-		}
-		terminalSeen := false
-		err = readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
+		},
+		ParseError: func(body []byte, status string) string {
+			return parseOpenAIResponsesError(body, status)
+		},
+		ShouldRetry: shouldRetryOpenAIResponsesRequest,
+		OnOpen: func(_ *http.Response) error {
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: *response})
+			return nil
+		},
+		OnEvent: func(_ string, data string) (bool, error) {
 			done, err := processOpenAIResponsesStreamEvent(data, model, response, stream, &state, options.ServiceTier)
 			if done {
 				terminalSeen = true
-				return true, nil
 			}
-			return false, err
-		})
-		_ = httpResponse.Body.Close()
-		if err != nil {
-			return err
-		}
-		if !terminalSeen {
-			return fmt.Errorf("missing terminal sse event")
-		}
-		return nil
+			return done, err
+		},
+	})
+	if err != nil {
+		return err
 	}
+	if !terminalSeen {
+		return fmt.Errorf("missing terminal sse event")
+	}
+	return nil
+}
 
-	return fmt.Errorf("openai responses request failed after retries")
+func buildOpenAIResponsesSSEHeaders(options ProviderStreamOptions, apiKey string) map[string]string {
+	headers := map[string]string{
+		"content-type":  "application/json",
+		"accept":        "text/event-stream",
+		"authorization": "Bearer " + apiKey,
+	}
+	if options.SessionID != "" {
+		headers["session_id"] = options.SessionID
+		headers["x-client-request-id"] = options.SessionID
+	}
+	for key, value := range options.Headers {
+		headers[key] = value
+	}
+	return headers
 }
 
 func waitOpenAIResponsesRetryDelay(ctx context.Context, maxRetryDelayMS int, attempt int, baseDelay time.Duration) error {

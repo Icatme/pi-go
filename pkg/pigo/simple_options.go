@@ -17,12 +17,7 @@ func BuildProviderStreamOptions(model Model, options SimpleStreamOptions) Provid
 }
 
 func buildBaseProviderStreamOptions(model Model, options SimpleStreamOptions) ProviderStreamOptions {
-	baseOptions := buildCommonProviderOptions(model, options)
-	streamOptions := baseOptions.toProviderStreamOptions()
-	streamOptions.Reasoning = options.Reasoning
-	streamOptions.PreviousResponseID = options.PreviousResponseID
-	streamOptions.Truncation = options.Truncation
-	return streamOptions
+	return streamOptionsFromSimple(model, options).providerStreamOptions(model)
 }
 
 func clampReasoning(level ThinkingLevel) ThinkingLevel {

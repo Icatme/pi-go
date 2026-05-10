@@ -1,12 +1,9 @@
 package pigo
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -84,91 +81,69 @@ func streamOpenAICodexSSE(
 	response *AssistantMessage,
 	stream *AssistantMessageEventStream,
 ) error {
-	for attempt := 0; attempt <= openAICodexRetryCount; attempt++ {
-		request, err := http.NewRequestWithContext(
-			requestContext,
-			http.MethodPost,
-			resolveOpenAICodexURL(model.BaseURL),
-			bytes.NewReader(bodyBytes),
-		)
-		if err != nil {
-			return err
-		}
-
-		request.Header.Set("content-type", "application/json")
-		request.Header.Set("accept", "text/event-stream")
-		request.Header.Set("authorization", "Bearer "+apiKey)
-		request.Header.Set("chatgpt-account-id", accountID)
-		request.Header.Set("originator", "pi")
-		request.Header.Set("openai-beta", "responses=experimental")
-		requestID := options.SessionID
-		if strings.TrimSpace(requestID) == "" {
-			requestID = createOpenAICodexRequestID()
-		}
-		request.Header.Set("x-client-request-id", requestID)
-		if options.SessionID != "" {
-			request.Header.Set("conversation_id", options.SessionID)
-			request.Header.Set("session_id", options.SessionID)
-		}
-		for key, value := range options.Headers {
-			request.Header.Set(key, value)
-		}
-
-		httpResponse, err := httpClient.Do(request)
-		if err != nil {
-			if shouldRetryOpenAIResponsesRequest(0, err.Error()) && attempt < openAICodexRetryCount {
-				if waitErr := waitOpenAICodexRetryDelay(requestContext, options.MaxRetryDelay, attempt); waitErr != nil {
-					return waitErr
-				}
-				continue
-			}
-			return err
-		}
-
-		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
-			body, _ := io.ReadAll(httpResponse.Body)
-			_ = httpResponse.Body.Close()
-			message := parseOpenAIResponsesErrorWithProvider(body, httpResponse.Status, "codex")
-			if shouldRetryOpenAIResponsesRequest(httpResponse.StatusCode, message) && attempt < openAICodexRetryCount {
-				if waitErr := waitOpenAICodexRetryDelay(requestContext, options.MaxRetryDelay, attempt); waitErr != nil {
-					return waitErr
-				}
-				continue
-			}
-			return errors.New(message)
-		}
-
-		stream.push(AssistantMessageEvent{
-			Type:    AssistantMessageEventStart,
-			Partial: *response,
-		})
-
-		state := openAIResponsesStreamingState{
-			CurrentTextIndex:     -1,
-			CurrentThinkingIndex: -1,
-			CurrentToolIndex:     -1,
-			FinalizedItemKeys:    map[string]bool{},
-		}
-		terminalSeen := false
-		err = readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
+	client := HTTPStreamClient{
+		HTTPClient:     httpClient,
+		MaxRetries:     openAICodexRetryCount,
+		BaseRetryDelay: time.Second,
+		MaxRetryDelay:  time.Duration(options.MaxRetryDelay) * time.Millisecond,
+	}
+	state := openAIResponsesStreamingState{
+		CurrentTextIndex:     -1,
+		CurrentThinkingIndex: -1,
+		CurrentToolIndex:     -1,
+		FinalizedItemKeys:    map[string]bool{},
+	}
+	terminalSeen := false
+	err := client.postStream(requestContext, resolveOpenAICodexURL(model.BaseURL), httpStreamRequest{
+		Headers: buildOpenAICodexSSEHeaders(options, apiKey, accountID),
+		Body:    bodyBytes,
+		ParseError: func(body []byte, status string) string {
+			return parseOpenAIResponsesErrorWithProvider(body, status, "codex")
+		},
+		ShouldRetry: shouldRetryOpenAIResponsesRequest,
+		OnOpen: func(_ *http.Response) error {
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: *response})
+			return nil
+		},
+		OnEvent: func(_ string, data string) (bool, error) {
 			done, err := processOpenAIResponsesStreamEventWithProvider(data, model, response, stream, &state, options.ServiceTier, "codex")
 			if done {
 				terminalSeen = true
-				return true, nil
 			}
-			return false, err
-		})
-		_ = httpResponse.Body.Close()
-		if err != nil {
-			return err
-		}
-		if !terminalSeen {
-			return fmt.Errorf("missing terminal sse event")
-		}
-		return nil
+			return done, err
+		},
+	})
+	if err != nil {
+		return err
 	}
+	if !terminalSeen {
+		return fmt.Errorf("missing terminal sse event")
+	}
+	return nil
+}
 
-	return fmt.Errorf("codex request failed after retries")
+func buildOpenAICodexSSEHeaders(options ProviderStreamOptions, apiKey string, accountID string) map[string]string {
+	requestID := options.SessionID
+	if strings.TrimSpace(requestID) == "" {
+		requestID = createOpenAICodexRequestID()
+	}
+	headers := map[string]string{
+		"content-type":        "application/json",
+		"accept":              "text/event-stream",
+		"authorization":       "Bearer " + apiKey,
+		"chatgpt-account-id":  accountID,
+		"originator":          "pi",
+		"openai-beta":         "responses=experimental",
+		"x-client-request-id": requestID,
+	}
+	if options.SessionID != "" {
+		headers["conversation_id"] = options.SessionID
+		headers["session_id"] = options.SessionID
+	}
+	for key, value := range options.Headers {
+		headers[key] = value
+	}
+	return headers
 }
 
 func streamOpenAICodexWebSocket(

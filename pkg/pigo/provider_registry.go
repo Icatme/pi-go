@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sync"
 )
 
 type ProviderAuthResolveFunc func(Provider, AuthConfig, *http.Client, context.Context) (string, error)
@@ -41,15 +40,8 @@ type ProviderModule struct {
 
 type ProviderModuleFactory func() ProviderModule
 
-type providerRegistryEntry struct {
-	module  *ProviderModule
-	factory ProviderModuleFactory
-}
-
 var (
-	providerRegistryMu  sync.RWMutex
-	providerRegistry    = map[Provider]*providerRegistryEntry{}
-	providerResolveHook func(Provider)
+	providerRegistry = NewRegistry[Provider, ProviderModule]()
 )
 
 func RegisterProviderModule(module ProviderModule) {
@@ -71,63 +63,27 @@ func registerProviderModule(provider Provider, module *ProviderModule, factory P
 		normalized := normalizeProviderModule(provider, *module)
 		module = &normalized
 	}
-
-	providerRegistryMu.Lock()
-	defer providerRegistryMu.Unlock()
-
-	if _, exists := providerRegistry[provider]; exists {
-		panic(fmt.Sprintf("pigo: provider %q already registered", provider))
+	if factory != nil {
+		originalFactory := factory
+		factory = func() ProviderModule {
+			return normalizeProviderModule(provider, originalFactory())
+		}
 	}
 
-	providerRegistry[provider] = &providerRegistryEntry{
-		module:  module,
-		factory: factory,
-	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			panic(fmt.Sprintf("pigo: provider %q already registered", provider))
+		}
+	}()
+	providerRegistry.Register(provider, module, factory)
 }
 
 func resolveProviderModule(provider Provider) *ProviderModule {
-	providerRegistryMu.RLock()
-	entry := providerRegistry[provider]
-	if entry == nil {
-		providerRegistryMu.RUnlock()
-		return nil
-	}
-	if entry.module != nil {
-		module := entry.module
-		providerRegistryMu.RUnlock()
-		return module
-	}
-	factory := entry.factory
-	providerRegistryMu.RUnlock()
-
-	providerRegistryMu.Lock()
-	defer providerRegistryMu.Unlock()
-
-	entry = providerRegistry[provider]
-	if entry == nil {
-		return nil
-	}
-	if entry.module != nil {
-		return entry.module
-	}
-
-	module := normalizeProviderModule(provider, factory())
-	entry.module = &module
-	if providerResolveHook != nil {
-		providerResolveHook(provider)
-	}
-	return entry.module
+	return providerRegistry.Resolve(provider)
 }
 
 func listRegisteredProviders() []Provider {
-	providerRegistryMu.RLock()
-	defer providerRegistryMu.RUnlock()
-
-	providers := make([]Provider, 0, len(providerRegistry))
-	for provider := range providerRegistry {
-		providers = append(providers, provider)
-	}
-	return providers
+	return providerRegistry.Keys()
 }
 
 func GetProviderCapabilities(provider Provider) ProviderCapabilities {

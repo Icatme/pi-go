@@ -3,70 +3,47 @@ package pigo
 import "strings"
 
 type OpenAIResponsesProviderOptions struct {
-	CommonProviderOptions
-	ReasoningEffort    ThinkingLevel
-	ReasoningSummary   string
-	ServiceTier        string
-	ToolChoice         string
-	PreviousResponseID string
-	Truncation         string
+	StreamOptions
 }
 
 func buildOpenAIResponsesProviderStreamOptions(model Model, options SimpleStreamOptions) ProviderStreamOptions {
-	return buildOpenAIResponsesProviderOptions(model, options).toProviderStreamOptions()
+	return buildOpenAIResponsesProviderOptions(model, options).toProviderStreamOptions(model)
 }
 
 func normalizeOpenAIResponsesProviderStreamOptions(model Model, options ProviderStreamOptions) ProviderStreamOptions {
-	return resolveOpenAIResponsesProviderOptions(model, options).toProviderStreamOptions()
+	return resolveOpenAIResponsesProviderOptions(model, options).toProviderStreamOptions(model)
 }
 
 func buildOpenAIResponsesProviderOptions(model Model, options SimpleStreamOptions) OpenAIResponsesProviderOptions {
 	providerOptions := OpenAIResponsesProviderOptions{
-		CommonProviderOptions: buildCommonProviderOptions(model, options),
-		ServiceTier:           options.ServiceTier,
-		PreviousResponseID:    options.PreviousResponseID,
-		Truncation:            options.Truncation,
+		StreamOptions: streamOptionsFromSimple(model, options),
 	}
 	if SupportsXHigh(model) {
-		providerOptions.ReasoningEffort = options.Reasoning
+		providerOptions.Reasoning = options.Reasoning
 	} else {
-		providerOptions.ReasoningEffort = clampReasoning(options.Reasoning)
+		providerOptions.Reasoning = clampReasoning(options.Reasoning)
 	}
-	if providerOptions.ReasoningEffort != "" {
+	if providerOptions.Reasoning != "" {
 		providerOptions.ReasoningSummary = defaultReasoningSummary("")
 	}
-	return resolveOpenAIResponsesProviderOptions(model, providerOptions.toProviderStreamOptions())
+	return resolveOpenAIResponsesProviderOptions(model, providerOptions.toProviderStreamOptions(model))
 }
 
 func resolveOpenAIResponsesProviderOptions(model Model, options ProviderStreamOptions) OpenAIResponsesProviderOptions {
-	common := commonProviderOptionsFromStream(options)
 	resolved := OpenAIResponsesProviderOptions{
-		CommonProviderOptions: common,
-		ReasoningEffort:       options.Reasoning,
-		ReasoningSummary:      options.ReasoningSummary,
-		ServiceTier:           options.ServiceTier,
-		ToolChoice:            options.ToolChoice,
-		PreviousResponseID:    options.PreviousResponseID,
-		Truncation:            options.Truncation,
+		StreamOptions: streamOptionsFromProvider(model, options),
 	}
 
-	if resolved.ReasoningEffort != "" {
-		resolved.ReasoningEffort = ThinkingLevel(clampOpenAIResponsesReasoningEffort(model, resolved.ReasoningEffort))
+	if resolved.Reasoning != "" {
+		resolved.Reasoning = ThinkingLevel(clampOpenAIResponsesReasoningEffort(model, resolved.Reasoning))
 	}
-	if strings.TrimSpace(resolved.ReasoningSummary) == "" && resolved.ReasoningEffort != "" {
+	if strings.TrimSpace(resolved.ReasoningSummary) == "" && resolved.Reasoning != "" {
 		resolved.ReasoningSummary = defaultReasoningSummary("")
 	}
 
 	return resolved
 }
 
-func (options OpenAIResponsesProviderOptions) toProviderStreamOptions() ProviderStreamOptions {
-	streamOptions := options.CommonProviderOptions.toProviderStreamOptions()
-	streamOptions.Reasoning = options.ReasoningEffort
-	streamOptions.ReasoningSummary = options.ReasoningSummary
-	streamOptions.ServiceTier = options.ServiceTier
-	streamOptions.ToolChoice = options.ToolChoice
-	streamOptions.PreviousResponseID = options.PreviousResponseID
-	streamOptions.Truncation = options.Truncation
-	return streamOptions
+func (options OpenAIResponsesProviderOptions) toProviderStreamOptions(model Model) ProviderStreamOptions {
+	return options.StreamOptions.providerStreamOptions(model)
 }

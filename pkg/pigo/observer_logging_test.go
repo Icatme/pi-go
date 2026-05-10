@@ -108,8 +108,8 @@ func TestStreamObserverIntegration(t *testing.T) {
 		Provider:   "openai-codex",
 		StopReason: StopReasonStop,
 		Usage: Usage{
-			Input:      100,
-			Output:     2,
+			Input:       100,
+			Output:      2,
 			TotalTokens: 102,
 		},
 	}

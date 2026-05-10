@@ -3,7 +3,6 @@ package pigo
 import (
 	"fmt"
 	"strings"
-	"sync"
 )
 
 type APIStreamFunc func(Model, Context, ProviderStreamOptions) *AssistantMessageEventStream
@@ -17,16 +16,9 @@ type APIModule struct {
 
 type APIModuleFactory func() APIModule
 
-type apiRegistryEntry struct {
-	module   *APIModule
-	factory  APIModuleFactory
-	sourceID string
-}
-
 var (
-	apiRegistryMu  sync.RWMutex
-	apiRegistry    = map[API]*apiRegistryEntry{}
-	apiResolveHook func(API)
+	apiRegistry          = NewRegistry[API, APIModule]()
+	apiRegistrySourceIDs = map[API]string{}
 )
 
 func RegisterAPIModule(module APIModule) {
@@ -56,19 +48,20 @@ func registerAPIModule(api API, module *APIModule, factory APIModuleFactory, sou
 		normalized := normalizeAPIModule(api, *module)
 		module = &normalized
 	}
-
-	apiRegistryMu.Lock()
-	defer apiRegistryMu.Unlock()
-
-	if _, exists := apiRegistry[api]; exists {
-		panic(fmt.Sprintf("pigo: api %q already registered", api))
+	if factory != nil {
+		originalFactory := factory
+		factory = func() APIModule {
+			return normalizeAPIModule(api, originalFactory())
+		}
 	}
 
-	apiRegistry[api] = &apiRegistryEntry{
-		module:   module,
-		factory:  factory,
-		sourceID: sourceID,
-	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			panic(fmt.Sprintf("pigo: api %q already registered", api))
+		}
+	}()
+	apiRegistry.Register(api, module, factory)
+	apiRegistrySourceIDs[api] = sourceID
 }
 
 func UnregisterAPIModules(sourceID string) {
@@ -77,12 +70,10 @@ func UnregisterAPIModules(sourceID string) {
 		return
 	}
 
-	apiRegistryMu.Lock()
-	defer apiRegistryMu.Unlock()
-
-	for api, entry := range apiRegistry {
-		if entry.sourceID == sourceID {
-			delete(apiRegistry, api)
+	for api, registeredSourceID := range cloneAPIRegistrySourceIDs() {
+		if registeredSourceID == sourceID {
+			apiRegistry.Delete(api)
+			delete(apiRegistrySourceIDs, api)
 		}
 	}
 }
@@ -96,14 +87,7 @@ func normalizeAPIModuleSourceID(sourceID string) string {
 }
 
 func ListAPIModules() []API {
-	apiRegistryMu.RLock()
-	defer apiRegistryMu.RUnlock()
-
-	apis := make([]API, 0, len(apiRegistry))
-	for api := range apiRegistry {
-		apis = append(apis, api)
-	}
-	return apis
+	return apiRegistry.Keys()
 }
 
 func GetAPIModule(api API) *APIModule {
@@ -111,37 +95,7 @@ func GetAPIModule(api API) *APIModule {
 }
 
 func resolveAPIModule(api API) *APIModule {
-	apiRegistryMu.RLock()
-	entry := apiRegistry[api]
-	if entry == nil {
-		apiRegistryMu.RUnlock()
-		return nil
-	}
-	if entry.module != nil {
-		module := entry.module
-		apiRegistryMu.RUnlock()
-		return module
-	}
-	factory := entry.factory
-	apiRegistryMu.RUnlock()
-
-	apiRegistryMu.Lock()
-	defer apiRegistryMu.Unlock()
-
-	entry = apiRegistry[api]
-	if entry == nil {
-		return nil
-	}
-	if entry.module != nil {
-		return entry.module
-	}
-
-	module := normalizeAPIModule(api, factory())
-	entry.module = &module
-	if apiResolveHook != nil {
-		apiResolveHook(api)
-	}
-	return entry.module
+	return apiRegistry.Resolve(api)
 }
 
 func normalizeAPIModule(api API, module APIModule) APIModule {
@@ -152,4 +106,12 @@ func normalizeAPIModule(api API, module APIModule) APIModule {
 		panic(fmt.Sprintf("pigo: api module mismatch: registered=%q module=%q", api, module.API))
 	}
 	return module
+}
+
+func cloneAPIRegistrySourceIDs() map[API]string {
+	cloned := make(map[API]string, len(apiRegistrySourceIDs))
+	for api, sourceID := range apiRegistrySourceIDs {
+		cloned[api] = sourceID
+	}
+	return cloned
 }

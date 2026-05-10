@@ -1,73 +1,141 @@
 # pi-go
 
-`pi-go` is a Go port of `V:\gitdownload\pi-mono\packages\ai`.
+`pi-go` is a Go reimplementation of the `pi.ai` core package surface. The repository is intentionally centered on a single reusable core library in `pkg/pigo`, with a thin CLI on top.
 
-Repository layout:
+Current scope is deliberately narrow:
 
-- `cmd/pigo`: CLI entrypoint
-- `internal/cli`: CLI-only login and credential-store logic
-- `pkg/pigo`: library code and tests
-- `docs`: project notes and repo-level documentation
-- repo root: module files and top-level docs only
+- keep provider-agnostic semantics stable first
+- keep the library surface small and explicit
+- focus on `OpenAI OAuth` / `openai-codex` and `Kimi Coding`
+- preserve WebSocket support, observer hooks, and the single-package core-library shape
 
-Current approach:
+## Project Positioning
 
-- migrate provider-agnostic tests first
-- keep the first implementation surface small
-- add provider integrations after the core semantics are locked down
-- for now, only implement `OpenAI OAuth` and `Kimi Coding`
+This repository is not a full agent framework. It provides the core runtime pieces needed to:
 
-Initial migrated areas:
+- describe models and provider capabilities
+- route requests through provider and API registries
+- execute `Complete`, `CompleteSimple`, `Stream`, and `StreamSimple`
+- normalize message history for cross-provider replay
+- expose incremental assistant events and final responses
+- validate tool arguments with a small built-in schema subset
 
-- model metadata and `SupportsXHigh`
-- provider/model registry helpers and target-provider model metadata
-- lazy provider-module registry for plugin-style provider wiring
-- target-provider auth resolution primitives for `openai-codex` OAuth and `kimi-coding` API keys
-- minimal `Complete` / `CompleteSimple` path for `kimi-coding` via Anthropic-style Messages API
-- minimal `Complete` / `CompleteSimple` path for `openai-codex` via Responses API
-- provider-native `Stream` / `StreamSimple` event surface for the supported providers
-- provider `responseId` propagation and aborted-request normalization
-- overflow detection
-- message transformation for cross-provider replay
-- minimal tool argument validation fallback
+## Supported Providers
 
-Package import path:
+Current primary provider scope:
+
+- `openai-codex` via OpenAI OAuth and the Responses-style API surface
+- `kimi-coding` via Anthropic-style Messages semantics
+
+Supporting provider and API modules also exist for shared protocol behavior used by the core library, but the repo is intentionally optimized around the two providers above.
+
+## Quick Start
+
+Import path:
 
 ```go
 import "github.com/Icatme/pi-go/pkg/pigo"
-
-Context serialization:
-
-- `Context` now supports standard JSON round-tripping via `json.Marshal` / `json.Unmarshal`
-- `SerializeContext` and `DeserializeContext` provide explicit helpers for persistence boundaries
-- serialized tools preserve name/description/parameters; runtime validators are intentionally omitted
-- messages and content blocks are encoded with explicit role/type tags so conversations can be restored safely
 ```
 
-Provider module registration:
+Basic request flow:
 
-- built-in providers are registered through a lazy provider registry
-- external providers can register with `RegisterProviderModule` or `RegisterLazyProviderModule`
-- `Stream` / `Complete` resolve provider execution through that registry instead of a hard-coded switch
-- provider auth metadata and provider capability metadata are also attached to registry modules
-- runtime auth resolution now reads provider auth behavior from the registered module
+```go
+package main
 
-API registration:
+import "github.com/Icatme/pi-go/pkg/pigo"
 
-- runtime stream dispatch is registered by `model.API`, not directly by provider
-- built-in APIs are registered lazily through an API registry
-- `Stream` / `Complete` are the provider-option path
-- `StreamSimple` / `CompleteSimple` are the generic simple-option path
-- simple options are normalized into provider options through a dedicated simple-options layer
+func main() {
+	model := pigo.GetModel("kimi-coding", "kimi-k2-thinking")
+	if model == nil {
+		panic("model not found")
+	}
+
+	result := pigo.CompleteSimple(*model, pigo.Context{
+		SystemPrompt: "You are a precise coding assistant.",
+		Messages: []pigo.Message{
+			pigo.UserMessage{Content: "Explain what this repository does."},
+		},
+	}, pigo.SimpleStreamOptions{
+		APIKey: "kimi-api-key",
+	})
+
+	_ = result
+}
+```
+
+Streaming flow:
+
+```go
+stream := pigo.StreamSimple(*model, pigo.Context{
+	Messages: []pigo.Message{pigo.UserMessage{Content: "hello"}},
+}, pigo.SimpleStreamOptions{APIKey: "kimi-api-key"})
+
+for event := range stream.Events() {
+	_ = event
+}
+
+final := stream.Result()
+_ = final
+```
+
+## Architecture Overview
+
+Repository layout:
+
+- `pkg/pigo`: exported core library and tests
+- `cmd/pigo`: CLI entrypoint
+- `internal/cli`: auth/login and credential-store logic for the CLI only
+- `docs`: repository notes and non-package documentation
+
+Core runtime pieces:
+
+- lazy provider registry for provider modules and model metadata
+- lazy API registry for stream dispatch by `model.API`
+- unified message/content model for replay and serialization
+- bounded stream event delivery with explicit droppable delta backpressure
+- shared HTTP/SSE transport utilities for OpenAI Responses-style providers
+- optional WebSocket transport for `openai-codex`
+- observer hooks for request completion/error and stream-finish accounting
+
+## Testing
+
+Main package validation commands:
+
+```powershell
+go test ./pkg/pigo/... -v -count=1
+go test ./pkg/pigo/... -coverprofile=coverage.out
+go tool cover -func=coverage.out
+go vet ./pkg/pigo/...
+gofmt -l pkg/pigo/
+```
+
+Race testing:
+
+```powershell
+go test ./pkg/pigo/... -race -count=1
+```
+
+Live tests are gated and skipped by default. Enable them explicitly with:
+
+```powershell
+$env:PIGO_LIVE_TEST = "1"
+```
+
+Some live paths also require credentials such as:
+
+- `KIMI_API_KEY`
+- test-only OpenAI Codex credentials in `01_auth.json`
 
 Support-file boundaries:
 
-- `.pigo/auth.json` is ignored by git and written by `pigo login`
-- `.pigo/.env` is ignored by git and used for local API-key lookup in tests/helpers
-- `01_auth.json` is ignored by git and used only by live tests
-- runtime auth must be passed explicitly and does not read those files
+- `.pigo/auth.json` is CLI-managed auth storage
+- `.pigo/.env` is local test/helper API-key input
+- `01_auth.json` is test-only and ignored by git
+- library runtime auth should still be passed explicitly via options or auth config
 
-CLI usage:
+## CLI
+
+Example commands:
 
 ```powershell
 go run .\cmd\pigo list
@@ -78,17 +146,10 @@ go run .\cmd\pigo ask --provider openai-codex --model gpt-5.4 "hello"
 .\scripts\build.ps1
 ```
 
-CLI behavior:
-
-- `list` shows OAuth-login providers only
-- `models` shows available models for a provider
-- `login` stores OAuth credentials in `.pigo/auth.json`
-- `ask` loads OAuth credentials from `.pigo/auth.json` and API keys from `.pigo/.env`
-
-Build scripts:
+Build helpers:
 
 - `.\scripts\test.ps1` runs `go test ./...`
-- `.\scripts\build.ps1` runs tests, then builds `bin/pigo.exe`
-- `.\scripts\build.ps1 -SkipTest` builds without re-running tests
+- `.\scripts\build.ps1` runs tests and builds `bin/pigo.exe`
+- `.\scripts\build.ps1 -SkipTest` builds without running tests
 - `.\scripts\build.ps1 -Release` adds stripped release flags
 - `.\scripts\build.ps1 -GOOS linux -GOARCH amd64` cross-builds to `bin/pigo`

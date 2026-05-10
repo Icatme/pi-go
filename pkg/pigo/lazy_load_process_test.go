@@ -95,19 +95,19 @@ func TestLazyLoadProcessHelper(t *testing.T) {
 		apis      []API
 	)
 
-	providerResolveHook = func(provider Provider) {
+	providerRegistry.SetResolveHook(func(provider Provider) {
 		mu.Lock()
 		defer mu.Unlock()
 		providers = append(providers, provider)
-	}
-	apiResolveHook = func(api API) {
+	})
+	apiRegistry.SetResolveHook(func(api API) {
 		mu.Lock()
 		defer mu.Unlock()
 		apis = append(apis, api)
-	}
+	})
 	defer func() {
-		providerResolveHook = nil
-		apiResolveHook = nil
+		providerRegistry.SetResolveHook(nil)
+		apiRegistry.SetResolveHook(nil)
 	}()
 
 	switch os.Getenv("PIGO_LAZY_LOAD_MODE") {

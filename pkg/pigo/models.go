@@ -151,69 +151,6 @@ func SupportsHostedTool(model Model, toolType HostedToolType) bool {
 	return GetProviderCapabilities(model.Provider).HostedTools.Supports(toolType)
 }
 
-func cloneModel(model Model) Model {
-	cloned := model
-	if len(model.Input) > 0 {
-		cloned.Input = append([]InputType(nil), model.Input...)
-	}
-	if len(model.ThinkingLevelMap) > 0 {
-		cloned.ThinkingLevelMap = make(ThinkingLevelMap, len(model.ThinkingLevelMap))
-		for k, v := range model.ThinkingLevelMap {
-			cloned.ThinkingLevelMap[k] = v
-		}
-	}
-	if len(model.Headers) > 0 {
-		cloned.Headers = make(map[string]string, len(model.Headers))
-		for k, v := range model.Headers {
-			cloned.Headers[k] = v
-		}
-	}
-	cloned.Compat = cloneCompat(model.Compat)
-	return cloned
-}
-
-func cloneCompat(compat any) any {
-	switch typed := compat.(type) {
-	case *OpenAICompletionsCompat:
-		cloned := *typed
-		if typed.OpenRouterRouting != nil {
-			routing := *typed.OpenRouterRouting
-			routing.Order = cloneStringSlice(typed.OpenRouterRouting.Order)
-			routing.Only = cloneStringSlice(typed.OpenRouterRouting.Only)
-			routing.Ignore = cloneStringSlice(typed.OpenRouterRouting.Ignore)
-			routing.Quantizations = cloneStringSlice(typed.OpenRouterRouting.Quantizations)
-			if typed.OpenRouterRouting.MaxPrice != nil {
-				routing.MaxPrice = cloneMap(typed.OpenRouterRouting.MaxPrice)
-			}
-			cloned.OpenRouterRouting = &routing
-		}
-		if typed.VercelGatewayRouting != nil {
-			routing := *typed.VercelGatewayRouting
-			routing.Order = cloneStringSlice(typed.VercelGatewayRouting.Order)
-			routing.Only = cloneStringSlice(typed.VercelGatewayRouting.Only)
-			cloned.VercelGatewayRouting = &routing
-		}
-		return &cloned
-	case *OpenAIResponsesCompat:
-		cloned := *typed
-		return &cloned
-	case *AnthropicMessagesCompat:
-		cloned := *typed
-		return &cloned
-	default:
-		return compat
-	}
-}
-
-func cloneStringSlice(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make([]string, len(values))
-	copy(out, values)
-	return out
-}
-
 func contains(value, needle string) bool {
 	return len(needle) > 0 && len(value) >= len(needle) && indexOf(value, needle) >= 0
 }

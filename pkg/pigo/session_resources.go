@@ -17,9 +17,9 @@ type sessionResourceCleanupEntry struct {
 }
 
 var (
-	sessionResourceCleanups       []sessionResourceCleanupEntry
-	sessionResourceCleanupsMu     sync.RWMutex
-	sessionResourceCleanupNextID  uint64
+	sessionResourceCleanups      []sessionResourceCleanupEntry
+	sessionResourceCleanupsMu    sync.RWMutex
+	sessionResourceCleanupNextID uint64
 )
 
 func RegisterSessionResourceCleanup(cleanup SessionResourceCleanup) func() {

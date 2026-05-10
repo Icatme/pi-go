@@ -7,6 +7,20 @@ const (
 	nonVisionToolImagePlaceholder = "(tool image omitted: model does not support images)"
 )
 
+type MessageTransformer func(transformContext, []Message) []Message
+
+type transformContext struct {
+	model               Model
+	normalizeToolCallID func(string, Model, AssistantMessage) string
+}
+
+var defaultTransformers = []MessageTransformer{
+	downgradeUnsupportedImages,
+	normalizeThinkingContent,
+	normalizeToolCallIDs,
+	fillMissingToolResults,
+}
+
 func modelSupportsImages(model Model) bool {
 	for _, input := range model.Input {
 		if input == InputImage {
@@ -38,8 +52,8 @@ func replaceImagesWithPlaceholder(content []ContentBlock, placeholder string) []
 	return result
 }
 
-func downgradeUnsupportedImages(messages []Message, model Model) []Message {
-	if modelSupportsImages(model) {
+func downgradeUnsupportedImages(ctx transformContext, messages []Message) []Message {
+	if modelSupportsImages(ctx.model) {
 		return messages
 	}
 
@@ -71,25 +85,80 @@ func downgradeUnsupportedImages(messages []Message, model Model) []Message {
 	return result
 }
 
-func TransformMessages(
-	messages []Message,
-	model Model,
-	normalizeToolCallID func(string, Model, AssistantMessage) string,
-) []Message {
-	toolCallIDMap := map[string]string{}
-	imageAwareMessages := downgradeUnsupportedImages(messages, model)
-	transformed := make([]Message, 0, len(imageAwareMessages))
+func normalizeThinkingContent(ctx transformContext, messages []Message) []Message {
+	result := make([]Message, 0, len(messages))
+	for _, message := range messages {
+		assistant, ok := message.(AssistantMessage)
+		if !ok {
+			result = append(result, message.clone())
+			continue
+		}
 
-	for _, message := range imageAwareMessages {
+		isSameModel := assistant.Provider == ctx.model.Provider && assistant.API == ctx.model.API && assistant.Model == ctx.model.ID
+		nextContent := make([]ContentBlock, 0, len(assistant.Content))
+		for _, block := range assistant.Content {
+			switch content := block.(type) {
+			case ThinkingContent:
+				if content.Redacted {
+					if isSameModel {
+						nextContent = append(nextContent, content)
+					}
+					continue
+				}
+				if isSameModel && content.ThinkingSignature != "" {
+					nextContent = append(nextContent, content)
+					continue
+				}
+				if content.Thinking == "" {
+					continue
+				}
+				if isSameModel {
+					nextContent = append(nextContent, content)
+					continue
+				}
+				nextContent = append(nextContent, TextContent{Text: content.Thinking})
+			case TextContent:
+				nextContent = append(nextContent, content)
+			case ToolCall:
+				nextContent = append(nextContent, ToolCall{
+					ID:               content.ID,
+					Name:             content.Name,
+					Arguments:        cloneMap(content.Arguments),
+					ThoughtSignature: content.ThoughtSignature,
+				})
+			case ImageContent:
+				nextContent = append(nextContent, content)
+			}
+		}
+
+		result = append(result, AssistantMessage{
+			Content:      nextContent,
+			API:          assistant.API,
+			Provider:     assistant.Provider,
+			Model:        assistant.Model,
+			Usage:        assistant.Usage,
+			StopReason:   assistant.StopReason,
+			ErrorMessage: assistant.ErrorMessage,
+			Timestamp:    assistant.Timestamp,
+		})
+	}
+	return result
+}
+
+func normalizeToolCallIDs(ctx transformContext, messages []Message) []Message {
+	toolCallIDMap := map[string]string{}
+	result := make([]Message, 0, len(messages))
+
+	for _, message := range messages {
 		switch typed := message.(type) {
 		case UserMessage:
-			transformed = append(transformed, typed.clone())
+			result = append(result, typed.clone())
 		case ToolResultMessage:
 			toolCallID := typed.ToolCallID
 			if normalizedID, ok := toolCallIDMap[typed.ToolCallID]; ok {
 				toolCallID = normalizedID
 			}
-			transformed = append(transformed, ToolResultMessage{
+			result = append(result, ToolResultMessage{
 				ToolCallID: toolCallID,
 				ToolName:   typed.ToolName,
 				Content:    cloneBlocks(typed.Content),
@@ -97,31 +166,10 @@ func TransformMessages(
 				Timestamp:  typed.Timestamp,
 			})
 		case AssistantMessage:
-			isSameModel := typed.Provider == model.Provider && typed.API == model.API && typed.Model == model.ID
+			isSameModel := typed.Provider == ctx.model.Provider && typed.API == ctx.model.API && typed.Model == ctx.model.ID
 			nextContent := make([]ContentBlock, 0, len(typed.Content))
 			for _, block := range typed.Content {
 				switch content := block.(type) {
-				case ThinkingContent:
-					if content.Redacted {
-						if isSameModel {
-							nextContent = append(nextContent, content)
-						}
-						continue
-					}
-					if isSameModel && content.ThinkingSignature != "" {
-						nextContent = append(nextContent, content)
-						continue
-					}
-					if content.Thinking == "" {
-						continue
-					}
-					if isSameModel {
-						nextContent = append(nextContent, content)
-						continue
-					}
-					nextContent = append(nextContent, TextContent{Text: content.Thinking})
-				case TextContent:
-					nextContent = append(nextContent, content)
 				case ToolCall:
 					nextToolCall := ToolCall{
 						ID:               content.ID,
@@ -132,19 +180,23 @@ func TransformMessages(
 					if !isSameModel {
 						nextToolCall.ThoughtSignature = ""
 					}
-					if !isSameModel && normalizeToolCallID != nil {
-						normalizedID := normalizeToolCallID(content.ID, model, typed)
+					if !isSameModel && ctx.normalizeToolCallID != nil {
+						normalizedID := ctx.normalizeToolCallID(content.ID, ctx.model, typed)
 						if normalizedID != content.ID {
 							toolCallIDMap[content.ID] = normalizedID
 							nextToolCall.ID = normalizedID
 						}
 					}
 					nextContent = append(nextContent, nextToolCall)
+				case TextContent:
+					nextContent = append(nextContent, content)
+				case ThinkingContent:
+					nextContent = append(nextContent, content)
 				case ImageContent:
 					nextContent = append(nextContent, content)
 				}
 			}
-			transformed = append(transformed, AssistantMessage{
+			result = append(result, AssistantMessage{
 				Content:      nextContent,
 				API:          typed.API,
 				Provider:     typed.Provider,
@@ -157,7 +209,11 @@ func TransformMessages(
 		}
 	}
 
-	result := make([]Message, 0, len(transformed))
+	return result
+}
+
+func fillMissingToolResults(_ transformContext, messages []Message) []Message {
+	result := make([]Message, 0, len(messages))
 	var pendingToolCalls []ToolCall
 	existingToolResults := map[string]struct{}{}
 
@@ -181,7 +237,7 @@ func TransformMessages(
 		existingToolResults = map[string]struct{}{}
 	}
 
-	for _, message := range transformed {
+	for _, message := range messages {
 		switch typed := message.(type) {
 		case AssistantMessage:
 			if len(pendingToolCalls) > 0 {
@@ -213,5 +269,22 @@ func TransformMessages(
 		}
 	}
 
+	return result
+}
+
+func TransformMessages(
+	messages []Message,
+	model Model,
+	normalizeToolCallID func(string, Model, AssistantMessage) string,
+) []Message {
+	ctx := transformContext{
+		model:               model,
+		normalizeToolCallID: normalizeToolCallID,
+	}
+
+	result := cloneMessages(messages)
+	for _, transformer := range defaultTransformers {
+		result = transformer(ctx, result)
+	}
 	return result
 }

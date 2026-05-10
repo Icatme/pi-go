@@ -10,7 +10,7 @@ import (
 )
 
 func streamOpenAICodex(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
-	options = resolveOpenAICodexProviderOptions(model, NormalizeProviderStreamOptions(model, options)).toProviderStreamOptions()
+	options = resolveOpenAICodexProviderOptions(model, NormalizeProviderStreamOptions(model, options)).toProviderStreamOptions(model)
 	stream := newAssistantMessageEventStream()
 	stream.setObserver(options.Observer, model)
 
@@ -137,7 +137,7 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 		requestBody.Truncation = resolvedOptions.Truncation
 	}
 
-	if effort := string(resolvedOptions.ReasoningEffort); effort != "" {
+	if effort := string(resolvedOptions.Reasoning); effort != "" {
 		requestBody.Reasoning = &openAIResponsesReasoningOptions{
 			Effort:  effort,
 			Summary: resolvedOptions.ReasoningSummary,
