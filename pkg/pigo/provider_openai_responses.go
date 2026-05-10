@@ -3,11 +3,16 @@ package pigo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	openai "github.com/openai/openai-go/v3"
+	openaioption "github.com/openai/openai-go/v3/option"
 )
 
 func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
@@ -184,12 +189,59 @@ func streamOpenAIResponsesSSE(
 	response *AssistantMessage,
 	stream *AssistantMessageEventStream,
 ) error {
-	client := HTTPStreamClient{
-		HTTPClient:     httpClient,
-		MaxRetries:     maxInt(options.MaxRetries, 3),
-		BaseRetryDelay: time.Second,
-		MaxRetryDelay:  time.Duration(options.MaxRetryDelay) * time.Millisecond,
+	clientOptions := []openaioption.RequestOption{
+		openaioption.WithAPIKey(apiKey),
+		openaioption.WithBaseURL(resolveOpenAIResponsesSDKBaseURL(model.BaseURL)),
+		openaioption.WithMaxRetries(maxInt(options.MaxRetries, 3)),
 	}
+	if httpClient != nil {
+		clientOptions = append(clientOptions, openaioption.WithHTTPClient(httpClient))
+	}
+
+	sdkClient := openai.NewClient(clientOptions...)
+
+	payload := json.RawMessage(bodyBytes)
+	requestOptions := []openaioption.RequestOption{
+		openaioption.WithHeader("accept", "text/event-stream"),
+	}
+	if options.SessionID != "" {
+		requestOptions = append(requestOptions,
+			openaioption.WithHeader("session_id", options.SessionID),
+			openaioption.WithHeader("x-client-request-id", options.SessionID),
+		)
+	}
+	for key, value := range options.Headers {
+		requestOptions = append(requestOptions, openaioption.WithHeader(key, value))
+	}
+
+	var httpResponse *http.Response
+	err := sdkClient.Post(requestContext, "responses", payload, &httpResponse, requestOptions...)
+	if err != nil {
+		return err
+	}
+	if httpResponse == nil {
+		return fmt.Errorf("missing sdk response")
+	}
+	defer httpResponse.Body.Close()
+
+	if options.OnResponse != nil {
+		headers := make(map[string]string)
+		for key, values := range httpResponse.Header {
+			if len(values) > 0 {
+				headers[key] = values[0]
+			}
+		}
+		options.OnResponse(ProviderResponse{Status: httpResponse.StatusCode, Headers: headers}, model)
+	}
+
+	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
+		body, readErr := io.ReadAll(httpResponse.Body)
+		if readErr != nil {
+			return readErr
+		}
+		return errors.New(parseOpenAIResponsesError(body, httpResponse.Status))
+	}
+
 	state := openAIResponsesStreamingState{
 		CurrentTextIndex:     -1,
 		CurrentThinkingIndex: -1,
@@ -197,36 +249,13 @@ func streamOpenAIResponsesSSE(
 		FinalizedItemKeys:    map[string]bool{},
 	}
 	terminalSeen := false
-	err := client.postStream(requestContext, resolveOpenAIResponsesURL(model.BaseURL), httpStreamRequest{
-		Headers: buildOpenAIResponsesSSEHeaders(options, apiKey),
-		Body:    bodyBytes,
-		OnResponse: func(httpResponse *http.Response) {
-			if options.OnResponse == nil {
-				return
-			}
-			headers := make(map[string]string)
-			for key, values := range httpResponse.Header {
-				if len(values) > 0 {
-					headers[key] = values[0]
-				}
-			}
-			options.OnResponse(ProviderResponse{Status: httpResponse.StatusCode, Headers: headers}, model)
-		},
-		ParseError: func(body []byte, status string) string {
-			return parseOpenAIResponsesError(body, status)
-		},
-		ShouldRetry: shouldRetryOpenAIResponsesRequest,
-		OnOpen: func(_ *http.Response) error {
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: *response})
-			return nil
-		},
-		OnEvent: func(_ string, data string) (bool, error) {
-			done, err := processOpenAIResponsesStreamEvent(data, model, response, stream, &state, options.ServiceTier)
-			if done {
-				terminalSeen = true
-			}
-			return done, err
-		},
+	stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: *response})
+	err = readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
+		done, eventErr := processOpenAIResponsesStreamEvent(data, model, response, stream, &state, options.ServiceTier)
+		if done {
+			terminalSeen = true
+		}
+		return done, eventErr
 	})
 	if err != nil {
 		return err
@@ -235,6 +264,14 @@ func streamOpenAIResponsesSSE(
 		return fmt.Errorf("missing terminal sse event")
 	}
 	return nil
+}
+
+func resolveOpenAIResponsesSDKBaseURL(baseURL string) string {
+	resolvedURL := resolveOpenAIResponsesURL(baseURL)
+	if strings.HasSuffix(resolvedURL, "/responses") {
+		return strings.TrimSuffix(resolvedURL, "/responses")
+	}
+	return resolvedURL
 }
 
 func buildOpenAIResponsesSSEHeaders(options ProviderStreamOptions, apiKey string) map[string]string {
