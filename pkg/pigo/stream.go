@@ -40,6 +40,19 @@ func (s *AssistantMessageEventStream) setObserver(obs Observer, m Model) {
 	s.requestCtx = context.Background()
 }
 
+func (s *AssistantMessageEventStream) startRequest(ctx context.Context, payload any) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s.observer != nil {
+		if observed := s.observer.OnRequestStart(ctx, s.model, payload); observed != nil {
+			ctx = observed
+		}
+	}
+	s.requestCtx = ctx
+	return ctx
+}
+
 func newAssistantMessageEventStream() *AssistantMessageEventStream {
 	stream := &AssistantMessageEventStream{
 		events: make(chan AssistantMessageEvent, 1024),
@@ -117,9 +130,8 @@ func (s *AssistantMessageEventStream) push(event AssistantMessageEvent) {
 	}
 
 	s.queueMu.Lock()
-	defer s.queueMu.Unlock()
-
 	if s.closing {
+		s.queueMu.Unlock()
 		return
 	}
 	if queued.droppable && s.pendingDelta >= assistantMessageEventDeltaBuffer {
@@ -131,6 +143,11 @@ func (s *AssistantMessageEventStream) push(event AssistantMessageEvent) {
 	s.pending = append(s.pending, queued)
 	s.eventCount++
 	s.queueCond.Signal()
+	s.queueMu.Unlock()
+
+	if s.observer != nil {
+		s.observer.OnStreamEvent(s.requestCtx, s.model, cloneAssistantMessageEvent(queued.event))
+	}
 }
 
 func (s *AssistantMessageEventStream) finish(result AssistantMessage) {

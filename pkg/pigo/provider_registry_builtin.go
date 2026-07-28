@@ -11,12 +11,18 @@ func registerBuiltInModules() {
 
 func registerBuiltInAPIModules() {
 	RegisterLazyAPIModule("anthropic-messages", newAnthropicMessagesAPIModule)
+	RegisterLazyAPIModule("deepseek-chat-completions", newDeepSeekChatCompletionsAPIModule)
+	RegisterLazyAPIModule("google-generative-ai", newGoogleGenerativeAIAPIModule)
+	RegisterLazyAPIModule("mistral-conversations", newMistralConversationsAPIModule)
 	RegisterLazyAPIModule("openai-codex-responses", newOpenAICodexResponsesAPIModule)
 	RegisterLazyAPIModule("openai-responses", newOpenAIResponsesAPIModule)
 }
 
 func registerBuiltInProviderModules() {
 	RegisterLazyProviderModule("anthropic", newAnthropicProviderModule)
+	RegisterLazyProviderModule("deepseek", newDeepSeekProviderModule)
+	RegisterLazyProviderModule("google", newGoogleProviderModule)
+	RegisterLazyProviderModule("mistral", newMistralProviderModule)
 	RegisterLazyProviderModule("openai-codex", newOpenAICodexProviderModule)
 	RegisterLazyProviderModule("openai", newOpenAIResponsesProviderModule)
 	RegisterLazyProviderModule("kimi-coding", newKimiCodingProviderModule)
@@ -27,6 +33,30 @@ func newAnthropicMessagesAPIModule() APIModule {
 		API:          "anthropic-messages",
 		Stream:       streamAnthropicMessages,
 		StreamSimple: streamSimpleAnthropicMessages,
+	}
+}
+
+func newDeepSeekChatCompletionsAPIModule() APIModule {
+	return APIModule{
+		API:          "deepseek-chat-completions",
+		Stream:       streamDeepSeekChatCompletions,
+		StreamSimple: streamSimpleDeepSeekChatCompletions,
+	}
+}
+
+func newGoogleGenerativeAIAPIModule() APIModule {
+	return APIModule{
+		API:          "google-generative-ai",
+		Stream:       streamGoogle,
+		StreamSimple: streamSimpleGoogle,
+	}
+}
+
+func newMistralConversationsAPIModule() APIModule {
+	return APIModule{
+		API:          "mistral-conversations",
+		Stream:       streamMistral,
+		StreamSimple: streamSimpleMistral,
 	}
 }
 
@@ -79,6 +109,211 @@ func newAnthropicProviderModule() ProviderModule {
 				Input:         []InputType{InputText, InputImage},
 				ContextWindow: 200000,
 				MaxTokens:     32000,
+			},
+		},
+	}
+}
+
+func newDeepSeekProviderModule() ProviderModule {
+	return ProviderModule{
+		Provider: "deepseek",
+		Auth: ProviderAuth{
+			EnvAPIKeyName: "DEEPSEEK_KEY",
+			EnvAPIKeyNames: []string{
+				"DEEPSEEK_KEY",
+				"DEEPSEEK_API_KEY",
+			},
+		},
+		Capabilities: ProviderCapabilities{
+			SupportsStreaming:  true,
+			SupportsToolChoice: true,
+		},
+		BuildOptions:     buildDeepSeekProviderStreamOptions,
+		NormalizeOptions: normalizeDeepSeekProviderStreamOptions,
+		Models: map[string]Model{
+			"deepseek-v4-flash": {
+				ID:        "deepseek-v4-flash",
+				Name:      "DeepSeek V4 Flash",
+				API:       "deepseek-chat-completions",
+				BaseURL:   "https://api.deepseek.com",
+				Reasoning: true,
+				ThinkingLevelMap: ThinkingLevelMap{
+					ModelThinkingLevelMinimal: "high",
+					ModelThinkingLevelLow:     "high",
+					ModelThinkingLevelMedium:  "high",
+					ModelThinkingLevelHigh:    "high",
+					ModelThinkingLevelXHigh:   "max",
+				},
+				Input:         []InputType{InputText},
+				Cost:          UsageCost{},
+				ContextWindow: 128000,
+				MaxTokens:     64000,
+			},
+			"deepseek-v4-pro": {
+				ID:        "deepseek-v4-pro",
+				Name:      "DeepSeek V4 Pro",
+				API:       "deepseek-chat-completions",
+				BaseURL:   "https://api.deepseek.com",
+				Reasoning: true,
+				ThinkingLevelMap: ThinkingLevelMap{
+					ModelThinkingLevelMinimal: "high",
+					ModelThinkingLevelLow:     "high",
+					ModelThinkingLevelMedium:  "high",
+					ModelThinkingLevelHigh:    "high",
+					ModelThinkingLevelXHigh:   "max",
+				},
+				Input:         []InputType{InputText},
+				Cost:          UsageCost{},
+				ContextWindow: 128000,
+				MaxTokens:     64000,
+			},
+		},
+	}
+}
+
+func newGoogleProviderModule() ProviderModule {
+	return ProviderModule{
+		Provider: "google",
+		Auth: ProviderAuth{
+			EnvAPIKeyName: "GOOGLE_API_KEY",
+			EnvAPIKeyNames: []string{
+				"GOOGLE_API_KEY",
+				"GEMINI_API_KEY",
+			},
+		},
+		Capabilities: ProviderCapabilities{
+			SupportsStreaming:  true,
+			SupportsToolChoice: true,
+		},
+		BuildOptions:     buildGoogleProviderStreamOptions,
+		NormalizeOptions: normalizeGoogleProviderStreamOptions,
+		Models: map[string]Model{
+			"gemini-2.5-pro": {
+				ID:            "gemini-2.5-pro",
+				Name:          "Gemini 2.5 Pro",
+				API:           "google-generative-ai",
+				BaseURL:       "https://generativelanguage.googleapis.com/v1beta",
+				Reasoning:     true,
+				Input:         []InputType{InputText, InputImage},
+				Cost:          UsageCost{Input: 1.25, Output: 10, CacheRead: 0.3125},
+				ContextWindow: 1048576,
+				MaxTokens:     65536,
+			},
+			"gemini-2.5-flash": {
+				ID:            "gemini-2.5-flash",
+				Name:          "Gemini 2.5 Flash",
+				API:           "google-generative-ai",
+				BaseURL:       "https://generativelanguage.googleapis.com/v1beta",
+				Reasoning:     true,
+				Input:         []InputType{InputText, InputImage},
+				Cost:          UsageCost{Input: 0.3, Output: 2.5, CacheRead: 0.03},
+				ContextWindow: 1048576,
+				MaxTokens:     65536,
+			},
+			"gemini-2.5-flash-lite": {
+				ID:            "gemini-2.5-flash-lite",
+				Name:          "Gemini 2.5 Flash Lite",
+				API:           "google-generative-ai",
+				BaseURL:       "https://generativelanguage.googleapis.com/v1beta",
+				Reasoning:     true,
+				Input:         []InputType{InputText, InputImage},
+				Cost:          UsageCost{Input: 0.1, Output: 0.4, CacheRead: 0.025},
+				ContextWindow: 1048576,
+				MaxTokens:     65536,
+			},
+			"gemini-2.0-flash": {
+				ID:            "gemini-2.0-flash",
+				Name:          "Gemini 2.0 Flash",
+				API:           "google-generative-ai",
+				BaseURL:       "https://generativelanguage.googleapis.com/v1beta",
+				Reasoning:     false,
+				Input:         []InputType{InputText, InputImage},
+				Cost:          UsageCost{Input: 0.1, Output: 0.4, CacheRead: 0.025},
+				ContextWindow: 1048576,
+				MaxTokens:     8192,
+			},
+			"gemini-2.0-flash-lite": {
+				ID:            "gemini-2.0-flash-lite",
+				Name:          "Gemini 2.0 Flash Lite",
+				API:           "google-generative-ai",
+				BaseURL:       "https://generativelanguage.googleapis.com/v1beta",
+				Reasoning:     false,
+				Input:         []InputType{InputText, InputImage},
+				Cost:          UsageCost{Input: 0.075, Output: 0.3},
+				ContextWindow: 1048576,
+				MaxTokens:     8192,
+			},
+		},
+	}
+}
+
+func newMistralProviderModule() ProviderModule {
+	return ProviderModule{
+		Provider: "mistral",
+		Auth: ProviderAuth{
+			EnvAPIKeyName: "MISTRAL_API_KEY",
+		},
+		Capabilities: ProviderCapabilities{
+			SupportsStreaming:  true,
+			SupportsToolChoice: true,
+		},
+		BuildOptions:     buildMistralProviderStreamOptions,
+		NormalizeOptions: normalizeMistralProviderStreamOptions,
+		Models: map[string]Model{
+			"mistral-large-latest": {
+				ID:            "mistral-large-latest",
+				Name:          "Mistral Large",
+				API:           "mistral-conversations",
+				BaseURL:       "https://api.mistral.ai",
+				Reasoning:     false,
+				Input:         []InputType{InputText},
+				Cost:          UsageCost{Input: 2, Output: 6},
+				ContextWindow: 128000,
+				MaxTokens:     4096,
+			},
+			"mistral-small-latest": {
+				ID:            "mistral-small-latest",
+				Name:          "Mistral Small",
+				API:           "mistral-conversations",
+				BaseURL:       "https://api.mistral.ai",
+				Reasoning:     true,
+				Input:         []InputType{InputText},
+				Cost:          UsageCost{Input: 0.2, Output: 0.6},
+				ContextWindow: 32000,
+				MaxTokens:     4096,
+			},
+			"pixtral-large-latest": {
+				ID:            "pixtral-large-latest",
+				Name:          "Pixtral Large",
+				API:           "mistral-conversations",
+				BaseURL:       "https://api.mistral.ai",
+				Reasoning:     false,
+				Input:         []InputType{InputText, InputImage},
+				Cost:          UsageCost{Input: 2, Output: 6},
+				ContextWindow: 128000,
+				MaxTokens:     4096,
+			},
+			"codestral-latest": {
+				ID:            "codestral-latest",
+				Name:          "Codestral",
+				API:           "mistral-conversations",
+				BaseURL:       "https://api.mistral.ai",
+				Reasoning:     false,
+				Input:         []InputType{InputText},
+				Cost:          UsageCost{Input: 0.3, Output: 0.9},
+				ContextWindow: 256000,
+				MaxTokens:     4096,
+			},
+			"ministral-3-8b-instruct": {
+				ID:            "ministral-3-8b-instruct",
+				Name:          "Ministral 3 8B",
+				API:           "mistral-conversations",
+				BaseURL:       "https://api.mistral.ai",
+				Reasoning:     false,
+				Input:         []InputType{InputText},
+				Cost:          UsageCost{Input: 0.1, Output: 0.1},
+				ContextWindow: 128000,
+				MaxTokens:     4096,
 			},
 		},
 	}

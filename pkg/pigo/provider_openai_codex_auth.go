@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,13 +20,33 @@ type openAICodexRefreshResponse struct {
 
 var openAICodexOAuthTokenURL = "https://auth.openai.com/oauth/token"
 
+var (
+	openAICodexOAuthRefreshMu      sync.Mutex
+	openAICodexOAuthRefreshFlights = map[openAICodexOAuthRefreshKey]*openAICodexOAuthRefreshFlight{}
+)
+
+type openAICodexOAuthRefreshKey struct {
+	refreshToken string
+	tokenURL     string
+	httpClient   *http.Client
+}
+
+type openAICodexOAuthRefreshFlight struct {
+	done        chan struct{}
+	credentials *OAuthCredentials
+	err         error
+	cancel      context.CancelFunc
+	waiters     int
+	completed   bool
+}
+
 const (
 	openAICodexOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	oauthRefreshSkew         = 60
 )
 
 func resolveOpenAICodexAuthorization(
-	_ Provider,
+	provider Provider,
 	config AuthConfig,
 	httpClient *http.Client,
 	requestContext context.Context,
@@ -37,11 +58,106 @@ func resolveOpenAICodexAuthorization(
 		return config.OAuth.AccessToken, nil
 	}
 
-	refreshed, err := refreshOpenAICodexOAuth(config.OAuth.RefreshToken, httpClient, requestContext)
+	refreshed, err := refreshOpenAICodexOAuthShared(config.OAuth.RefreshToken, httpClient, requestContext)
 	if err != nil {
 		return "", err
 	}
+	if config.OnOAuthCredentialsRefreshed != nil {
+		config.OnOAuthCredentialsRefreshed(provider, *refreshed)
+	}
 	return refreshed.AccessToken, nil
+}
+
+func refreshOpenAICodexOAuthShared(refreshToken string, httpClient *http.Client, requestContext context.Context) (*OAuthCredentials, error) {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	if requestContext == nil {
+		requestContext = context.Background()
+	}
+	if err := requestContext.Err(); err != nil {
+		return nil, err
+	}
+
+	key := openAICodexOAuthRefreshKey{
+		refreshToken: refreshToken,
+		tokenURL:     openAICodexOAuthTokenURL,
+		httpClient:   httpClient,
+	}
+	openAICodexOAuthRefreshMu.Lock()
+	if flight := openAICodexOAuthRefreshFlights[key]; flight != nil {
+		flight.waiters++
+		openAICodexOAuthRefreshMu.Unlock()
+		return waitForOpenAICodexOAuthRefresh(key, flight, requestContext)
+	}
+	refreshContext, cancel := context.WithCancel(context.Background())
+	flight := &openAICodexOAuthRefreshFlight{
+		done:    make(chan struct{}),
+		cancel:  cancel,
+		waiters: 1,
+	}
+	openAICodexOAuthRefreshFlights[key] = flight
+	openAICodexOAuthRefreshMu.Unlock()
+
+	go runOpenAICodexOAuthRefresh(key, flight, refreshToken, httpClient, refreshContext)
+	return waitForOpenAICodexOAuthRefresh(key, flight, requestContext)
+}
+
+func runOpenAICodexOAuthRefresh(
+	key openAICodexOAuthRefreshKey,
+	flight *openAICodexOAuthRefreshFlight,
+	refreshToken string,
+	httpClient *http.Client,
+	refreshContext context.Context,
+) {
+	defer flight.cancel()
+	credentials, err := refreshOpenAICodexOAuth(refreshToken, httpClient, refreshContext)
+
+	openAICodexOAuthRefreshMu.Lock()
+	if openAICodexOAuthRefreshFlights[key] == flight {
+		delete(openAICodexOAuthRefreshFlights, key)
+	}
+	flight.credentials = cloneOAuthCredentials(credentials)
+	flight.err = err
+	flight.completed = true
+	close(flight.done)
+	openAICodexOAuthRefreshMu.Unlock()
+}
+
+func waitForOpenAICodexOAuthRefresh(
+	key openAICodexOAuthRefreshKey,
+	flight *openAICodexOAuthRefreshFlight,
+	requestContext context.Context,
+) (*OAuthCredentials, error) {
+	select {
+	case <-flight.done:
+		return cloneOAuthCredentials(flight.credentials), flight.err
+	case <-requestContext.Done():
+		var cancel context.CancelFunc
+		openAICodexOAuthRefreshMu.Lock()
+		if !flight.completed {
+			flight.waiters--
+			if flight.waiters == 0 {
+				if openAICodexOAuthRefreshFlights[key] == flight {
+					delete(openAICodexOAuthRefreshFlights, key)
+				}
+				cancel = flight.cancel
+			}
+		}
+		openAICodexOAuthRefreshMu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		return nil, requestContext.Err()
+	}
+}
+
+func cloneOAuthCredentials(credentials *OAuthCredentials) *OAuthCredentials {
+	if credentials == nil {
+		return nil
+	}
+	cloned := *credentials
+	return &cloned
 }
 
 func oauthCredentialsNeedRefresh(credentials *OAuthCredentials) bool {

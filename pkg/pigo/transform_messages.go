@@ -63,21 +63,16 @@ func downgradeUnsupportedImages(ctx transformContext, messages []Message) []Mess
 		case UserMessage:
 			contentBlocks, ok := typed.Content.([]ContentBlock)
 			if ok {
-				result = append(result, UserMessage{
-					Content:   replaceImagesWithPlaceholder(contentBlocks, nonVisionUserImagePlaceholder),
-					Timestamp: typed.Timestamp,
-				})
+				next := typed.clone().(UserMessage)
+				next.Content = replaceImagesWithPlaceholder(contentBlocks, nonVisionUserImagePlaceholder)
+				result = append(result, next)
 				continue
 			}
 			result = append(result, typed.clone())
 		case ToolResultMessage:
-			result = append(result, ToolResultMessage{
-				ToolCallID: typed.ToolCallID,
-				ToolName:   typed.ToolName,
-				Content:    replaceImagesWithPlaceholder(typed.Content, nonVisionToolImagePlaceholder),
-				IsError:    typed.IsError,
-				Timestamp:  typed.Timestamp,
-			})
+			next := typed.clone().(ToolResultMessage)
+			next.Content = replaceImagesWithPlaceholder(typed.Content, nonVisionToolImagePlaceholder)
+			result = append(result, next)
 		default:
 			result = append(result, typed.clone())
 		}
@@ -131,16 +126,9 @@ func normalizeThinkingContent(ctx transformContext, messages []Message) []Messag
 			}
 		}
 
-		result = append(result, AssistantMessage{
-			Content:      nextContent,
-			API:          assistant.API,
-			Provider:     assistant.Provider,
-			Model:        assistant.Model,
-			Usage:        assistant.Usage,
-			StopReason:   assistant.StopReason,
-			ErrorMessage: assistant.ErrorMessage,
-			Timestamp:    assistant.Timestamp,
-		})
+		next := assistant.clone().(AssistantMessage)
+		next.Content = nextContent
+		result = append(result, next)
 	}
 	return result
 }
@@ -158,13 +146,9 @@ func normalizeToolCallIDs(ctx transformContext, messages []Message) []Message {
 			if normalizedID, ok := toolCallIDMap[typed.ToolCallID]; ok {
 				toolCallID = normalizedID
 			}
-			result = append(result, ToolResultMessage{
-				ToolCallID: toolCallID,
-				ToolName:   typed.ToolName,
-				Content:    cloneBlocks(typed.Content),
-				IsError:    typed.IsError,
-				Timestamp:  typed.Timestamp,
-			})
+			next := typed.clone().(ToolResultMessage)
+			next.ToolCallID = toolCallID
+			result = append(result, next)
 		case AssistantMessage:
 			isSameModel := typed.Provider == ctx.model.Provider && typed.API == ctx.model.API && typed.Model == ctx.model.ID
 			nextContent := make([]ContentBlock, 0, len(typed.Content))
@@ -196,16 +180,9 @@ func normalizeToolCallIDs(ctx transformContext, messages []Message) []Message {
 					nextContent = append(nextContent, content)
 				}
 			}
-			result = append(result, AssistantMessage{
-				Content:      nextContent,
-				API:          typed.API,
-				Provider:     typed.Provider,
-				Model:        typed.Model,
-				Usage:        typed.Usage,
-				StopReason:   typed.StopReason,
-				ErrorMessage: typed.ErrorMessage,
-				Timestamp:    typed.Timestamp,
-			})
+			next := typed.clone().(AssistantMessage)
+			next.Content = nextContent
+			result = append(result, next)
 		}
 	}
 
@@ -268,6 +245,7 @@ func fillMissingToolResults(_ transformContext, messages []Message) []Message {
 			result = append(result, typed.clone())
 		}
 	}
+	flushPending()
 
 	return result
 }

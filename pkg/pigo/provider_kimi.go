@@ -166,11 +166,31 @@ type anthropicStreamingBlockState struct {
 	PartialJSON  string
 }
 
+var errAnthropicStreamMissingTerminal = errors.New("anthropic stream ended before message_stop")
+
+func notifyAnthropicResponse(callback func(ProviderResponse, Model), model Model, response *http.Response) {
+	if callback == nil || response == nil {
+		return
+	}
+
+	headers := make(map[string]string, len(response.Header))
+	for key, values := range response.Header {
+		if len(values) > 0 {
+			headers[key] = values[0]
+		}
+	}
+	callback(ProviderResponse{Status: response.StatusCode, Headers: headers}, model)
+}
+
 func streamAnthropicMessagesWithHostedTools(model Model, ctx Context, options AnthropicMessagesProviderOptions) *AssistantMessageEventStream {
 	stream := newAssistantMessageEventStream()
 	stream.setObserver(options.Observer, model)
 
 	go func() {
+		requestContext, cancel := providerRequestContext(options.RequestContext, options.TimeoutMs)
+		defer cancel()
+		options.RequestContext = requestContext
+
 		response := AssistantMessage{
 			API:        model.API,
 			Provider:   model.Provider,
@@ -178,12 +198,10 @@ func streamAnthropicMessagesWithHostedTools(model Model, ctx Context, options An
 			StopReason: StopReasonStop,
 			Timestamp:  time.Now().UTC(),
 		}
-		stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: response})
 
 		apiKey, isOAuth, err := resolveAnthropicAuthorization(model, options)
 		if err != nil {
-			response.StopReason = StopReasonError
-			response.ErrorMessage = err.Error()
+			applyRequestError(&response, err)
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
 			return
@@ -193,10 +211,12 @@ func streamAnthropicMessagesWithHostedTools(model Model, ctx Context, options An
 			emitHostedToolLifecycle(stream, partial, call)
 		}, stream)
 		if err != nil {
-			response.StopReason = StopReasonError
-			response.ErrorMessage = err.Error()
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
-			stream.finish(response)
+			if finalResponse.Model == "" {
+				finalResponse = response
+			}
+			applyRequestError(&finalResponse, err)
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: finalResponse.StopReason, Error: finalResponse})
+			stream.finish(finalResponse)
 			return
 		}
 		if finalResponse.StopReason == StopReasonError {
@@ -218,9 +238,13 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 	for attempt := 0; attempt < 4; attempt++ {
 		loopCtx := ctx
 		loopCtx.Messages = messages
-		response, err := completeAnthropicOnceWithStream(model, loopCtx, options, apiKey, isOAuth, stream, false)
+		var observedRequestContext context.Context
+		response, err := completeAnthropicOnceWithStream(model, loopCtx, options, apiKey, isOAuth, stream, false, attempt == 0, &observedRequestContext)
+		if observedRequestContext != nil {
+			options.RequestContext = observedRequestContext
+		}
 		if err != nil {
-			return AssistantMessage{}, err
+			return response, err
 		}
 		hostedCalls, ok := extractAnthropicHostedToolCalls(response.Content, ctx.HostedTools)
 		if !ok || response.StopReason != StopReasonToolUse {
@@ -298,10 +322,10 @@ func findToolCallContentIndex(content []ContentBlock, toolCallID string) int {
 }
 
 func completeAnthropicOnce(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool) (AssistantMessage, error) {
-	return completeAnthropicOnceWithStream(model, ctx, options, apiKey, isOAuth, nil, true)
+	return completeAnthropicOnceWithStream(model, ctx, options, apiKey, isOAuth, nil, true, false, nil)
 }
 
-func completeAnthropicOnceWithStream(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool, stream *AssistantMessageEventStream, emitTerminal bool) (AssistantMessage, error) {
+func completeAnthropicOnceWithStream(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool, stream *AssistantMessageEventStream, emitTerminal bool, observeRequest bool, observedRequestContext *context.Context) (AssistantMessage, error) {
 	response := AssistantMessage{
 		API:        model.API,
 		Provider:   model.Provider,
@@ -324,6 +348,14 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 	if requestContext == nil {
 		requestContext = context.Background()
 	}
+	if observeRequest && stream != nil {
+		requestContext = stream.startRequest(requestContext, payload)
+		options.RequestContext = requestContext
+		if observedRequestContext != nil {
+			*observedRequestContext = requestContext
+		}
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: response})
+	}
 	request, err := http.NewRequestWithContext(
 		requestContext,
 		http.MethodPost,
@@ -331,7 +363,8 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 		bytes.NewReader(bodyBytes),
 	)
 	if err != nil {
-		return AssistantMessage{}, err
+		applyRequestError(&response, err)
+		return response, err
 	}
 	request.Header.Set("content-type", "application/json")
 	request.Header.Set("accept", "text/event-stream")
@@ -358,9 +391,11 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 	}
 	httpResponse, err := httpClient.Do(request)
 	if err != nil {
-		return AssistantMessage{}, err
+		applyRequestError(&response, err)
+		return response, err
 	}
 	defer httpResponse.Body.Close()
+	notifyAnthropicResponse(options.OnResponse, model, httpResponse)
 	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
 		body, _ := io.ReadAll(httpResponse.Body)
 		return AssistantMessage{
@@ -383,10 +418,12 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 		}
 		return false, err
 	}); err != nil {
-		return AssistantMessage{}, err
+		applyRequestError(&response, err)
+		return response, err
 	}
 	if !terminalSeen {
-		response.Usage.Cost = CalculateCost(model, response.Usage)
+		applyRequestError(&response, errAnthropicStreamMissingTerminal)
+		return response, errAnthropicStreamMissingTerminal
 	}
 	return response, nil
 }

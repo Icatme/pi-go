@@ -2,11 +2,11 @@
 
 `pi-go` is a Go reimplementation of the `pi.ai` core package surface. The repository is intentionally centered on a single reusable core library in `pkg/pigo`, with a thin CLI on top.
 
-Current scope is deliberately narrow:
+Current scope:
 
 - keep provider-agnostic semantics stable first
 - keep the library surface small and explicit
-- focus on `OpenAI OAuth` / `openai-codex` and `Kimi Coding`
+- focus on the most commonly used model providers, including `OpenAI OAuth` / `openai-codex`, `Kimi Coding`, `Anthropic`, `DeepSeek`, `Google`, and `Mistral`
 - preserve WebSocket support, observer hooks, and the single-package core-library shape
 
 ## Project Positioning
@@ -26,8 +26,12 @@ Current primary provider scope:
 
 - `openai-codex` via OpenAI OAuth and the Responses-style API surface
 - `kimi-coding` via Anthropic-style Messages semantics
+- `anthropic` via the Anthropic Messages API
+- `deepseek` via DeepSeek chat completions
+- `google` via the Gemini Generative AI API
+- `mistral` via the Mistral chat completions API
 
-Supporting provider and API modules also exist for shared protocol behavior used by the core library, but the repo is intentionally optimized around the two providers above.
+Supporting provider and API modules also exist for shared protocol behavior used by the core library, but the repo is intentionally optimized around these providers.
 
 ## Quick Start
 

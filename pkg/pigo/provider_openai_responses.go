@@ -29,9 +29,31 @@ func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptio
 	}
 
 	go func() {
+		requestBody := buildOpenAIResponsesRequest(model, ctx, options)
+		payload := any(requestBody)
+		if options.OnPayload != nil {
+			if next := options.OnPayload(payload, model); next != nil {
+				payload = next
+			}
+		}
+
+		bodyBytes, err := json.Marshal(payload)
+		if err != nil {
+			response.StopReason = StopReasonError
+			response.ErrorMessage = err.Error()
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
+			stream.finish(response)
+			return
+		}
+
+		requestContext, cancel := providerRequestContext(options.RequestContext, options.TimeoutMs)
+		defer cancel()
+		requestContext = stream.startRequest(requestContext, payload)
+		options.RequestContext = requestContext
+
 		apiKey := options.APIKey
 		if apiKey == "" {
-			resolved, err := ResolveAuthorization(model.Provider, options.Auth, options.HTTPClient, options.RequestContext)
+			resolved, err := ResolveAuthorization(model.Provider, options.Auth, options.HTTPClient, requestContext)
 			if err != nil {
 				response.StopReason = StopReasonError
 				response.ErrorMessage = err.Error()
@@ -53,28 +75,6 @@ func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptio
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
 			return
-		}
-
-		requestBody := buildOpenAIResponsesRequest(model, ctx, options)
-		payload := any(requestBody)
-		if options.OnPayload != nil {
-			if next := options.OnPayload(payload, model); next != nil {
-				payload = next
-			}
-		}
-
-		bodyBytes, err := json.Marshal(payload)
-		if err != nil {
-			response.StopReason = StopReasonError
-			response.ErrorMessage = err.Error()
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
-			stream.finish(response)
-			return
-		}
-
-		requestContext := options.RequestContext
-		if requestContext == nil {
-			requestContext = context.Background()
 		}
 
 		httpClient := options.HTTPClient

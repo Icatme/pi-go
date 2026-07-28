@@ -126,19 +126,38 @@ func TestCrossProviderHandoffCodexToKimiBuildsReplaySafePayload(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 			t.Fatalf("expected valid request body: %v", err)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id":          "msg_handoff_2",
-			"stop_reason": "end_turn",
-			"content": []map[string]any{
-				{"type": "text", "text": "42"},
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildAnthropicSSE(
+			map[string]any{
+				"type": "message_start",
+				"message": map[string]any{
+					"id": "msg_handoff_2",
+					"usage": map[string]any{
+						"input_tokens":                20,
+						"output_tokens":               0,
+						"cache_read_input_tokens":     0,
+						"cache_creation_input_tokens": 0,
+					},
+				},
 			},
-			"usage": map[string]any{
-				"input_tokens":                20,
-				"output_tokens":               1,
-				"cache_read_input_tokens":     0,
-				"cache_creation_input_tokens": 0,
+			map[string]any{
+				"type":          "content_block_start",
+				"index":         0,
+				"content_block": map[string]any{"type": "text", "text": ""},
 			},
-		})
+			map[string]any{
+				"type":  "content_block_delta",
+				"index": 0,
+				"delta": map[string]any{"type": "text_delta", "text": "42"},
+			},
+			map[string]any{"type": "content_block_stop", "index": 0},
+			map[string]any{
+				"type":  "message_delta",
+				"delta": map[string]any{"stop_reason": "end_turn"},
+				"usage": map[string]any{"output_tokens": 1},
+			},
+			map[string]any{"type": "message_stop"},
+		)))
 	}))
 	defer server.Close()
 

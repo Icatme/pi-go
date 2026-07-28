@@ -20,14 +20,21 @@ var (
 	openAICodexBaseRetryDelay        = time.Second
 	openAICodexWebSocketCacheTTL     = 5 * time.Minute
 	openAICodexWebSocketCacheMu      sync.Mutex
-	openAICodexWebSocketSessionCache = map[string]*cachedOpenAICodexWebSocketConnection{}
+	openAICodexWebSocketSessionCache = map[openAICodexWebSocketCacheKey]*cachedOpenAICodexWebSocketConnection{}
 )
 
+type openAICodexWebSocketCacheKey struct {
+	endpoint  string
+	accountID string
+	sessionID string
+}
+
 type cachedOpenAICodexWebSocketConnection struct {
-	conn      *websocket.Conn
-	busy      bool
-	closed    bool
-	idleTimer *time.Timer
+	conn             *websocket.Conn
+	providerResponse ProviderResponse
+	busy             bool
+	closed           bool
+	idleTimer        *time.Timer
 }
 
 func streamOpenAICodexWithTransport(
@@ -61,6 +68,9 @@ func streamOpenAICodexWithTransport(
 		})
 		if err == nil {
 			return nil
+		}
+		if requestContext.Err() != nil {
+			return requestContext.Err()
 		}
 		if transport == TransportWebSocket || websocketStarted {
 			return err
@@ -97,6 +107,9 @@ func streamOpenAICodexSSE(
 	err := client.postStream(requestContext, resolveOpenAICodexURL(model.BaseURL), httpStreamRequest{
 		Headers: buildOpenAICodexSSEHeaders(options, apiKey, accountID),
 		Body:    bodyBytes,
+		OnResponse: func(httpResponse *http.Response) {
+			notifyOpenAICodexResponse(options.OnResponse, model, providerResponseFromHTTPResponse(httpResponse))
+		},
 		ParseError: func(body []byte, status string) string {
 			return parseOpenAIResponsesErrorWithProvider(body, status, "codex")
 		},
@@ -182,8 +195,12 @@ func streamOpenAICodexWebSocket(
 		dialer,
 		resolveOpenAICodexWebSocketURL(model.BaseURL),
 		headers,
+		accountID,
 		options.SessionID,
 		requestContext,
+		func(providerResponse ProviderResponse) {
+			notifyOpenAICodexResponse(options.OnResponse, model, providerResponse)
+		},
 	)
 	if err != nil {
 		return err
@@ -192,15 +209,29 @@ func streamOpenAICodexWebSocket(
 	defer func() {
 		acquired.release(keepConnection)
 	}()
+	conn := acquired.entry.conn
+	contextCloseDone := make(chan struct{})
+	stopContextClose := context.AfterFunc(requestContext, func() {
+		closeOpenAICodexWebSocket(acquired.entry)
+		close(contextCloseDone)
+	})
+	defer func() {
+		if !stopContextClose() {
+			<-contextCloseDone
+		}
+	}()
 
 	payload := map[string]any{"type": "response.create"}
 	if err := jsonUnmarshalIntoMap(bodyBytes, payload); err != nil {
 		keepConnection = false
 		return err
 	}
-	if err := acquired.entry.conn.WriteJSON(payload); err != nil {
+	if err := conn.WriteJSON(payload); err != nil {
 		markOpenAICodexWebSocketClosed(acquired.entry)
 		keepConnection = false
+		if requestContext.Err() != nil {
+			return requestContext.Err()
+		}
 		return err
 	}
 
@@ -222,10 +253,13 @@ func streamOpenAICodexWebSocket(
 			return err
 		}
 
-		_, message, err := acquired.entry.conn.ReadMessage()
+		_, message, err := conn.ReadMessage()
 		if err != nil {
 			markOpenAICodexWebSocketClosed(acquired.entry)
 			keepConnection = false
+			if requestContext.Err() != nil {
+				return requestContext.Err()
+			}
 			return err
 		}
 
@@ -249,11 +283,13 @@ func acquireOpenAICodexWebSocket(
 	dialer websocket.Dialer,
 	url string,
 	headers http.Header,
+	accountID string,
 	sessionID string,
 	requestContext context.Context,
+	onResponse func(ProviderResponse),
 ) (*acquiredOpenAICodexWebSocket, error) {
 	if strings.TrimSpace(sessionID) == "" {
-		entry, err := connectOpenAICodexWebSocket(dialer, url, headers, requestContext)
+		entry, err := connectOpenAICodexWebSocket(dialer, url, headers, requestContext, onResponse)
 		if err != nil {
 			return nil, err
 		}
@@ -264,40 +300,51 @@ func acquireOpenAICodexWebSocket(
 			},
 		}, nil
 	}
+	cacheKey := openAICodexWebSocketCacheKey{
+		endpoint:  url,
+		accountID: accountID,
+		sessionID: sessionID,
+	}
 
 	openAICodexWebSocketCacheMu.Lock()
-	if cached := openAICodexWebSocketSessionCache[sessionID]; cached != nil {
+	if cached := openAICodexWebSocketSessionCache[cacheKey]; cached != nil {
 		stopOpenAICodexWebSocketTimerLocked(cached)
 		if !cached.busy && !cached.closed {
 			cached.busy = true
+			providerResponse := cloneOpenAICodexProviderResponse(cached.providerResponse)
 			openAICodexWebSocketCacheMu.Unlock()
+			// OnResponse is per logical request. A request reusing a cached socket
+			// receives the immutable metadata from that socket's upgrade response.
+			if onResponse != nil {
+				onResponse(providerResponse)
+			}
 			return &acquiredOpenAICodexWebSocket{
 				entry: cached,
 				release: func(keep bool) {
-					releaseOpenAICodexSessionWebSocket(sessionID, cached, keep)
+					releaseOpenAICodexSessionWebSocket(cacheKey, cached, keep)
 				},
 			}, nil
 		}
 		if cached.closed {
-			delete(openAICodexWebSocketSessionCache, sessionID)
+			delete(openAICodexWebSocketSessionCache, cacheKey)
 		}
 	}
 	openAICodexWebSocketCacheMu.Unlock()
 
-	entry, err := connectOpenAICodexWebSocket(dialer, url, headers, requestContext)
+	entry, err := connectOpenAICodexWebSocket(dialer, url, headers, requestContext, onResponse)
 	if err != nil {
 		return nil, err
 	}
 	entry.busy = true
 
 	openAICodexWebSocketCacheMu.Lock()
-	if existing := openAICodexWebSocketSessionCache[sessionID]; existing == nil || existing.closed {
-		openAICodexWebSocketSessionCache[sessionID] = entry
+	if existing := openAICodexWebSocketSessionCache[cacheKey]; existing == nil || existing.closed {
+		openAICodexWebSocketSessionCache[cacheKey] = entry
 		openAICodexWebSocketCacheMu.Unlock()
 		return &acquiredOpenAICodexWebSocket{
 			entry: entry,
 			release: func(keep bool) {
-				releaseOpenAICodexSessionWebSocket(sessionID, entry, keep)
+				releaseOpenAICodexSessionWebSocket(cacheKey, entry, keep)
 			},
 		}, nil
 	}
@@ -316,51 +363,62 @@ func connectOpenAICodexWebSocket(
 	url string,
 	headers http.Header,
 	requestContext context.Context,
+	onResponse func(ProviderResponse),
 ) (*cachedOpenAICodexWebSocketConnection, error) {
-	conn, _, err := dialer.DialContext(requestContext, url, headers)
+	conn, httpResponse, err := dialer.DialContext(requestContext, url, headers)
+	providerResponse := providerResponseFromHTTPResponse(httpResponse)
+	if httpResponse != nil && onResponse != nil {
+		onResponse(cloneOpenAICodexProviderResponse(providerResponse))
+	}
 	if err != nil {
+		if httpResponse != nil && httpResponse.Body != nil {
+			_ = httpResponse.Body.Close()
+		}
 		return nil, err
 	}
-	return &cachedOpenAICodexWebSocketConnection{conn: conn}, nil
+	return &cachedOpenAICodexWebSocketConnection{
+		conn:             conn,
+		providerResponse: providerResponse,
+	}, nil
 }
 
 func releaseOpenAICodexSessionWebSocket(
-	sessionID string,
+	cacheKey openAICodexWebSocketCacheKey,
 	entry *cachedOpenAICodexWebSocketConnection,
 	keep bool,
 ) {
 	openAICodexWebSocketCacheMu.Lock()
-	current := openAICodexWebSocketSessionCache[sessionID]
+	current := openAICodexWebSocketSessionCache[cacheKey]
 	if current != entry {
 		openAICodexWebSocketCacheMu.Unlock()
 		closeOpenAICodexWebSocket(entry)
 		return
 	}
 	if !keep || entry.closed {
-		delete(openAICodexWebSocketSessionCache, sessionID)
+		delete(openAICodexWebSocketSessionCache, cacheKey)
 		conn := detachOpenAICodexWebSocketConnLocked(entry)
 		openAICodexWebSocketCacheMu.Unlock()
 		closeDetachedOpenAICodexWebSocket(conn)
 		return
 	}
 	entry.busy = false
-	scheduleOpenAICodexSessionWebSocketExpiryLocked(sessionID, entry)
+	scheduleOpenAICodexSessionWebSocketExpiryLocked(cacheKey, entry)
 	openAICodexWebSocketCacheMu.Unlock()
 }
 
 func scheduleOpenAICodexSessionWebSocketExpiryLocked(
-	sessionID string,
+	cacheKey openAICodexWebSocketCacheKey,
 	entry *cachedOpenAICodexWebSocketConnection,
 ) {
 	stopOpenAICodexWebSocketTimerLocked(entry)
 	entry.idleTimer = time.AfterFunc(openAICodexWebSocketCacheTTL, func() {
 		openAICodexWebSocketCacheMu.Lock()
-		current := openAICodexWebSocketSessionCache[sessionID]
+		current := openAICodexWebSocketSessionCache[cacheKey]
 		if current != entry || entry.busy {
 			openAICodexWebSocketCacheMu.Unlock()
 			return
 		}
-		delete(openAICodexWebSocketSessionCache, sessionID)
+		delete(openAICodexWebSocketSessionCache, cacheKey)
 		conn := detachOpenAICodexWebSocketConnLocked(entry)
 		openAICodexWebSocketCacheMu.Unlock()
 		closeDetachedOpenAICodexWebSocket(conn)
@@ -481,4 +539,31 @@ func jsonUnmarshalIntoMap(bodyBytes []byte, target map[string]any) error {
 		target[key] = value
 	}
 	return nil
+}
+
+func providerResponseFromHTTPResponse(response *http.Response) ProviderResponse {
+	if response == nil {
+		return ProviderResponse{}
+	}
+	headers := make(map[string]string, len(response.Header))
+	for key, values := range response.Header {
+		if len(values) > 0 {
+			headers[key] = values[0]
+		}
+	}
+	return ProviderResponse{Status: response.StatusCode, Headers: headers}
+}
+
+func cloneOpenAICodexProviderResponse(response ProviderResponse) ProviderResponse {
+	return ProviderResponse{
+		Status:  response.Status,
+		Headers: cloneStringMap(response.Headers),
+	}
+}
+
+func notifyOpenAICodexResponse(callback func(ProviderResponse, Model), model Model, response ProviderResponse) {
+	if callback == nil {
+		return
+	}
+	callback(cloneOpenAICodexProviderResponse(response), model)
 }

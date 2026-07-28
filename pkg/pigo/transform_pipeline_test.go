@@ -213,6 +213,75 @@ func TestFillMissingToolResultsTransformer(t *testing.T) {
 	}
 }
 
+func TestTransformMessagesPreservesMessageMetadata(t *testing.T) {
+	model := makeCopilotClaudeModel()
+	messages := []Message{
+		AssistantMessage{
+			Content: []ContentBlock{
+				ThinkingContent{Thinking: "reasoning", ThinkingSignature: "sig"},
+				ToolCall{ID: "call-1", Name: "echo", Arguments: map[string]any{"message": "hello"}},
+			},
+			HostedToolExecutions: []HostedToolExecution{{
+				ID:        "execution-1",
+				Name:      "search",
+				Arguments: map[string]any{"query": "pigo"},
+			}},
+			Provider:      "github-copilot",
+			API:           "openai-responses",
+			Model:         "gpt-5.4",
+			ResponseModel: "gpt-5.4-2026-01-01",
+			ResponseID:    "response-1",
+			StopReason:    StopReasonToolUse,
+			Diagnostics: []AssistantMessageDiagnostic{{
+				Type:    "warning",
+				Details: map[string]any{"retry": true},
+			}},
+		},
+		ToolResultMessage{
+			ToolCallID: "call-1",
+			ToolName:   "echo",
+			Content:    []ContentBlock{TextContent{Text: "done"}},
+			Details:    map[string]any{"status": "ok"},
+		},
+	}
+
+	result := TransformMessages(messages, model, func(string, Model, AssistantMessage) string {
+		return "normalized-call"
+	})
+	assistant := result[0].(AssistantMessage)
+	if assistant.ResponseModel != "gpt-5.4-2026-01-01" || assistant.ResponseID != "response-1" {
+		t.Fatalf("expected response metadata to survive transforms, got %+v", assistant)
+	}
+	if len(assistant.HostedToolExecutions) != 1 || assistant.HostedToolExecutions[0].ID != "execution-1" {
+		t.Fatalf("expected hosted tool executions to survive transforms, got %+v", assistant.HostedToolExecutions)
+	}
+	if len(assistant.Diagnostics) != 1 || assistant.Diagnostics[0].Details["retry"] != true {
+		t.Fatalf("expected diagnostics to survive transforms, got %+v", assistant.Diagnostics)
+	}
+	toolResult := result[1].(ToolResultMessage)
+	if toolResult.ToolCallID != "normalized-call" || toolResult.Details.(map[string]any)["status"] != "ok" {
+		t.Fatalf("expected tool result metadata to survive transforms, got %+v", toolResult)
+	}
+}
+
+func TestFillMissingToolResultsFlushesTrailingToolCalls(t *testing.T) {
+	messages := []Message{
+		AssistantMessage{
+			Content:    []ContentBlock{ToolCall{ID: "call-1", Name: "echo"}},
+			StopReason: StopReasonToolUse,
+		},
+	}
+
+	result := fillMissingToolResults(transformContext{}, messages)
+	if len(result) != 2 {
+		t.Fatalf("expected a trailing synthetic tool result, got %d messages", len(result))
+	}
+	toolResult, ok := result[1].(ToolResultMessage)
+	if !ok || toolResult.ToolCallID != "call-1" || !toolResult.IsError {
+		t.Fatalf("expected synthetic result for trailing tool call, got %#v", result[1])
+	}
+}
+
 func TestDefaultTransformersMatchTransformMessages(t *testing.T) {
 	model := makeCopilotClaudeModel()
 	messages := []Message{

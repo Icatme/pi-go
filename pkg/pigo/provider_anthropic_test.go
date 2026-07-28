@@ -2,10 +2,12 @@ package pigo
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCompleteSimpleAnthropicBuildsAPIKeyRequestWithThinkingDisabled(t *testing.T) {
@@ -411,4 +413,143 @@ func TestCompleteSimpleAnthropicOAuthUsesBearerHeadersAndNormalizesToolNames(t *
 	if !ok || call.Name != "read" {
 		t.Fatalf("expected inbound tool name to map back to original casing, got %#v", response.Content[0])
 	}
+}
+
+func TestCompleteSimpleAnthropicRejectsStreamWithoutMessageStop(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildAnthropicSSE(
+			map[string]any{
+				"type": "message_start",
+				"message": map[string]any{
+					"id":    "msg_truncated",
+					"usage": map[string]any{"input_tokens": 2},
+				},
+			},
+			map[string]any{
+				"type":  "content_block_start",
+				"index": 0,
+				"content_block": map[string]any{
+					"type": "text",
+					"text": "",
+				},
+			},
+			map[string]any{
+				"type":  "content_block_delta",
+				"index": 0,
+				"delta": map[string]any{"type": "text_delta", "text": "partial"},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("anthropic", "claude-sonnet-4-5")
+	if model == nil {
+		t.Fatal("expected anthropic model")
+	}
+	model.BaseURL = server.URL
+
+	response := CompleteSimple(*model, Context{Messages: []Message{UserMessage{Content: "hello"}}}, SimpleStreamOptions{
+		APIKey: "anthropic-test-key",
+	})
+
+	if response.StopReason != StopReasonError {
+		t.Fatalf("expected truncated stream to fail, got %+v", response)
+	}
+	if !strings.Contains(response.ErrorMessage, "message_stop") {
+		t.Fatalf("expected missing terminal event error, got %q", response.ErrorMessage)
+	}
+}
+
+func TestCompleteSimpleAnthropicTimeoutCoversSSELifetime(t *testing.T) {
+	requestStarted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		writeAnthropicSSEEvent(t, w, map[string]any{
+			"type":    "message_start",
+			"message": map[string]any{"id": "msg_timeout", "usage": map[string]any{}},
+		})
+		close(requestStarted)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	model := GetModel("anthropic", "claude-sonnet-4-5")
+	if model == nil {
+		t.Fatal("expected anthropic model")
+	}
+	model.BaseURL = server.URL
+
+	startedAt := time.Now()
+	response := CompleteSimple(*model, Context{Messages: []Message{UserMessage{Content: "hello"}}}, SimpleStreamOptions{
+		APIKey:    "anthropic-test-key",
+		TimeoutMs: 100,
+	})
+	if response.StopReason != StopReasonAborted {
+		t.Fatalf("expected timeout to abort the stream, got %+v", response)
+	}
+	if time.Since(startedAt) > 2*time.Second {
+		t.Fatalf("expected TimeoutMs to bound the SSE lifetime, took %s", time.Since(startedAt))
+	}
+	select {
+	case <-requestStarted:
+	default:
+		t.Fatal("expected request to reach the server before timing out")
+	}
+}
+
+func TestCompleteSimpleAnthropicOnResponseReceivesClonedHeaders(t *testing.T) {
+	originalHeaders := http.Header{
+		"Content-Type": []string{"text/event-stream"},
+		"X-Provider":   []string{"anthropic"},
+	}
+	httpClient := &http.Client{Transport: anthropicRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     originalHeaders,
+			Body: io.NopCloser(strings.NewReader(buildAnthropicSSE(
+				map[string]any{
+					"type":    "message_start",
+					"message": map[string]any{"id": "msg_response", "usage": map[string]any{}},
+				},
+				map[string]any{
+					"type":  "message_delta",
+					"delta": map[string]any{"stop_reason": "end_turn"},
+				},
+				map[string]any{"type": "message_stop"},
+			))),
+			Request: request,
+		}, nil
+	})}
+
+	model := GetModel("anthropic", "claude-sonnet-4-5")
+	if model == nil {
+		t.Fatal("expected anthropic model")
+	}
+
+	var callbackResponse ProviderResponse
+	response := CompleteSimple(*model, Context{Messages: []Message{UserMessage{Content: "hello"}}}, SimpleStreamOptions{
+		APIKey:     "anthropic-test-key",
+		HTTPClient: httpClient,
+		OnResponse: func(received ProviderResponse, _ Model) {
+			callbackResponse = received
+			callbackResponse.Headers["X-Provider"] = "changed"
+		},
+	})
+
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected successful response, got %+v", response)
+	}
+	if callbackResponse.Status != http.StatusOK {
+		t.Fatalf("expected response callback status 200, got %+v", callbackResponse)
+	}
+	if originalHeaders.Get("X-Provider") != "anthropic" {
+		t.Fatalf("expected callback headers to be cloned, original changed to %q", originalHeaders.Get("X-Provider"))
+	}
+}
+
+type anthropicRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (roundTrip anthropicRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTrip(request)
 }

@@ -6,21 +6,6 @@ This repository is a Go reimplementation of the `pi.ai` core package surface, cu
 
 Build a clean Go version of the `pi.ai` core semantics first, then expand only after the behavior is nailed down by tests.
 
-Provider scope for the current stage:
-
-- implement only `OpenAI OAuth`
-- implement only `Kimi Coding`
-- do not add other providers unless explicitly requested
-- do not port local AI / local inference provider support unless explicitly requested
-- do not port generic OpenAI-compatible local server support unless explicitly requested
-
-Current scope in this repo:
-
-- model metadata and `SupportsXHigh`
-- overflow detection
-- message transformation for cross-provider replay
-- minimal tool argument validation fallback
-
 ## Working Rules
 
 1. Find the root cause before fixing a bug.
@@ -44,8 +29,6 @@ Current scope in this repo:
 - Follow existing repository style unless there is a clear reason to improve it.
 - Prefer focused changes over speculative refactors.
 - Do not broaden provider-specific behavior until the provider-agnostic semantics are stable.
-- Even after provider work starts, keep the provider set limited to `OpenAI OAuth` and `Kimi Coding` unless the user expands scope explicitly.
-- Do not spend migration effort on local-model providers, local runtime adapters, or compatibility layers for self-hosted OpenAI-style endpoints unless the user asks for them explicitly.
 - If behavior is unclear, derive expected behavior from tests before adding new abstractions.
 
 ## Testing

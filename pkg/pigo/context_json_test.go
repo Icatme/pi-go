@@ -29,18 +29,34 @@ func TestContextJSONRoundTripPreservesMessagesAndTools(t *testing.T) {
 						ThoughtSignature: "thought-sig",
 					},
 				},
-				API:        "openai-codex-responses",
-				Provider:   "openai-codex",
-				Model:      "gpt-5.4",
-				ResponseID: "resp_123",
-				Usage:      Usage{Input: 10, Output: 5, CacheRead: 2, TotalTokens: 17},
-				StopReason: StopReasonToolUse,
-				Timestamp:  now.Add(time.Second),
+				HostedToolExecutions: []HostedToolExecution{{
+					ID:               "hosted_1",
+					Type:             HostedToolTypeWebSearch,
+					Name:             "search",
+					ProviderToolName: "$web_search",
+					Arguments:        map[string]any{"query": "pigo"},
+					Result:           map[string]any{"count": float64(1)},
+				}},
+				API:           "openai-codex-responses",
+				Provider:      "openai-codex",
+				Model:         "gpt-5.4",
+				ResponseModel: "gpt-5.4-2026-01-01",
+				ResponseID:    "resp_123",
+				Usage:         Usage{Input: 10, Output: 5, CacheRead: 2, TotalTokens: 17},
+				StopReason:    StopReasonToolUse,
+				Diagnostics: []AssistantMessageDiagnostic{{
+					Type:      "retry",
+					Timestamp: now,
+					Error:     &DiagnosticErrorInfo{Name: "temporary", Message: "retrying", Code: map[string]any{"status": float64(429)}},
+					Details:   map[string]any{"attempt": float64(2)},
+				}},
+				Timestamp: now.Add(time.Second),
 			},
 			ToolResultMessage{
 				ToolCallID: "call_1|item_1",
 				ToolName:   "edit_file",
 				Content:    []ContentBlock{TextContent{Text: `{"ok":true}`}},
+				Details:    map[string]any{"status": "written"},
 				IsError:    true,
 				Timestamp:  now.Add(2 * time.Second),
 			},
@@ -60,6 +76,7 @@ func TestContextJSONRoundTripPreservesMessagesAndTools(t *testing.T) {
 				}),
 			},
 		},
+		HostedTools: []HostedTool{{Type: HostedToolTypeWebSearch, Name: "search"}},
 	}
 
 	payload, err := json.Marshal(context)
@@ -80,6 +97,9 @@ func TestContextJSONRoundTripPreservesMessagesAndTools(t *testing.T) {
 	}
 	if len(restored.Tools) != 1 {
 		t.Fatalf("expected 1 restored tool, got %d", len(restored.Tools))
+	}
+	if len(restored.HostedTools) != 1 || restored.HostedTools[0].Type != HostedToolTypeWebSearch || restored.HostedTools[0].Name != "search" {
+		t.Fatalf("expected hosted tools to round-trip, got %+v", restored.HostedTools)
 	}
 	if restored.Tools[0].Validator != nil {
 		t.Fatalf("expected validator to be omitted from serialized context, got %+v", restored.Tools[0].Validator)
@@ -107,6 +127,15 @@ func TestContextJSONRoundTripPreservesMessagesAndTools(t *testing.T) {
 	if assistant.Provider != "openai-codex" || assistant.ResponseID != "resp_123" || assistant.StopReason != StopReasonToolUse {
 		t.Fatalf("expected assistant metadata to round-trip, got %+v", assistant)
 	}
+	if assistant.ResponseModel != "gpt-5.4-2026-01-01" {
+		t.Fatalf("expected response model to round-trip, got %q", assistant.ResponseModel)
+	}
+	if len(assistant.HostedToolExecutions) != 1 || assistant.HostedToolExecutions[0].ProviderToolName != "$web_search" {
+		t.Fatalf("expected hosted tool executions to round-trip, got %+v", assistant.HostedToolExecutions)
+	}
+	if len(assistant.Diagnostics) != 1 || assistant.Diagnostics[0].Error == nil || assistant.Diagnostics[0].Error.Message != "retrying" {
+		t.Fatalf("expected diagnostics to round-trip, got %+v", assistant.Diagnostics)
+	}
 	if len(assistant.Content) != 3 {
 		t.Fatalf("expected assistant content blocks to round-trip, got %+v", assistant.Content)
 	}
@@ -123,6 +152,9 @@ func TestContextJSONRoundTripPreservesMessagesAndTools(t *testing.T) {
 	}
 	if toolResult.ToolCallID != "call_1|item_1" || !toolResult.IsError {
 		t.Fatalf("expected tool result metadata to round-trip, got %+v", toolResult)
+	}
+	if details, ok := toolResult.Details.(map[string]any); !ok || details["status"] != "written" {
+		t.Fatalf("expected tool result details to round-trip, got %#v", toolResult.Details)
 	}
 }
 

@@ -2,7 +2,6 @@ package pigo
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -34,12 +33,15 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 	}
 
 	go func() {
+		requestContext, cancel := providerRequestContext(anthropicOptions.RequestContext, anthropicOptions.TimeoutMs)
+		defer cancel()
+		anthropicOptions.RequestContext = requestContext
+
 		apiKey := options.APIKey
 		if apiKey == "" {
-			resolved, err := ResolveAuthorization(model.Provider, options.Auth, options.HTTPClient, options.RequestContext)
+			resolved, err := ResolveAuthorization(model.Provider, options.Auth, options.HTTPClient, requestContext)
 			if err != nil {
-				response.StopReason = StopReasonError
-				response.ErrorMessage = err.Error()
+				applyRequestError(&response, err)
 				stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 				stream.finish(response)
 				return
@@ -82,11 +84,8 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 			stream.finish(response)
 			return
 		}
-
-		requestContext := anthropicOptions.RequestContext
-		if requestContext == nil {
-			requestContext = context.Background()
-		}
+		requestContext = stream.startRequest(requestContext, payload)
+		anthropicOptions.RequestContext = requestContext
 
 		request, err := http.NewRequestWithContext(
 			requestContext,
@@ -133,6 +132,7 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 			return
 		}
 		defer httpResponse.Body.Close()
+		notifyAnthropicResponse(anthropicOptions.OnResponse, model, httpResponse)
 
 		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
 			body, _ := io.ReadAll(httpResponse.Body)
@@ -165,12 +165,8 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 		}
 
 		if !terminalSeen {
-			response.Usage.Cost = CalculateCost(model, response.Usage)
-			stream.push(AssistantMessageEvent{
-				Type:    AssistantMessageEventDone,
-				Reason:  response.StopReason,
-				Message: response,
-			})
+			applyRequestError(&response, errAnthropicStreamMissingTerminal)
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
 		}
 	}()

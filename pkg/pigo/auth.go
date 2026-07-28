@@ -23,6 +23,14 @@ type AuthConfig struct {
 	Type   AuthType
 	APIKey string
 	OAuth  *OAuthCredentials
+
+	// OnOAuthCredentialsRefreshed is called synchronously after OAuth
+	// credentials are refreshed. The callback owns any persistence. The
+	// refreshed credentials are passed by value, and the library does not
+	// mutate OAuth or the caller's auth map. Concurrent authorization calls
+	// may invoke the callback concurrently, so external storage must provide
+	// its own synchronization.
+	OnOAuthCredentialsRefreshed func(provider Provider, credentials OAuthCredentials)
 }
 
 func RequiresOAuth(provider Provider) bool {

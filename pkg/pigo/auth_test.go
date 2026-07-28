@@ -3,6 +3,7 @@ package pigo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -141,6 +142,11 @@ func TestResolveAuthorizationRefreshesExpiredOpenAICodexOAuth(t *testing.T) {
 
 	openAICodexOAuthTokenURL = server.URL + "/oauth/token"
 	expiredAt := time.Now().Unix() - 10
+	var (
+		callbackProvider    Provider
+		callbackCredentials OAuthCredentials
+		callbackCalls       int
+	)
 
 	auth := map[Provider]AuthConfig{
 		"openai-codex": {
@@ -150,9 +156,16 @@ func TestResolveAuthorizationRefreshesExpiredOpenAICodexOAuth(t *testing.T) {
 				RefreshToken: "refresh-old",
 				ExpiresUnix:  expiredAt,
 			},
+			OnOAuthCredentialsRefreshed: func(provider Provider, credentials OAuthCredentials) {
+				callbackCalls++
+				callbackProvider = provider
+				callbackCredentials = credentials
+				credentials.AccessToken = "callback-local-mutation"
+			},
 		},
 	}
 
+	refreshStartedAt := time.Now().Unix()
 	token, err := ResolveAuthorization("openai-codex", auth, server.Client(), context.Background())
 	if err != nil {
 		t.Fatalf("expected refreshed oauth token, got error: %v", err)
@@ -160,11 +173,214 @@ func TestResolveAuthorizationRefreshesExpiredOpenAICodexOAuth(t *testing.T) {
 	if token != refreshedToken {
 		t.Fatalf("expected refreshed access token, got %q", token)
 	}
+	if callbackCalls != 1 {
+		t.Fatalf("expected one refreshed-credentials callback, got %d", callbackCalls)
+	}
+	if callbackProvider != "openai-codex" {
+		t.Fatalf("expected callback provider openai-codex, got %q", callbackProvider)
+	}
+	if callbackCredentials.AccessToken != refreshedToken {
+		t.Fatalf("expected callback access token %q, got %q", refreshedToken, callbackCredentials.AccessToken)
+	}
+	if callbackCredentials.RefreshToken != "refresh-new" {
+		t.Fatalf("expected callback refresh token refresh-new, got %q", callbackCredentials.RefreshToken)
+	}
+	if callbackCredentials.ExpiresUnix < refreshStartedAt+3600 || callbackCredentials.ExpiresUnix > time.Now().Unix()+3600 {
+		t.Fatalf("expected callback expiry from refreshed credentials, got %d", callbackCredentials.ExpiresUnix)
+	}
 	if auth["openai-codex"].OAuth == nil || auth["openai-codex"].OAuth.RefreshToken != "refresh-old" {
 		t.Fatalf("expected auth map to remain unchanged, got %+v", auth["openai-codex"].OAuth)
 	}
 	if auth["openai-codex"].OAuth.ExpiresUnix != expiredAt {
 		t.Fatalf("expected expired credentials to remain unchanged in caller auth map, got %d", auth["openai-codex"].OAuth.ExpiresUnix)
+	}
+}
+
+func TestResolveAuthorizationCoalescesConcurrentOpenAICodexRefresh(t *testing.T) {
+	previousURL := openAICodexOAuthTokenURL
+	defer func() {
+		openAICodexOAuthTokenURL = previousURL
+	}()
+
+	requestStarted := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	var (
+		requestMu    sync.Mutex
+		requestCount int
+		startedOnce  sync.Once
+	)
+	refreshedToken := makeOpenAICodexToken("acc_shared_refresh")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestMu.Lock()
+		requestCount++
+		requestMu.Unlock()
+		startedOnce.Do(func() { close(requestStarted) })
+		<-releaseResponse
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  refreshedToken,
+			"refresh_token": "refresh-new",
+			"expires_in":    3600,
+		})
+	}))
+	defer server.Close()
+	openAICodexOAuthTokenURL = server.URL
+
+	auth := map[Provider]AuthConfig{
+		"openai-codex": {
+			Type: AuthTypeOAuth,
+			OAuth: &OAuthCredentials{
+				AccessToken:  "expired-token",
+				RefreshToken: "refresh-old",
+				ExpiresUnix:  time.Now().Add(-time.Minute).Unix(),
+			},
+		},
+	}
+	start := make(chan struct{})
+	results := make(chan string, 2)
+	errors := make(chan error, 2)
+	var callers sync.WaitGroup
+	callers.Add(2)
+	for range 2 {
+		go func() {
+			defer callers.Done()
+			<-start
+			token, err := ResolveAuthorization("openai-codex", auth, server.Client(), context.Background())
+			results <- token
+			errors <- err
+		}()
+	}
+	close(start)
+	<-requestStarted
+	time.Sleep(25 * time.Millisecond)
+	close(releaseResponse)
+	callers.Wait()
+	close(results)
+	close(errors)
+
+	for err := range errors {
+		if err != nil {
+			t.Fatalf("expected shared refresh to succeed, got %v", err)
+		}
+	}
+	for token := range results {
+		if token != refreshedToken {
+			t.Fatalf("expected shared refreshed token, got %q", token)
+		}
+	}
+	requestMu.Lock()
+	defer requestMu.Unlock()
+	if requestCount != 1 {
+		t.Fatalf("expected one refresh request for concurrent callers, got %d", requestCount)
+	}
+}
+
+func TestResolveAuthorizationKeepsSharedRefreshAliveForRemainingCaller(t *testing.T) {
+	previousURL := openAICodexOAuthTokenURL
+	defer func() {
+		openAICodexOAuthTokenURL = previousURL
+	}()
+
+	requestStarted := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	requestCanceled := make(chan struct{}, 1)
+	var (
+		requestMu    sync.Mutex
+		requestCount int
+		startedOnce  sync.Once
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		requestMu.Lock()
+		requestCount++
+		requestMu.Unlock()
+		startedOnce.Do(func() { close(requestStarted) })
+		select {
+		case <-releaseResponse:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token":  makeOpenAICodexToken("acc_remaining_waiter"),
+				"refresh_token": "refresh-new",
+				"expires_in":    3600,
+			})
+		case <-request.Context().Done():
+			requestCanceled <- struct{}{}
+		}
+	}))
+	defer server.Close()
+	openAICodexOAuthTokenURL = server.URL
+	httpClient := server.Client()
+	auth := map[Provider]AuthConfig{
+		"openai-codex": {
+			Type: AuthTypeOAuth,
+			OAuth: &OAuthCredentials{
+				AccessToken:  "expired-token",
+				RefreshToken: "refresh-old",
+				ExpiresUnix:  time.Now().Add(-time.Minute).Unix(),
+			},
+		},
+	}
+
+	type authorizationResult struct {
+		token string
+		err   error
+	}
+	leaderContext, cancelLeader := context.WithCancel(context.Background())
+	leaderResult := make(chan authorizationResult, 1)
+	go func() {
+		token, err := ResolveAuthorization("openai-codex", auth, httpClient, leaderContext)
+		leaderResult <- authorizationResult{token: token, err: err}
+	}()
+	<-requestStarted
+
+	followerResult := make(chan authorizationResult, 1)
+	go func() {
+		token, err := ResolveAuthorization("openai-codex", auth, httpClient, context.Background())
+		followerResult <- authorizationResult{token: token, err: err}
+	}()
+
+	key := openAICodexOAuthRefreshKey{
+		refreshToken: "refresh-old",
+		tokenURL:     openAICodexOAuthTokenURL,
+		httpClient:   httpClient,
+	}
+	waitDeadline := time.Now().Add(time.Second)
+	for {
+		openAICodexOAuthRefreshMu.Lock()
+		flight := openAICodexOAuthRefreshFlights[key]
+		waiters := 0
+		if flight != nil {
+			waiters = flight.waiters
+		}
+		openAICodexOAuthRefreshMu.Unlock()
+		if waiters == 2 {
+			break
+		}
+		if time.Now().After(waitDeadline) {
+			t.Fatal("timed out waiting for both callers to share the refresh")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	cancelLeader()
+	if result := <-leaderResult; !errors.Is(result.err, context.Canceled) {
+		t.Fatalf("expected canceled leader to return context.Canceled, got %+v", result)
+	}
+	select {
+	case <-requestCanceled:
+		t.Fatal("leader cancellation stopped refresh needed by follower")
+	default:
+	}
+
+	close(releaseResponse)
+	result := <-followerResult
+	if result.err != nil {
+		t.Fatalf("expected remaining caller to receive shared refresh, got %v", result.err)
+	}
+	if result.token != makeOpenAICodexToken("acc_remaining_waiter") {
+		t.Fatalf("expected remaining caller to receive refreshed token, got %q", result.token)
+	}
+	requestMu.Lock()
+	defer requestMu.Unlock()
+	if requestCount != 1 {
+		t.Fatalf("expected callers to share one refresh request, got %d", requestCount)
 	}
 }
 

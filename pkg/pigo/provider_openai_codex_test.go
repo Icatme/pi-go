@@ -134,6 +134,97 @@ func TestCompleteSimpleOpenAICodexBuildsRequestAndParsesText(t *testing.T) {
 	}
 }
 
+func TestCompleteSimpleOpenAICodexSSEInvokesOnResponse(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.Header().Set("x-codex-trace", "sse-response")
+		_, _ = w.Write([]byte(buildOpenAICodexSSE(map[string]any{
+			"type": "response.completed",
+			"response": map[string]any{
+				"id":     "resp_on_response",
+				"status": "completed",
+				"usage": map[string]any{
+					"input_tokens":  1,
+					"output_tokens": 1,
+					"total_tokens":  2,
+				},
+			},
+		})))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	var received []ProviderResponse
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hello"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportSSE,
+		OnResponse: func(providerResponse ProviderResponse, _ Model) {
+			received = append(received, providerResponse)
+		},
+	})
+
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("expected successful response, got %+v", response)
+	}
+	if len(received) != 1 {
+		t.Fatalf("expected one OnResponse call, got %d", len(received))
+	}
+	if received[0].Status != http.StatusOK || received[0].Headers["X-Codex-Trace"] != "sse-response" {
+		t.Fatalf("expected SSE response metadata, got %+v", received[0])
+	}
+}
+
+func TestCompleteSimpleOpenAICodexTimeoutCancelsSSERequest(t *testing.T) {
+	token := makeOpenAICodexToken("acc_test")
+	requestStarted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		close(requestStarted)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	startedAt := time.Now()
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hello"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportSSE,
+		TimeoutMs: 50,
+	})
+	elapsed := time.Since(startedAt)
+
+	select {
+	case <-requestStarted:
+	default:
+		t.Fatal("expected the SSE request to reach the server")
+	}
+	if response.StopReason != StopReasonAborted {
+		t.Fatalf("expected timeout to abort the request, got %+v", response)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("expected timeout to stop the request promptly, took %s", elapsed)
+	}
+}
+
 func TestCompleteSimpleOpenAICodexParsesToolCallResponse(t *testing.T) {
 	token := makeOpenAICodexToken("acc_test")
 
@@ -1017,6 +1108,63 @@ func TestCompleteSimpleOpenAICodexRefreshesExpiredOAuthBeforeRequest(t *testing.
 	}
 }
 
+func TestCompleteSimpleOpenAICodexTimeoutIncludesOAuthRefresh(t *testing.T) {
+	refreshStarted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		close(refreshStarted)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	previousURL := openAICodexOAuthTokenURL
+	openAICodexOAuthTokenURL = server.URL
+	defer func() {
+		openAICodexOAuthTokenURL = previousURL
+	}()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	startedAt := time.Now()
+	response := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "hello"}},
+	}, SimpleStreamOptions{
+		Auth: map[Provider]AuthConfig{
+			"openai-codex": {
+				Type: AuthTypeOAuth,
+				OAuth: &OAuthCredentials{
+					AccessToken:  "expired-token",
+					RefreshToken: "refresh-token",
+					ExpiresUnix:  1,
+				},
+			},
+		},
+		HTTPClient: server.Client(),
+		TimeoutMs:  50,
+	})
+	elapsed := time.Since(startedAt)
+
+	select {
+	case <-refreshStarted:
+	default:
+		t.Fatal("expected OAuth refresh to reach the server")
+	}
+	if response.StopReason != StopReasonAborted {
+		t.Fatalf("expected timeout during OAuth refresh to abort the request, got %+v", response)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("expected OAuth timeout to stop the request promptly, took %s", elapsed)
+	}
+}
+
 func TestCompleteSimpleOpenAICodexUsesRequestedServiceTierWhenResponseEchoesDefault(t *testing.T) {
 	var requestBody openAIResponsesRequest
 	token := makeOpenAICodexToken("acc_test")
@@ -1395,9 +1543,10 @@ func TestCompleteSimpleOpenAICodexWebSocketReusesSessionConnection(t *testing.T)
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 
 	var (
-		mu           sync.Mutex
-		upgradeCount int
-		requestCount int
+		mu                sync.Mutex
+		upgradeCount      int
+		requestCount      int
+		providerResponses []ProviderResponse
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1410,7 +1559,9 @@ func TestCompleteSimpleOpenAICodexWebSocketReusesSessionConnection(t *testing.T)
 		upgradeCount++
 		mu.Unlock()
 
-		conn, err := upgrader.Upgrade(w, r, nil)
+		upgradeHeaders := http.Header{}
+		upgradeHeaders.Set("x-codex-trace", "ws-upgrade")
+		conn, err := upgrader.Upgrade(w, r, upgradeHeaders)
 		if err != nil {
 			t.Fatalf("expected websocket upgrade: %v", err)
 		}
@@ -1463,20 +1614,27 @@ func TestCompleteSimpleOpenAICodexWebSocketReusesSessionConnection(t *testing.T)
 		t.Fatal("expected codex model")
 	}
 	model.BaseURL = server.URL
+	onResponse := func(providerResponse ProviderResponse, _ Model) {
+		mu.Lock()
+		providerResponses = append(providerResponses, providerResponse)
+		mu.Unlock()
+	}
 
 	first := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "one"}},
 	}, SimpleStreamOptions{
-		APIKey:    token,
-		Transport: TransportWebSocket,
-		SessionID: sessionID,
+		APIKey:     token,
+		Transport:  TransportWebSocket,
+		SessionID:  sessionID,
+		OnResponse: onResponse,
 	})
 	second := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "two"}},
 	}, SimpleStreamOptions{
-		APIKey:    token,
-		Transport: TransportWebSocket,
-		SessionID: sessionID,
+		APIKey:     token,
+		Transport:  TransportWebSocket,
+		SessionID:  sessionID,
+		OnResponse: onResponse,
 	})
 
 	if first.StopReason != StopReasonStop || second.StopReason != StopReasonStop {
@@ -1490,6 +1648,221 @@ func TestCompleteSimpleOpenAICodexWebSocketReusesSessionConnection(t *testing.T)
 	}
 	if requestCount != 2 {
 		t.Fatalf("expected two response.create requests on reused websocket, got %d", requestCount)
+	}
+	if len(providerResponses) != 2 {
+		t.Fatalf("expected OnResponse once per logical request, got %d", len(providerResponses))
+	}
+	for _, providerResponse := range providerResponses {
+		if providerResponse.Status != http.StatusSwitchingProtocols || providerResponse.Headers["X-Codex-Trace"] != "ws-upgrade" {
+			t.Fatalf("expected cached websocket handshake metadata, got %+v", providerResponse)
+		}
+	}
+}
+
+func TestCompleteSimpleOpenAICodexWebSocketTimeoutInterruptsReadAndEvictsSession(t *testing.T) {
+	clearOpenAICodexWebSocketSessionCache()
+
+	token := makeOpenAICodexToken("acc_test")
+	sessionID := "ws-session-timeout"
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	firstConnectionClosed := make(chan struct{})
+
+	var (
+		mu           sync.Mutex
+		upgradeCount int
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		upgradeCount++
+		currentUpgrade := upgradeCount
+		mu.Unlock()
+
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("expected websocket upgrade: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		var payload map[string]any
+		if err := conn.ReadJSON(&payload); err != nil {
+			t.Errorf("expected websocket request payload: %v", err)
+			return
+		}
+		if currentUpgrade == 1 {
+			_, _, _ = conn.ReadMessage()
+			close(firstConnectionClosed)
+			return
+		}
+
+		_ = conn.WriteJSON(map[string]any{
+			"type": "response.completed",
+			"response": map[string]any{
+				"id":     "resp_after_timeout",
+				"status": "completed",
+				"usage": map[string]any{
+					"input_tokens":  1,
+					"output_tokens": 1,
+					"total_tokens":  2,
+				},
+			},
+		})
+	}))
+	defer func() {
+		clearOpenAICodexWebSocketSessionCache()
+		server.Close()
+	}()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	model.BaseURL = server.URL
+
+	startedAt := time.Now()
+	first := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "wait"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportWebSocket,
+		SessionID: sessionID,
+		TimeoutMs: 50,
+	})
+	if first.StopReason != StopReasonAborted {
+		t.Fatalf("expected blocked websocket read to be aborted, got %+v", first)
+	}
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("expected websocket cancellation to interrupt ReadMessage promptly, took %s", elapsed)
+	}
+
+	select {
+	case <-firstConnectionClosed:
+	case <-time.After(time.Second):
+		t.Fatal("expected timeout to close the blocked websocket connection")
+	}
+	openAICodexWebSocketCacheMu.Lock()
+	cachedConnections := len(openAICodexWebSocketSessionCache)
+	openAICodexWebSocketCacheMu.Unlock()
+	if cachedConnections != 0 {
+		t.Fatalf("expected timed-out websocket to be evicted, found %d cached connections", cachedConnections)
+	}
+
+	second := CompleteSimple(*model, Context{
+		Messages: []Message{UserMessage{Content: "retry"}},
+	}, SimpleStreamOptions{
+		APIKey:    token,
+		Transport: TransportWebSocket,
+		SessionID: sessionID,
+		TimeoutMs: 500,
+	})
+	if second.StopReason != StopReasonStop {
+		t.Fatalf("expected a fresh websocket request to succeed, got %+v", second)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if upgradeCount != 2 {
+		t.Fatalf("expected timeout to force a new websocket upgrade, got %d", upgradeCount)
+	}
+}
+
+func TestCompleteSimpleOpenAICodexWebSocketCacheIsolatesEndpointAccountAndSession(t *testing.T) {
+	clearOpenAICodexWebSocketSessionCache()
+
+	var (
+		mu            sync.Mutex
+		upgradeCounts = map[string]int{}
+		requestCounts = map[string]int{}
+	)
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	newServer := func(name string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			accountID := r.Header.Get("chatgpt-account-id")
+			counterKey := name + "/" + accountID
+			mu.Lock()
+			upgradeCounts[counterKey]++
+			mu.Unlock()
+
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				t.Errorf("expected websocket upgrade: %v", err)
+				return
+			}
+			defer conn.Close()
+
+			for {
+				var payload map[string]any
+				if err := conn.ReadJSON(&payload); err != nil {
+					return
+				}
+				mu.Lock()
+				requestCounts[counterKey]++
+				requestNumber := requestCounts[counterKey]
+				mu.Unlock()
+
+				_ = conn.WriteJSON(map[string]any{
+					"type": "response.completed",
+					"response": map[string]any{
+						"id":     fmt.Sprintf("resp_%s_%d", name, requestNumber),
+						"status": "completed",
+						"usage": map[string]any{
+							"input_tokens":  1,
+							"output_tokens": 1,
+							"total_tokens":  2,
+						},
+					},
+				})
+			}
+		}))
+	}
+
+	serverA := newServer("endpoint-a")
+	serverB := newServer("endpoint-b")
+	defer func() {
+		clearOpenAICodexWebSocketSessionCache()
+		serverA.Close()
+		serverB.Close()
+	}()
+
+	model := GetModel("openai-codex", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected codex model")
+	}
+	sessionID := "shared-session"
+	complete := func(baseURL string, accountID string) AssistantMessage {
+		requestModel := *model
+		requestModel.BaseURL = baseURL
+		return CompleteSimple(requestModel, Context{
+			Messages: []Message{UserMessage{Content: "hello"}},
+		}, SimpleStreamOptions{
+			APIKey:    makeOpenAICodexToken(accountID),
+			Transport: TransportWebSocket,
+			SessionID: sessionID,
+		})
+	}
+
+	responses := []AssistantMessage{
+		complete(serverA.URL, "account-a"),
+		complete(serverA.URL, "account-b"),
+		complete(serverB.URL, "account-b"),
+		complete(serverB.URL, "account-b"),
+	}
+	for index, response := range responses {
+		if response.StopReason != StopReasonStop {
+			t.Fatalf("expected isolated websocket request %d to succeed, got %+v", index, response)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if upgradeCounts["endpoint-a/account-a"] != 1 || upgradeCounts["endpoint-a/account-b"] != 1 {
+		t.Fatalf("expected account-specific connections on endpoint A, got %+v", upgradeCounts)
+	}
+	if upgradeCounts["endpoint-b/account-b"] != 1 {
+		t.Fatalf("expected endpoint B to use its own connection, got %+v", upgradeCounts)
+	}
+	if requestCounts["endpoint-b/account-b"] != 2 {
+		t.Fatalf("expected exact cache key match to reuse endpoint B connection, got %+v", requestCounts)
 	}
 }
 

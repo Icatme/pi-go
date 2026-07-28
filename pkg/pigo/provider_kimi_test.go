@@ -2675,3 +2675,98 @@ func textFromContent(blocks []ContentBlock) string {
 	}
 	return builder.String()
 }
+
+func TestCompleteSimpleKimiCodingHostedRejectsStreamWithoutMessageStop(t *testing.T) {
+	var callbackResponse ProviderResponse
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.Header().Set("x-provider", "kimi")
+		_, _ = w.Write([]byte(buildAnthropicSSE(
+			map[string]any{
+				"type":    "message_start",
+				"message": map[string]any{"id": "msg_hosted_truncated", "usage": map[string]any{}},
+			},
+			map[string]any{
+				"type":  "content_block_start",
+				"index": 0,
+				"content_block": map[string]any{
+					"type": "text",
+					"text": "",
+				},
+			},
+			map[string]any{
+				"type":  "content_block_delta",
+				"index": 0,
+				"delta": map[string]any{"type": "text_delta", "text": "partial hosted output"},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	response := CompleteSimple(*model, Context{
+		Messages:    []Message{UserMessage{Content: "search"}},
+		HostedTools: []HostedTool{{Type: HostedToolTypeWebSearch, Name: "web_search"}},
+	}, SimpleStreamOptions{
+		APIKey: "kimi-test-key",
+		OnResponse: func(received ProviderResponse, _ Model) {
+			callbackResponse = received
+		},
+	})
+
+	if response.StopReason != StopReasonError {
+		t.Fatalf("expected hosted truncated stream to fail, got %+v", response)
+	}
+	if !strings.Contains(response.ErrorMessage, "message_stop") {
+		t.Fatalf("expected missing terminal event error, got %q", response.ErrorMessage)
+	}
+	if callbackResponse.Status != http.StatusOK || callbackResponse.Headers["X-Provider"] != "kimi" {
+		t.Fatalf("expected hosted response callback with status and headers, got %+v", callbackResponse)
+	}
+}
+
+func TestCompleteSimpleKimiCodingHostedTimeoutCoversSSELifetime(t *testing.T) {
+	requestStarted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		writeAnthropicSSEEvent(t, w, map[string]any{
+			"type":    "message_start",
+			"message": map[string]any{"id": "msg_hosted_timeout", "usage": map[string]any{}},
+		})
+		close(requestStarted)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+
+	startedAt := time.Now()
+	response := CompleteSimple(*model, Context{
+		Messages:    []Message{UserMessage{Content: "search"}},
+		HostedTools: []HostedTool{{Type: HostedToolTypeWebSearch, Name: "web_search"}},
+	}, SimpleStreamOptions{
+		APIKey:    "kimi-test-key",
+		TimeoutMs: 100,
+	})
+
+	if response.StopReason != StopReasonAborted {
+		t.Fatalf("expected hosted timeout to abort the stream, got %+v", response)
+	}
+	if time.Since(startedAt) > 2*time.Second {
+		t.Fatalf("expected TimeoutMs to bound hosted SSE lifetime, took %s", time.Since(startedAt))
+	}
+	select {
+	case <-requestStarted:
+	default:
+		t.Fatal("expected hosted request to reach the server before timing out")
+	}
+}

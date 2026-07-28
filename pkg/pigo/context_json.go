@@ -8,9 +8,10 @@ import (
 )
 
 type contextJSON struct {
-	SystemPrompt string        `json:"systemPrompt,omitempty"`
-	Messages     []messageJSON `json:"messages,omitempty"`
-	Tools        []toolJSON    `json:"tools,omitempty"`
+	SystemPrompt string           `json:"systemPrompt,omitempty"`
+	Messages     []messageJSON    `json:"messages,omitempty"`
+	Tools        []toolJSON       `json:"tools,omitempty"`
+	HostedTools  []hostedToolJSON `json:"hostedTools,omitempty"`
 }
 
 type toolJSON struct {
@@ -20,19 +21,51 @@ type toolJSON struct {
 }
 
 type messageJSON struct {
-	Role         string          `json:"role"`
-	Content      json.RawMessage `json:"content,omitempty"`
-	Timestamp    string          `json:"timestamp,omitempty"`
-	API          API             `json:"api,omitempty"`
-	Provider     Provider        `json:"provider,omitempty"`
-	Model        string          `json:"model,omitempty"`
-	ResponseID   string          `json:"responseId,omitempty"`
-	Usage        Usage           `json:"usage,omitempty"`
-	StopReason   StopReason      `json:"stopReason,omitempty"`
-	ErrorMessage string          `json:"errorMessage,omitempty"`
-	ToolCallID   string          `json:"toolCallId,omitempty"`
-	ToolName     string          `json:"toolName,omitempty"`
-	IsError      bool            `json:"isError,omitempty"`
+	Role                 string                           `json:"role"`
+	Content              json.RawMessage                  `json:"content,omitempty"`
+	Timestamp            string                           `json:"timestamp,omitempty"`
+	API                  API                              `json:"api,omitempty"`
+	Provider             Provider                         `json:"provider,omitempty"`
+	Model                string                           `json:"model,omitempty"`
+	ResponseModel        string                           `json:"responseModel,omitempty"`
+	ResponseID           string                           `json:"responseId,omitempty"`
+	HostedToolExecutions []hostedToolExecutionJSON        `json:"hostedToolExecutions,omitempty"`
+	Usage                Usage                            `json:"usage,omitempty"`
+	StopReason           StopReason                       `json:"stopReason,omitempty"`
+	ErrorMessage         string                           `json:"errorMessage,omitempty"`
+	Diagnostics          []assistantMessageDiagnosticJSON `json:"diagnostics,omitempty"`
+	ToolCallID           string                           `json:"toolCallId,omitempty"`
+	ToolName             string                           `json:"toolName,omitempty"`
+	Details              any                              `json:"details,omitempty"`
+	IsError              bool                             `json:"isError,omitempty"`
+}
+
+type hostedToolJSON struct {
+	Type HostedToolType `json:"type"`
+	Name string         `json:"name,omitempty"`
+}
+
+type hostedToolExecutionJSON struct {
+	ID               string         `json:"id,omitempty"`
+	Type             HostedToolType `json:"type,omitempty"`
+	Name             string         `json:"name,omitempty"`
+	ProviderToolName string         `json:"providerToolName,omitempty"`
+	Arguments        map[string]any `json:"arguments,omitempty"`
+	Result           map[string]any `json:"result,omitempty"`
+}
+
+type assistantMessageDiagnosticJSON struct {
+	Type      string               `json:"type"`
+	Timestamp string               `json:"timestamp,omitempty"`
+	Error     *diagnosticErrorJSON `json:"error,omitempty"`
+	Details   map[string]any       `json:"details,omitempty"`
+}
+
+type diagnosticErrorJSON struct {
+	Name    string `json:"name,omitempty"`
+	Message string `json:"message,omitempty"`
+	Stack   string `json:"stack,omitempty"`
+	Code    any    `json:"code,omitempty"`
 }
 
 type contentBlockJSON struct {
@@ -67,6 +100,7 @@ func (context Context) MarshalJSON() ([]byte, error) {
 		SystemPrompt: context.SystemPrompt,
 		Messages:     make([]messageJSON, 0, len(context.Messages)),
 		Tools:        make([]toolJSON, 0, len(context.Tools)),
+		HostedTools:  make([]hostedToolJSON, 0, len(context.HostedTools)),
 	}
 
 	for _, message := range context.Messages {
@@ -82,6 +116,12 @@ func (context Context) MarshalJSON() ([]byte, error) {
 			Name:        tool.Name,
 			Description: tool.Description,
 			Parameters:  cloneAny(tool.Parameters),
+		})
+	}
+	for _, tool := range context.HostedTools {
+		wire.HostedTools = append(wire.HostedTools, hostedToolJSON{
+			Type: tool.Type,
+			Name: tool.Name,
 		})
 	}
 
@@ -113,6 +153,14 @@ func (context *Context) UnmarshalJSON(payload []byte) error {
 		})
 	}
 
+	context.HostedTools = make([]HostedTool, 0, len(wire.HostedTools))
+	for _, tool := range wire.HostedTools {
+		context.HostedTools = append(context.HostedTools, HostedTool{
+			Type: tool.Type,
+			Name: tool.Name,
+		})
+	}
+
 	return nil
 }
 
@@ -134,16 +182,19 @@ func marshalMessageJSON(message Message) (messageJSON, error) {
 			return messageJSON{}, err
 		}
 		return messageJSON{
-			Role:         "assistant",
-			Content:      content,
-			Timestamp:    typed.Timestamp.Format(timeLayoutJSON),
-			API:          typed.API,
-			Provider:     typed.Provider,
-			Model:        typed.Model,
-			ResponseID:   typed.ResponseID,
-			Usage:        typed.Usage,
-			StopReason:   typed.StopReason,
-			ErrorMessage: typed.ErrorMessage,
+			Role:                 "assistant",
+			Content:              content,
+			Timestamp:            typed.Timestamp.Format(timeLayoutJSON),
+			API:                  typed.API,
+			Provider:             typed.Provider,
+			Model:                typed.Model,
+			ResponseModel:        typed.ResponseModel,
+			ResponseID:           typed.ResponseID,
+			HostedToolExecutions: marshalHostedToolExecutionsJSON(typed.HostedToolExecutions),
+			Usage:                typed.Usage,
+			StopReason:           typed.StopReason,
+			ErrorMessage:         typed.ErrorMessage,
+			Diagnostics:          marshalAssistantDiagnosticsJSON(typed.Diagnostics),
 		}, nil
 	case ToolResultMessage:
 		content, err := marshalContentBlocksJSON(typed.Content)
@@ -156,6 +207,7 @@ func marshalMessageJSON(message Message) (messageJSON, error) {
 			Timestamp:  typed.Timestamp.Format(timeLayoutJSON),
 			ToolCallID: typed.ToolCallID,
 			ToolName:   typed.ToolName,
+			Details:    cloneAny(typed.Details),
 			IsError:    typed.IsError,
 		}, nil
 	default:
@@ -184,16 +236,23 @@ func unmarshalMessageJSON(encoded messageJSON) (Message, error) {
 		if err != nil {
 			return nil, err
 		}
+		diagnostics, err := unmarshalAssistantDiagnosticsJSON(encoded.Diagnostics)
+		if err != nil {
+			return nil, err
+		}
 		return AssistantMessage{
-			Content:      content,
-			API:          encoded.API,
-			Provider:     encoded.Provider,
-			Model:        encoded.Model,
-			ResponseID:   encoded.ResponseID,
-			Usage:        encoded.Usage,
-			StopReason:   encoded.StopReason,
-			ErrorMessage: encoded.ErrorMessage,
-			Timestamp:    timestamp,
+			Content:              content,
+			API:                  encoded.API,
+			Provider:             encoded.Provider,
+			Model:                encoded.Model,
+			ResponseModel:        encoded.ResponseModel,
+			ResponseID:           encoded.ResponseID,
+			HostedToolExecutions: unmarshalHostedToolExecutionsJSON(encoded.HostedToolExecutions),
+			Usage:                encoded.Usage,
+			StopReason:           encoded.StopReason,
+			ErrorMessage:         encoded.ErrorMessage,
+			Diagnostics:          diagnostics,
+			Timestamp:            timestamp,
 		}, nil
 	case "toolResult":
 		content, err := unmarshalContentBlocksJSON(encoded.Content)
@@ -204,12 +263,91 @@ func unmarshalMessageJSON(encoded messageJSON) (Message, error) {
 			ToolCallID: encoded.ToolCallID,
 			ToolName:   encoded.ToolName,
 			Content:    content,
+			Details:    cloneAny(encoded.Details),
 			IsError:    encoded.IsError,
 			Timestamp:  timestamp,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported message role %q", encoded.Role)
 	}
+}
+
+func marshalHostedToolExecutionsJSON(items []HostedToolExecution) []hostedToolExecutionJSON {
+	wire := make([]hostedToolExecutionJSON, 0, len(items))
+	for _, item := range items {
+		wire = append(wire, hostedToolExecutionJSON{
+			ID:               item.ID,
+			Type:             item.Type,
+			Name:             item.Name,
+			ProviderToolName: item.ProviderToolName,
+			Arguments:        cloneMap(item.Arguments),
+			Result:           cloneMap(item.Result),
+		})
+	}
+	return wire
+}
+
+func unmarshalHostedToolExecutionsJSON(items []hostedToolExecutionJSON) []HostedToolExecution {
+	result := make([]HostedToolExecution, 0, len(items))
+	for _, item := range items {
+		result = append(result, HostedToolExecution{
+			ID:               item.ID,
+			Type:             item.Type,
+			Name:             item.Name,
+			ProviderToolName: item.ProviderToolName,
+			Arguments:        cloneMap(item.Arguments),
+			Result:           cloneMap(item.Result),
+		})
+	}
+	return result
+}
+
+func marshalAssistantDiagnosticsJSON(items []AssistantMessageDiagnostic) []assistantMessageDiagnosticJSON {
+	wire := make([]assistantMessageDiagnosticJSON, 0, len(items))
+	for _, item := range items {
+		var diagnosticError *diagnosticErrorJSON
+		if item.Error != nil {
+			diagnosticError = &diagnosticErrorJSON{
+				Name:    item.Error.Name,
+				Message: item.Error.Message,
+				Stack:   item.Error.Stack,
+				Code:    cloneAny(item.Error.Code),
+			}
+		}
+		wire = append(wire, assistantMessageDiagnosticJSON{
+			Type:      item.Type,
+			Timestamp: item.Timestamp.Format(timeLayoutJSON),
+			Error:     diagnosticError,
+			Details:   cloneMap(item.Details),
+		})
+	}
+	return wire
+}
+
+func unmarshalAssistantDiagnosticsJSON(items []assistantMessageDiagnosticJSON) ([]AssistantMessageDiagnostic, error) {
+	result := make([]AssistantMessageDiagnostic, 0, len(items))
+	for _, item := range items {
+		timestamp, err := parseTimeJSON(item.Timestamp)
+		if err != nil {
+			return nil, err
+		}
+		var diagnosticError *DiagnosticErrorInfo
+		if item.Error != nil {
+			diagnosticError = &DiagnosticErrorInfo{
+				Name:    item.Error.Name,
+				Message: item.Error.Message,
+				Stack:   item.Error.Stack,
+				Code:    cloneAny(item.Error.Code),
+			}
+		}
+		result = append(result, AssistantMessageDiagnostic{
+			Type:      item.Type,
+			Timestamp: timestamp,
+			Error:     diagnosticError,
+			Details:   cloneMap(item.Details),
+		})
+	}
+	return result, nil
 }
 
 func marshalUserContentJSON(content any) (json.RawMessage, error) {
