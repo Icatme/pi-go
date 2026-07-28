@@ -63,6 +63,11 @@ func TestOpenAICodexLoginManualFallback(t *testing.T) {
 
 	provider := newOpenAICodexOAuthProvider()
 	var authURL string
+	var openedURL string
+	provider.openBrowser = func(target string) error {
+		openedURL = target
+		return nil
+	}
 	var output bytes.Buffer
 	credentials, err := provider.Login(context.Background(), oauthLoginCallbacks{
 		OnAuth: func(info oauthAuthInfo) {
@@ -91,6 +96,9 @@ func TestOpenAICodexLoginManualFallback(t *testing.T) {
 	}
 	if got := parsedURL.Query().Get("client_id"); got != openAICodexOAuthClientID {
 		t.Fatalf("expected client_id %q, got %q", openAICodexOAuthClientID, got)
+	}
+	if openedURL != authURL {
+		t.Fatalf("expected browser opener to receive auth URL %q, got %q", authURL, openedURL)
 	}
 	if !strings.Contains(output.String(), "Falling back to manual code paste.") {
 		t.Fatalf("expected manual fallback output, got %q", output.String())

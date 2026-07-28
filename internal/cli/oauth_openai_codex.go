@@ -27,7 +27,8 @@ var (
 )
 
 type openAICodexOAuthProvider struct {
-	httpClient *http.Client
+	httpClient  *http.Client
+	openBrowser func(string) error
 }
 
 type openAICodexAuthorizationFlow struct {
@@ -47,9 +48,10 @@ type openAICodexCallbackServer struct {
 	codes  chan string
 }
 
-func newOpenAICodexOAuthProvider() oauthProvider {
+func newOpenAICodexOAuthProvider() *openAICodexOAuthProvider {
 	return &openAICodexOAuthProvider{
-		httpClient: http.DefaultClient,
+		httpClient:  http.DefaultClient,
+		openBrowser: openBrowser,
 	}
 }
 
@@ -83,7 +85,7 @@ func (p *openAICodexOAuthProvider) Login(ctx context.Context, callbacks oauthLog
 		})
 	}
 
-	if err := openBrowser(flow.URL); err != nil && callbacks.OnOutput != nil {
+	if err := p.openBrowser(flow.URL); err != nil && callbacks.OnOutput != nil {
 		callbacks.OnOutput("Failed to open browser automatically. Open the URL above manually.\n")
 	}
 
