@@ -53,6 +53,18 @@ func TestBuiltInsDoNotExposeOpenRouter(t *testing.T) {
 	}
 }
 
+func TestKimiCodingModelsUseUpstreamUserAgent(t *testing.T) {
+	for _, modelID := range []string{"k2p5", "k2p6", "kimi-k2-thinking"} {
+		model := GetModel("kimi-coding", modelID)
+		if model == nil {
+			t.Fatalf("expected kimi model %q to exist", modelID)
+		}
+		if got := model.Headers["User-Agent"]; got != "KimiCLI/1.5" {
+			t.Fatalf("expected kimi model %q user-agent KimiCLI/1.5, got %q", modelID, got)
+		}
+	}
+}
+
 func TestGetSupportedThinkingLevelsForNonReasoningModel(t *testing.T) {
 	model := Model{Reasoning: false}
 	levels := GetSupportedThinkingLevels(model)

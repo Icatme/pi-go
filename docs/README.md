@@ -11,6 +11,6 @@ Current layout:
 
 Operational notes:
 
-- keep the package surface focused on `openai-codex` and `kimi-coding`
+- keep the package surface focused on the built-in providers listed in the root README
 - keep provider-agnostic semantics stable before widening provider behavior
 - do not add local-model or generic OpenAI-compatible support unless requested

@@ -11,6 +11,7 @@ func registerBuiltInModules() {
 
 func registerBuiltInAPIModules() {
 	RegisterLazyAPIModule("anthropic-messages", newAnthropicMessagesAPIModule)
+	RegisterLazyAPIModule("commandcode-custom", newCommandCodeAPIModule)
 	RegisterLazyAPIModule("deepseek-chat-completions", newDeepSeekChatCompletionsAPIModule)
 	RegisterLazyAPIModule("google-generative-ai", newGoogleGenerativeAIAPIModule)
 	RegisterLazyAPIModule("mistral-conversations", newMistralConversationsAPIModule)
@@ -20,6 +21,7 @@ func registerBuiltInAPIModules() {
 
 func registerBuiltInProviderModules() {
 	RegisterLazyProviderModule("anthropic", newAnthropicProviderModule)
+	RegisterLazyProviderModule("commandcode", newCommandCodeProviderModule)
 	RegisterLazyProviderModule("deepseek", newDeepSeekProviderModule)
 	RegisterLazyProviderModule("google", newGoogleProviderModule)
 	RegisterLazyProviderModule("mistral", newMistralProviderModule)
@@ -524,6 +526,7 @@ func newKimiCodingProviderModule() ProviderModule {
 				Name:          "Kimi K2.5",
 				API:           "anthropic-messages",
 				BaseURL:       "https://api.kimi.com/coding",
+				Headers:       map[string]string{"User-Agent": "KimiCLI/1.5"},
 				Reasoning:     true,
 				Input:         []InputType{InputText, InputImage},
 				HostedTools:   HostedToolCapabilities{WebSearch: true, Fetch: true, CodeRunner: true, Excel: true},
@@ -536,6 +539,7 @@ func newKimiCodingProviderModule() ProviderModule {
 				Name:          "Kimi K2.6",
 				API:           "anthropic-messages",
 				BaseURL:       "https://api.kimi.com/coding",
+				Headers:       map[string]string{"User-Agent": "KimiCLI/1.5"},
 				Reasoning:     true,
 				Input:         []InputType{InputText, InputImage},
 				HostedTools:   HostedToolCapabilities{WebSearch: true, Fetch: true, CodeRunner: true, Excel: true},
@@ -548,6 +552,7 @@ func newKimiCodingProviderModule() ProviderModule {
 				Name:          "Kimi K2 Thinking",
 				API:           "anthropic-messages",
 				BaseURL:       "https://api.kimi.com/coding",
+				Headers:       map[string]string{"User-Agent": "KimiCLI/1.5"},
 				Reasoning:     true,
 				Input:         []InputType{InputText},
 				HostedTools:   HostedToolCapabilities{WebSearch: true, Fetch: true, CodeRunner: true, Excel: true},

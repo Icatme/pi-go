@@ -6,7 +6,7 @@ Current scope:
 
 - keep provider-agnostic semantics stable first
 - keep the library surface small and explicit
-- focus on the most commonly used model providers, including `OpenAI OAuth` / `openai-codex`, `Kimi Coding`, `Anthropic`, `DeepSeek`, `Google`, and `Mistral`
+- focus on the most commonly used model providers, including `OpenAI OAuth` / `openai-codex`, `Kimi Coding`, `Command Code`, `Anthropic`, `DeepSeek`, `Google`, and `Mistral`
 - preserve WebSocket support, observer hooks, and the single-package core-library shape
 
 ## Project Positioning
@@ -26,6 +26,7 @@ Current primary provider scope:
 
 - `openai-codex` via OpenAI OAuth and the Responses-style API surface
 - `kimi-coding` via Anthropic-style Messages semantics
+- `commandcode` via the `commandcode-custom` streaming protocol used by `pi-commandcode-provider`
 - `anthropic` via the Anthropic Messages API
 - `deepseek` via DeepSeek chat completions
 - `google` via the Gemini Generative AI API
@@ -134,6 +135,7 @@ $env:PIGO_LIVE_TEST = "1"
 Some live paths also require credentials such as:
 
 - `KIMI_API_KEY`
+- `COMMANDCODE_API_KEY`
 - test-only OpenAI Codex credentials in `01_auth.json`
 
 Support-file boundaries:
@@ -142,6 +144,11 @@ Support-file boundaries:
 - `.pigo/.env` is local test/helper API-key input
 - `01_auth.json` is test-only and ignored by git
 - library runtime auth should still be passed explicitly via options or auth config
+
+The `commandcode` provider does not run a browser login or read Command Code's
+auth files. Supply `COMMANDCODE_API_KEY`, `SimpleStreamOptions.APIKey`, or an
+external `AuthConfig`. Its built-in model registry is a deterministic snapshot;
+constructing a provider model never performs startup network I/O.
 
 ## CLI
 

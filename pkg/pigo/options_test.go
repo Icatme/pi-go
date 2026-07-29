@@ -172,6 +172,27 @@ func TestStreamOptionsProviderStreamOptionsPrefersFlatFieldsOverStaleCommon(t *t
 	}
 }
 
+func TestMergeRequestHeadersUsesRequestLayerCaseInsensitively(t *testing.T) {
+	headers := mergeRequestHeaders(
+		map[string]string{
+			"User-Agent": "model-agent",
+			"X-Shared":   "model",
+		},
+		map[string]string{
+			"user-agent": "plugin-agent",
+			"x-shared":   "request",
+			"x-plugin":   "enabled",
+		},
+	)
+
+	if len(headers) != 3 {
+		t.Fatalf("expected one value per case-insensitive header name, got %+v", headers)
+	}
+	if headers["user-agent"] != "plugin-agent" || headers["x-shared"] != "request" || headers["x-plugin"] != "enabled" {
+		t.Fatalf("expected request headers to override model headers, got %+v", headers)
+	}
+}
+
 func TestBuildKimiCodingProviderOptionsRefreshesCommonSnapshot(t *testing.T) {
 	model := Model{MaxTokens: 4096}
 	options := buildKimiCodingProviderOptions(model, SimpleStreamOptions{

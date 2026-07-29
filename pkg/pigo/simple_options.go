@@ -1,5 +1,7 @@
 package pigo
 
+import "strings"
+
 func NormalizeProviderStreamOptions(model Model, options ProviderStreamOptions) ProviderStreamOptions {
 	module := resolveProviderModule(model.Provider)
 	if module == nil || module.NormalizeOptions == nil {
@@ -82,6 +84,25 @@ func cloneStringMap(values map[string]string) map[string]string {
 		out[key] = value
 	}
 	return out
+}
+
+func mergeRequestHeaders(layers ...map[string]string) map[string]string {
+	var merged map[string]string
+	keys := map[string]string{}
+	for _, layer := range layers {
+		for key, value := range layer {
+			if merged == nil {
+				merged = make(map[string]string)
+			}
+			normalized := strings.ToLower(key)
+			if previous, ok := keys[normalized]; ok {
+				delete(merged, previous)
+			}
+			merged[key] = value
+			keys[normalized] = key
+		}
+	}
+	return merged
 }
 
 func minInt(left int, right int) int {

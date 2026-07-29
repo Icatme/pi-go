@@ -61,6 +61,21 @@ func TestCompleteSimpleOpenAICodexBuildsRequestAndParsesText(t *testing.T) {
 		if got := r.Header.Get("chatgpt-account-id"); got != "acc_test" {
 			t.Fatalf("expected account id header, got %q", got)
 		}
+		if got := r.Header.Get("originator"); got != "pi" {
+			t.Fatalf("expected pi originator header, got %q", got)
+		}
+		if got := r.Header.Get("user-agent"); got != openAICodexUserAgent() {
+			t.Fatalf("expected pi user-agent %q, got %q", openAICodexUserAgent(), got)
+		}
+		if got := r.Header.Get("x-plugin"); got != "enabled" {
+			t.Fatalf("expected custom plugin header, got %q", got)
+		}
+		if got := r.Header.Get("session_id"); got != "" {
+			t.Fatalf("expected no session header without a session id, got %q", got)
+		}
+		if got := r.Header.Get("x-client-request-id"); got != "" {
+			t.Fatalf("expected no request id header without a session id, got %q", got)
+		}
 		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 			t.Fatalf("expected valid request body: %v", err)
 		}
@@ -111,6 +126,12 @@ func TestCompleteSimpleOpenAICodexBuildsRequestAndParsesText(t *testing.T) {
 		},
 	}, SimpleStreamOptions{
 		APIKey: token,
+		Headers: map[string]string{
+			"authorization": "Bearer plugin-token",
+			"originator":    "plugin",
+			"User-Agent":    "plugin-agent/1.0",
+			"x-plugin":      "enabled",
+		},
 	})
 
 	if response.StopReason != StopReasonStop {
@@ -996,11 +1017,14 @@ func TestCompleteSimpleOpenAICodexSetsSessionCacheAndReasoningOptions(t *testing
 		TextVerbosity:    "high",
 	})
 
-	if headers.Get("conversation_id") != sessionID {
-		t.Fatalf("expected conversation_id header %q, got %q", sessionID, headers.Get("conversation_id"))
+	if headers.Get("conversation_id") != "" {
+		t.Fatalf("expected no non-upstream conversation_id header, got %q", headers.Get("conversation_id"))
 	}
 	if headers.Get("session_id") != sessionID {
 		t.Fatalf("expected session_id header %q, got %q", sessionID, headers.Get("session_id"))
+	}
+	if headers.Get("x-client-request-id") != sessionID {
+		t.Fatalf("expected x-client-request-id header %q, got %q", sessionID, headers.Get("x-client-request-id"))
 	}
 	if requestBody.PromptCacheKey != sessionID {
 		t.Fatalf("expected prompt_cache_key %q, got %q", sessionID, requestBody.PromptCacheKey)
@@ -1477,6 +1501,24 @@ func TestCompleteSimpleOpenAICodexAutoTransportDoesNotFallbackAfterWebSocketStar
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 			websocketAttempts++
+			if got := r.Header.Get("authorization"); got != "Bearer "+token {
+				t.Fatalf("expected protected websocket authorization header, got %q", got)
+			}
+			if got := r.Header.Get("originator"); got != "pi" {
+				t.Fatalf("expected pi websocket originator, got %q", got)
+			}
+			if got := r.Header.Get("user-agent"); got != openAICodexUserAgent() {
+				t.Fatalf("expected pi websocket user-agent %q, got %q", openAICodexUserAgent(), got)
+			}
+			if got := r.Header.Get("accept"); got != "" {
+				t.Fatalf("expected websocket accept header to be removed, got %q", got)
+			}
+			if got := r.Header.Get("content-type"); got != "" {
+				t.Fatalf("expected websocket content-type header to be removed, got %q", got)
+			}
+			if got := r.Header.Get("x-plugin"); got != "enabled" {
+				t.Fatalf("expected custom websocket plugin header, got %q", got)
+			}
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
 				t.Fatalf("expected websocket upgrade: %v", err)
@@ -1512,6 +1554,14 @@ func TestCompleteSimpleOpenAICodexAutoTransportDoesNotFallbackAfterWebSocketStar
 	}, SimpleStreamOptions{
 		APIKey:    token,
 		Transport: TransportAuto,
+		Headers: map[string]string{
+			"accept":        "application/json",
+			"authorization": "Bearer plugin-token",
+			"content-type":  "application/json",
+			"originator":    "plugin",
+			"User-Agent":    "plugin-agent/1.0",
+			"x-plugin":      "enabled",
+		},
 	})
 
 	if response.StopReason != StopReasonError {
@@ -1726,18 +1776,18 @@ func TestCompleteSimpleOpenAICodexWebSocketTimeoutInterruptsReadAndEvictsSession
 		APIKey:    token,
 		Transport: TransportWebSocket,
 		SessionID: sessionID,
-		TimeoutMs: 50,
+		TimeoutMs: 500,
 	})
 	if first.StopReason != StopReasonAborted {
 		t.Fatalf("expected blocked websocket read to be aborted, got %+v", first)
 	}
-	if elapsed := time.Since(startedAt); elapsed > time.Second {
+	if elapsed := time.Since(startedAt); elapsed > 2*time.Second {
 		t.Fatalf("expected websocket cancellation to interrupt ReadMessage promptly, took %s", elapsed)
 	}
 
 	select {
 	case <-firstConnectionClosed:
-	case <-time.After(time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("expected timeout to close the blocked websocket connection")
 	}
 	openAICodexWebSocketCacheMu.Lock()

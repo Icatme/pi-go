@@ -64,6 +64,7 @@ func newAssistantMessageEventStream() *AssistantMessageEventStream {
 }
 
 func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	options.Headers = mergeRequestHeaders(model.Headers, options.Headers)
 	apiModule := resolveAPIModule(model.API)
 	if providerModule := resolveProviderModule(model.Provider); providerModule != nil && providerModule.NormalizeOptions != nil {
 		options = providerModule.NormalizeOptions(model, options)
@@ -75,6 +76,7 @@ func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantM
 }
 
 func StreamSimple(model Model, ctx Context, options SimpleStreamOptions) *AssistantMessageEventStream {
+	options.Headers = mergeRequestHeaders(model.Headers, options.Headers)
 	apiModule := resolveAPIModule(model.API)
 	if apiModule != nil && apiModule.StreamSimple != nil {
 		return apiModule.StreamSimple(model, ctx, options)

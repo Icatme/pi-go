@@ -58,6 +58,12 @@ func TestCompleteSimpleKimiCodingBuildsAnthropicRequestAndParsesText(t *testing.
 		if got := r.Header.Get("anthropic-version"); got != "2023-06-01" {
 			t.Fatalf("expected anthropic version header, got %q", got)
 		}
+		if got := r.Header.Get("user-agent"); got != "plugin-agent/1.0" {
+			t.Fatalf("expected request header to override the model user-agent, got %q", got)
+		}
+		if got := r.Header.Get("x-plugin"); got != "enabled" {
+			t.Fatalf("expected custom plugin header, got %q", got)
+		}
 		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 			t.Fatalf("expected valid request json: %v", err)
 		}
@@ -125,6 +131,10 @@ func TestCompleteSimpleKimiCodingBuildsAnthropicRequestAndParsesText(t *testing.
 		},
 	}, SimpleStreamOptions{
 		APIKey: "kimi-test-key",
+		Headers: map[string]string{
+			"user-agent": "plugin-agent/1.0",
+			"x-plugin":   "enabled",
+		},
 	})
 
 	if response.StopReason != StopReasonStop {

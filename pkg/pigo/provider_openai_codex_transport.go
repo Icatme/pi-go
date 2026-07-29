@@ -136,25 +136,20 @@ func streamOpenAICodexSSE(
 }
 
 func buildOpenAICodexSSEHeaders(options ProviderStreamOptions, apiKey string, accountID string) map[string]string {
-	requestID := options.SessionID
-	if strings.TrimSpace(requestID) == "" {
-		requestID = createOpenAICodexRequestID()
-	}
-	headers := map[string]string{
-		"content-type":        "application/json",
-		"accept":              "text/event-stream",
-		"authorization":       "Bearer " + apiKey,
-		"chatgpt-account-id":  accountID,
-		"originator":          "pi",
-		"openai-beta":         "responses=experimental",
-		"x-client-request-id": requestID,
-	}
+	headers := mergeRequestHeaders(options.Headers, map[string]string{
+		"content-type":       "application/json",
+		"accept":             "text/event-stream",
+		"authorization":      "Bearer " + apiKey,
+		"chatgpt-account-id": accountID,
+		"originator":         "pi",
+		"openai-beta":        "responses=experimental",
+		"user-agent":         openAICodexUserAgent(),
+	})
 	if options.SessionID != "" {
-		headers["conversation_id"] = options.SessionID
-		headers["session_id"] = options.SessionID
-	}
-	for key, value := range options.Headers {
-		headers[key] = value
+		headers = mergeRequestHeaders(headers, map[string]string{
+			"session_id":          options.SessionID,
+			"x-client-request-id": options.SessionID,
+		})
 	}
 	return headers
 }
@@ -175,15 +170,19 @@ func streamOpenAICodexWebSocket(
 	}
 
 	headers := http.Header{}
+	for key, value := range options.Headers {
+		headers.Set(key, value)
+	}
+	headers.Del("accept")
+	headers.Del("content-type")
+	headers.Del("openai-beta")
 	headers.Set("authorization", "Bearer "+apiKey)
 	headers.Set("chatgpt-account-id", accountID)
 	headers.Set("originator", "pi")
 	headers.Set("openai-beta", openAICodexWebSocketBetaHeader)
 	headers.Set("x-client-request-id", requestID)
 	headers.Set("session_id", requestID)
-	for key, value := range options.Headers {
-		headers.Set(key, value)
-	}
+	headers.Set("user-agent", openAICodexUserAgent())
 
 	dialer := websocket.Dialer{}
 	requestContext := options.RequestContext
