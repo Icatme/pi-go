@@ -143,24 +143,41 @@ Support-file boundaries:
 - `.pigo/auth.json` is CLI-managed auth storage
 - `.pigo/.env` is local test/helper API-key input
 - `01_auth.json` is test-only and ignored by git
-- library runtime auth should still be passed explicitly via options or auth config
+- library runtime auth should normally be passed explicitly via options or auth config; `commandcode` additionally supports the upstream user-home auth files listed below
 
-The `commandcode` provider does not run a browser login or read Command Code's
-auth files. Supply `COMMANDCODE_API_KEY`, `SimpleStreamOptions.APIKey`, or an
-external `AuthConfig`. Its built-in model registry is a deterministic snapshot;
-constructing a provider model never performs startup network I/O.
+The `commandcode` provider matches `pi-commandcode-provider` v0.4.2's setup
+surface. `pigo login commandcode` opens the browser-assisted login flow and
+stores the returned API key in `.pigo/auth.json`. Runtime lookup also accepts
+`COMMANDCODE_API_KEY`, `SimpleStreamOptions.APIKey`, caller-supplied
+`AuthConfig`, and the supported Command Code/pi/OMP auth-file shapes under the
+user home directory: `.commandcode/auth.json`, `.omp/agent/auth.json`, and
+`.pi/agent/auth.json`.
+
+The CLI refreshes Command Code models from
+`https://api.commandcode.ai/provider/v1/models` before `models` and `ask`.
+Library callers can use `FetchCommandCodeModels` for a read-only catalog or
+`RefreshCommandCodeModels` to replace the registered snapshot. Override the
+endpoints with `COMMANDCODE_MODELS_URL` and `COMMANDCODE_API_BASE`. As in the
+upstream extension, newly discovered models without a local pricing entry use
+zero display cost until the pricing table is updated. If refresh fails while
+listing every provider, the CLI warns and continues with the currently
+registered Command Code catalog; provider-specific commands still report the
+refresh failure.
 
 ## CLI
 
 Example commands:
 
 ```powershell
-go run .\cmd\pigo list
-go run .\cmd\pigo models openai-codex
-go run .\cmd\pigo login openai-codex
-go run .\cmd\pigo ask --provider kimi-coding "hello"
-go run .\cmd\pigo ask --provider openai-codex --model gpt-5.4 "hello"
 .\scripts\build.ps1
+.\bin\pigo.exe list
+.\bin\pigo.exe models openai-codex
+.\bin\pigo.exe login openai-codex
+.\bin\pigo.exe login commandcode
+.\bin\pigo.exe models commandcode
+.\bin\pigo.exe ask --provider kimi-coding "hello"
+.\bin\pigo.exe ask --provider commandcode --model poolside/laguna-s-2.1-free "hello"
+.\bin\pigo.exe ask --provider openai-codex --model gpt-5.4 "hello"
 ```
 
 Build helpers:

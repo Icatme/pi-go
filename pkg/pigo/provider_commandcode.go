@@ -28,8 +28,8 @@ const (
 )
 
 // This transport is a native Go port of pi-commandcode-provider v0.4.2's
-// commandcode-custom wire protocol. It deliberately excludes that extension's
-// credential-file reads and browser login; callers own credential persistence.
+// commandcode-custom wire protocol. Provider discovery and credential lookup
+// live beside the transport; browser login is owned by the CLI package.
 
 type commandCodeRequest struct {
 	Config   commandCodeConfig `json:"config"`
@@ -114,16 +114,13 @@ func streamCommandCode(model Model, ctx Context, options ProviderStreamOptions) 
 	}
 
 	go func() {
-		apiKey := options.APIKey
+		apiKey := usableCommandCodeAPIKey(options.APIKey)
 		if apiKey == "" {
-			apiKey = ResolveAPIKey(model.Provider, options.Auth)
-		}
-		if apiKey == "" {
-			apiKey = GetEnvAPIKey(model.Provider)
+			apiKey = ResolveCommandCodeAPIKey(options.Auth)
 		}
 		if apiKey == "" {
 			response.StopReason = StopReasonError
-			response.ErrorMessage = "missing Command Code API key"
+			response.ErrorMessage = "missing Command Code API key; run pigo login commandcode, set COMMANDCODE_API_KEY, or configure a supported auth.json file"
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
 			return
@@ -753,7 +750,7 @@ func newCommandCodeThreadID() (string, error) {
 func resolveCommandCodeGenerateURL(baseURL string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if trimmed == "" {
-		trimmed = commandCodeDefaultBaseURL
+		trimmed = resolveCommandCodeAPIBaseURL()
 	}
 	if strings.HasSuffix(trimmed, "/alpha/generate") {
 		return trimmed

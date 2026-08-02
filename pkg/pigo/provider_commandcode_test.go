@@ -37,7 +37,7 @@ func TestCommandCodeProviderRegistration(t *testing.T) {
 		t.Fatalf("unexpected Command Code auth metadata: %+v", module)
 	}
 	if RequiresOAuth("commandcode") {
-		t.Fatal("Command Code credentials must be supplied externally, not persisted through library OAuth")
+		t.Fatal("Command Code must continue accepting API keys without requiring OAuth")
 	}
 	if !GetProviderCapabilities("commandcode").SupportsStreaming {
 		t.Fatal("expected Command Code streaming capability")

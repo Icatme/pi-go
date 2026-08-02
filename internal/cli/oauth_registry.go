@@ -28,6 +28,7 @@ type oauthProvider interface {
 }
 
 var builtInOAuthProviders = map[string]oauthProvider{
+	"commandcode":  newCommandCodeOAuthProvider(),
 	"openai-codex": newOpenAICodexOAuthProvider(),
 }
 

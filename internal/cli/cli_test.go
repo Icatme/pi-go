@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,8 +24,73 @@ func TestRunListShowsOAuthProviders(t *testing.T) {
 	if !strings.Contains(stdout.String(), "openai-codex") {
 		t.Fatalf("expected openai-codex in list output, got %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "commandcode") {
+		t.Fatalf("expected commandcode in list output, got %q", stdout.String())
+	}
 	if strings.Contains(stdout.String(), "kimi-coding") {
 		t.Fatalf("did not expect kimi-coding in oauth provider list, got %q", stdout.String())
+	}
+}
+
+func TestRunModelsRefreshesCommandCodeCatalog(t *testing.T) {
+	previousRefresh := refreshCommandCodeModelsFn
+	previousModels := getModelsFn
+	defer func() {
+		refreshCommandCodeModelsFn = previousRefresh
+		getModelsFn = previousModels
+	}()
+
+	refreshed := false
+	refreshCommandCodeModelsFn = func(context.Context, *http.Client) ([]pigo.Model, error) {
+		refreshed = true
+		return []pigo.Model{{ID: "dynamic-model"}}, nil
+	}
+	getModelsFn = func(provider pigo.Provider) []pigo.Model {
+		if provider != "commandcode" {
+			return nil
+		}
+		return []pigo.Model{{ID: "dynamic-model", Provider: provider}}
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := Run(context.Background(), []string{"models", "commandcode"}, strings.NewReader(""), &stdout, &stderr)
+	if exitCode != 0 || !refreshed || !strings.Contains(stdout.String(), "dynamic-model") {
+		t.Fatalf("expected refreshed Command Code models, code=%d refreshed=%v stdout=%q stderr=%q", exitCode, refreshed, stdout.String(), stderr.String())
+	}
+}
+
+func TestRunModelsContinuesWhenCommandCodeRefreshFails(t *testing.T) {
+	previousRefresh := refreshCommandCodeModelsFn
+	previousProviders := getProvidersFn
+	previousModels := getModelsFn
+	defer func() {
+		refreshCommandCodeModelsFn = previousRefresh
+		getProvidersFn = previousProviders
+		getModelsFn = previousModels
+	}()
+
+	refreshCommandCodeModelsFn = func(context.Context, *http.Client) ([]pigo.Model, error) {
+		return nil, errors.New("catalog unavailable")
+	}
+	getProvidersFn = func() []pigo.Provider {
+		return []pigo.Provider{"commandcode", "openai"}
+	}
+	getModelsFn = func(provider pigo.Provider) []pigo.Model {
+		return []pigo.Model{{ID: string(provider) + "-model", Provider: provider}}
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := Run(context.Background(), []string{"models"}, strings.NewReader(""), &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected model listing to continue, code=%d stderr=%q", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "commandcode-model") || !strings.Contains(stdout.String(), "openai-model") {
+		t.Fatalf("expected all registered models after refresh failure, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "Warning: refresh Command Code models: catalog unavailable") {
+		t.Fatalf("expected refresh warning, got %q", stderr.String())
 	}
 }
 

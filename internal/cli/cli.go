@@ -12,12 +12,14 @@ import (
 )
 
 var (
-	getProvidersFn   = pigo.GetProviders
-	getModelsFn      = pigo.GetModels
-	getModelFn       = pigo.GetModel
-	getEnvAPIKeyFn   = pigo.GetEnvAPIKey
-	requiresOAuthFn  = pigo.RequiresOAuth
-	completeSimpleFn = pigo.CompleteSimple
+	getProvidersFn             = pigo.GetProviders
+	getModelsFn                = pigo.GetModels
+	getModelFn                 = pigo.GetModel
+	getEnvAPIKeyFn             = pigo.GetEnvAPIKey
+	requiresOAuthFn            = pigo.RequiresOAuth
+	completeSimpleFn           = pigo.CompleteSimple
+	refreshCommandCodeModelsFn = pigo.RefreshCommandCodeModels
+	resolveCommandCodeAPIKeyFn = pigo.ResolveCommandCodeAPIKey
 )
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -38,7 +40,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		writeUsage(stdout)
 		return 0
 	case "models":
-		return runModels(args[1:], stdout, stderr)
+		return runModels(ctx, args[1:], stdout, stderr)
 	case "list":
 		return runList(stdout)
 	case "login":
@@ -87,7 +89,7 @@ func runList(stdout io.Writer) int {
 	return 0
 }
 
-func runModels(args []string, stdout, stderr io.Writer) int {
+func runModels(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) > 1 {
 		writeLine(stderr, "Usage: pigo models [provider]\n")
 		return 1
@@ -95,6 +97,10 @@ func runModels(args []string, stdout, stderr io.Writer) int {
 
 	if len(args) == 1 {
 		provider := pigo.Provider(strings.TrimSpace(args[0]))
+		if err := refreshProviderModels(ctx, provider); err != nil {
+			writeLine(stderr, err.Error()+"\n")
+			return 1
+		}
 		models := getModelsFn(provider)
 		if len(models) == 0 {
 			writeLine(stderr, fmt.Sprintf("Unknown provider or no models: %s\n", provider))
@@ -105,6 +111,9 @@ func runModels(args []string, stdout, stderr io.Writer) int {
 			writeLine(stdout, fmt.Sprintf("  %s\n", model.ID))
 		}
 		return 0
+	}
+	if err := refreshProviderModels(ctx, "commandcode"); err != nil {
+		writeLine(stderr, "Warning: "+err.Error()+"; using currently registered Command Code models.\n")
 	}
 
 	for _, provider := range getProvidersFn() {
@@ -223,6 +232,10 @@ func runAsk(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	}
 
 	provider := pigo.Provider(strings.TrimSpace(*providerID))
+	if err := refreshProviderModels(ctx, provider); err != nil {
+		writeLine(stderr, err.Error()+"\n")
+		return 1
+	}
 	resolvedModelID := strings.TrimSpace(*modelID)
 	if resolvedModelID == "" {
 		resolvedModelID = defaultModelID(provider)
@@ -245,9 +258,13 @@ func runAsk(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	}
 	auth := loadRuntimeAuth(authPath)
 
+	apiKey := getEnvAPIKeyFn(provider)
+	if provider == "commandcode" {
+		apiKey = resolveCommandCodeAPIKeyFn(auth)
+	}
 	options := pigo.SimpleStreamOptions{
 		Auth:           auth,
-		APIKey:         getEnvAPIKeyFn(provider),
+		APIKey:         apiKey,
 		RequestContext: ctx,
 		MaxTokens:      *maxTokens,
 	}
@@ -258,6 +275,8 @@ func runAsk(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	if options.APIKey == "" && auth[provider].OAuth == nil {
 		if requiresOAuthFn(provider) {
 			writeLine(stderr, fmt.Sprintf("Missing OAuth credentials for %s. Run 'pigo login %s'.\n", provider, provider))
+		} else if getOAuthProvider(string(provider)) != nil {
+			writeLine(stderr, fmt.Sprintf("Missing credentials for %s. Run 'pigo login %s' or configure an API key.\n", provider, provider))
 		} else {
 			writeLine(stderr, fmt.Sprintf("Missing API key for %s. Put it in .pigo/.env.\n", provider))
 		}
@@ -283,6 +302,17 @@ func runAsk(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 		}
 	}
 	return 0
+}
+
+func refreshProviderModels(ctx context.Context, provider pigo.Provider) error {
+	if provider != "commandcode" {
+		return nil
+	}
+	_, err := refreshCommandCodeModelsFn(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("refresh Command Code models: %w", err)
+	}
+	return nil
 }
 
 func promptProviderSelection(stdin io.Reader, stdout io.Writer, providers []oauthProvider) (string, error) {

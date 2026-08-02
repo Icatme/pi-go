@@ -83,6 +83,23 @@ func (r *Registry[K, V]) Delete(key K) {
 	delete(r.entries, key)
 }
 
+// Replace swaps an existing entry for a resolved value without exposing a
+// partially updated value to concurrent readers. It returns false when the key
+// is not registered.
+func (r *Registry[K, V]) Replace(key K, value *V) bool {
+	if value == nil {
+		return false
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.entries[key]; !exists {
+		return false
+	}
+	r.entries[key] = &registryEntry[V]{value: value}
+	return true
+}
+
 // SetResolveHook installs a callback invoked when a lazy entry resolves.
 func (r *Registry[K, V]) SetResolveHook(hook func(K)) {
 	r.mu.Lock()

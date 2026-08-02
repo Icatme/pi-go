@@ -6,9 +6,9 @@ type commandCodeModelSpec struct {
 	ContextWindow int
 }
 
-// Command Code's Provider API is the authority for availability. The built-in
-// registry uses this 2026-07-29 snapshot so model lookup remains deterministic
-// and never performs network I/O from library initialization.
+// Command Code's Provider API is the authority for availability. This
+// 2026-07-29 snapshot keeps bare library initialization deterministic; the CLI
+// and RefreshCommandCodeModels replace it with the validated live catalog.
 var commandCodeModelSpecs = []commandCodeModelSpec{
 	{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", ContextWindow: 1000000},
 	{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", ContextWindow: 1000000},
@@ -126,33 +126,10 @@ var commandCodeLongContextCosts = map[string]struct {
 }
 
 func newCommandCodeProviderModule() ProviderModule {
-	models := make(map[string]Model, len(commandCodeModelSpecs))
-	for _, spec := range commandCodeModelSpecs {
-		cost, ok := commandCodeModelCosts[spec.ID]
-		if !ok {
-			panic("missing Command Code pricing for model " + spec.ID)
-		}
-		models[spec.ID] = Model{
-			ID:            spec.ID,
-			Name:          spec.Name + " (CC)",
-			API:           "commandcode-custom",
-			BaseURL:       commandCodeDefaultBaseURL,
-			Reasoning:     true,
-			Input:         []InputType{InputText},
-			Cost:          cost,
-			ContextWindow: spec.ContextWindow,
-			MaxTokens:     minInt(spec.ContextWindow, 65_536),
-			Headers: map[string]string{
-				"Accept":                 "*/*",
-				"Accept-Encoding":        "gzip, deflate",
-				"Accept-Language":        "*",
-				"Sec-Fetch-Mode":         "cors",
-				"User-Agent":             "node",
-				"x-cli-environment":      "production",
-				"x-command-code-version": commandCodeCLIVersion,
-			},
-		}
-	}
+	return newCommandCodeProviderModuleWithModels(commandCodeModelsFromSpecs(commandCodeModelSpecs, true))
+}
+
+func newCommandCodeProviderModuleWithModels(models map[string]Model) ProviderModule {
 	return ProviderModule{
 		Provider: "commandcode",
 		Auth: ProviderAuth{
@@ -165,4 +142,37 @@ func newCommandCodeProviderModule() ProviderModule {
 		NormalizeOptions: normalizeCommandCodeProviderStreamOptions,
 		Models:           models,
 	}
+}
+
+func commandCodeModelsFromSpecs(specs []commandCodeModelSpec, requireKnownCost bool) map[string]Model {
+	baseURL := resolveCommandCodeAPIBaseURL()
+	models := make(map[string]Model, len(specs))
+	for _, spec := range specs {
+		cost, ok := commandCodeModelCosts[spec.ID]
+		if !ok && requireKnownCost {
+			panic("missing Command Code pricing for model " + spec.ID)
+		}
+		models[spec.ID] = Model{
+			ID:            spec.ID,
+			Name:          spec.Name + " (CC)",
+			API:           "commandcode-custom",
+			Provider:      "commandcode",
+			BaseURL:       baseURL,
+			Reasoning:     true,
+			Input:         []InputType{InputText},
+			Cost:          cost,
+			ContextWindow: spec.ContextWindow,
+			MaxTokens:     minInt(spec.ContextWindow, commandCodeDefaultModelMaxTokens),
+			Headers: map[string]string{
+				"Accept":                 "*/*",
+				"Accept-Encoding":        "gzip, deflate",
+				"Accept-Language":        "*",
+				"Sec-Fetch-Mode":         "cors",
+				"User-Agent":             "node",
+				"x-cli-environment":      "production",
+				"x-command-code-version": commandCodeCLIVersion,
+			},
+		}
+	}
+	return models
 }
