@@ -122,5 +122,3 @@ needs that auth payload.
   - `ToolCall.OriginalID`
   - `ToolResultPayload.OriginalToolCallID`
   - `PendingToolCall.OriginalToolCallID`
-- The `adapters/langgraphgo` session wrapper must preserve the same fields across
-  clone and JSON checkpoint persistence.

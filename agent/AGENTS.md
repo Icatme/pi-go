@@ -11,8 +11,7 @@
 - `agent` owns the agent loop, message model, tool lifecycle, and runtime state.
 - `StreamModel` is the primary model boundary; provider-specific transport stays outside the loop.
 - The built-in provider implementation may depend on `pkg/pigo`; `pkg/pigo` must not depend on `agent`.
-- Adapters are optional integration layers, not part of the core contract.
-- LangGraphGo adapters may bridge state, checkpoints, callbacks, and traces, but must not redefine core runtime behavior.
+- Graph and multi-agent orchestration must remain outside the core runtime.
 
 ## Working rules
 

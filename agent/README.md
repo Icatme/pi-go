@@ -1,10 +1,7 @@
 # pi-go/agent
 
-`agent` is a standalone single-agent runtime with an optional `langgraphgo`
-adapter layer.
-
-It is intentionally separate from `prebuilt/` so it can evolve without requiring
-changes to the upstream `langgraphgo` framework.
+`agent` is a standalone single-agent runtime. It is intentionally separate from
+`prebuilt/` so the core runtime and higher-level helpers keep clear boundaries.
 
 ## Project Goals
 
@@ -20,22 +17,18 @@ Core goals:
   be integrated without pushing transport logic into the core runtime.
 - Use `pi-go` as the built-in default provider implementation when a
   `ModelRef{Provider, Model}` is configured.
-- Keep the package usable on its own and, when needed, usable through a thin
-  integration layer inside `langgraphgo`.
+- Keep the package usable on its own and expose a stable boundary for external
+  orchestration packages.
 
 Non-goals:
 
-- This package is not a replacement for `langgraphgo` graph orchestration.
 - This package does not aim to own multi-agent, supervisor, planner, or
   tree-of-thoughts workflows in the core package.
-- This package should not require modifications to `langgraphgo` core
-  packages in order to work.
 
 Success means:
 
 - the core package can run independently in Go
 - the core package stays aligned with the original `pi-agent-core` semantics
-- integration with `langgraphgo` remains a thin adapter, not a forked runtime
 - backend integrations happen behind `StreamModel`, not inside the agent loop
 
 ## What It Provides
@@ -56,9 +49,6 @@ Success means:
 - A native `prebuilt.ChatAgent` session wrapper built on the same runtime
 - A native `prebuilt.ReflectionAgent` helper for sequential draft-and-reflect passes
 - Package-level loop façades: `RunAgentLoop`, `RunAgentLoopContinue`
-- Adapters for:
-  - `langgraphgo` graph nodes
-  - a standard checkpoint-friendly `SessionState` graph wrapper
 
 ## Package Layout
 
@@ -67,10 +57,6 @@ Success means:
 - `agent/prebuilt`
   - native high-level wrappers implemented on top of the core runtime
   - does not reintroduce graph orchestration into the root module
-- `adapters/langgraphgo`
-  - adapts `agent` into `langgraphgo` graph nodes
-  - maintained as a separate nested Go module so the root runtime module does
-    not depend on `langgraphgo`
 
 ## Direct Usage
 
@@ -148,107 +134,16 @@ The current stable core runtime surface is:
 Secondary integration surfaces:
 
 - `prebuilt`
-- `adapters/langgraphgo`
 
 This package does not keep a compatibility shim for legacy image URLs.
 
-## Graph Usage
-
-`langgraphgo` support is optional. Keep adapter usage limited to graph-facing
-bridge concerns such as:
-
-- `thread_id` / `SessionID` alignment
-- standard `SessionState` shapes for graph state
-- checkpoint helper wrappers such as `UpdateSessionState` / `ResumeSession`
-- binder helpers for graph state mapping
-- graph callback / trace integration
-- runtime-built supervisor helpers that select an active subset from a
-  pre-registered worker registry before compiling one graph run
-
-If a feature changes agent-loop semantics, message semantics, or tool/runtime
-contracts, it belongs in `agent` core or in the outer orchestration layer,
-not in the adapter.
-
-The adapter lives in its own nested module. Test it separately with:
-
-```powershell
-cd adapters/langgraphgo
-go test ./...
-```
-
 Live provider tests are manual release checks, not default CI. See
-[`docs/testing.md`](docs/testing.md) for the exact
-environment variables, skip behavior, and commands.
-
-For the common case, use the built-in `SessionState` instead of writing a
-custom binder. It already includes:
-
-- durable `Snapshot`
-- queued `Prompts`
-- queued `Steering`
-- queued `FollowUps`
-- `Mode`
-
-```go
-package main
-
-import (
-	"context"
-
-	langgraph "github.com/smallnest/langgraphgo/graph"
-	"github.com/Icatme/pi-go/agent"
-	adapter "github.com/Icatme/pi-go/adapters/langgraphgo"
-)
-
-func main() {
-	definition := agent.AgentDefinition{
-		SystemPrompt: "You are a helpful assistant.",
-		// Model: ...
-	}
-
-	sessionGraph := adapter.NewCheckpointableSessionStateGraph(nil, definition)
-	runnable, _ := sessionGraph.CompileCheckpointable()
-
-	threadConfig := langgraph.WithThreadID("demo-thread")
-
-	result, _ := runnable.InvokeWithConfig(
-		context.Background(),
-		adapter.PromptUpdate(
-			agent.NewTextMessage(agent.RoleUser, "Hello"),
-		),
-		threadConfig,
-	)
-
-	resumeConfig, _ := adapter.UpdateSessionState(
-		context.Background(),
-		runnable,
-		threadConfig,
-		adapter.PromptUpdate(
-			agent.NewTextMessage(agent.RoleUser, "Continue"),
-		),
-	)
-
-	result, _ = adapter.ResumeSession(
-		context.Background(),
-		runnable,
-		resumeConfig,
-	)
-	_ = result
-}
-```
-
-If you need a custom outer state shape, keep using `Binder[S]`. The recommended
-pattern is:
-
-- use `SessionState` directly when the graph state is only agent session data
-- use `Binder[S]` when the graph state also carries unrelated workflow fields
-- use `SessionStateSchema()` or the same merge rule when you expect checkpoint
-  resume or `UpdateState`
+[`docs/testing.md`](docs/testing.md) for the exact environment variables, skip
+behavior, and commands.
 
 ## Current Scope
 
-This package is meant to be the single-agent runtime core, not a full
-replacement for `langgraphgo` graphs.
+This package is the single-agent runtime core, not a graph orchestration runtime.
 
 Use `agent` for:
 
@@ -260,7 +155,7 @@ Use `agent` for:
 - user-facing agent construction via `AgentOptions`
 - dynamic low-level agent definition when needed
 
-Use `langgraphgo` for:
+Keep these concerns in outer orchestration packages:
 
 - multi-agent orchestration
 - conditional routing
@@ -269,7 +164,5 @@ Use `langgraphgo` for:
 
 ## Current Limitations
 
-- The built-in graph wrapper is intentionally a single-session node. Multi-node
-  orchestration and supervisor-style routing should still live in `langgraphgo`.
-- Dynamic supervisor membership should be handled as run-start worker selection,
-  not as in-run graph mutation.
+- Multi-node orchestration, supervisor-style routing, checkpointing, time travel,
+  and human-in-the-loop workflows are intentionally outside this package.

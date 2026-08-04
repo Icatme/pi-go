@@ -36,7 +36,6 @@ Build a clean Go version of the `pi.ai` core semantics first, then expand only a
 - `pkg/pigo` owns model metadata, provider protocols, authentication, and model streaming.
 - `agent` owns the single-agent loop, runtime state, message lifecycle, and tool execution lifecycle.
 - `agent` may depend on `pkg/pigo`; `pkg/pigo` must not depend on `agent`.
-- `adapters/langgraphgo` is an optional nested module and must not redefine core agent behavior.
 - Keep graph and multi-agent orchestration out of the `agent` core package.
 
 ## Testing

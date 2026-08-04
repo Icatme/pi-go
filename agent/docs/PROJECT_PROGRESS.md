@@ -13,11 +13,10 @@ with focus on the single-agent runtime rather than graph orchestration.
 - Keep the prompt / continue / steer / follow-up model aligned with the source project.
 - Preserve tool execution flow, runtime state, and event contracts as closely as practical.
 - Provide a stable backend boundary through `StreamModel`.
-- Allow optional integration with `langgraphgo` without changing `langgraphgo` core packages.
 
 ### Out of Scope
 
-- Replacing `langgraphgo` as a graph runtime.
+- Building a graph orchestration runtime.
 - Adding multi-agent, supervisor, planner, or tree-of-thoughts logic into the core package.
 - Building provider-specific behavior directly into the core runtime.
 - Carrying compatibility layers that do not solve a current, concrete need.
@@ -26,7 +25,6 @@ with focus on the single-agent runtime rather than graph orchestration.
 
 - `pi-go/agent` can be used as an independent Go package.
 - Core runtime behavior stays close to the original `pi-agent-core`.
-- Optional adapters stay thin and do not redefine the core contract.
 - Backend integrations remain behind `StreamModel`.
 
 ## Current Status
@@ -53,7 +51,7 @@ The runtime is maintained in the `pi-go` repository as a package with a one-way 
 - Added `AgentOptions` and initial-state oriented construction.
 - Added package-level loop helpers mirroring the original runtime shape.
 - Added a native `prebuilt.PiAgent` direct exposure of the core `Agent`,
-  without rebuilding LangGraph-style state graphs or maintaining a second wrapper runtime.
+  without rebuilding graph state or maintaining a second wrapper runtime.
 - Added a native `prebuilt.CreateAgent(...)` helper that turns the common
   model-plus-tools setup into a direct `agent.Agent` constructor path.
 - Added a native `prebuilt.ChatAgent` wrapper for session-oriented single-agent
@@ -74,39 +72,20 @@ The runtime is maintained in the `pi-go` repository as a package with a one-way 
 - Added offline provider regression coverage for provider error mapping, codex failure metadata, mixed history replay, and tool-result image replay.
 - Added concurrent request and subscriber-state stress coverage for burst prompt/continue/update paths.
 
-### Integration Layers
-
-- Added a `langgraphgo` adapter layer for node/session integration.
-- Normalized LangGraphGo integration so `SessionID == thread_id`.
-- Kept LangGraphGo support scoped to adapter-only bridge concerns such as state
-  mapping and checkpoint helpers, rather than moving orchestration semantics into core.
-- Split the LangGraphGo adapter into a separate nested module so the root
-  runtime module no longer depends on `langgraphgo`.
-- Added snapshot round-trip coverage for root runtime state and `adapters/langgraphgo` session clone / JSON persistence.
-
 ## Current Boundaries
 
 - Core focus remains the original `pi-agent-core` runtime.
 - Multi-agent, supervisor, planner, and graph-native orchestration are out of scope for core.
-- LangGraphGo integration is optional and should remain a thin adapter layer.
 - `StreamModel` is the main long-term interface for model backends, with `pi-go` as the built-in default provider implementation.
-- Adapter-only LangGraphGo concerns include `thread_id` / `SessionID` alignment,
-  `SessionState` shapes, checkpoint helpers, binder helpers, and graph callback / trace wiring.
-- Supervisor-style orchestration remains adapter-only. When dynamic worker
-  membership is needed, the adapter should select an active subset from a
-  pre-registered worker registry before compiling that run's graph.
 
 ## Known Design Notes
 
-- Keeping optional adapters in the main module still pulls their dependency graph into the root `go.mod`.
 - Provider-specific streaming fidelity now flows through the built-in `pi-go` path for supported providers, while custom `StreamModel` implementations can still define their own fidelity.
-- Integration-oriented files remain optional layers; dependencies such as LangGraphGo stay in nested modules outside the core package.
 - Formal runtime semantics are now documented in `docs/runtime-contracts.md`.
 - Default offline and gated live test entrypoints are now documented in `docs/testing.md`.
 
 ## Recommended Next Steps
 
 1. Continue checking remaining differences against the original `pi-agent-core` tests and contracts.
-2. Keep future optional adapters in separate modules when they would otherwise pull orchestration dependencies into the root runtime module.
-3. Keep future backend integrations behind `StreamModel` instead of pushing provider details into the core runtime.
-4. Treat `docs/runtime-contracts.md` and `docs/testing.md` as the source of truth when changing runtime semantics or release checks.
+2. Keep future backend integrations behind `StreamModel` instead of pushing provider details into the core runtime.
+3. Treat `docs/runtime-contracts.md` and `docs/testing.md` as the source of truth when changing runtime semantics or release checks.

@@ -93,7 +93,6 @@ Repository layout:
 
 - `pkg/pigo`: exported core library and tests
 - `agent`: exported single-agent runtime and its `prebuilt` helpers
-- `adapters/langgraphgo`: optional LangGraphGo adapter in a nested module
 - `examples`: runnable examples in a nested module, isolating example-only dependencies
 - `cmd/pigo`: CLI entrypoint
 - `internal/cli`: auth/login and credential-store logic for the CLI only
@@ -127,8 +126,8 @@ Run all repository modules through the shared PowerShell entrypoint:
 ```
 
 Direct package checks for the merged agent runtime remain available with
-`go test ./agent/...`; the shared script also tests the adapter and examples
-modules declared in `go.work`.
+`go test ./agent/...`; the shared script tests the root and examples modules
+independently.
 
 For direct coverage commands, prefer a forced rebuild after package file moves or splits so the profile does not reuse stale cover metadata from the Go build cache:
 

@@ -13,13 +13,6 @@ Run from the repository root:
 go test ./agent/...
 ```
 
-Run the optional adapter module separately:
-
-```powershell
-cd adapters/langgraphgo
-go test ./...
-```
-
 The default offline suite covers:
 
 - core prompt / continue / steer / follow-up behavior
@@ -28,7 +21,6 @@ The default offline suite covers:
   raw tool ids, and tool results
 - provider error mapping on the built-in `pi-go` path
 - snapshot JSON round-trip for runtime state
-- `adapters/langgraphgo` clone and JSON persistence round-trip
 - concurrent request rejection and state consistency under burst message updates
 
 ## Race Checks
@@ -36,8 +28,6 @@ The default offline suite covers:
 Recommended pre-release verification:
 
 ```powershell
-go test ./... -race
-cd adapters/langgraphgo
 go test ./... -race
 ```
 
@@ -93,7 +83,6 @@ The current stable core runtime surface is:
 Secondary integration surfaces:
 
 - `prebuilt`
-- `adapters/langgraphgo`
 
 Non-goals for this test plan:
 

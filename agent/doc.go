@@ -1,4 +1,2 @@
-// Package agent provides a standalone agent runtime that can be used
-// directly, with optional adapter layers for integration into langgraphgo
-// graphs or other orchestration systems.
+// Package agent provides a standalone single-agent runtime.
 package agent

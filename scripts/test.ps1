@@ -39,6 +39,18 @@ function Invoke-ModuleTests {
 	}
 }
 
-Invoke-ModuleTests -ModulePath $repoRoot
-Invoke-ModuleTests -ModulePath (Join-Path $repoRoot "adapters/langgraphgo")
-Invoke-ModuleTests -ModulePath (Join-Path $repoRoot "examples")
+$hadGoWork = Test-Path Env:GOWORK
+$previousGoWork = [Environment]::GetEnvironmentVariable("GOWORK", "Process")
+try {
+	[Environment]::SetEnvironmentVariable("GOWORK", "off", "Process")
+	Invoke-ModuleTests -ModulePath $repoRoot
+	Invoke-ModuleTests -ModulePath (Join-Path $repoRoot "examples")
+}
+finally {
+	if ($hadGoWork) {
+		[Environment]::SetEnvironmentVariable("GOWORK", $previousGoWork, "Process")
+	}
+	else {
+		Remove-Item Env:GOWORK -ErrorAction SilentlyContinue
+	}
+}
