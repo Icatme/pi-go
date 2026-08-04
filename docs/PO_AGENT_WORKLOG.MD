@@ -68,3 +68,10 @@
 - Removed the now-unnecessary `go.work` and `go.work.sum`; the examples module already resolves the root through its local `replace`, and independent module loading avoids its legacy Mattermost graph conflicting with split genproto modules.
 - Made the multi-module test script set and restore `GOWORK=off` so each module is validated against its own dependency graph.
 - Verified the root and examples modules with `.\scripts\test.ps1`, `go vet ./...`, and `go test -race ./... -count=1` under `GOWORK=off`.
+
+## 2026-08-05 - Public repository metadata and README
+
+- Added a concise GitHub About description, a pkg.go.dev homepage, and provider/runtime topics for the public repository.
+- Updated the root README with public-facing highlights, release and package-documentation badges, install commands, package navigation, and links to agent documentation and examples.
+- Clarified that the merged `agent` package is available from `master` but is not part of the current `v0.4.1` tag.
+- Verified all relative README links, `git diff --check`, root and examples tests through `.\scripts\test.ps1`, and `go vet ./...` in both modules with `GOWORK=off`.

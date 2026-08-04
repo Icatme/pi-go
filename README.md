@@ -1,13 +1,18 @@
 # pi-go
 
-`pi-go` is a Go reimplementation of the `pi.ai` core package surface. The repository contains the reusable provider/runtime library in `pkg/pigo`, a single-agent runtime in `agent`, and a thin CLI.
+[![Go Reference](https://pkg.go.dev/badge/github.com/Icatme/pi-go.svg)](https://pkg.go.dev/github.com/Icatme/pi-go)
+[![GitHub release](https://img.shields.io/github/v/release/Icatme/pi-go)](https://github.com/Icatme/pi-go/releases)
+[![Go version](https://img.shields.io/github/go-mod/go-version/Icatme/pi-go)](go.mod)
 
-Current scope:
+`pi-go` is a Go reimplementation of the [`pi.ai`](https://github.com/badlogic/pi-mono/tree/main/packages/ai) core package surface. It combines a provider-agnostic model runtime in `pkg/pigo`, a single-agent runtime in `agent`, and the `pigo` CLI while keeping provider protocol code out of the agent loop.
 
-- keep provider-agnostic semantics stable first
-- keep the library surface small and explicit
-- focus on the most commonly used model providers, including `OpenAI OAuth` / `openai-codex`, `Kimi Coding`, `Command Code`, `Anthropic`, `DeepSeek`, `Google`, and `Mistral`
-- preserve WebSocket support and observer hooks while keeping provider and agent responsibilities in separate packages
+## Highlights
+
+- One model and message surface across OpenAI Codex, Kimi Coding, Command Code, Anthropic, DeepSeek, Google, and Mistral
+- Blocking and streaming completion APIs with normalized cross-provider message replay
+- SSE and WebSocket transports, tool calls, reasoning content, usage accounting, and observer hooks
+- A separate single-agent runtime with message, tool, steering, follow-up, and snapshot lifecycles
+- A small CLI for provider login, model discovery, and prompts
 
 ## Project Positioning
 
@@ -38,9 +43,38 @@ Current primary provider scope:
 
 Supporting provider and API modules also exist for shared protocol behavior used by the core library, but the repo is intentionally optimized around these providers.
 
+## Install
+
+The repository currently requires Go 1.26.2 or newer.
+
+Add the core library to a Go module:
+
+```powershell
+go get github.com/Icatme/pi-go@latest
+```
+
+Install the CLI:
+
+```powershell
+go install github.com/Icatme/pi-go/cmd/pigo@latest
+pigo --help
+```
+
+The `agent` package was added after the current `v0.4.1` release and is available from `master`:
+
+```powershell
+go get github.com/Icatme/pi-go/agent@master
+```
+
+Import it with:
+
+```go
+import "github.com/Icatme/pi-go/agent"
+```
+
 ## Quick Start
 
-Import path:
+Core library import path:
 
 ```go
 import "github.com/Icatme/pi-go/pkg/pigo"
@@ -89,14 +123,14 @@ _ = final
 
 ## Architecture Overview
 
-Repository layout:
-
-- `pkg/pigo`: exported core library and tests
-- `agent`: exported single-agent runtime and its `prebuilt` helpers
-- `examples`: runnable examples in a nested module, isolating example-only dependencies
-- `cmd/pigo`: CLI entrypoint
-- `internal/cli`: auth/login and credential-store logic for the CLI only
-- `docs`: repository notes and non-package documentation
+| Path | Responsibility |
+| --- | --- |
+| [`pkg/pigo`](pkg/pigo) | Exported model, provider, protocol, streaming, and tool library |
+| [`agent`](agent) | Exported single-agent runtime and `prebuilt` helpers |
+| [`examples`](examples) | Runnable examples in a dependency-isolated nested module |
+| [`cmd/pigo`](cmd/pigo) | CLI entrypoint |
+| [`internal/cli`](internal/cli) | CLI-only login and credential-store logic |
+| [`docs`](docs) | Repository notes and supporting documentation |
 
 Core runtime pieces:
 
@@ -210,3 +244,10 @@ Build helpers:
 - `.\scripts\build.ps1 -SkipTest` builds without running tests
 - `.\scripts\build.ps1 -Release` adds stripped release flags
 - `.\scripts\build.ps1 -GOOS linux -GOARCH amd64` cross-builds to `bin/pigo`
+
+## More Documentation
+
+- [`agent/README.md`](agent/README.md): agent runtime concepts, package boundaries, and direct usage
+- [`agent/docs/runtime-contracts.md`](agent/docs/runtime-contracts.md): runtime state and event contracts
+- [`agent/docs/testing.md`](agent/docs/testing.md): agent validation and live-test entrypoints
+- [`examples`](examples): runnable integrations and sample applications
