@@ -4,7 +4,7 @@
 
 ### Core Goal
 
-Build `pi-agent-go` as a standalone Go port of the original `pi-agent-core`,
+Build `pi-go/agent` as a Go port of the original `pi-agent-core`,
 with focus on the single-agent runtime rather than graph orchestration.
 
 ### In Scope
@@ -24,18 +24,18 @@ with focus on the single-agent runtime rather than graph orchestration.
 
 ### Success Criteria
 
-- `pi-agent-go` can be used as an independent Go package.
+- `pi-go/agent` can be used as an independent Go package.
 - Core runtime behavior stays close to the original `pi-agent-core`.
 - Optional adapters stay thin and do not redefine the core contract.
 - Backend integrations remain behind `StreamModel`.
 
 ## Current Status
 
-The repository has been split out as an independent public project and can be built and tested on its own.
+The runtime is maintained in the `pi-go` repository as a package with a one-way dependency on `pkg/pigo`.
 
-- GitHub repository: `github.com/Icatme/pi-agent-go`
-- Module path: `github.com/Icatme/pi-agent-go`
-- Local verification: `go test ./...`
+- Repository: `github.com/Icatme/pi-go`
+- Import path: `github.com/Icatme/pi-go/agent`
+- Local verification: `go test ./agent/...`
 
 ## Completed Work
 
@@ -55,11 +55,11 @@ The repository has been split out as an independent public project and can be bu
 - Added a native `prebuilt.PiAgent` direct exposure of the core `Agent`,
   without rebuilding LangGraph-style state graphs or maintaining a second wrapper runtime.
 - Added a native `prebuilt.CreateAgent(...)` helper that turns the common
-  model-plus-tools setup into a direct `piagentgo.Agent` constructor path.
+  model-plus-tools setup into a direct `agent.Agent` constructor path.
 - Added a native `prebuilt.ChatAgent` wrapper for session-oriented single-agent
   chat with runtime-backed streaming and dynamic tool management.
 - Added a native `prebuilt.ReflectionAgent` helper that runs sequential
-  draft-and-reflect passes on top of one-shot `piagentgo.Agent` executions,
+  draft-and-reflect passes on top of one-shot `agent.Agent` executions,
   instead of introducing graph orchestration into the root module.
 - Added prompt convenience methods for text and image input, with image parts now aligned to the original `pi-agent-core` / `pi-go` base64-plus-MIME shape.
 - Added custom message helpers without copying TypeScript-only declaration-merging patterns.
@@ -100,7 +100,7 @@ The repository has been split out as an independent public project and can be bu
 
 - Keeping optional adapters in the main module still pulls their dependency graph into the root `go.mod`.
 - Provider-specific streaming fidelity now flows through the built-in `pi-go` path for supported providers, while custom `StreamModel` implementations can still define their own fidelity.
-- Some integration-oriented files exist because the project was extracted from earlier work inside another repository; they should continue to be treated as optional layers.
+- Integration-oriented files remain optional layers; dependencies such as LangGraphGo stay in nested modules outside the core package.
 - Formal runtime semantics are now documented in `docs/runtime-contracts.md`.
 - Default offline and gated live test entrypoints are now documented in `docs/testing.md`.
 

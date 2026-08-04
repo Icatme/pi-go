@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	core "github.com/Icatme/pi-agent-go"
+	core "github.com/Icatme/pi-go/agent"
 )
 
 type chatScriptedModel struct {
@@ -334,6 +334,7 @@ func TestChatAgentAsyncChatRespectsCancellation(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	chunks, err := agent.AsyncChat(ctx, "Hi")
 	if err != nil {
 		t.Fatalf("AsyncChat returned error: %v", err)

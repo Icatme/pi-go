@@ -1,4 +1,4 @@
-package piagentgo
+package agent
 
 import (
 	"context"
@@ -37,7 +37,7 @@ var liveProviderCases = []liveProviderCase{
 		Provider:  "openai-codex",
 		Model:     "gpt-5.4",
 		API:       "openai-codex-responses",
-		TokenEnvs: []string{"PIAGENTGO_OPENAI_CODEX_TOKEN", "OPENAI_CODEX_TOKEN"},
+		TokenEnvs: []string{"PI_GO_AGENT_OPENAI_CODEX_TOKEN", "OPENAI_CODEX_TOKEN"},
 	},
 }
 
@@ -285,8 +285,8 @@ func newLiveAgent(t *testing.T, modelRef ModelRef, systemPrompt string, tools []
 func requireLiveModelRef(t *testing.T, testCase liveProviderCase) ModelRef {
 	t.Helper()
 
-	if os.Getenv("PIAGENTGO_LIVE_TEST") != "1" {
-		t.Skip("set PIAGENTGO_LIVE_TEST=1 to run live pi-agent-go provider tests")
+	if os.Getenv("PI_GO_AGENT_LIVE_TEST") != "1" {
+		t.Skip("set PI_GO_AGENT_LIVE_TEST=1 to run live pi-go/agent provider tests")
 	}
 
 	token := firstEnvValue(testCase.TokenEnvs...)

@@ -1,4 +1,4 @@
-package piagentgo
+package agent
 
 import (
 	"context"
@@ -517,7 +517,7 @@ func TestAgentPromptEncodesRuntimeErrorsAsAssistantMessages(t *testing.T) {
 func TestAgentPromptWhileRunningReturnsErrAlreadyRunning(t *testing.T) {
 	started := make(chan struct{})
 	agent, err := NewAgent(AgentDefinition{
-		Model: blockingModel{started: started},
+		Model: &blockingModel{started: started},
 	})
 	if err != nil {
 		t.Fatalf("NewAgent returned error: %v", err)
@@ -543,7 +543,7 @@ func TestAgentPromptWhileRunningReturnsErrAlreadyRunning(t *testing.T) {
 func TestAgentContinueWhileRunningReturnsErrAlreadyRunning(t *testing.T) {
 	started := make(chan struct{})
 	agent, err := NewAgent(AgentDefinition{
-		Model: blockingModel{started: started},
+		Model: &blockingModel{started: started},
 	})
 	if err != nil {
 		t.Fatalf("NewAgent returned error: %v", err)
@@ -571,7 +571,7 @@ func TestAgentContinueWhileRunningReturnsErrAlreadyRunning(t *testing.T) {
 func TestAgentBurstRequestsWhileRunningReturnErrAlreadyRunning(t *testing.T) {
 	started := make(chan struct{})
 	agent, err := NewAgent(AgentDefinition{
-		Model: blockingModel{started: started},
+		Model: &blockingModel{started: started},
 	})
 	if err != nil {
 		t.Fatalf("NewAgent returned error: %v", err)
@@ -896,7 +896,7 @@ func TestAgentForwardsTransportThinkingBudgetsAndRetryDelay(t *testing.T) {
 func TestAgentAbortProducesAbortedAssistantMessage(t *testing.T) {
 	started := make(chan struct{})
 	agent, err := NewAgent(AgentDefinition{
-		Model: blockingModel{started: started},
+		Model: &blockingModel{started: started},
 	})
 	if err != nil {
 		t.Fatalf("NewAgent returned error: %v", err)
@@ -1279,7 +1279,7 @@ type blockingModel struct {
 	once    sync.Once
 }
 
-func (m blockingModel) Stream(ctx context.Context, _ ModelRequest) (AssistantStream, error) {
+func (m *blockingModel) Stream(ctx context.Context, _ ModelRequest) (AssistantStream, error) {
 	return newBlockingAssistantStream(ctx, m.started, &m.once), nil
 }
 

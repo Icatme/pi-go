@@ -31,7 +31,7 @@ try {
 
     if (-not $SkipTest) {
         Write-Host "==> Running tests"
-        go test ./...
+        & (Join-Path $PSScriptRoot "test.ps1")
     }
 
     if (-not [string]::IsNullOrWhiteSpace($GOOS)) {

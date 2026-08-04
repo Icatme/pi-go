@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	core "github.com/Icatme/pi-agent-go"
+	core "github.com/Icatme/pi-go/agent"
 )
 
 func TestCreateReflectionAgentRequiresModel(t *testing.T) {

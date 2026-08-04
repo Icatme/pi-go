@@ -1,4 +1,4 @@
-package piagentgo
+package agent
 
 import (
 	"context"
@@ -341,11 +341,14 @@ func TestDefaultPigoStreamModelUsesCodexSessionAndPreservesResponseID(t *testing
 		t.Fatalf("expected codex text output, got %+v", final.Parts)
 	}
 
-	if headers.Get("conversation_id") != "session-123" {
-		t.Fatalf("expected conversation_id header, got %q", headers.Get("conversation_id"))
+	if headers.Get("conversation_id") != "" {
+		t.Fatalf("expected deprecated conversation_id header to be omitted, got %q", headers.Get("conversation_id"))
 	}
 	if headers.Get("session_id") != "session-123" {
 		t.Fatalf("expected session_id header, got %q", headers.Get("session_id"))
+	}
+	if headers.Get("x-client-request-id") != "session-123" {
+		t.Fatalf("expected x-client-request-id header, got %q", headers.Get("x-client-request-id"))
 	}
 	if requestBody["prompt_cache_key"] != "session-123" {
 		t.Fatalf("expected prompt_cache_key session-123, got %#v", requestBody["prompt_cache_key"])

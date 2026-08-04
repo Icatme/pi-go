@@ -1,17 +1,17 @@
 # pi-go
 
-`pi-go` is a Go reimplementation of the `pi.ai` core package surface. The repository is intentionally centered on a single reusable core library in `pkg/pigo`, with a thin CLI on top.
+`pi-go` is a Go reimplementation of the `pi.ai` core package surface. The repository contains the reusable provider/runtime library in `pkg/pigo`, a single-agent runtime in `agent`, and a thin CLI.
 
 Current scope:
 
 - keep provider-agnostic semantics stable first
 - keep the library surface small and explicit
 - focus on the most commonly used model providers, including `OpenAI OAuth` / `openai-codex`, `Kimi Coding`, `Command Code`, `Anthropic`, `DeepSeek`, `Google`, and `Mistral`
-- preserve WebSocket support, observer hooks, and the single-package core-library shape
+- preserve WebSocket support and observer hooks while keeping provider and agent responsibilities in separate packages
 
 ## Project Positioning
 
-This repository is not a full agent framework. It provides the core runtime pieces needed to:
+The low-level `pkg/pigo` package is not an agent framework. It provides the model and provider pieces needed to:
 
 - describe models and provider capabilities
 - route requests through provider and API registries
@@ -19,6 +19,10 @@ This repository is not a full agent framework. It provides the core runtime piec
 - normalize message history for cross-provider replay
 - expose incremental assistant events and final responses
 - validate tool arguments with a small built-in schema subset
+
+The optional `agent` package builds a single-agent loop, tool lifecycle, snapshots,
+steering, and follow-up behavior on that provider layer. It deliberately does not
+own graph or multi-agent orchestration.
 
 ## Supported Providers
 
@@ -88,6 +92,9 @@ _ = final
 Repository layout:
 
 - `pkg/pigo`: exported core library and tests
+- `agent`: exported single-agent runtime and its `prebuilt` helpers
+- `adapters/langgraphgo`: optional LangGraphGo adapter in a nested module
+- `examples`: runnable examples in a nested module, isolating example-only dependencies
 - `cmd/pigo`: CLI entrypoint
 - `internal/cli`: auth/login and credential-store logic for the CLI only
 - `docs`: repository notes and non-package documentation
@@ -112,6 +119,16 @@ go test ./pkg/pigo/... -v -count=1
 go vet ./pkg/pigo/...
 gofmt -l pkg/pigo/
 ```
+
+Run all repository modules through the shared PowerShell entrypoint:
+
+```powershell
+.\scripts\test.ps1
+```
+
+Direct package checks for the merged agent runtime remain available with
+`go test ./agent/...`; the shared script also tests the adapter and examples
+modules declared in `go.work`.
 
 For direct coverage commands, prefer a forced rebuild after package file moves or splits so the profile does not reuse stale cover metadata from the Go build cache:
 

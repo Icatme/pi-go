@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	core "github.com/Icatme/pi-agent-go"
+	core "github.com/Icatme/pi-go/agent"
 )
 
 type scriptedStreamModel struct {

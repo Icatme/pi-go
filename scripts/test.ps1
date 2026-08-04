@@ -20,4 +20,25 @@ if ($Coverage) {
 	return
 }
 
-go test ./...
+function Invoke-ModuleTests {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$ModulePath
+	)
+
+	Push-Location $ModulePath
+	try {
+		Write-Host "==> Testing $ModulePath"
+		& go test ./...
+		if ($LASTEXITCODE -ne 0) {
+			throw "go test failed in $ModulePath"
+		}
+	}
+	finally {
+		Pop-Location
+	}
+}
+
+Invoke-ModuleTests -ModulePath $repoRoot
+Invoke-ModuleTests -ModulePath (Join-Path $repoRoot "adapters/langgraphgo")
+Invoke-ModuleTests -ModulePath (Join-Path $repoRoot "examples")

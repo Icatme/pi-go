@@ -1,4 +1,4 @@
-package piagentgo
+package agent
 
 import (
 	"context"
@@ -329,16 +329,23 @@ func TestEngineToolExecutionParallelPreservesSourceOrder(t *testing.T) {
 		t.Fatalf("Validate returned error: %v", err)
 	}
 
+	var eventsMu sync.Mutex
 	var events []AgentEvent
 	next, err := engine.Run(context.Background(), definition, &AgentSnapshot{}, []Message{NewTextMessage(RoleUser, "echo both")}, func(event AgentEvent) {
+		eventsMu.Lock()
+		defer eventsMu.Unlock()
 		events = append(events, event)
 	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
+	eventsMu.Lock()
+	recordedEvents := append([]AgentEvent(nil), events...)
+	eventsMu.Unlock()
+
 	var toolResultIDs []string
-	for _, event := range events {
+	for _, event := range recordedEvents {
 		if event.Type != EventMessageEnd || event.Message == nil || event.Message.Role != RoleTool || event.Message.ToolResult == nil {
 			continue
 		}

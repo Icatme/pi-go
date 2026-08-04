@@ -1,4 +1,4 @@
-package piagentgo
+package agent
 
 import (
 	"context"
@@ -32,7 +32,7 @@ func (pigoStreamModel) Stream(ctx context.Context, request ModelRequest) (Assist
 
 	model := pigo.GetModel(pigo.Provider(provider), modelID)
 	if model == nil {
-		return nil, fmt.Errorf("piagentgo: unsupported provider/model %q/%q", provider, modelID)
+		return nil, fmt.Errorf("agent: unsupported provider/model %q/%q", provider, modelID)
 	}
 
 	resolvedModel := *model
@@ -78,7 +78,7 @@ func (s *pigoAssistantStream) Events() <-chan AssistantEvent {
 func (s *pigoAssistantStream) Wait() (Message, error) {
 	result, ok := <-s.result
 	if !ok {
-		return Message{}, fmt.Errorf("piagentgo: stream result unavailable")
+		return Message{}, fmt.Errorf("agent: stream result unavailable")
 	}
 	return result.message, result.err
 }

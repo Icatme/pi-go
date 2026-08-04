@@ -1,10 +1,10 @@
 # Runtime Contracts
 
-This document defines the stable runtime contract for `pi-agent-go`.
+This document defines the stable runtime contract for `pi-go/agent`.
 
 ## Message Model
 
-The canonical runtime envelope is [`Message`](/V:/gitdownload/pi-agent-go/types.go).
+The canonical runtime envelope is [`Message`](../types.go).
 
 - `RoleUser` messages use `Parts`.
 - `RoleAssistant` messages use `Parts`, `ToolCalls`, and provider metadata fields:
@@ -60,8 +60,8 @@ Assistant tool calls and tool results preserve both normalized and raw provider 
 
 ## Tool Hook Contract
 
-The tool hook surface lives in [`types.go`](/V:/gitdownload/pi-agent-go/types.go)
-and is executed by the runtime engine in [`engine.go`](/V:/gitdownload/pi-agent-go/engine.go).
+The tool hook surface lives in [`types.go`](../types.go)
+and is executed by the runtime engine in [`engine.go`](../engine.go).
 
 ### `beforeToolCall`
 
@@ -87,7 +87,7 @@ and is executed by the runtime engine in [`engine.go`](/V:/gitdownload/pi-agent-
 
 ## Provider Config Contract
 
-The typed provider runtime configuration lives in [`ProviderConfig`](/V:/gitdownload/pi-agent-go/types.go).
+The typed provider runtime configuration lives in [`ProviderConfig`](../types.go).
 
 - `BaseURL`: override the provider base URL.
 - `APIKey`: explicit API key or bearer token.

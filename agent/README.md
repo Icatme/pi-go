@@ -1,6 +1,6 @@
-# pi-agent-go
+# pi-go/agent
 
-`piagentgo` is a standalone single-agent runtime with an optional `langgraphgo`
+`agent` is a standalone single-agent runtime with an optional `langgraphgo`
 adapter layer.
 
 It is intentionally separate from `prebuilt/` so it can evolve without requiring
@@ -25,10 +25,10 @@ Core goals:
 
 Non-goals:
 
-- This repository is not a replacement for `langgraphgo` graph orchestration.
-- This repository does not aim to own multi-agent, supervisor, planner, or
+- This package is not a replacement for `langgraphgo` graph orchestration.
+- This package does not aim to own multi-agent, supervisor, planner, or
   tree-of-thoughts workflows in the core package.
-- This repository should not require modifications to `langgraphgo` core
+- This package should not require modifications to `langgraphgo` core
   packages in order to work.
 
 Success means:
@@ -51,7 +51,7 @@ Success means:
   - `steer` / `followUp`
   - `continue`
 - A higher-level `Agent` wrapper
-- A native `prebuilt.PiAgent` direct re-export of `piagentgo.Agent`
+- A native `prebuilt.PiAgent` direct re-export of `agent.Agent`
 - A native `prebuilt.CreateAgent(...)` helper for the common model-plus-tools constructor path
 - A native `prebuilt.ChatAgent` session wrapper built on the same runtime
 - A native `prebuilt.ReflectionAgent` helper for sequential draft-and-reflect passes
@@ -62,13 +62,13 @@ Success means:
 
 ## Package Layout
 
-- `piagentgo/`
+- `agent/`
   - core runtime types, state, engine, and agent wrapper
-- `piagentgo/prebuilt`
+- `agent/prebuilt`
   - native high-level wrappers implemented on top of the core runtime
   - does not reintroduce graph orchestration into the root module
-- `piagentgo/adapters/langgraphgo`
-  - adapts `piagentgo` into `langgraphgo` graph nodes
+- `adapters/langgraphgo`
+  - adapts `agent` into `langgraphgo` graph nodes
   - maintained as a separate nested Go module so the root runtime module does
     not depend on `langgraphgo`
 
@@ -81,7 +81,7 @@ import (
 	"context"
 	"fmt"
 
-	core "github.com/Icatme/pi-agent-go"
+	core "github.com/Icatme/pi-go/agent"
 )
 
 type echoModel struct{}
@@ -116,8 +116,8 @@ If you only need built-in provider execution, set `InitialState.ModelRef` or
 `AgentDefinition.DefaultModel` with `Provider` and `Model`. The runtime will
 resolve the default `pi-go` provider implementation automatically.
 
-Formal runtime semantics live in [`docs/runtime-contracts.md`](/V:/gitdownload/pi-agent-go/docs/runtime-contracts.md).
-Testing entrypoints and release checks live in [`docs/testing.md`](/V:/gitdownload/pi-agent-go/docs/testing.md).
+Formal runtime semantics live in [`docs/runtime-contracts.md`](docs/runtime-contracts.md).
+Testing entrypoints and release checks live in [`docs/testing.md`](docs/testing.md).
 
 `ModelRef.ProviderConfig` carries typed provider runtime settings when needed:
 
@@ -150,7 +150,7 @@ Secondary integration surfaces:
 - `prebuilt`
 - `adapters/langgraphgo`
 
-This repository does not keep a compatibility shim for legacy image URLs.
+This package does not keep a compatibility shim for legacy image URLs.
 
 ## Graph Usage
 
@@ -166,7 +166,7 @@ bridge concerns such as:
   pre-registered worker registry before compiling one graph run
 
 If a feature changes agent-loop semantics, message semantics, or tool/runtime
-contracts, it belongs in `piagentgo` core or in the outer orchestration layer,
+contracts, it belongs in `agent` core or in the outer orchestration layer,
 not in the adapter.
 
 The adapter lives in its own nested module. Test it separately with:
@@ -177,7 +177,7 @@ go test ./...
 ```
 
 Live provider tests are manual release checks, not default CI. See
-[`docs/testing.md`](/V:/gitdownload/pi-agent-go/docs/testing.md) for the exact
+[`docs/testing.md`](docs/testing.md) for the exact
 environment variables, skip behavior, and commands.
 
 For the common case, use the built-in `SessionState` instead of writing a
@@ -196,12 +196,12 @@ import (
 	"context"
 
 	langgraph "github.com/smallnest/langgraphgo/graph"
-	"github.com/Icatme/pi-agent-go"
-	adapter "github.com/Icatme/pi-agent-go/adapters/langgraphgo"
+	"github.com/Icatme/pi-go/agent"
+	adapter "github.com/Icatme/pi-go/adapters/langgraphgo"
 )
 
 func main() {
-	definition := piagentgo.AgentDefinition{
+	definition := agent.AgentDefinition{
 		SystemPrompt: "You are a helpful assistant.",
 		// Model: ...
 	}
@@ -214,7 +214,7 @@ func main() {
 	result, _ := runnable.InvokeWithConfig(
 		context.Background(),
 		adapter.PromptUpdate(
-			piagentgo.NewTextMessage(piagentgo.RoleUser, "Hello"),
+			agent.NewTextMessage(agent.RoleUser, "Hello"),
 		),
 		threadConfig,
 	)
@@ -224,7 +224,7 @@ func main() {
 		runnable,
 		threadConfig,
 		adapter.PromptUpdate(
-			piagentgo.NewTextMessage(piagentgo.RoleUser, "Continue"),
+			agent.NewTextMessage(agent.RoleUser, "Continue"),
 		),
 	)
 
@@ -250,7 +250,7 @@ pattern is:
 This package is meant to be the single-agent runtime core, not a full
 replacement for `langgraphgo` graphs.
 
-Use `piagentgo` for:
+Use `agent` for:
 
 - single-agent runtime behavior
 - message lifecycle

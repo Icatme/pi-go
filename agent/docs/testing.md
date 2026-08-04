@@ -1,16 +1,16 @@
 # Testing
 
-This repository uses two test layers:
+The agent runtime uses two test layers:
 
 - default offline tests, which must pass in normal development and CI
 - gated live provider tests, which are intended for release checks and manual verification
 
 ## Default Offline Coverage
 
-Run from the root module:
+Run from the repository root:
 
 ```powershell
-go test ./...
+go test ./agent/...
 ```
 
 Run the optional adapter module separately:
@@ -48,7 +48,7 @@ Live tests are gated and are not part of the default offline suite.
 Enable them with:
 
 ```powershell
-$env:PIAGENTGO_LIVE_TEST = "1"
+$env:PI_GO_AGENT_LIVE_TEST = "1"
 go test ./... -run Live
 ```
 
@@ -62,11 +62,11 @@ Credentials are read from:
 
 - Anthropic: `ANTHROPIC_API_KEY`
 - Kimi: `KIMI_API_KEY`
-- OpenAI Codex: `PIAGENTGO_OPENAI_CODEX_TOKEN` or `OPENAI_CODEX_TOKEN`
+- OpenAI Codex: `PI_GO_AGENT_OPENAI_CODEX_TOKEN` or `OPENAI_CODEX_TOKEN`
 
 Expected behavior:
 
-- If `PIAGENTGO_LIVE_TEST != 1`, live tests skip.
+- If `PI_GO_AGENT_LIVE_TEST != 1`, live tests skip.
 - If a provider credential is missing, only that provider case skips.
 - Live tests are intended to validate:
   - basic prompt

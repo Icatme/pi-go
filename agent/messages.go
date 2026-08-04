@@ -1,4 +1,4 @@
-package piagentgo
+package agent
 
 import "time"
 

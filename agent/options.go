@@ -1,4 +1,4 @@
-package piagentgo
+package agent
 
 // AgentInitialState stores the user-facing initial state used to create an Agent.
 type AgentInitialState struct {

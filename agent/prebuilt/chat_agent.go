@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	core "github.com/Icatme/pi-agent-go"
+	core "github.com/Icatme/pi-go/agent"
 )
 
 // ChatAgentOption customizes a native ChatAgent.
@@ -40,7 +40,7 @@ func WithMaxIterations(maxIterations int) ChatAgentOption {
 }
 
 // ChatAgent is a session-oriented single-agent wrapper.
-// Convenience APIs stay here, but the underlying behavior should reuse piagentgo.Agent directly.
+// Convenience APIs stay here, but the underlying behavior should reuse agent.Agent directly.
 type ChatAgent struct {
 	agent        *core.Agent
 	baseTools    []core.ToolDefinition

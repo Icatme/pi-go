@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	core "github.com/Icatme/pi-agent-go"
+	core "github.com/Icatme/pi-go/agent"
 )
 
 // ReflectionAgentConfig configures the sequential reflection helper.

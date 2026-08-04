@@ -1,8 +1,8 @@
 package prebuilt
 
-import core "github.com/Icatme/pi-agent-go"
+import core "github.com/Icatme/pi-go/agent"
 
-// PiAgent is the native piagentgo.Agent exposed through the prebuilt package.
+// PiAgent is the native agent.Agent exposed through the prebuilt package.
 // The prebuilt layer should not maintain a second wrapper runtime.
 type PiAgent = core.Agent
 
@@ -58,7 +58,7 @@ func WithPiMaxIterations(max int) PiAgentOption {
 	}
 }
 
-// NewPiAgent creates a native piagentgo.Agent with optional definition mutators.
+// NewPiAgent creates a native agent.Agent with optional definition mutators.
 func NewPiAgent(definition core.AgentDefinition, opts ...PiAgentOption) (*PiAgent, error) {
 	for _, opt := range opts {
 		opt(&definition)
