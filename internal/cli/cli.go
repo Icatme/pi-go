@@ -18,7 +18,7 @@ var (
 	getEnvAPIKeyFn             = pigo.GetEnvAPIKey
 	requiresOAuthFn            = pigo.RequiresOAuth
 	completeSimpleFn           = pigo.CompleteSimple
-	refreshCommandCodeModelsFn = pigo.RefreshCommandCodeModels
+	refreshCommandCodeModelsFn = pigo.RefreshCommandCodeModelsWithResult
 	resolveCommandCodeAPIKeyFn = pigo.ResolveCommandCodeAPIKey
 )
 
@@ -97,7 +97,11 @@ func runModels(ctx context.Context, args []string, stdout, stderr io.Writer) int
 
 	if len(args) == 1 {
 		provider := pigo.Provider(strings.TrimSpace(args[0]))
-		if err := refreshProviderModels(ctx, provider); err != nil {
+		warning, err := refreshProviderModels(ctx, provider)
+		if warning != "" {
+			writeLine(stderr, "Warning: "+warning+"\n")
+		}
+		if err != nil {
 			writeLine(stderr, err.Error()+"\n")
 			return 1
 		}
@@ -112,7 +116,11 @@ func runModels(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		}
 		return 0
 	}
-	if err := refreshProviderModels(ctx, "commandcode"); err != nil {
+	warning, err := refreshProviderModels(ctx, "commandcode")
+	if warning != "" {
+		writeLine(stderr, "Warning: "+warning+"\n")
+	}
+	if err != nil {
 		writeLine(stderr, "Warning: "+err.Error()+"; using currently registered Command Code models.\n")
 	}
 
@@ -232,7 +240,11 @@ func runAsk(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	}
 
 	provider := pigo.Provider(strings.TrimSpace(*providerID))
-	if err := refreshProviderModels(ctx, provider); err != nil {
+	warning, err := refreshProviderModels(ctx, provider)
+	if warning != "" {
+		writeLine(stderr, "Warning: "+warning+"\n")
+	}
+	if err != nil {
 		writeLine(stderr, err.Error()+"\n")
 		return 1
 	}
@@ -304,15 +316,15 @@ func runAsk(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	return 0
 }
 
-func refreshProviderModels(ctx context.Context, provider pigo.Provider) error {
+func refreshProviderModels(ctx context.Context, provider pigo.Provider) (string, error) {
 	if provider != "commandcode" {
-		return nil
+		return "", nil
 	}
-	_, err := refreshCommandCodeModelsFn(ctx, nil)
+	result, err := refreshCommandCodeModelsFn(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("refresh Command Code models: %w", err)
+		return result.Warning, fmt.Errorf("refresh Command Code models: %w", err)
 	}
-	return nil
+	return result.Warning, nil
 }
 
 func promptProviderSelection(stdin io.Reader, stdout io.Writer, providers []oauthProvider) (string, error) {

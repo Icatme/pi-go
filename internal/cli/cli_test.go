@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -41,9 +40,12 @@ func TestRunModelsRefreshesCommandCodeCatalog(t *testing.T) {
 	}()
 
 	refreshed := false
-	refreshCommandCodeModelsFn = func(context.Context, *http.Client) ([]pigo.Model, error) {
+	refreshCommandCodeModelsFn = func(context.Context, *http.Client) (pigo.CommandCodeModelsResult, error) {
 		refreshed = true
-		return []pigo.Model{{ID: "dynamic-model"}}, nil
+		return pigo.CommandCodeModelsResult{
+			Models: []pigo.Model{{ID: "dynamic-model"}},
+			Source: pigo.CommandCodeModelsSourceLive,
+		}, nil
 	}
 	getModelsFn = func(provider pigo.Provider) []pigo.Model {
 		if provider != "commandcode" {
@@ -60,7 +62,7 @@ func TestRunModelsRefreshesCommandCodeCatalog(t *testing.T) {
 	}
 }
 
-func TestRunModelsContinuesWhenCommandCodeRefreshFails(t *testing.T) {
+func TestRunModelsContinuesWhenCommandCodeCatalogIsUnavailable(t *testing.T) {
 	previousRefresh := refreshCommandCodeModelsFn
 	previousProviders := getProvidersFn
 	previousModels := getModelsFn
@@ -70,13 +72,20 @@ func TestRunModelsContinuesWhenCommandCodeRefreshFails(t *testing.T) {
 		getModelsFn = previousModels
 	}()
 
-	refreshCommandCodeModelsFn = func(context.Context, *http.Client) ([]pigo.Model, error) {
-		return nil, errors.New("catalog unavailable")
+	refreshCommandCodeModelsFn = func(context.Context, *http.Client) (pigo.CommandCodeModelsResult, error) {
+		return pigo.CommandCodeModelsResult{
+			Models:  []pigo.Model{},
+			Source:  pigo.CommandCodeModelsSourceEmpty,
+			Warning: "catalog unavailable and no valid cached catalog is available",
+		}, nil
 	}
 	getProvidersFn = func() []pigo.Provider {
 		return []pigo.Provider{"commandcode", "openai"}
 	}
 	getModelsFn = func(provider pigo.Provider) []pigo.Model {
+		if provider == "commandcode" {
+			return nil
+		}
 		return []pigo.Model{{ID: string(provider) + "-model", Provider: provider}}
 	}
 
@@ -86,11 +95,44 @@ func TestRunModelsContinuesWhenCommandCodeRefreshFails(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("expected model listing to continue, code=%d stderr=%q", exitCode, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "commandcode-model") || !strings.Contains(stdout.String(), "openai-model") {
-		t.Fatalf("expected all registered models after refresh failure, got %q", stdout.String())
+	if strings.Contains(stdout.String(), "commandcode-model") || !strings.Contains(stdout.String(), "openai-model") {
+		t.Fatalf("expected other providers after an empty Command Code load, got %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "Warning: refresh Command Code models: catalog unavailable") {
+	if !strings.Contains(stderr.String(), "Warning: catalog unavailable and no valid cached catalog is available") {
 		t.Fatalf("expected refresh warning, got %q", stderr.String())
+	}
+}
+
+func TestRunModelsUsesCachedCommandCodeCatalogWithWarning(t *testing.T) {
+	previousRefresh := refreshCommandCodeModelsFn
+	previousModels := getModelsFn
+	defer func() {
+		refreshCommandCodeModelsFn = previousRefresh
+		getModelsFn = previousModels
+	}()
+
+	refreshCommandCodeModelsFn = func(context.Context, *http.Client) (pigo.CommandCodeModelsResult, error) {
+		return pigo.CommandCodeModelsResult{
+			Models:  []pigo.Model{{ID: "cached-model"}},
+			Source:  pigo.CommandCodeModelsSourceCache,
+			Warning: "live catalog unavailable; using cached catalog",
+		}, nil
+	}
+	getModelsFn = func(provider pigo.Provider) []pigo.Model {
+		if provider != "commandcode" {
+			return nil
+		}
+		return []pigo.Model{{ID: "cached-model", Provider: provider}}
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := Run(context.Background(), []string{"models", "commandcode"}, strings.NewReader(""), &stdout, &stderr)
+	if exitCode != 0 || !strings.Contains(stdout.String(), "cached-model") {
+		t.Fatalf("expected cached Command Code models, code=%d stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Warning: live catalog unavailable; using cached catalog") {
+		t.Fatalf("expected cache fallback warning, got %q", stderr.String())
 	}
 }
 

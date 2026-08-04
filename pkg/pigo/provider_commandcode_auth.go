@@ -12,7 +12,7 @@ const (
 	commandCodeAPIKeyDollarEnvReference = "$COMMANDCODE_API_KEY"
 )
 
-// ResolveCommandCodeAPIKey follows pi-commandcode-provider v0.4.2's
+// ResolveCommandCodeAPIKey follows pi-commandcode-provider v0.4.3's
 // credential lookup after considering caller-supplied runtime auth. Explicit
 // stream API keys are handled before this function by the transport.
 func ResolveCommandCodeAPIKey(auth map[Provider]AuthConfig) string {

@@ -162,7 +162,7 @@ Support-file boundaries:
 - `01_auth.json` is test-only and ignored by git
 - library runtime auth should normally be passed explicitly via options or auth config; `commandcode` additionally supports the upstream user-home auth files listed below
 
-The `commandcode` provider matches `pi-commandcode-provider` v0.4.2's setup
+The `commandcode` provider matches `pi-commandcode-provider` v0.4.3's setup
 surface. `pigo login commandcode` opens the browser-assisted login flow and
 stores the returned API key in `.pigo/auth.json`. Runtime lookup also accepts
 `COMMANDCODE_API_KEY`, `SimpleStreamOptions.APIKey`, caller-supplied
@@ -171,15 +171,22 @@ user home directory: `.commandcode/auth.json`, `.omp/agent/auth.json`, and
 `.pi/agent/auth.json`.
 
 The CLI refreshes Command Code models from
-`https://api.commandcode.ai/provider/v1/models` before `models` and `ask`.
-Library callers can use `FetchCommandCodeModels` for a read-only catalog or
-`RefreshCommandCodeModels` to replace the registered snapshot. Override the
-endpoints with `COMMANDCODE_MODELS_URL` and `COMMANDCODE_API_BASE`. As in the
-upstream extension, newly discovered models without a local pricing entry use
-zero display cost until the pricing table is updated. If refresh fails while
-listing every provider, the CLI warns and continues with the currently
-registered Command Code catalog; provider-specific commands still report the
-refresh failure.
+`https://api.commandcode.ai/provider/v1/models` before `models` and `ask`, then
+atomically caches the validated catalog in the Pi-compatible
+`~/.pi/agent/commandcode-models.json` format. `PI_CODING_AGENT_DIR` changes the
+agent directory and `COMMANDCODE_MODELS_CACHE` overrides the complete cache
+path. If live discovery is unavailable, a valid cache remains usable with a
+warning; the first offline load without a valid cache leaves Command Code
+unavailable without preventing other providers from loading.
+
+Library callers can use `FetchCommandCodeModels` for a strict read-only live
+catalog, `LoadCommandCodeModels` for the live/cache selection, or
+`RefreshCommandCodeModelsWithResult` to apply that selection while retaining
+its source and warning. `RefreshCommandCodeModels` remains the concise wrapper
+for callers that only need the applied model slice. Override the endpoints with
+`COMMANDCODE_MODELS_URL` and `COMMANDCODE_API_BASE`. As in the upstream
+extension, newly discovered models without a local pricing entry use zero
+display cost until the pricing table is updated.
 
 ## CLI
 

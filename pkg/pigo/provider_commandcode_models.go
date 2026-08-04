@@ -145,34 +145,44 @@ func newCommandCodeProviderModuleWithModels(models map[string]Model) ProviderMod
 }
 
 func commandCodeModelsFromSpecs(specs []commandCodeModelSpec, requireKnownCost bool) map[string]Model {
-	baseURL := resolveCommandCodeAPIBaseURL()
 	models := make(map[string]Model, len(specs))
 	for _, spec := range specs {
 		cost, ok := commandCodeModelCosts[spec.ID]
 		if !ok && requireKnownCost {
 			panic("missing Command Code pricing for model " + spec.ID)
 		}
-		models[spec.ID] = Model{
-			ID:            spec.ID,
-			Name:          spec.Name + " (CC)",
-			API:           "commandcode-custom",
-			Provider:      "commandcode",
-			BaseURL:       baseURL,
-			Reasoning:     true,
-			Input:         []InputType{InputText},
-			Cost:          cost,
-			ContextWindow: spec.ContextWindow,
-			MaxTokens:     minInt(spec.ContextWindow, commandCodeDefaultModelMaxTokens),
-			Headers: map[string]string{
-				"Accept":                 "*/*",
-				"Accept-Encoding":        "gzip, deflate",
-				"Accept-Language":        "*",
-				"Sec-Fetch-Mode":         "cors",
-				"User-Agent":             "node",
-				"x-cli-environment":      "production",
-				"x-command-code-version": commandCodeCLIVersion,
-			},
-		}
+		models[spec.ID] = newCommandCodeModel(
+			spec.ID,
+			spec.Name+" (CC)",
+			true,
+			spec.ContextWindow,
+			minInt(spec.ContextWindow, commandCodeDefaultModelMaxTokens),
+			cost,
+		)
 	}
 	return models
+}
+
+func newCommandCodeModel(id, name string, reasoning bool, contextWindow, maxTokens int, cost UsageCost) Model {
+	return Model{
+		ID:            id,
+		Name:          name,
+		API:           "commandcode-custom",
+		Provider:      "commandcode",
+		BaseURL:       resolveCommandCodeAPIBaseURL(),
+		Reasoning:     reasoning,
+		Input:         []InputType{InputText},
+		Cost:          cost,
+		ContextWindow: contextWindow,
+		MaxTokens:     maxTokens,
+		Headers: map[string]string{
+			"Accept":                 "*/*",
+			"Accept-Encoding":        "gzip, deflate",
+			"Accept-Language":        "*",
+			"Sec-Fetch-Mode":         "cors",
+			"User-Agent":             "node",
+			"x-cli-environment":      "production",
+			"x-command-code-version": commandCodeCLIVersion,
+		},
+	}
 }

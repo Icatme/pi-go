@@ -27,7 +27,7 @@ const (
 	commandCodeBaseRetryDelay       = 500
 )
 
-// This transport is a native Go port of pi-commandcode-provider v0.4.2's
+// This transport is a native Go port of pi-commandcode-provider v0.4.3's
 // commandcode-custom wire protocol. Provider discovery and credential lookup
 // live beside the transport; browser login is owned by the CLI package.
 
