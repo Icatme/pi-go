@@ -42,7 +42,15 @@ type openAIResponsesReasoningOptions struct {
 }
 
 type openAIResponsesTextOptions struct {
-	Verbosity string `json:"verbosity,omitempty"`
+	Verbosity string                     `json:"verbosity,omitempty"`
+	Format    *openAIResponsesTextFormat `json:"format,omitempty"`
+}
+
+type openAIResponsesTextFormat struct {
+	Type   string          `json:"type"`
+	Name   string          `json:"name,omitempty"`
+	Schema json.RawMessage `json:"schema,omitempty"`
+	Strict bool            `json:"strict,omitempty"`
 }
 
 type openAIResponsesResponse struct {

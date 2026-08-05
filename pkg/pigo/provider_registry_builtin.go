@@ -128,6 +128,7 @@ func newDeepSeekProviderModule() ProviderModule {
 		},
 		Capabilities: ProviderCapabilities{
 			SupportsStreaming:  true,
+			SupportsJSONOutput: true,
 			SupportsToolChoice: true,
 		},
 		BuildOptions:     buildDeepSeekProviderStreamOptions,
@@ -450,6 +451,8 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 		},
 		Capabilities: ProviderCapabilities{
 			SupportsStreaming:        true,
+			SupportsJSONOutput:       true,
+			SupportsJSONSchema:       true,
 			SupportsSession:          true,
 			SupportsPromptCacheKey:   true,
 			SupportsReasoningSummary: true,

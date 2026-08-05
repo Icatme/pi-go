@@ -19,6 +19,8 @@ type ProviderAuth struct {
 
 type ProviderCapabilities struct {
 	SupportsStreaming          bool
+	SupportsJSONOutput         bool
+	SupportsJSONSchema         bool
 	SupportsSession            bool
 	SupportsPromptCacheKey     bool
 	SupportsPromptCacheControl bool

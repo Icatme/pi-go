@@ -135,6 +135,16 @@ func buildOpenAIResponsesRequest(model Model, ctx Context, options ProviderStrea
 	if strings.TrimSpace(resolvedOptions.Truncation) != "" {
 		requestBody.Truncation = resolvedOptions.Truncation
 	}
+	if resolvedOptions.ResponseFormat != nil {
+		requestBody.Text = &openAIResponsesTextOptions{
+			Format: &openAIResponsesTextFormat{
+				Type:   string(resolvedOptions.ResponseFormat.Type),
+				Name:   resolvedOptions.ResponseFormat.Name,
+				Schema: append(json.RawMessage(nil), resolvedOptions.ResponseFormat.JSONSchema...),
+				Strict: resolvedOptions.ResponseFormat.Strict,
+			},
+		}
+	}
 
 	if effort := string(resolvedOptions.Reasoning); effort != "" {
 		requestBody.Reasoning = &openAIResponsesReasoningOptions{
