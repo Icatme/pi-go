@@ -13,14 +13,19 @@ import (
 )
 
 type deepSeekChatRequest struct {
-	Model       string                   `json:"model"`
-	Messages    []deepSeekChatMessage    `json:"messages"`
-	Stream      bool                     `json:"stream"`
-	Thinking    *deepSeekThinkingOptions `json:"thinking,omitempty"`
-	MaxTokens   int                      `json:"max_tokens,omitempty"`
-	Temperature *float64                 `json:"temperature,omitempty"`
-	Tools       []map[string]any         `json:"tools,omitempty"`
-	ToolChoice  any                      `json:"tool_choice,omitempty"`
+	Model          string                   `json:"model"`
+	Messages       []deepSeekChatMessage    `json:"messages"`
+	Stream         bool                     `json:"stream"`
+	Thinking       *deepSeekThinkingOptions `json:"thinking,omitempty"`
+	MaxTokens      int                      `json:"max_tokens,omitempty"`
+	Temperature    *float64                 `json:"temperature,omitempty"`
+	Tools          []map[string]any         `json:"tools,omitempty"`
+	ToolChoice     any                      `json:"tool_choice,omitempty"`
+	ResponseFormat *deepSeekResponseFormat  `json:"response_format,omitempty"`
+}
+
+type deepSeekResponseFormat struct {
+	Type string `json:"type"`
 }
 
 type deepSeekThinkingOptions struct {
@@ -193,6 +198,9 @@ func buildDeepSeekChatRequest(model Model, ctx Context, options ProviderStreamOp
 	}
 	if thinking := resolveDeepSeekThinking(model, resolvedOptions.Reasoning); thinking != nil {
 		requestBody.Thinking = thinking
+	}
+	if resolvedOptions.ResponseFormat != nil {
+		requestBody.ResponseFormat = &deepSeekResponseFormat{Type: string(resolvedOptions.ResponseFormat.Type)}
 	}
 	return requestBody
 }

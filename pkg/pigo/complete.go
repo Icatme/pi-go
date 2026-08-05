@@ -37,6 +37,7 @@ type StreamOptions struct {
 	Truncation           string
 	ThinkingBudgets      ThinkingBudgets
 	Observer             Observer
+	ResponseFormat       *ResponseFormat
 }
 
 // Option mutates StreamOptions when constructing new option sets.
@@ -75,6 +76,13 @@ func WithToolChoice(choice string) Option {
 	}
 }
 
+// WithResponseFormat requests provider-neutral structured text output.
+func WithResponseFormat(format ResponseFormat) Option {
+	return func(options *StreamOptions) {
+		options.ResponseFormat = cloneResponseFormat(&format)
+	}
+}
+
 // Deprecated: use StreamOptions with StreamOptions.providerStreamOptions instead.
 type ProviderStreamOptions struct {
 	APIKey               string
@@ -102,6 +110,7 @@ type ProviderStreamOptions struct {
 	PreviousResponseID   string
 	Truncation           string
 	Observer             Observer
+	ResponseFormat       *ResponseFormat
 }
 
 // Deprecated: use StreamOptions with streamOptionsFromSimple or NewStreamOptions instead.
@@ -128,4 +137,5 @@ type SimpleStreamOptions struct {
 	PreviousResponseID string
 	Truncation         string
 	Observer           Observer
+	ResponseFormat     *ResponseFormat
 }

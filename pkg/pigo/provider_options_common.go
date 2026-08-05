@@ -26,6 +26,7 @@ type CommonProviderOptions struct {
 	PreviousResponseID string
 	Truncation         string
 	Observer           Observer
+	ResponseFormat     *ResponseFormat
 }
 
 func buildCommonProviderOptions(model Model, options SimpleStreamOptions) CommonProviderOptions {
@@ -58,6 +59,7 @@ func (options CommonProviderOptions) toProviderStreamOptions() ProviderStreamOpt
 		PreviousResponseID: options.PreviousResponseID,
 		Truncation:         options.Truncation,
 		Observer:           options.Observer,
+		ResponseFormat:     cloneResponseFormat(options.ResponseFormat),
 	}
 }
 
@@ -85,6 +87,7 @@ func streamOptionsFromSimple(model Model, options SimpleStreamOptions) StreamOpt
 		Truncation:         options.Truncation,
 		ThinkingBudgets:    options.ThinkingBudgets,
 		Observer:           options.Observer,
+		ResponseFormat:     cloneResponseFormat(options.ResponseFormat),
 	}
 	return streamOptions.withCommonSnapshot(model)
 }
@@ -116,6 +119,7 @@ func streamOptionsFromProvider(model Model, options ProviderStreamOptions) Strea
 		PreviousResponseID:   options.PreviousResponseID,
 		Truncation:           options.Truncation,
 		Observer:             options.Observer,
+		ResponseFormat:       cloneResponseFormat(options.ResponseFormat),
 	}
 	return streamOptions.withCommonSnapshot(model)
 }
@@ -195,6 +199,11 @@ func (options StreamOptions) normalizeLegacyCommonFallback() StreamOptions {
 	if options.Observer == nil {
 		options.Observer = options.Common.Observer
 	}
+	if options.ResponseFormat == nil {
+		options.ResponseFormat = cloneResponseFormat(options.Common.ResponseFormat)
+	} else {
+		options.ResponseFormat = cloneResponseFormat(options.ResponseFormat)
+	}
 	return options
 }
 
@@ -220,6 +229,7 @@ func (options StreamOptions) commonSnapshot(model Model) CommonProviderOptions {
 		PreviousResponseID: options.PreviousResponseID,
 		Truncation:         options.Truncation,
 		Observer:           options.Observer,
+		ResponseFormat:     cloneResponseFormat(options.ResponseFormat),
 	}
 	if common.MaxTokens <= 0 {
 		common.MaxTokens = minInt(model.MaxTokens, 32000)
@@ -260,5 +270,6 @@ func (options StreamOptions) providerStreamOptions(model Model) ProviderStreamOp
 		PreviousResponseID:   common.PreviousResponseID,
 		Truncation:           common.Truncation,
 		Observer:             common.Observer,
+		ResponseFormat:       cloneResponseFormat(common.ResponseFormat),
 	}
 }
