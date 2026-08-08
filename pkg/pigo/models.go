@@ -45,15 +45,25 @@ func GetModels(provider Provider) []Model {
 }
 
 func CalculateCost(model Model, usage Usage) UsageCost {
+	rates := model.Cost
+	inputTokens := usage.Input + usage.CacheRead + usage.CacheWrite
+	matchedThreshold := -1
+	for _, tier := range model.CostTiers {
+		if inputTokens > tier.InputTokensAbove && tier.InputTokensAbove > matchedThreshold {
+			rates = tier.Rates
+			matchedThreshold = tier.InputTokensAbove
+		}
+	}
+
 	return UsageCost{
-		Input:      (model.Cost.Input / 1_000_000) * float64(usage.Input),
-		Output:     (model.Cost.Output / 1_000_000) * float64(usage.Output),
-		CacheRead:  (model.Cost.CacheRead / 1_000_000) * float64(usage.CacheRead),
-		CacheWrite: (model.Cost.CacheWrite / 1_000_000) * float64(usage.CacheWrite),
-		Total: ((model.Cost.Input / 1_000_000) * float64(usage.Input)) +
-			((model.Cost.Output / 1_000_000) * float64(usage.Output)) +
-			((model.Cost.CacheRead / 1_000_000) * float64(usage.CacheRead)) +
-			((model.Cost.CacheWrite / 1_000_000) * float64(usage.CacheWrite)),
+		Input:      (rates.Input / 1_000_000) * float64(usage.Input),
+		Output:     (rates.Output / 1_000_000) * float64(usage.Output),
+		CacheRead:  (rates.CacheRead / 1_000_000) * float64(usage.CacheRead),
+		CacheWrite: (rates.CacheWrite / 1_000_000) * float64(usage.CacheWrite),
+		Total: ((rates.Input / 1_000_000) * float64(usage.Input)) +
+			((rates.Output / 1_000_000) * float64(usage.Output)) +
+			((rates.CacheRead / 1_000_000) * float64(usage.CacheRead)) +
+			((rates.CacheWrite / 1_000_000) * float64(usage.CacheWrite)),
 	}
 }
 
@@ -65,7 +75,10 @@ func ModelsAreEqual(a, b *Model) bool {
 }
 
 func SupportsXHigh(model Model) bool {
-	if contains(model.ID, "gpt-5.2") || contains(model.ID, "gpt-5.3") || contains(model.ID, "gpt-5.4") {
+	if mapped, ok := model.ThinkingLevelMap[ModelThinkingLevelXHigh]; ok {
+		return mapped != ""
+	}
+	if contains(model.ID, "gpt-5.2") || contains(model.ID, "gpt-5.3") || contains(model.ID, "gpt-5.4") || contains(model.ID, "gpt-5.5") || contains(model.ID, "gpt-5.6") {
 		return true
 	}
 	if contains(model.ID, "opus-4-6") || contains(model.ID, "opus-4.6") || contains(model.ID, "sonnet-4-6") || contains(model.ID, "sonnet-4.6") {

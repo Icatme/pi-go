@@ -359,6 +359,8 @@ func defaultModelID(provider pigo.Provider) string {
 		return "gpt-5.4"
 	case "kimi-coding":
 		return "kimi-k2-thinking"
+	case "opencode-go":
+		return "kimi-k2.6"
 	case "anthropic":
 		return "claude-sonnet-4-5"
 	}

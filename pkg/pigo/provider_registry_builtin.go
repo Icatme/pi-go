@@ -16,6 +16,7 @@ func registerBuiltInAPIModules() {
 	RegisterLazyAPIModule("google-generative-ai", newGoogleGenerativeAIAPIModule)
 	RegisterLazyAPIModule("mistral-conversations", newMistralConversationsAPIModule)
 	RegisterLazyAPIModule("openai-codex-responses", newOpenAICodexResponsesAPIModule)
+	RegisterLazyAPIModule("openai-completions", newOpenAICompletionsAPIModule)
 	RegisterLazyAPIModule("openai-responses", newOpenAIResponsesAPIModule)
 }
 
@@ -26,6 +27,7 @@ func registerBuiltInProviderModules() {
 	RegisterLazyProviderModule("google", newGoogleProviderModule)
 	RegisterLazyProviderModule("mistral", newMistralProviderModule)
 	RegisterLazyProviderModule("openai-codex", newOpenAICodexProviderModule)
+	RegisterLazyProviderModule("opencode-go", newOpenCodeGoProviderModule)
 	RegisterLazyProviderModule("openai", newOpenAIResponsesProviderModule)
 	RegisterLazyProviderModule("kimi-coding", newKimiCodingProviderModule)
 }
@@ -67,6 +69,14 @@ func newOpenAICodexResponsesAPIModule() APIModule {
 		API:          "openai-codex-responses",
 		Stream:       streamOpenAICodex,
 		StreamSimple: streamSimpleOpenAICodex,
+	}
+}
+
+func newOpenAICompletionsAPIModule() APIModule {
+	return APIModule{
+		API:          "openai-completions",
+		Stream:       streamOpenAICompletions,
+		StreamSimple: streamSimpleOpenAICompletions,
 	}
 }
 

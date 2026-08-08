@@ -44,6 +44,11 @@ type UsageCost struct {
 	Total      float64
 }
 
+type ModelCostTier struct {
+	InputTokensAbove int
+	Rates            UsageCost
+}
+
 type Usage struct {
 	Input       int
 	Output      int
@@ -64,6 +69,7 @@ type Model struct {
 	Input            []InputType
 	HostedTools      HostedToolCapabilities
 	Cost             UsageCost
+	CostTiers        []ModelCostTier
 	ContextWindow    int
 	MaxTokens        int
 	Headers          map[string]string

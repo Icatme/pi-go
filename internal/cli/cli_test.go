@@ -173,6 +173,12 @@ func TestRunModelsShowsProviderModels(t *testing.T) {
 	}
 }
 
+func TestDefaultModelIDUsesOpenCodeGoUpstreamDefault(t *testing.T) {
+	if got := defaultModelID("opencode-go"); got != "kimi-k2.6" {
+		t.Fatalf("expected OpenCode Go default kimi-k2.6, got %q", got)
+	}
+}
+
 func TestRunAskUsesStoredOAuthCredentials(t *testing.T) {
 	provider := pigo.Provider("cli-oauth-provider")
 	api := pigo.API("cli-oauth-api")

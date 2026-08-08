@@ -1,6 +1,9 @@
 package pigo
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestSupportsXHighForAnthropicOpus46(t *testing.T) {
 	model := GetModel("anthropic", "claude-opus-4-6")
@@ -279,5 +282,25 @@ func TestCalculateCostHandlesZeroUsage(t *testing.T) {
 	cost := CalculateCost(model, usage)
 	if cost.Total != 0 {
 		t.Fatalf("expected zero cost for zero usage, got %f", cost.Total)
+	}
+}
+
+func TestCalculateCostUsesHighestMatchingInputTier(t *testing.T) {
+	model := Model{
+		Cost: UsageCost{Input: 1, CacheRead: 1},
+		CostTiers: []ModelCostTier{
+			{InputTokensAbove: 200_000, Rates: UsageCost{Input: 3, CacheRead: 3}},
+			{InputTokensAbove: 100_000, Rates: UsageCost{Input: 2, CacheRead: 2}},
+		},
+	}
+
+	atThreshold := CalculateCost(model, Usage{Input: 90_000, CacheRead: 10_000})
+	if atThreshold.Input != 0.09 || atThreshold.CacheRead != 0.01 {
+		t.Fatalf("expected base rates at the exact threshold, got %+v", atThreshold)
+	}
+
+	highestTier := CalculateCost(model, Usage{Input: 200_001})
+	if math.Abs(highestTier.Input-0.600003) > 1e-12 {
+		t.Fatalf("expected highest matching tier, got %+v", highestTier)
 	}
 }

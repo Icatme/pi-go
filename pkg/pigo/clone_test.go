@@ -10,6 +10,7 @@ func TestCloneModelDeepCopiesCompatAndCollections(t *testing.T) {
 		Provider:         "openai-codex",
 		API:              "openai-codex-responses",
 		Input:            []InputType{InputText, InputImage},
+		CostTiers:        []ModelCostTier{{InputTokensAbove: 100_000, Rates: UsageCost{Input: 2}}},
 		Headers:          map[string]string{"x-test": "value"},
 		ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelHigh: "high"},
 		Compat: &OpenAICompletionsCompat{
@@ -34,6 +35,7 @@ func TestCloneModelDeepCopiesCompatAndCollections(t *testing.T) {
 	}
 
 	cloned.Input[0] = InputType("mutated")
+	cloned.CostTiers[0].Rates.Input = 9
 	cloned.Headers["x-test"] = "mutated"
 	cloned.ThinkingLevelMap[ModelThinkingLevelHigh] = "mutated"
 	compat.OpenRouterRouting.Order[0] = "mutated"
@@ -41,6 +43,9 @@ func TestCloneModelDeepCopiesCompatAndCollections(t *testing.T) {
 
 	if model.Input[0] != InputText {
 		t.Fatalf("expected model input slice to remain isolated, got %q", model.Input[0])
+	}
+	if model.CostTiers[0].Rates.Input != 2 {
+		t.Fatalf("expected model cost tiers to remain isolated, got %+v", model.CostTiers)
 	}
 	if model.Headers["x-test"] != "value" {
 		t.Fatalf("expected model headers to remain isolated, got %q", model.Headers["x-test"])

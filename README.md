@@ -4,11 +4,11 @@
 [![GitHub release](https://img.shields.io/github/v/release/Icatme/pi-go)](https://github.com/Icatme/pi-go/releases)
 [![Go version](https://img.shields.io/github/go-mod/go-version/Icatme/pi-go)](go.mod)
 
-`pi-go` is a Go reimplementation of the [`pi.ai`](https://github.com/badlogic/pi-mono/tree/main/packages/ai) core package surface. It combines a provider-agnostic model runtime in `pkg/pigo`, a single-agent runtime in `agent`, and the `pigo` CLI while keeping provider protocol code out of the agent loop.
+`pi-go` is a Go reimplementation of the [`pi.ai`](https://github.com/earendil-works/pi/tree/main/packages/ai) core package surface. It combines a provider-agnostic model runtime in `pkg/pigo`, a single-agent runtime in `agent`, and the `pigo` CLI while keeping provider protocol code out of the agent loop.
 
 ## Highlights
 
-- One model and message surface across OpenAI Codex, Kimi Coding, Command Code, Anthropic, DeepSeek, Google, and Mistral
+- One model and message surface across OpenAI Codex, OpenCode Go, Kimi Coding, Command Code, Anthropic, DeepSeek, Google, and Mistral
 - Blocking and streaming completion APIs with normalized cross-provider message replay
 - SSE and WebSocket transports, tool calls, reasoning content, usage accounting, and observer hooks
 - A separate single-agent runtime with message, tool, steering, follow-up, and snapshot lifecycles
@@ -34,6 +34,7 @@ own graph or multi-agent orchestration.
 Current primary provider scope:
 
 - `openai-codex` via OpenAI OAuth and the Responses-style API surface
+- `opencode-go` via an OpenCode Go API key and model-specific OpenAI Completions, OpenAI Responses, or Anthropic Messages routing
 - `kimi-coding` via Anthropic-style Messages semantics
 - `commandcode` via the `commandcode-custom` streaming protocol used by `pi-commandcode-provider`
 - `anthropic` via the Anthropic Messages API
@@ -60,10 +61,10 @@ go install github.com/Icatme/pi-go/cmd/pigo@latest
 pigo --help
 ```
 
-The `agent` package was added after the current `v0.4.1` release and is available from `master`:
+The `agent` package is included in the current `v0.6.0` release:
 
 ```powershell
-go get github.com/Icatme/pi-go/agent@master
+go get github.com/Icatme/pi-go/agent@v0.6.0
 ```
 
 Import it with:
@@ -184,6 +185,7 @@ $env:PIGO_LIVE_TEST = "1"
 
 Some live paths also require credentials such as:
 
+- `OPENCODE_API_KEY`
 - `KIMI_API_KEY`
 - `COMMANDCODE_API_KEY`
 - test-only OpenAI Codex credentials in `01_auth.json`
@@ -212,6 +214,12 @@ path. If live discovery is unavailable, a valid cache remains usable with a
 warning; the first offline load without a valid cache leaves Command Code
 unavailable without preventing other providers from loading.
 
+The `opencode-go` provider follows Pi's built-in OpenCode Go routing and reads
+`OPENCODE_API_KEY`. Its deterministic built-in catalog is the 2026-08-08
+snapshot of active, non-deprecated, tool-capable models from
+[`models.dev`](https://models.dev), which is also Pi's catalog source. OpenCode
+Go keys are managed at [`opencode.ai/auth`](https://opencode.ai/auth).
+
 Library callers can use `FetchCommandCodeModels` for a strict read-only live
 catalog, `LoadCommandCodeModels` for the live/cache selection, or
 `RefreshCommandCodeModelsWithResult` to apply that selection while retaining
@@ -227,12 +235,15 @@ Example commands:
 
 ```powershell
 .\scripts\build.ps1
+$env:OPENCODE_API_KEY = "your-opencode-go-key"
 .\bin\pigo.exe list
 .\bin\pigo.exe models openai-codex
 .\bin\pigo.exe login openai-codex
 .\bin\pigo.exe login commandcode
 .\bin\pigo.exe models commandcode
+.\bin\pigo.exe models opencode-go
 .\bin\pigo.exe ask --provider kimi-coding "hello"
+.\bin\pigo.exe ask --provider opencode-go --model kimi-k2.6 "hello"
 .\bin\pigo.exe ask --provider commandcode --model poolside/laguna-s-2.1-free "hello"
 .\bin\pigo.exe ask --provider openai-codex --model gpt-5.4 "hello"
 ```

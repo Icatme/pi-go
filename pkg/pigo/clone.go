@@ -5,6 +5,9 @@ func cloneModel(model Model) Model {
 	if len(model.Input) > 0 {
 		cloned.Input = append([]InputType(nil), model.Input...)
 	}
+	if len(model.CostTiers) > 0 {
+		cloned.CostTiers = append([]ModelCostTier(nil), model.CostTiers...)
+	}
 	if len(model.ThinkingLevelMap) > 0 {
 		cloned.ThinkingLevelMap = make(ThinkingLevelMap, len(model.ThinkingLevelMap))
 		for key, value := range model.ThinkingLevelMap {
