@@ -49,11 +49,15 @@ func TestAgentSnapshotJSONRoundTripPreservesExpandedRuntimeFields(t *testing.T) 
 					{Type: PartTypeThinking, Text: "reasoning", Signature: "sig-1"},
 				},
 				ToolCalls: []ToolCall{{
-					ID:               "tool-normalized-1",
-					OriginalID:       "tool-raw-1",
-					Name:             "lookup",
-					Arguments:        json.RawMessage(`{"value":42}`),
-					ParsedArgs:       map[string]any{"value": "42"},
+					ID:         "tool-normalized-1",
+					OriginalID: "tool-raw-1",
+					Name:       "lookup",
+					Arguments:  json.RawMessage(`{"value":42}`),
+					ParsedArgs: map[string]any{
+						"value":    "42",
+						"large":    int64(9007199254740993),
+						"exponent": json.Number("1e3"),
+					},
 					ThoughtSignature: "sig-1",
 				}},
 				ToolResult: &ToolResultPayload{
@@ -79,7 +83,8 @@ func TestAgentSnapshotJSONRoundTripPreservesExpandedRuntimeFields(t *testing.T) 
 			OriginalToolCallID: "tool-raw-1",
 			ToolName:           "lookup",
 		}},
-		Error: "transient",
+		PendingToolControl: &PendingToolControl{Turn: 3, Binding: "binding-3"},
+		Error:              "transient",
 		Metadata: map[string]any{
 			"tenant": "acme",
 		},
@@ -122,6 +127,12 @@ func TestAgentSnapshotJSONRoundTripPreservesExpandedRuntimeFields(t *testing.T) 
 	if len(decoded.Messages[0].ToolCalls) != 1 || decoded.Messages[0].ToolCalls[0].OriginalID != "tool-raw-1" {
 		t.Fatalf("expected tool call raw id to round-trip, got %+v", decoded.Messages[0].ToolCalls)
 	}
+	parsedArgs := decoded.Messages[0].ToolCalls[0].ParsedArgs
+	large, largeOK := parsedArgs["large"].(json.Number)
+	exponent, exponentOK := parsedArgs["exponent"].(json.Number)
+	if !largeOK || large.String() != "9007199254740993" || !exponentOK || exponent.String() != "1e3" {
+		t.Fatalf("expected tool-call numeric arguments to round-trip exactly, got %#v", parsedArgs)
+	}
 	if decoded.Messages[0].ToolResult == nil || decoded.Messages[0].ToolResult.OriginalToolCallID != "tool-raw-1" {
 		t.Fatalf("expected tool result raw id to round-trip, got %+v", decoded.Messages[0].ToolResult)
 	}
@@ -130,6 +141,9 @@ func TestAgentSnapshotJSONRoundTripPreservesExpandedRuntimeFields(t *testing.T) 
 	}
 	if len(decoded.PendingToolCalls) != 1 || decoded.PendingToolCalls[0].OriginalToolCallID != "tool-raw-1" {
 		t.Fatalf("expected pending tool call raw id to round-trip, got %+v", decoded.PendingToolCalls)
+	}
+	if decoded.PendingToolControl == nil || decoded.PendingToolControl.Turn != 3 || decoded.PendingToolControl.Binding != "binding-3" {
+		t.Fatalf("expected pending tool control to round-trip, got %+v", decoded.PendingToolControl)
 	}
 }
 

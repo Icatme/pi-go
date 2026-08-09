@@ -169,6 +169,80 @@ between model updates and context cancellation, then calls `Close` before
 `Wait`. Event-loop, wait, and close failures are joined and normalized into one
 terminal assistant message so message lifecycle events stay balanced.
 
+## Tool Gate And Pending Resume Contract
+
+`LoopHooks.ToolGate` is an invocation-local execution gate. It is not stored in
+`AgentDefinition` and does not change ordinary runs when omitted.
+
+- A gated batch is completely preflighted before any tool body or
+  `EventToolExecutionStart`.
+- The gate receives a detached copy of the final arguments after parsing,
+  schema validation, `BeforeToolCall`, and revalidation. Gate mutation does not
+  change executor arguments.
+- `allow` executes normally. `block` creates a source-order error tool result
+  without calling the body. Empty/unknown actions and invalid action/terminate
+  combinations fail closed.
+- If any call returns `suspend`, no call in the batch executes, including calls
+  that otherwise would have produced immediate validation or block results. No
+  tool lifecycle, result message, `EventTurnEnd`, `PrepareNextTurn`, or
+  `ShouldStopAfterTurn` occurs.
+- Suspension returns `ToolCallsSuspendedError`, keeps the assistant tail and all
+  `PendingToolCalls`, stores a canonical argument view for suspended calls, and
+  leaves `AgentSnapshot.Error` empty.
+
+`PendingToolControl` binds the exact assistant call batch and its original turn
+budget without using application metadata. Its digest covers source order,
+normalized/original IDs, tool name, raw-argument presence and canonical value,
+canonical `ParsedArgs`, and the thought signature. Zero-length raw arguments
+normalize to absent; JSON round trips retain arbitrary-precision parsed numbers.
+
+`ResumePendingToolCallsWithHooks` requires an explicit non-nil gate and rejects
+a changed tail, binding, or incomplete assistant output before emitting any
+event. Ordinary Run/Continue calls reject snapshots with pending tool state. A
+pre-execution resume error leaves the old turn open and the exact pending state
+retryable without emitting `EventTurnEnd`. A successful resume does not append
+the assistant again: it executes the old batch, emits its `EventTurnEnd`, runs
+`PrepareNextTurn` then `ShouldStopAfterTurn`, and only then starts another model
+turn. Re-suspension keeps the same open turn and does not reset `MaxTurns`.
+
+## Targeted Checkpoint Approval Contract
+
+The `agent/checkpoint` child package stores a strict, versioned
+`pi-go.agent.checkpoint` envelope behind revisioned compare-and-swap:
+
+- the initial `absent -> running` CAS completes before model or tool work
+- `interrupted` contains random, single-use tool-approval interrupt IDs
+- any stale or unknown decision rejects the whole resume request without a write
+- a partial decision executes nothing, persists only targeted decisions, and
+  rotates every unresolved interrupt ID
+- a complete decision set must win `interrupted -> running` CAS before parser,
+  hook, model, or tool work resumes
+- approval bindings cover the checkpoint/definition domain, normalized and raw
+  IDs, tool name, canonical raw arguments, and canonical final arguments
+- approval or rejection is consumed on first match; a later identical call is a
+  new capability request
+- a changed parser/hook result invalidates the old binding and re-interrupts the
+  whole batch
+- a pre-commit policy/core error with the original batch still intact performs
+  `running -> interrupted`, rotates all active IDs, clears consumed decisions,
+  and returns the original error; a changed batch stays on the conservative
+  indeterminate path
+- terminal `AgentEnd` is not released until the terminal checkpoint CAS succeeds
+
+Checkpoint runners require a non-empty `DefinitionVersion`, a fixed tool set,
+and no `PrepareNextTurn`. `ToolResolver` and invocation-local next-turn
+overrides are rejected because their executable/model values are not durable.
+Custom parsers and `BeforeToolCall` hooks may run again on resume and must be
+pure and deterministic.
+
+The provided `MemoryStore` is process-local. The public `Store` contract is a
+trusted secret-bearing boundary: snapshots may contain provider credentials.
+`running` means busy, not proof of a crashed execution, and is never replayed
+automatically. A terminal CAS failure after possible side effects returns an
+observational `StatusIndeterminate` outcome with `Persisted=false`; the stored
+record remains `running`, so this API does not claim exactly-once tool effects.
+Checkpoint streams retain Runner's bounded, lossless backpressure contract.
+
 ## Task Agent Tool Contract
 
 `prebuilt.NewAgentTool` is an outer helper over `Runner`, not a multi-agent
@@ -281,3 +355,4 @@ needs that auth payload.
   - `ToolCall.OriginalID`
   - `ToolResultPayload.OriginalToolCallID`
   - `PendingToolCall.OriginalToolCallID`
+  - `PendingToolControl` while a batch is suspended

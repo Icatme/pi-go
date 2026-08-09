@@ -3,11 +3,13 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,6 +19,7 @@ type LoopHooks struct {
 	ResolveDefinition   func(context.Context, AgentDefinition, AgentSnapshot) (AgentDefinition, error)
 	GetSteeringMessages func(context.Context) ([]Message, error)
 	GetFollowUpMessages func(context.Context) ([]Message, error)
+	ToolGate            ToolGateHook
 }
 
 // Engine executes agent turns against a mutable snapshot.
@@ -24,6 +27,19 @@ type Engine struct{}
 
 type loopRuntimeState struct {
 	turnEnded bool
+}
+
+type loopExecutionState struct {
+	firstTurn bool
+	turn      int
+	overrides turnOverrides
+	durable   *loopDurableState
+}
+
+type loopDurableState struct {
+	messages     []Message
+	systemPrompt string
+	model        ModelRef
 }
 
 type engineRunError struct {
@@ -62,6 +78,9 @@ func (e *Engine) Run(ctx context.Context, definition AgentDefinition, snapshot *
 
 // RunWithHooks appends prompts and executes turns with runtime hooks.
 func (e *Engine) RunWithHooks(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, prompts []Message, emit EventSink, hooks LoopHooks) (out *AgentSnapshot, err error) {
+	if hasPendingToolState(snapshot) {
+		return nil, ErrPendingToolCallsRequireResume
+	}
 	if len(prompts) == 0 {
 		return nil, ErrNoPromptMessages
 	}
@@ -72,9 +91,25 @@ func (e *Engine) RunWithHooks(ctx context.Context, definition AgentDefinition, s
 	}
 
 	next := cloneSnapshotPtr(snapshot)
+	runtimeState := &loopRuntimeState{}
+	var newMessages []Message
+	started := false
+	defer func() {
+		if !started || err == nil || hooks.ToolGate == nil {
+			return
+		}
+		if !runtimeState.turnEnded && !isToolCallsSuspended(err) {
+			emitEvent(emit, AgentEvent{Type: EventTurnEnd})
+			runtimeState.turnEnded = true
+		}
+		emitEvent(emit, AgentEvent{Type: EventAgentEnd, Messages: cloneMessages(newMessages), Err: err})
+	}()
+
 	emitEvent(emit, AgentEvent{Type: EventAgentStart})
+	started = true
 	emitEvent(emit, AgentEvent{Type: EventTurnStart})
 	normalized := normalizeMessages(prompts)
+	newMessages = cloneMessages(normalized)
 	next.Messages = append(next.Messages, normalized...)
 	for i := range normalized {
 		msg := cloneMessage(normalized[i])
@@ -85,13 +120,13 @@ func (e *Engine) RunWithHooks(ctx context.Context, definition AgentDefinition, s
 	initialPending, err := dequeueHookMessages(ctx, hooks.GetSteeringMessages)
 	if err != nil {
 		next.Error = err.Error()
-		return next, wrapEngineRunError(err, normalized, false)
+		err = wrapEngineRunError(err, newMessages, false)
+		return next, err
 	}
-	runtimeState := &loopRuntimeState{}
-	var newMessages []Message
-	next, newMessages, err = e.runLoop(ctx, definition, next, emit, hooks, initialPending, normalized, runtimeState)
+	next, newMessages, err = e.runLoop(ctx, definition, next, emit, hooks, initialPending, normalized, runtimeState, loopExecutionState{firstTurn: true, turn: 1})
 	if err != nil {
-		return next, wrapEngineRunError(err, newMessages, runtimeState.turnEnded)
+		err = wrapEngineRunError(err, newMessages, runtimeState.turnEnded)
+		return next, err
 	}
 	emitEvent(emit, AgentEvent{Type: EventAgentEnd, Messages: cloneMessages(newMessages)})
 	return next, nil
@@ -110,6 +145,9 @@ func (e *Engine) ContinueWithHooks(ctx context.Context, definition AgentDefiniti
 	}
 
 	next := cloneSnapshotPtr(snapshot)
+	if hasPendingToolState(next) {
+		return nil, ErrPendingToolCallsRequireResume
+	}
 	if len(next.Messages) == 0 {
 		return nil, ErrNoMessagesToContinue
 	}
@@ -117,33 +155,410 @@ func (e *Engine) ContinueWithHooks(ctx context.Context, definition AgentDefiniti
 		return nil, ErrCannotContinueFromAssistant
 	}
 
+	runtimeState := &loopRuntimeState{}
+	var newMessages []Message
+	started := false
+	defer func() {
+		if !started || err == nil || hooks.ToolGate == nil {
+			return
+		}
+		if !runtimeState.turnEnded && !isToolCallsSuspended(err) {
+			emitEvent(emit, AgentEvent{Type: EventTurnEnd})
+			runtimeState.turnEnded = true
+		}
+		emitEvent(emit, AgentEvent{Type: EventAgentEnd, Messages: cloneMessages(newMessages), Err: err})
+	}()
+
 	emitEvent(emit, AgentEvent{Type: EventAgentStart})
+	started = true
 	emitEvent(emit, AgentEvent{Type: EventTurnStart})
 
 	initialPending, err := dequeueHookMessages(ctx, hooks.GetSteeringMessages)
 	if err != nil {
 		next.Error = err.Error()
-		return next, wrapEngineRunError(err, nil, false)
+		err = wrapEngineRunError(err, nil, false)
+		return next, err
 	}
 
-	runtimeState := &loopRuntimeState{}
-	var newMessages []Message
-	next, newMessages, err = e.runLoop(ctx, definition, next, emit, hooks, initialPending, nil, runtimeState)
+	next, newMessages, err = e.runLoop(ctx, definition, next, emit, hooks, initialPending, nil, runtimeState, loopExecutionState{firstTurn: true, turn: 1})
 	if err != nil {
-		return next, wrapEngineRunError(err, newMessages, runtimeState.turnEnded)
+		err = wrapEngineRunError(err, newMessages, runtimeState.turnEnded)
+		return next, err
 	}
 	emitEvent(emit, AgentEvent{Type: EventAgentEnd, Messages: cloneMessages(newMessages)})
 	return next, nil
 }
 
-func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink, hooks LoopHooks, pendingMessages []Message, initialNewMessages []Message, runtimeState *loopRuntimeState) (*AgentSnapshot, []Message, error) {
-	firstTurn := true
-	turn := 1
+// ResumePendingToolCallsWithHooks resumes the exact tool-call batch recorded in
+// snapshot without appending a duplicate assistant message. The batch is
+// resolved and preflighted again against the current definition and hooks.
+func (e *Engine) ResumePendingToolCallsWithHooks(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink, hooks LoopHooks) (out *AgentSnapshot, err error) {
+	if hooks.ToolGate == nil {
+		return nil, ErrToolGateRequired
+	}
+	definition, err = definition.Validate()
+	if err != nil {
+		return nil, err
+	}
+
+	next := cloneSnapshotPtr(snapshot)
+	assistant, err := validatePendingToolBatch(*next)
+	if err != nil {
+		return nil, err
+	}
+	pendingTurn, err := pendingToolTurn(*next)
+	if err != nil {
+		return nil, err
+	}
+	originalSystemPrompt := next.SystemPrompt
+	originalModel := cloneModelRef(next.Model)
+	originalPendingToolCalls := clonePendingToolCalls(next.PendingToolCalls)
+	originalPendingToolControl := clonePendingToolControl(next.PendingToolControl)
+
+	runtimeState := &loopRuntimeState{}
+	var newMessages []Message
+	started := false
+	pendingBatchCommitted := false
+	defer func() {
+		if !started {
+			return
+		}
+		if pendingBatchCommitted && err != nil && !runtimeState.turnEnded && !isToolCallsSuspended(err) {
+			emitEvent(emit, AgentEvent{Type: EventTurnEnd})
+			runtimeState.turnEnded = true
+		}
+		emitEvent(emit, AgentEvent{Type: EventAgentEnd, Messages: cloneMessages(newMessages), Err: err})
+	}()
+
+	emitEvent(emit, AgentEvent{Type: EventAgentStart})
+	started = true
+
+	resolutionSnapshot := cloneSnapshotValue(*next)
+	clearPendingToolControlState(&resolutionSnapshot)
+	resolvedDefinition, resolveErr := resolveLoopDefinition(ctx, hooks, definition, resolutionSnapshot)
+	if resolveErr != nil {
+		next.Error = resolveErr.Error()
+		err = wrapEngineRunError(resolveErr, nil, false)
+		return next, err
+	}
+	tools, resolveErr := resolvedDefinition.ResolveTools(ctx, resolutionSnapshot)
+	if resolveErr != nil {
+		next.Error = resolveErr.Error()
+		err = wrapEngineRunError(resolveErr, nil, false)
+		return next, err
+	}
+
+	toolBatch, batchErr := e.executeToolCalls(ctx, resolvedDefinition, next, assistant, tools, emit, hooks.ToolGate)
+	newMessages = append(newMessages, cloneMessages(toolBatch.messages)...)
+	if isToolCallsSuspended(batchErr) {
+		setPendingToolControlState(next, pendingTurn, assistant)
+		next.Error = ""
+		err = wrapEngineRunError(batchErr, newMessages, false)
+		return next, err
+	}
+	batchCommitted := len(toolBatch.messages) == len(assistant.ToolCalls)
+	if !batchCommitted {
+		next.PendingToolCalls = clonePendingToolCalls(originalPendingToolCalls)
+		next.PendingToolControl = clonePendingToolControl(originalPendingToolControl)
+		if batchErr == nil {
+			batchErr = errors.New("agent: pending tool batch did not commit all results")
+		}
+		next.Error = batchErr.Error()
+		err = wrapEngineRunError(batchErr, newMessages, false)
+		return next, err
+	}
+	pendingBatchCommitted = true
+	emitEvent(emit, AgentEvent{
+		Type:         EventTurnEnd,
+		Message:      &assistant,
+		ToolMessages: cloneMessages(toolBatch.messages),
+	})
+	runtimeState.turnEnded = true
+	if batchErr != nil {
+		clearPendingToolControlState(next)
+		next.Error = batchErr.Error()
+		err = wrapEngineRunError(batchErr, newMessages, true)
+		return next, err
+	}
+	clearPendingToolControlState(next)
+
+	turnContext := ShouldStopAfterTurnContext{
+		Message:     cloneMessage(assistant),
+		ToolResults: cloneMessages(toolBatch.messages),
+		Context:     buildAgentContext(resolvedDefinition, *next, tools),
+		NewMessages: cloneMessages(newMessages),
+	}
+	durable := &loopDurableState{
+		messages:     cloneMessages(next.Messages),
+		systemPrompt: originalSystemPrompt,
+		model:        originalModel,
+	}
 	var overrides turnOverrides
+	if resolvedDefinition.PrepareNextTurn != nil {
+		update, prepareErr := resolvedDefinition.PrepareNextTurn(ctx, turnContext)
+		if prepareErr != nil {
+			next.Error = prepareErr.Error()
+			err = wrapEngineRunError(prepareErr, newMessages, true)
+			return next, err
+		}
+		if update != nil {
+			overrides.merge(update, next)
+			resolvedDefinition = overrides.apply(resolvedDefinition, next)
+			if update.Context != nil {
+				tools = cloneTools(update.Context.Tools)
+			}
+			turnContext.Context = buildAgentContext(resolvedDefinition, *next, tools)
+		}
+	}
+
+	if resolvedDefinition.ShouldStopAfterTurn != nil {
+		stop, stopErr := resolvedDefinition.ShouldStopAfterTurn(ctx, turnContext)
+		if stopErr != nil {
+			restoreLoopDurable(next, durable)
+			next.Error = stopErr.Error()
+			err = wrapEngineRunError(stopErr, newMessages, true)
+			return next, err
+		}
+		if stop {
+			restoreLoopDurable(next, durable)
+			next.Error = ""
+			return next, nil
+		}
+	}
+	if toolBatch.terminate {
+		restoreLoopDurable(next, durable)
+		next.Error = ""
+		return next, nil
+	}
+
+	pendingMessages, dequeueErr := dequeueHookMessages(ctx, hooks.GetSteeringMessages)
+	if dequeueErr != nil {
+		restoreLoopDurable(next, durable)
+		next.Error = dequeueErr.Error()
+		err = wrapEngineRunError(dequeueErr, newMessages, true)
+		return next, err
+	}
+	runtimeState.turnEnded = true
+	next, newMessages, batchErr = e.runLoop(ctx, definition, next, emit, hooks, pendingMessages, newMessages, runtimeState, loopExecutionState{
+		firstTurn: false,
+		turn:      pendingTurn + 1,
+		overrides: overrides,
+		durable:   durable,
+	})
+	if batchErr != nil {
+		err = wrapEngineRunError(batchErr, newMessages, runtimeState.turnEnded)
+		return next, err
+	}
+	return next, nil
+}
+
+func hasPendingToolState(snapshot *AgentSnapshot) bool {
+	return snapshot != nil && (len(snapshot.PendingToolCalls) > 0 || snapshot.PendingToolControl != nil)
+}
+
+// ValidatePendingToolState verifies that snapshot contains one intact,
+// resumable assistant tool-call batch without executing hooks or tools.
+func ValidatePendingToolState(snapshot AgentSnapshot) error {
+	_, err := validatePendingToolBatch(snapshot)
+	return err
+}
+
+func validatePendingToolBatch(snapshot AgentSnapshot) (Message, error) {
+	if snapshot.PendingToolControl == nil {
+		return Message{}, ErrPendingToolControlRequired
+	}
+	pendingTurn, err := pendingToolTurn(snapshot)
+	if err != nil {
+		return Message{}, err
+	}
+	if len(snapshot.Messages) == 0 {
+		return Message{}, errors.New("agent: cannot resume pending tool calls without messages")
+	}
+	assistant := snapshot.Messages[len(snapshot.Messages)-1]
+	if assistant.Role != RoleAssistant || len(assistant.ToolCalls) == 0 {
+		return Message{}, errors.New("agent: pending tool calls require an assistant tail with tool calls")
+	}
+	if isErrorAssistantMessage(assistant) || assistant.StopReason == StopReasonLength {
+		return Message{}, errors.New("agent: cannot resume tool calls from an incomplete or failed assistant message")
+	}
+	if err := validateNormalizedToolCallIDs(assistant.ToolCalls); err != nil {
+		return Message{}, err
+	}
+	if len(snapshot.PendingToolCalls) != len(assistant.ToolCalls) {
+		return Message{}, errors.New("agent: pending tool calls do not match assistant tool calls")
+	}
+	for i, call := range assistant.ToolCalls {
+		pending := snapshot.PendingToolCalls[i]
+		if pending.ToolCallID != call.ID || pending.OriginalToolCallID != call.OriginalID || pending.ToolName != call.Name {
+			return Message{}, fmt.Errorf("agent: pending tool call %d does not match assistant tool call", i)
+		}
+	}
+	if snapshot.PendingToolControl != nil {
+		expectedBinding, err := pendingToolBindingDigest(assistant, pendingTurn)
+		if err != nil {
+			return Message{}, err
+		}
+		if snapshot.PendingToolControl.Binding == "" || snapshot.PendingToolControl.Binding != expectedBinding {
+			return Message{}, errors.New("agent: pending assistant tool-call binding does not match")
+		}
+	}
+	return cloneMessage(assistant), nil
+}
+
+func validateNormalizedToolCallIDs(calls []ToolCall) error {
+	seenIDs := make(map[string]struct{}, len(calls))
+	for i, call := range calls {
+		normalizedID := strings.TrimSpace(call.ID)
+		if normalizedID == "" {
+			return fmt.Errorf("agent: assistant tool call %d has an empty normalized id", i)
+		}
+		if _, exists := seenIDs[normalizedID]; exists {
+			return fmt.Errorf("agent: assistant tool call %d repeats normalized id %q", i, normalizedID)
+		}
+		seenIDs[normalizedID] = struct{}{}
+	}
+	return nil
+}
+
+func restoreLoopDurable(snapshot *AgentSnapshot, durable *loopDurableState) {
+	if snapshot == nil || durable == nil {
+		return
+	}
+	snapshot.Messages = cloneMessages(durable.messages)
+	snapshot.SystemPrompt = durable.systemPrompt
+	snapshot.Model = cloneModelRef(durable.model)
+}
+
+func pendingToolTurn(snapshot AgentSnapshot) (int, error) {
+	if snapshot.PendingToolControl == nil {
+		return 1, nil
+	}
+	if snapshot.PendingToolControl.Turn <= 0 {
+		return 0, errors.New("agent: pending tool turn metadata is invalid")
+	}
+	return snapshot.PendingToolControl.Turn, nil
+}
+
+func setPendingToolControlState(snapshot *AgentSnapshot, turn int, assistant Message) {
+	binding, _ := pendingToolBindingDigest(assistant, turn)
+	snapshot.PendingToolControl = &PendingToolControl{Turn: turn, Binding: binding}
+}
+
+func clearPendingToolControlState(snapshot *AgentSnapshot) {
+	snapshot.PendingToolControl = nil
+}
+
+func pendingToolBindingDigest(assistant Message, turn int) (string, error) {
+	type callBinding struct {
+		Index            int    `json:"index"`
+		ID               string `json:"id"`
+		OriginalID       string `json:"original_id"`
+		Name             string `json:"name"`
+		RawPresent       bool   `json:"raw_present"`
+		Arguments        string `json:"arguments"`
+		ParsedArgs       string `json:"parsed_args"`
+		ThoughtSignature string `json:"thought_signature"`
+	}
+	bindings := make([]callBinding, 0, len(assistant.ToolCalls))
+	for i, call := range assistant.ToolCalls {
+		canonicalArguments, err := canonicalRawToolArguments(call.Arguments)
+		if err != nil {
+			return "", fmt.Errorf("agent: assistant tool call %d has invalid raw arguments: %w", i, err)
+		}
+		parsedArgs, err := canonicalJSONValue(call.ParsedArgs)
+		if err != nil {
+			return "", fmt.Errorf("agent: assistant tool call %d has non-durable parsed arguments: %w", i, err)
+		}
+		bindings = append(bindings, callBinding{
+			Index:            i,
+			ID:               call.ID,
+			OriginalID:       call.OriginalID,
+			Name:             call.Name,
+			RawPresent:       len(call.Arguments) > 0,
+			Arguments:        canonicalArguments,
+			ParsedArgs:       parsedArgs,
+			ThoughtSignature: call.ThoughtSignature,
+		})
+	}
+	payload, err := json.Marshal(struct {
+		Domain string        `json:"domain"`
+		Turn   int           `json:"turn"`
+		Calls  []callBinding `json:"calls"`
+	}{Domain: "pi-go.agent.pending-tools.v1", Turn: turn, Calls: bindings})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(payload)), nil
+}
+
+func canonicalRawToolArguments(arguments json.RawMessage) (string, error) {
+	if len(arguments) == 0 {
+		return "{}", nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(arguments))
+	decoder.UseNumber()
+	var parsed any
+	if err := decoder.Decode(&parsed); err != nil {
+		return "", err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		if err == nil {
+			return "", errors.New("multiple JSON argument values")
+		}
+		return "", err
+	}
+	canonical, err := json.Marshal(parsed)
+	if err != nil {
+		return "", err
+	}
+	return string(canonical), nil
+}
+
+func canonicalJSONValue(value any) (string, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return "", err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		if err == nil {
+			return "", errors.New("multiple JSON values")
+		}
+		return "", err
+	}
+	canonical, err := json.Marshal(decoded)
+	if err != nil {
+		return "", err
+	}
+	return string(canonical), nil
+}
+
+func isToolCallsSuspended(err error) bool {
+	var suspended *ToolCallsSuspendedError
+	return errors.As(err, &suspended)
+}
+
+func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink, hooks LoopHooks, pendingMessages []Message, initialNewMessages []Message, runtimeState *loopRuntimeState, executionState loopExecutionState) (*AgentSnapshot, []Message, error) {
+	firstTurn := executionState.firstTurn
+	turn := executionState.turn
+	if turn <= 0 {
+		turn = 1
+	}
+	overrides := executionState.overrides
 	newMessages := cloneMessages(initialNewMessages)
 	transcript := cloneMessages(snapshot.Messages)
 	originalSystemPrompt := snapshot.SystemPrompt
 	originalModel := cloneModelRef(snapshot.Model)
+	if executionState.durable != nil {
+		transcript = cloneMessages(executionState.durable.messages)
+		originalSystemPrompt = executionState.durable.systemPrompt
+		originalModel = cloneModelRef(executionState.durable.model)
+	}
 	defer func() {
 		snapshot.Messages = transcript
 		snapshot.SystemPrompt = originalSystemPrompt
@@ -208,10 +623,15 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 			if assistantMessage.StopReason == StopReasonLength && len(assistantMessage.ToolCalls) > 0 {
 				toolBatch = e.failTruncatedToolCalls(snapshot, assistantMessage.ToolCalls, emit)
 			} else {
-				toolBatch, err = e.executeToolCalls(ctx, resolvedDefinition, snapshot, assistantMessage, tools, emit)
+				toolBatch, err = e.executeToolCalls(ctx, resolvedDefinition, snapshot, assistantMessage, tools, emit, hooks.ToolGate)
 			}
 			newMessages = append(newMessages, cloneMessages(toolBatch.messages)...)
 			transcript = append(transcript, cloneMessages(toolBatch.messages)...)
+			if isToolCallsSuspended(err) {
+				setPendingToolControlState(snapshot, turn, assistantMessage)
+				snapshot.Error = ""
+				return snapshot, newMessages, err
+			}
 			emitEvent(emit, AgentEvent{
 				Type:         EventTurnEnd,
 				Message:      &assistantMessage,
@@ -407,7 +827,14 @@ eventLoop:
 	return finalMessage, tools, nil
 }
 
-func (e *Engine) executeToolCalls(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, assistant Message, tools []ToolDefinition, emit EventSink) (executedToolBatch, error) {
+func (e *Engine) executeToolCalls(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, assistant Message, tools []ToolDefinition, emit EventSink, gate ToolGateHook) (executedToolBatch, error) {
+	if gate != nil {
+		return e.executeToolCallsGated(ctx, definition, snapshot, assistant, tools, emit, gate)
+	}
+	return e.executeToolCallsOrdinary(ctx, definition, snapshot, assistant, tools, emit)
+}
+
+func (e *Engine) executeToolCallsOrdinary(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, assistant Message, tools []ToolDefinition, emit EventSink) (executedToolBatch, error) {
 	if len(assistant.ToolCalls) == 0 {
 		return executedToolBatch{}, nil
 	}
@@ -468,6 +895,291 @@ func (e *Engine) executeToolCalls(ctx context.Context, definition AgentDefinitio
 		return batch, err
 	}
 	return batch, ctx.Err()
+}
+
+func (e *Engine) executeToolCallsGated(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, assistant Message, tools []ToolDefinition, emit EventSink, gate ToolGateHook) (executedToolBatch, error) {
+	if len(assistant.ToolCalls) == 0 {
+		return executedToolBatch{}, nil
+	}
+	if err := validateNormalizedToolCallIDs(assistant.ToolCalls); err != nil {
+		return executedToolBatch{}, err
+	}
+	if _, err := pendingToolBindingDigest(assistant, 1); err != nil {
+		return executedToolBatch{}, err
+	}
+	toolMap := make(map[string]ToolDefinition, len(tools))
+	for _, tool := range tools {
+		toolMap[tool.Name] = tool
+	}
+	currentContext := buildAgentContext(definition, *snapshot, tools)
+	snapshot.PendingToolCalls = pendingToolCallsForAssistant(assistant)
+	clearPending := true
+	defer func() {
+		if clearPending {
+			snapshot.PendingToolCalls = nil
+		}
+	}()
+
+	prepared := make([]preparedToolCall, 0, len(assistant.ToolCalls))
+	suspended := make([]SuspendedToolCall, 0)
+	for _, original := range assistant.ToolCalls {
+		item, suspension, err := e.prepareGatedToolCall(ctx, definition, assistant, currentContext, toolMap, original, gate)
+		if err != nil {
+			return executedToolBatch{}, err
+		}
+		prepared = append(prepared, item)
+		if suspension != nil {
+			suspended = append(suspended, SuspendedToolCall{
+				ToolCall:  cloneToolCall(suspension.ToolCall),
+				Arguments: append(json.RawMessage(nil), suspension.Arguments...),
+				Reason:    suspension.Reason,
+			})
+		}
+	}
+	if ctx.Err() != nil {
+		return executedToolBatch{}, ctx.Err()
+	}
+	if len(suspended) > 0 {
+		clearPending = false
+		return executedToolBatch{}, &ToolCallsSuspendedError{Calls: suspended}
+	}
+
+	sequential := definition.ToolExecution == ToolExecutionSequential
+	if !sequential {
+		for _, item := range prepared {
+			if item.tool.ExecutionMode == ToolExecutionSequential {
+				sequential = true
+				break
+			}
+		}
+	}
+
+	var (
+		outcomes []toolOutcome
+		err      error
+	)
+	if sequential {
+		outcomes, err = e.executePreparedToolCallsSequential(ctx, definition, assistant, prepared, emit)
+	} else {
+		outcomes, err = e.executePreparedToolCallsParallel(ctx, definition, assistant, prepared, emit)
+	}
+	if ctx.Err() != nil && len(outcomes) < len(prepared) {
+		for _, item := range prepared[len(outcomes):] {
+			outcomes = append(outcomes, toolOutcome{
+				call:    cloneToolCall(item.call),
+				args:    cloneAny(item.args),
+				result:  errorToolResult("operation aborted before tool execution"),
+				isError: true,
+			})
+		}
+	}
+
+	toolMessages := make([]Message, 0, len(outcomes))
+	for _, outcome := range outcomes {
+		toolMessage := NewToolResultMessage(outcome.call, outcome.result, outcome.isError)
+		snapshot.Messages = append(snapshot.Messages, toolMessage)
+		toolMessages = append(toolMessages, toolMessage)
+		msg := cloneMessage(toolMessage)
+		emitEvent(emit, AgentEvent{Type: EventMessageStart, Message: &msg})
+		emitEvent(emit, AgentEvent{Type: EventMessageEnd, Message: &msg})
+	}
+	batch := executedToolBatch{
+		messages:  toolMessages,
+		terminate: shouldTerminateToolBatch(outcomes),
+	}
+	if err != nil {
+		return batch, err
+	}
+	return batch, ctx.Err()
+}
+
+func pendingToolCallsForAssistant(assistant Message) []PendingToolCall {
+	pending := make([]PendingToolCall, 0, len(assistant.ToolCalls))
+	for _, call := range assistant.ToolCalls {
+		pending = append(pending, PendingToolCall{
+			ToolCallID:         call.ID,
+			OriginalToolCallID: call.OriginalID,
+			ToolName:           call.Name,
+		})
+	}
+	return pending
+}
+
+func (e *Engine) prepareGatedToolCall(ctx context.Context, definition AgentDefinition, assistant Message, currentContext AgentContext, tools map[string]ToolDefinition, original ToolCall, gate ToolGateHook) (preparedToolCall, *SuspendedToolCall, error) {
+	call := cloneToolCall(original)
+	if ctx.Err() != nil {
+		return immediateToolCall(call, nil, errorToolResult("operation aborted"), true), nil, nil
+	}
+
+	tool, ok := tools[call.Name]
+	if !ok {
+		return immediateToolCall(call, nil, errorToolResult(fmt.Sprintf("tool %q not found", call.Name)), true), nil, nil
+	}
+	validator, err := newToolArgumentValidator(tool)
+	if err != nil {
+		return preparedToolCall{}, nil, err
+	}
+	args, err := parseToolArguments(tool, call)
+	if err == nil {
+		args, err = validator(args)
+	}
+	if err != nil {
+		return immediateToolCall(call, args, errorToolResult(err.Error()), true), nil, nil
+	}
+	if ctx.Err() != nil {
+		return immediateToolCall(call, args, errorToolResult("operation aborted"), true), nil, nil
+	}
+
+	executionArgs := cloneAny(args)
+	if definition.BeforeToolCall != nil {
+		beforeResult, beforeErr := definition.BeforeToolCall(ctx, BeforeToolCallContext{
+			AssistantMessage: cloneMessage(assistant),
+			ToolCall:         cloneToolCall(call),
+			Args:             executionArgs,
+			Context:          cloneAgentContext(currentContext),
+		})
+		if beforeErr != nil {
+			return immediateToolCall(call, executionArgs, errorToolResult(beforeErr.Error()), true), nil, nil
+		}
+		if ctx.Err() != nil {
+			return immediateToolCall(call, executionArgs, errorToolResult("operation aborted"), true), nil, nil
+		}
+		if beforeResult.Block {
+			reason := beforeResult.Reason
+			if reason == "" {
+				reason = "tool execution was blocked"
+			}
+			result := errorToolResult(reason)
+			result.Terminate = beforeResult.Terminate
+			return immediateToolCall(call, executionArgs, result, true), nil, nil
+		}
+		executionArgs, err = validator(executionArgs)
+		if err != nil {
+			return immediateToolCall(call, executionArgs, errorToolResult(err.Error()), true), nil, nil
+		}
+	}
+	if ctx.Err() != nil {
+		return immediateToolCall(call, executionArgs, errorToolResult("operation aborted"), true), nil, nil
+	}
+
+	gateResult, gateErr := gate(ctx, BeforeToolCallContext{
+		AssistantMessage: cloneMessage(assistant),
+		ToolCall:         cloneToolCall(call),
+		Args:             cloneAny(executionArgs),
+		Context:          cloneAgentContext(currentContext),
+	})
+	if gateErr != nil {
+		return preparedToolCall{}, nil, fmt.Errorf("agent: tool gate for %q failed: %w", call.Name, gateErr)
+	}
+	if ctx.Err() != nil {
+		return immediateToolCall(call, executionArgs, errorToolResult("operation aborted"), true), nil, nil
+	}
+	switch gateResult.Action {
+	case ToolGateActionAllow:
+		if gateResult.Terminate {
+			return preparedToolCall{}, nil, fmt.Errorf("agent: tool gate for %q cannot allow and terminate", call.Name)
+		}
+	case ToolGateActionBlock:
+		reason := gateResult.Reason
+		if reason == "" {
+			reason = "tool execution was blocked"
+		}
+		result := errorToolResult(reason)
+		result.Terminate = gateResult.Terminate
+		return immediateToolCall(call, executionArgs, result, true), nil, nil
+	case ToolGateActionSuspend:
+		if gateResult.Terminate {
+			return preparedToolCall{}, nil, fmt.Errorf("agent: tool gate for %q cannot suspend and terminate", call.Name)
+		}
+		canonicalArgs, marshalErr := json.Marshal(executionArgs)
+		if marshalErr != nil {
+			return preparedToolCall{}, nil, fmt.Errorf("agent: tool gate for %q cannot suspend non-JSON arguments: %w", call.Name, marshalErr)
+		}
+		return preparedToolCall{call: call, tool: tool, args: cloneAny(executionArgs), context: cloneAgentContext(currentContext)}, &SuspendedToolCall{
+			ToolCall:  cloneToolCall(call),
+			Arguments: canonicalArgs,
+			Reason:    gateResult.Reason,
+		}, nil
+	default:
+		return preparedToolCall{}, nil, fmt.Errorf("agent: tool gate for %q returned invalid action %q", call.Name, gateResult.Action)
+	}
+
+	if tool.Execute == nil {
+		return immediateToolCall(call, executionArgs, errorToolResult(fmt.Sprintf("tool %q has no executor", call.Name)), true), nil, nil
+	}
+	return preparedToolCall{
+		call:    call,
+		tool:    tool,
+		args:    cloneAny(executionArgs),
+		context: cloneAgentContext(currentContext),
+	}, nil, nil
+}
+
+func (e *Engine) executePreparedToolCallsSequential(ctx context.Context, definition AgentDefinition, assistant Message, prepared []preparedToolCall, emit EventSink) ([]toolOutcome, error) {
+	outcomes := make([]toolOutcome, 0, len(prepared))
+	for _, item := range prepared {
+		if ctx.Err() != nil && !item.immediate {
+			item = immediateToolCall(item.call, item.args, errorToolResult("operation aborted"), true)
+		}
+		emitToolExecutionStart(emit, item.call, item.args)
+		outcome, err := e.executePreparedTool(ctx, definition, assistant, item, emit)
+		if err != nil {
+			return nil, err
+		}
+		outcomes = append(outcomes, outcome)
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return outcomes, nil
+}
+
+func (e *Engine) executePreparedToolCallsParallel(ctx context.Context, definition AgentDefinition, assistant Message, prepared []preparedToolCall, emit EventSink) ([]toolOutcome, error) {
+	if ctx.Err() != nil {
+		for i := range prepared {
+			if !prepared[i].immediate {
+				prepared[i] = immediateToolCall(prepared[i].call, prepared[i].args, errorToolResult("operation aborted"), true)
+			}
+		}
+	}
+
+	outcomes := make([]toolOutcome, len(prepared))
+	var (
+		wg       sync.WaitGroup
+		firstErr error
+		errMu    sync.Mutex
+	)
+	for i, item := range prepared {
+		emitToolExecutionStart(emit, item.call, item.args)
+		if item.immediate {
+			outcome, err := e.executePreparedTool(ctx, definition, assistant, item, emit)
+			if err != nil {
+				return nil, err
+			}
+			outcomes[i] = outcome
+			continue
+		}
+
+		wg.Add(1)
+		go func(index int, current preparedToolCall) {
+			defer wg.Done()
+			outcome, err := e.executePreparedTool(ctx, definition, assistant, current, emit)
+			if err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				errMu.Unlock()
+				return
+			}
+			outcomes[index] = outcome
+		}(i, item)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return outcomes, nil
 }
 
 func (e *Engine) executeToolCallsSequential(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, assistant Message, currentContext AgentContext, tools map[string]ToolDefinition, emit EventSink) ([]toolOutcome, error) {
@@ -816,13 +1528,14 @@ func cloneSnapshotPtr(snapshot *AgentSnapshot) *AgentSnapshot {
 
 func cloneSnapshotValue(snapshot AgentSnapshot) AgentSnapshot {
 	return AgentSnapshot{
-		SessionID:        snapshot.SessionID,
-		SystemPrompt:     snapshot.SystemPrompt,
-		Model:            cloneModelRef(snapshot.Model),
-		Messages:         cloneMessages(snapshot.Messages),
-		PendingToolCalls: clonePendingToolCalls(snapshot.PendingToolCalls),
-		Error:            snapshot.Error,
-		Metadata:         cloneStringAnyMap(snapshot.Metadata),
+		SessionID:          snapshot.SessionID,
+		SystemPrompt:       snapshot.SystemPrompt,
+		Model:              cloneModelRef(snapshot.Model),
+		Messages:           cloneMessages(snapshot.Messages),
+		PendingToolCalls:   clonePendingToolCalls(snapshot.PendingToolCalls),
+		PendingToolControl: clonePendingToolControl(snapshot.PendingToolControl),
+		Error:              snapshot.Error,
+		Metadata:           cloneStringAnyMap(snapshot.Metadata),
 	}
 }
 
@@ -1033,6 +1746,14 @@ func clonePendingToolCalls(calls []PendingToolCall) []PendingToolCall {
 	cloned := make([]PendingToolCall, len(calls))
 	copy(cloned, calls)
 	return cloned
+}
+
+func clonePendingToolControl(control *PendingToolControl) *PendingToolControl {
+	if control == nil {
+		return nil
+	}
+	cloned := *control
+	return &cloned
 }
 
 func cloneStringAnyMap(input map[string]any) map[string]any {
