@@ -224,6 +224,79 @@ func TestRunnerSupportsConcurrentIndependentRuns(t *testing.T) {
 	}
 }
 
+func TestRunnerPropagatesNestedRunLineageAndKeepsSequencesLocal(t *testing.T) {
+	childRunner, err := NewRunner(AgentDefinition{Name: "child-agent", Model: runnerStaticModel("child result")})
+	if err != nil {
+		t.Fatalf("NewRunner child returned error: %v", err)
+	}
+
+	var childEvents []AgentEvent
+	childTool := ToolDefinition{
+		Name: "delegate",
+		Execute: func(ctx context.Context, _ string, _ any, _ ToolUpdateFunc) (ToolResult, error) {
+			stream := childRunner.Query(ctx, "child task")
+			for event := range stream.Events() {
+				childEvents = append(childEvents, event)
+			}
+			if _, waitErr := stream.Wait(); waitErr != nil {
+				return ToolResult{}, waitErr
+			}
+			return ToolResult{Content: []Part{{Type: PartTypeText, Text: "delegated"}}}, nil
+		},
+	}
+	parentCalls := 0
+	parentRunner, err := NewRunner(AgentDefinition{
+		Name:  "parent-agent",
+		Tools: []ToolDefinition{childTool},
+		Model: StreamFunc(func(context.Context, ModelRequest) (AssistantStream, error) {
+			parentCalls++
+			message := Message{
+				Role:       RoleAssistant,
+				StopReason: StopReasonStop,
+				Timestamp:  time.Now().UTC(),
+				Parts:      []Part{{Type: PartTypeText, Text: "parent result"}},
+			}
+			if parentCalls == 1 {
+				message.Parts = nil
+				message.ToolCalls = []ToolCall{{ID: "delegate-1", Name: "delegate"}}
+				message.StopReason = StopReasonToolUse
+			}
+			return newStaticAssistantStream(message, nil), nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewRunner parent returned error: %v", err)
+	}
+
+	stream := parentRunner.Query(context.Background(), "parent task")
+	var parentEvents []AgentEvent
+	for event := range stream.Events() {
+		parentEvents = append(parentEvents, event)
+	}
+	if _, err := stream.Wait(); err != nil {
+		t.Fatalf("parent Wait returned error: %v", err)
+	}
+	if len(parentEvents) == 0 || len(childEvents) == 0 {
+		t.Fatalf("expected parent and child events, parent=%d child=%d", len(parentEvents), len(childEvents))
+	}
+
+	parentRunID := parentEvents[0].RunID
+	childRunID := childEvents[0].RunID
+	if parentRunID == "" || childRunID == "" || parentRunID == childRunID {
+		t.Fatalf("unexpected run ids parent=%q child=%q", parentRunID, childRunID)
+	}
+	for i, event := range parentEvents {
+		if event.RunID != parentRunID || event.ParentRunID != "" || event.Sequence != uint64(i+1) {
+			t.Fatalf("unexpected parent event %d lineage/sequence: %+v", i, event)
+		}
+	}
+	for i, event := range childEvents {
+		if event.RunID != childRunID || event.ParentRunID != parentRunID || event.Sequence != uint64(i+1) {
+			t.Fatalf("unexpected child event %d lineage/sequence: %+v", i, event)
+		}
+	}
+}
+
 func TestRunnerSynthesizesSingleEndOnEngineError(t *testing.T) {
 	wantErr := errors.New("runner model failed")
 	runner, err := NewRunner(AgentDefinition{Model: StreamFunc(func(context.Context, ModelRequest) (AssistantStream, error) {

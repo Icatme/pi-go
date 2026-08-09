@@ -114,3 +114,16 @@
 - Excluded pi-agent's explicitly pre-convergence operation/Harness protocol;
   session, race, vet, repository safety, and crash-tail tests passed without a
   live provider request.
+
+## 2026-08-09 - Task agent tools and structured reflection
+
+- Added a strict task-only `prebuilt.AgentTool` over isolated child Runners,
+  including automatic parent-run lineage, transient child-event forwarding,
+  and depth, per-child turn, and timeout limits.
+- Kept child termination and internal events outside the parent transcript and
+  converted only the final child output into a normal parent tool result.
+- Replaced reflection keyword matching with typed accept/revise evaluations,
+  strict JSON model output, complete request replay, and one evaluation for
+  every generated draft.
+- Added ordinary, race, vet, cancellation, ownership, lineage, and example
+  coverage; no live provider request was run for this change.

@@ -78,16 +78,22 @@ func TestReflectionTranscriptIsPersistedWithoutLiveSnapshot(t *testing.T) {
 	dataDir := t.TempDir()
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
+	var criticPrompts []string
+	critic := fakeStreamModel(func(request core.ModelRequest) string {
+		criticPrompts = append(criticPrompts, request.SystemPrompt)
+		return `{"verdict":"accept","summary":"The draft satisfies the request.","revision_instructions":[]}`
+	})
 
 	app, err := NewApp(AppConfig{
-		DataDir:         dataDir,
-		Provider:        "openai-codex",
-		Model:           "gpt-5.4",
-		ChatModel:       fakeChatModel("chat"),
-		ReflectionModel: fakeReflectionModel(),
-		Preset:          "reflect",
-		Stdout:          stdout,
-		Stderr:          stderr,
+		DataDir:          dataDir,
+		Provider:         "openai-codex",
+		Model:            "gpt-5.4",
+		ChatModel:        fakeChatModel("chat"),
+		ReflectionModel:  fakeReflectionModel(),
+		ReflectionCritic: critic,
+		Preset:           "reflect",
+		Stdout:           stdout,
+		Stderr:           stderr,
 	})
 	if err != nil {
 		t.Fatalf("NewApp returned error: %v", err)
@@ -109,6 +115,15 @@ func TestReflectionTranscriptIsPersistedWithoutLiveSnapshot(t *testing.T) {
 	}
 	if text := messageText(session.Transcript[3]); !strings.Contains(text, "draft:beta") {
 		t.Fatalf("expected final reflection transcript entry to be the latest draft, got %q", text)
+	}
+	if len(criticPrompts) != 2 {
+		t.Fatalf("expected one structured critic call per draft, got %d", len(criticPrompts))
+	}
+	wantCriticPrompt := app.presetIndex["reflect"].ReflectionPrompt
+	for _, prompt := range criticPrompts {
+		if prompt != wantCriticPrompt {
+			t.Fatalf("critic system prompt=%q, want preset prompt %q", prompt, wantCriticPrompt)
+		}
 	}
 }
 
@@ -154,9 +169,6 @@ func fakeChatModel(prefix string) core.StreamModel {
 func fakeReflectionModel() core.StreamModel {
 	return fakeStreamModel(func(request core.ModelRequest) string {
 		text := messageText(request.Messages[len(request.Messages)-1])
-		if strings.HasPrefix(text, "Request: ") && strings.Contains(text, "\nResponse: ") {
-			return "no major issues"
-		}
 		return "draft:" + text
 	})
 }
@@ -165,7 +177,8 @@ func fakeStreamModel(fn func(core.ModelRequest) string) core.StreamModel {
 	return core.StreamFunc(func(_ context.Context, request core.ModelRequest) (core.AssistantStream, error) {
 		text := fn(request)
 		message := core.Message{
-			Role: core.RoleAssistant,
+			Role:       core.RoleAssistant,
+			StopReason: core.StopReasonStop,
 			Parts: []core.Part{
 				{Type: core.PartTypeText, Text: text},
 			},
