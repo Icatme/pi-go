@@ -82,7 +82,9 @@ func (a *ReflectionAgent) Run(ctx context.Context, messages []core.Message) (Ref
 
 	for iteration := 0; iteration < a.maxIterations; iteration++ {
 		if iteration == 0 {
-			generator.Reset()
+			if err := generator.Reset(); err != nil {
+				return result, err
+			}
 			generator.ReplaceMessages(messages)
 		} else {
 			revisionPrompt := fmt.Sprintf(
@@ -91,7 +93,9 @@ func (a *ReflectionAgent) Run(ctx context.Context, messages []core.Message) (Ref
 				result.Draft,
 				result.Reflection,
 			)
-			generator.Reset()
+			if err := generator.Reset(); err != nil {
+				return result, err
+			}
 			generator.ReplaceMessages([]core.Message{core.NewUserTextMessage(revisionPrompt)})
 		}
 
@@ -113,7 +117,9 @@ func (a *ReflectionAgent) Run(ctx context.Context, messages []core.Message) (Ref
 		}
 
 		reflectionPrompt := fmt.Sprintf("Request: %s\nResponse: %s", originalRequest, result.Draft)
-		reflector.Reset()
+		if err := reflector.Reset(); err != nil {
+			return result, err
+		}
 		if err := reflector.PromptText(ctx, reflectionPrompt); err != nil {
 			return result, err
 		}

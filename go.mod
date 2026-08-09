@@ -3,6 +3,7 @@ module github.com/Icatme/pi-go
 go 1.26.2
 
 require (
+	github.com/google/jsonschema-go v0.4.3
 	github.com/gorilla/websocket v1.5.3
 	github.com/openai/openai-go/v3 v3.35.0
 )

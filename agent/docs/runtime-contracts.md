@@ -66,24 +66,77 @@ and is executed by the runtime engine in [`engine.go`](../engine.go).
 ### `beforeToolCall`
 
 - `BeforeToolCallContext.Args` is mutable.
-- Mutations made by `beforeToolCall` are used by the tool body and are visible to
-  `afterToolCall`.
+- Tool arguments are parsed and validated against `ToolDefinition.Parameters`
+  before this hook runs.
+- Custom parsers may return typed Go values. Validation uses their JSON
+  projection while the same typed value is passed to hooks and the executor;
+  custom parsers run once per call.
+- Mutations made by `beforeToolCall` are revalidated before execution. Schema
+  coercions are applied to the value passed to the tool body and `afterToolCall`.
 - Returning `BeforeToolCallResult{Block: true}` prevents the tool body from
   executing.
 - A blocked tool call is encoded as an error tool-result message and emits the
   normal tool execution lifecycle events.
-- Returning an error from `beforeToolCall` stops the current turn and is encoded
-  as a runtime error path.
+- Returning an error from `beforeToolCall` prevents that tool body from running
+  and becomes that call's error tool result. Sibling results remain durable.
 
 ### `afterToolCall`
 
 - `afterToolCall` runs after the tool body returns.
-- It may override `Result`.
+- It may override fields in `Result`; omitted fields preserve the tool body's
+  finalized result.
 - It may override `IsError`.
-- Override order is: tool body result first, then `afterToolCall` may replace the
-  result and error flag.
-- Returning an error from `afterToolCall` stops the current turn and is encoded
-  as a runtime error path.
+- Override order is: tool body result first, then `afterToolCall` merges result
+  fields and may override the error flag.
+- Returning an error from `afterToolCall` becomes that call's error tool result.
+  Already-completed sibling results remain durable.
+
+### Tool execution safety
+
+- `ToolDefinition.ExecutionMode = ToolExecutionSequential` forces the entire
+  assistant tool-call batch to run sequentially. A global sequential mode also
+  takes precedence over per-tool settings.
+- A `StopReasonLength` assistant message never executes its tool calls. The
+  runtime appends one synthetic error result per call and lets the model retry
+  with complete arguments. Failed, aborted, and cancellation-skipped calls also
+  receive source-order synthetic results so the transcript remains paired.
+- Truncated calls emit a start/end lifecycle with their synthetic failure, as
+  required by the tool UI contract. Other failed or cancellation-skipped calls
+  that never entered execution only append paired result messages.
+- Tool progress emitted after `Execute` returns is ignored. Progress accepted
+  before settlement completes before the tool-end event.
+- `ToolResult.Terminate` is a batch hint, not cancellation. Automatic model
+  continuation stops only when every finalized result in a non-empty batch has
+  `Terminate=true`; steering or follow-up input may still resume the loop.
+- A blocked call can opt into that rule with
+  `BeforeToolCallResult.Terminate`; `AfterToolCallResult.Terminate` can override
+  the final hint.
+- Parameter schemas are resolved with `jsonschema-go` Draft 7/2020-12 support.
+  Remote references require an explicit resolver and are rejected by this
+  runtime; `format` and content annotations are not enforcement hooks. Invalid
+  static schemas fail definition validation, and invalid resolver-provided
+  schemas fail the run before a model request.
+
+## Turn Boundary Hooks
+
+For every non-error assistant turn, the runtime order is:
+
+1. finalize all tool results
+2. emit `EventTurnEnd`
+3. call `PrepareNextTurn`
+4. call `ShouldStopAfterTurn`
+5. poll steering and follow-up queues only if the run continues
+
+`PrepareNextTurnContext.NewMessages` contains only messages added by the current
+`Run` or `Continue` invocation. A returned `AgentLoopTurnUpdate` may replace the
+next turn's provider context, model, model reference, or thinking level. Context
+replacement does not rewrite the invocation's append-only transcript. Returning
+true from `ShouldStopAfterTurn` ends the invocation before queues are polled.
+
+## Runtime mutation safety
+
+`Agent.Reset` returns `ErrAlreadyRunning` while a run is active and leaves the
+in-flight state unchanged. Abort the run and wait for idle before resetting.
 
 ## Provider Config Contract
 

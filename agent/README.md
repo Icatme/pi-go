@@ -40,7 +40,10 @@ Success means:
 - A turn-based `Engine` with:
   - assistant message streaming
   - tool execution
+  - JSON Schema argument validation
   - `beforeToolCall` / `afterToolCall`
+  - per-tool sequential execution and batch termination hints
+  - `prepareNextTurn` / `shouldStopAfterTurn`
   - `steer` / `followUp`
   - `continue`
 - A higher-level `Agent` wrapper
@@ -154,6 +157,10 @@ Use `agent` for:
   thinking signatures, and original tool call ids
 - user-facing agent construction via `AgentOptions`
 - dynamic low-level agent definition when needed
+
+The default model transport is `TransportAuto`. Callers can still select SSE,
+WebSocket, or cached WebSocket explicitly. `ThinkingMax` is forwarded through
+the provider layer and clamped to a model-supported level when necessary.
 
 Keep these concerns in outer orchestration packages:
 

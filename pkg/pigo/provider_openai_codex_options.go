@@ -19,7 +19,7 @@ func buildOpenAICodexProviderOptions(model Model, options SimpleStreamOptions) O
 		StreamOptions: streamOptionsFromSimple(model, options),
 	}
 	providerOptions.TextVerbosity = defaultTextVerbosity("")
-	if SupportsXHigh(model) {
+	if SupportsXHigh(model) || SupportsMax(model) {
 		providerOptions.Reasoning = options.Reasoning
 	} else {
 		providerOptions.Reasoning = clampReasoning(options.Reasoning)

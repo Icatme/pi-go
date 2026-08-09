@@ -210,7 +210,7 @@ func resolveDeepSeekThinking(model Model, level ThinkingLevel) *deepSeekThinking
 		return nil
 	}
 	switch strings.TrimSpace(string(level)) {
-	case "", string(ThinkingLevelXHigh):
+	case "", string(ThinkingLevelXHigh), string(ThinkingLevelMax):
 		return &deepSeekThinkingOptions{Type: "enabled", ReasoningEffort: "max"}
 	case string(ThinkingLevelHigh), string(ThinkingLevelMedium), string(ThinkingLevelLow), string(ThinkingLevelMinimal):
 		return &deepSeekThinkingOptions{Type: "enabled", ReasoningEffort: "high"}

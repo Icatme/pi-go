@@ -477,8 +477,12 @@ func TestAgentPromptEncodesRuntimeErrorsAsAssistantMessages(t *testing.T) {
 		t.Fatalf("NewAgent returned error: %v", err)
 	}
 
-	var endEvent AgentEvent
+	var (
+		endEvent   AgentEvent
+		eventTypes []EventType
+	)
 	agent.Subscribe(func(event AgentEvent) {
+		eventTypes = append(eventTypes, event.Type)
 		if event.Type == EventAgentEnd {
 			endEvent = event
 		}
@@ -509,8 +513,26 @@ func TestAgentPromptEncodesRuntimeErrorsAsAssistantMessages(t *testing.T) {
 	if state.Error != "boom" {
 		t.Fatalf("expected state error %q, got %q", "boom", state.Error)
 	}
-	if len(endEvent.Messages) != 1 || endEvent.Messages[0].ErrorMessage != "boom" {
+	if len(endEvent.Messages) != 2 || endEvent.Messages[0].Role != RoleUser || endEvent.Messages[1].ErrorMessage != "boom" {
 		t.Fatalf("expected agent_end to contain runtime error message, got %+v", endEvent.Messages)
+	}
+	wantEventTypes := []EventType{
+		EventAgentStart,
+		EventTurnStart,
+		EventMessageStart,
+		EventMessageEnd,
+		EventMessageStart,
+		EventMessageEnd,
+		EventTurnEnd,
+		EventAgentEnd,
+	}
+	if len(eventTypes) != len(wantEventTypes) {
+		t.Fatalf("expected runtime error lifecycle %v, got %v", wantEventTypes, eventTypes)
+	}
+	for i := range wantEventTypes {
+		if eventTypes[i] != wantEventTypes[i] {
+			t.Fatalf("expected runtime error event %d to be %q, got %q", i, wantEventTypes[i], eventTypes[i])
+		}
 	}
 }
 

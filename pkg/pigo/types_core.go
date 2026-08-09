@@ -31,6 +31,7 @@ const (
 	ThinkingLevelMedium  ThinkingLevel = "medium"
 	ThinkingLevelHigh    ThinkingLevel = "high"
 	ThinkingLevelXHigh   ThinkingLevel = "xhigh"
+	ThinkingLevelMax     ThinkingLevel = "max"
 
 	ModelThinkingLevelOff     ModelThinkingLevel = "off"
 	ModelThinkingLevelMinimal ModelThinkingLevel = "minimal"
@@ -38,6 +39,7 @@ const (
 	ModelThinkingLevelMedium  ModelThinkingLevel = "medium"
 	ModelThinkingLevelHigh    ModelThinkingLevel = "high"
 	ModelThinkingLevelXHigh   ModelThinkingLevel = "xhigh"
+	ModelThinkingLevelMax     ModelThinkingLevel = "max"
 
 	TransportSSE             Transport = "sse"
 	TransportWebSocket       Transport = "websocket"

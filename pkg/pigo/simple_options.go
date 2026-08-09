@@ -23,7 +23,7 @@ func buildBaseProviderStreamOptions(model Model, options SimpleStreamOptions) Pr
 }
 
 func clampReasoning(level ThinkingLevel) ThinkingLevel {
-	if level == ThinkingLevelXHigh {
+	if level == ThinkingLevelXHigh || level == ThinkingLevelMax {
 		return ThinkingLevelHigh
 	}
 	return level

@@ -55,7 +55,7 @@ func buildGoogleThinkingFromSimple(model Model, options StreamOptions) *GoogleTh
 	}
 
 	level := options.Reasoning
-	if level == "" || level == ThinkingLevelXHigh {
+	if level == "" || level == ThinkingLevelXHigh || level == ThinkingLevelMax {
 		level = ThinkingLevelHigh
 	}
 
@@ -98,7 +98,7 @@ func (b ThinkingBudgets) ForLevel(level ThinkingLevel) int {
 		return b.Low
 	case ThinkingLevelMedium:
 		return b.Medium
-	case ThinkingLevelHigh, ThinkingLevelXHigh:
+	case ThinkingLevelHigh, ThinkingLevelXHigh, ThinkingLevelMax:
 		return b.High
 	default:
 		return -1
@@ -134,7 +134,7 @@ func mapGoogleThinkingLevel(level ThinkingLevel) string {
 		return "LOW"
 	case ThinkingLevelMedium:
 		return "MEDIUM"
-	case ThinkingLevelHigh, ThinkingLevelXHigh:
+	case ThinkingLevelHigh, ThinkingLevelXHigh, ThinkingLevelMax:
 		return "HIGH"
 	default:
 		return "LOW"

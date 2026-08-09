@@ -801,7 +801,7 @@ func buildAnthropicThinkingConfig(model Model, options AnthropicMessagesProvider
 			budget = 4096
 		case ThinkingLevelHigh:
 			budget = 8192
-		case ThinkingLevelXHigh:
+		case ThinkingLevelXHigh, ThinkingLevelMax:
 			if SupportsXHigh(model) {
 				budget = 16384
 			} else {
