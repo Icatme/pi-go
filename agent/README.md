@@ -48,6 +48,8 @@ Success means:
   - `continue`
 - A higher-level `Agent` wrapper
 - A stateless `Runner` for asynchronous, snapshot-in/snapshot-out execution
+- An optional `agent/session` package for append-only lane logs, repositories,
+  pure replay, and turn-safe compaction
 - A native `prebuilt.PiAgent` direct re-export of `agent.Agent`
 - A native `prebuilt.CreateAgent(...)` helper for the common model-plus-tools constructor path
 - A native `prebuilt.ChatAgent` session wrapper built on the same runtime
@@ -61,6 +63,10 @@ Success means:
 - `agent/prebuilt`
   - native high-level wrappers implemented on top of the core runtime
   - does not reintroduce graph orchestration into the root module
+- `agent/session`
+  - provider-independent durable conversation primitives
+  - memory and versioned JSONL repositories
+  - pure lane/context replay and pluggable compaction summaries
 
 ## Direct Usage
 
@@ -123,6 +129,37 @@ _ = err
 Runner events are lossless and use a bounded buffer. Drain `Events` before
 calling `Wait`; call `Close` to cancel and drain a run that is being abandoned.
 
+## Durable Sessions
+
+The optional `agent/session` child package keeps persistence out of the core
+loop while providing a shared memory/JSONL contract:
+
+```go
+repo, err := sessionstore.NewJSONLRepository("./sessions")
+if err != nil {
+	panic(err)
+}
+durable, err := repo.Create(sessionstore.Header{ID: "chat-1"}, sessionstore.Options{})
+if err != nil {
+	panic(err)
+}
+defer durable.Close()
+
+_, _ = durable.AppendMessage(sessionstore.MainLane, core.NewUserTextMessage("Hello"))
+context, _ := durable.Context(sessionstore.MainLane)
+_ = context.Messages
+```
+
+Import the child package as:
+
+```go
+import sessionstore "github.com/Icatme/pi-go/agent/session"
+```
+
+Compaction keeps its summary separate from runtime messages. Applications must
+explicitly project that summary into their model context; the session package
+does not disguise it as a user instruction.
+
 `StreamModel` is the primary model abstraction. Integrate providers by
 implementing that interface directly, or use `StreamFunc` when a function-style
 adapter is enough.
@@ -164,6 +201,7 @@ The current stable core runtime surface is:
 Secondary integration surfaces:
 
 - `prebuilt`
+- `session`
 
 This package does not keep a compatibility shim for legacy image URLs.
 
@@ -196,7 +234,10 @@ Keep these concerns in outer orchestration packages:
 - checkpointing / time travel / HITL
 - graph composition
 
+Durable transcript storage and safe compaction live in `agent/session`; they do
+not add orchestration behavior to the root `agent` package.
+
 ## Current Limitations
 
 - Multi-node orchestration, supervisor-style routing, checkpointing, time travel,
-  and human-in-the-loop workflows are intentionally outside this package.
+  and human-in-the-loop workflows are intentionally outside the core runtime.

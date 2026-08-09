@@ -104,3 +104,13 @@
   cleanup explicit and cancellation-aware across the built-in adapters.
 - Added lifecycle, backpressure, adapter, cancellation, race, and vet coverage;
   no live provider test was run for this change.
+
+## 2026-08-09 - Durable agent sessions and compaction
+
+- Added the `agent/session` child package with memory and versioned append-only
+  JSONL repositories, lane branches, strict pure replay, and detached reads.
+- Added provider-independent compaction that only cuts complete user turns and
+  preserves assistant tool-call/result groups.
+- Excluded pi-agent's explicitly pre-convergence operation/Harness protocol;
+  session, race, vet, repository safety, and crash-tail tests passed without a
+  live provider request.
