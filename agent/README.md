@@ -47,6 +47,7 @@ Success means:
   - `steer` / `followUp`
   - `continue`
 - A higher-level `Agent` wrapper
+- A stateless `Runner` for asynchronous, snapshot-in/snapshot-out execution
 - A native `prebuilt.PiAgent` direct re-export of `agent.Agent`
 - A native `prebuilt.CreateAgent(...)` helper for the common model-plus-tools constructor path
 - A native `prebuilt.ChatAgent` session wrapper built on the same runtime
@@ -97,6 +98,31 @@ func main() {
 }
 ```
 
+For application boundaries that should not retain mutable agent state, use a
+`Runner`. Each invocation owns a run id and monotonically sequenced event
+stream, and returns a new snapshot without mutating the caller's input:
+
+```go
+runner, err := core.NewRunner(core.AgentDefinition{
+	Name:  "assistant",
+	Model: echoModel{},
+})
+if err != nil {
+	panic(err)
+}
+
+run := runner.Query(context.Background(), "Hello")
+for event := range run.Events() {
+	fmt.Println(event.RunID, event.Sequence, event.Type)
+}
+snapshot, err := run.Wait()
+_ = snapshot
+_ = err
+```
+
+Runner events are lossless and use a bounded buffer. Drain `Events` before
+calling `Wait`; call `Close` to cancel and drain a run that is being abandoned.
+
 `StreamModel` is the primary model abstraction. Integrate providers by
 implementing that interface directly, or use `StreamFunc` when a function-style
 adapter is enough.
@@ -125,6 +151,7 @@ User image input now follows the same shape as `pi-agent-core` and `pi-go`:
 The current stable core runtime surface is:
 
 - `Agent`
+- `Runner`
 - `Engine`
 - `AgentDefinition`
 - `ModelRef`

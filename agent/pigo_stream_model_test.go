@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaultPigoStreamModelReplaysRawIDsAndPreservesProviderFields(t *testing.T) {
@@ -164,10 +165,23 @@ func TestDefaultPigoStreamModelReplaysRawIDsAndPreservesProviderFields(t *testin
 	for event := range stream.Events() {
 		events = append(events, event)
 	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("expected first Close to succeed, got %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("expected repeated Close to succeed, got %v", err)
+	}
 
 	final, err := stream.Wait()
 	if err != nil {
 		t.Fatalf("expected final message, got error: %v", err)
+	}
+	cached, err := stream.Wait()
+	if err != nil {
+		t.Fatalf("expected repeated Wait to return the cached message, got error: %v", err)
+	}
+	if cached.ResponseID != final.ResponseID || cached.StopReason != final.StopReason {
+		t.Fatalf("repeated Wait returned a different result: first=%+v cached=%+v", final, cached)
 	}
 
 	if final.ResponseID != "msg_resp_1" {
@@ -242,6 +256,98 @@ func TestDefaultPigoStreamModelReplaysRawIDsAndPreservesProviderFields(t *testin
 	toolResultBlock := toolResultBlocks[0].(map[string]any)
 	if toolResultBlock["type"] != "tool_result" || toolResultBlock["tool_use_id"] != "tool_raw_1" {
 		t.Fatalf("expected tool result to keep raw tool id, got %#v", toolResultBlock)
+	}
+}
+
+func TestPigoAssistantStreamCloseCancelsDerivedRequestContext(t *testing.T) {
+	started := make(chan struct{}, 1)
+	canceled := make(chan struct{}, 1)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("expected response flusher")
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_cancel\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n"))
+		flusher.Flush()
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-r.Context().Done():
+			select {
+			case canceled <- struct{}{}:
+			default:
+			}
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	stream, err := (pigoStreamModel{}).Stream(context.Background(), ModelRequest{
+		Model: ModelRef{
+			Provider: "kimi-coding",
+			Model:    "kimi-k2-thinking",
+			ProviderConfig: ProviderConfig{
+				BaseURL: server.URL,
+				APIKey:  "kimi-test-key",
+			},
+		},
+		Messages: []Message{NewTextMessage(RoleUser, "cancel")},
+	})
+	if err != nil {
+		t.Fatalf("expected stream, got error: %v", err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider request did not start")
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("expected Close to succeed, got %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("expected repeated Close to succeed, got %v", err)
+	}
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not cancel the provider request context")
+	}
+
+	go func() {
+		for range stream.Events() {
+		}
+	}()
+	type waitResult struct {
+		message Message
+		err     error
+	}
+	done := make(chan waitResult, 1)
+	go func() {
+		message, waitErr := stream.Wait()
+		done <- waitResult{message: message, err: waitErr}
+	}()
+
+	select {
+	case first := <-done:
+		if first.err != nil {
+			t.Fatalf("Wait returned error after Close: %v", first.err)
+		}
+		second, waitErr := stream.Wait()
+		if waitErr != nil {
+			t.Fatalf("repeated Wait returned error: %v", waitErr)
+		}
+		if second.StopReason != first.message.StopReason || second.ErrorMessage != first.message.ErrorMessage {
+			t.Fatalf("repeated Wait returned a different result: first=%+v second=%+v", first.message, second)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait did not finish after Close")
 	}
 }
 

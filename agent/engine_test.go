@@ -2,11 +2,35 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestAgentEventJSONUsesFlatAssistantUpdateFields(t *testing.T) {
+	encoded, err := json.Marshal(AgentEvent{
+		Type:         EventMessageUpdate,
+		UpdateType:   AssistantEventTextDelta,
+		ContentIndex: 2,
+		Reason:       StopReasonStop,
+		Delta:        "hello",
+	})
+	if err != nil {
+		t.Fatalf("Marshal returned error: %v", err)
+	}
+	var event map[string]any
+	if err := json.Unmarshal(encoded, &event); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if _, exists := event["assistant_event"]; exists {
+		t.Fatalf("unexpected nested assistant_event field in %s", encoded)
+	}
+	if event["update_type"] != string(AssistantEventTextDelta) || event["content_index"] != float64(2) || event["reason"] != string(StopReasonStop) {
+		t.Fatalf("flat assistant update fields were not preserved: %s", encoded)
+	}
+}
 
 func TestEngineContinueNoMessagesReturnsError(t *testing.T) {
 	engine := NewEngine()
@@ -932,7 +956,7 @@ func TestEngineEmitsAssistantMessageUpdateSequence(t *testing.T) {
 							Parts:     []Part{{Type: PartTypeText, Text: ""}},
 							Timestamp: time.Now().UTC(),
 						},
-						ContentIndex: 0,
+						ContentIndex: 2,
 					},
 					{
 						Type: AssistantEventTextDelta,
@@ -942,7 +966,7 @@ func TestEngineEmitsAssistantMessageUpdateSequence(t *testing.T) {
 							Timestamp: time.Now().UTC(),
 						},
 						Delta:        "hel",
-						ContentIndex: 0,
+						ContentIndex: 2,
 					},
 					{
 						Type: AssistantEventTextEnd,
@@ -951,7 +975,8 @@ func TestEngineEmitsAssistantMessageUpdateSequence(t *testing.T) {
 							Parts:     []Part{{Type: PartTypeText, Text: "hello"}},
 							Timestamp: time.Now().UTC(),
 						},
-						ContentIndex: 0,
+						ContentIndex: 2,
+						Reason:       StopReasonStop,
 					},
 					{
 						Type: AssistantEventDone,
@@ -972,14 +997,18 @@ func TestEngineEmitsAssistantMessageUpdateSequence(t *testing.T) {
 	}
 
 	var (
-		eventTypes      []EventType
-		assistantEvents []AssistantEventType
-		deltas          []string
+		eventTypes   []EventType
+		updateTypes  []AssistantEventType
+		contentIndex []int
+		reasons      []StopReason
+		deltas       []string
 	)
 	_, err = engine.Run(context.Background(), definition, &AgentSnapshot{}, []Message{NewTextMessage(RoleUser, "hello")}, func(event AgentEvent) {
 		eventTypes = append(eventTypes, event.Type)
-		if event.AssistantEvent != nil {
-			assistantEvents = append(assistantEvents, event.AssistantEvent.Type)
+		if event.Type == EventMessageUpdate {
+			updateTypes = append(updateTypes, event.UpdateType)
+			contentIndex = append(contentIndex, event.ContentIndex)
+			reasons = append(reasons, event.Reason)
 			deltas = append(deltas, event.Delta)
 		}
 	})
@@ -1014,13 +1043,19 @@ func TestEngineEmitsAssistantMessageUpdateSequence(t *testing.T) {
 		AssistantEventTextDelta,
 		AssistantEventTextEnd,
 	}
-	if len(assistantEvents) != len(wantAssistantEvents) {
-		t.Fatalf("expected assistant events %v, got %v", wantAssistantEvents, assistantEvents)
+	if len(updateTypes) != len(wantAssistantEvents) {
+		t.Fatalf("expected assistant events %v, got %v", wantAssistantEvents, updateTypes)
 	}
 	for i := range wantAssistantEvents {
-		if assistantEvents[i] != wantAssistantEvents[i] {
-			t.Fatalf("expected assistant event %d to be %q, got %q", i, wantAssistantEvents[i], assistantEvents[i])
+		if updateTypes[i] != wantAssistantEvents[i] {
+			t.Fatalf("expected assistant event %d to be %q, got %q", i, wantAssistantEvents[i], updateTypes[i])
 		}
+	}
+	if contentIndex[0] != 2 || contentIndex[1] != 2 || contentIndex[2] != 2 {
+		t.Fatalf("unexpected content indexes %v", contentIndex)
+	}
+	if reasons[0] != "" || reasons[1] != "" || reasons[2] != StopReasonStop {
+		t.Fatalf("unexpected update reasons %v", reasons)
 	}
 	if deltas[0] != "" || deltas[1] != "hel" || deltas[2] != "" {
 		t.Fatalf("unexpected deltas %v", deltas)

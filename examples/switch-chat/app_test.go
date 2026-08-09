@@ -193,3 +193,7 @@ func (s *fakeAssistantStream) Events() <-chan core.AssistantEvent {
 func (s *fakeAssistantStream) Wait() (core.Message, error) {
 	return s.final, nil
 }
+
+func (s *fakeAssistantStream) Close() error {
+	return nil
+}

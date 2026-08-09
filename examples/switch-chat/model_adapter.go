@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	core "github.com/Icatme/pi-go/agent"
 	pigo "github.com/Icatme/pi-go/pkg/pigo"
@@ -39,6 +40,7 @@ func (m textPigoStreamModel) Stream(ctx context.Context, request core.ModelReque
 		resolvedModel.BaseURL = ref.ProviderConfig.BaseURL
 	}
 
+	streamCtx, cancel := context.WithCancel(ctx)
 	stream := pigo.StreamSimple(
 		resolvedModel,
 		pigo.Context{
@@ -49,7 +51,7 @@ func (m textPigoStreamModel) Stream(ctx context.Context, request core.ModelReque
 			APIKey:          strings.TrimSpace(ref.ProviderConfig.APIKey),
 			Auth:            toPigoAuth(ref.Provider, ref.ProviderConfig.Auth),
 			Headers:         cloneStringMap(ref.ProviderConfig.Headers),
-			RequestContext:  ctx,
+			RequestContext:  streamCtx,
 			SessionID:       request.SessionID,
 			Reasoning:       toPigoThinkingLevel(request.ThinkingLevel),
 			ThinkingBudgets: toPigoThinkingBudgets(request.ThinkingBudgets),
@@ -57,12 +59,15 @@ func (m textPigoStreamModel) Stream(ctx context.Context, request core.ModelReque
 			Transport:       toPigoTransport(request.Transport),
 		},
 	)
-	return newPigoAssistantStream(stream), nil
+	return newPigoAssistantStream(streamCtx, cancel, stream), nil
 }
 
 type pigoAssistantStream struct {
-	events chan core.AssistantEvent
-	result chan pigoStreamResult
+	events    chan core.AssistantEvent
+	done      chan struct{}
+	cancel    context.CancelFunc
+	closeOnce sync.Once
+	result    pigoStreamResult
 }
 
 type pigoStreamResult struct {
@@ -70,23 +75,24 @@ type pigoStreamResult struct {
 	err     error
 }
 
-func newPigoAssistantStream(stream *pigo.AssistantMessageEventStream) core.AssistantStream {
+func newPigoAssistantStream(ctx context.Context, cancel context.CancelFunc, stream *pigo.AssistantMessageEventStream) core.AssistantStream {
 	wrapped := &pigoAssistantStream{
 		events: make(chan core.AssistantEvent, 1024),
-		result: make(chan pigoStreamResult, 1),
+		done:   make(chan struct{}),
+		cancel: cancel,
 	}
 
 	go func() {
 		defer close(wrapped.events)
+		defer close(wrapped.done)
 		for event := range stream.Events() {
-			wrapped.events <- convertPigoAssistantEvent(event)
+			select {
+			case wrapped.events <- convertPigoAssistantEvent(event):
+			case <-ctx.Done():
+			}
 		}
 
-		final := stream.Result()
-		wrapped.result <- pigoStreamResult{
-			message: convertPigoAssistantMessage(final),
-		}
-		close(wrapped.result)
+		wrapped.result.message = convertPigoAssistantMessage(stream.Result())
 	}()
 
 	return wrapped
@@ -97,11 +103,14 @@ func (s *pigoAssistantStream) Events() <-chan core.AssistantEvent {
 }
 
 func (s *pigoAssistantStream) Wait() (core.Message, error) {
-	result, ok := <-s.result
-	if !ok {
-		return core.Message{}, fmt.Errorf("switch-chat: stream result unavailable")
-	}
-	return result.message, result.err
+	<-s.done
+	return s.result.message, s.result.err
+}
+
+func (s *pigoAssistantStream) Close() error {
+	s.closeOnce.Do(s.cancel)
+	<-s.done
+	return nil
 }
 
 func convertTextMessagesToPigo(messages []core.Message) []pigo.Message {

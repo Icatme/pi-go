@@ -25,6 +25,9 @@ The default offline suite covers:
 - provider error mapping on the built-in `pi-go` path
 - snapshot JSON round-trip for runtime state
 - concurrent request rejection and state consistency under burst message updates
+- flat assistant-update event fields and balanced stream-close error lifecycle
+- stateless runner snapshot isolation, run metadata, bounded lossless
+  backpressure, and concurrent `Wait` / `Close`
 
 ## Race Checks
 
@@ -74,6 +77,7 @@ Expected behavior:
 The current stable core runtime surface is:
 
 - `Agent`
+- `Runner`
 - `Engine`
 - `AgentDefinition`
 - `ModelRef`
