@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"reflect"
 	"strings"
 	"time"
 
@@ -285,16 +286,90 @@ func cloneStringAnyMap(input map[string]any) map[string]any {
 }
 
 func cloneAny(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneStringAnyMap(typed)
-	case []any:
-		cloned := make([]any, len(typed))
-		for i, item := range typed {
-			cloned[i] = cloneAny(item)
+	cloned := cloneReflectValue(reflect.ValueOf(value), make(map[cloneVisit]reflect.Value))
+	if !cloned.IsValid() {
+		return nil
+	}
+	return cloned.Interface()
+}
+
+type cloneVisit struct {
+	typeOf   reflect.Type
+	pointer  uintptr
+	length   int
+	capacity int
+}
+
+func cloneReflectValue(value reflect.Value, visited map[cloneVisit]reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return reflect.Value{}
+	}
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
 		}
-		return cloned
+		cloned := cloneReflectValue(value.Elem(), visited)
+		result := reflect.New(value.Type()).Elem()
+		result.Set(cloned)
+		return result
+	case reflect.Pointer:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		visit := cloneVisit{typeOf: value.Type(), pointer: value.Pointer()}
+		if cloned, ok := visited[visit]; ok {
+			return cloned
+		}
+		result := reflect.New(value.Type().Elem())
+		visited[visit] = result
+		result.Elem().Set(cloneReflectValue(value.Elem(), visited))
+		return result
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		visit := cloneVisit{typeOf: value.Type(), pointer: value.Pointer()}
+		if cloned, ok := visited[visit]; ok {
+			return cloned
+		}
+		result := reflect.MakeMapWithSize(value.Type(), value.Len())
+		visited[visit] = result
+		iterator := value.MapRange()
+		for iterator.Next() {
+			result.SetMapIndex(iterator.Key(), cloneReflectValue(iterator.Value(), visited))
+		}
+		return result
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		visit := cloneVisit{typeOf: value.Type(), pointer: value.Pointer(), length: value.Len(), capacity: value.Cap()}
+		if cloned, ok := visited[visit]; ok {
+			return cloned
+		}
+		result := reflect.MakeSlice(value.Type(), value.Len(), value.Cap())
+		visited[visit] = result
+		for i := 0; i < value.Len(); i++ {
+			result.Index(i).Set(cloneReflectValue(value.Index(i), visited))
+		}
+		return result
+	case reflect.Array:
+		result := reflect.New(value.Type()).Elem()
+		for i := 0; i < value.Len(); i++ {
+			result.Index(i).Set(cloneReflectValue(value.Index(i), visited))
+		}
+		return result
+	case reflect.Struct:
+		result := reflect.New(value.Type()).Elem()
+		result.Set(value)
+		for i := 0; i < value.NumField(); i++ {
+			if result.Field(i).CanSet() && value.Type().Field(i).IsExported() {
+				result.Field(i).Set(cloneReflectValue(value.Field(i), visited))
+			}
+		}
+		return result
 	default:
-		return typed
+		return value
 	}
 }

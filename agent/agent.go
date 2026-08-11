@@ -154,7 +154,7 @@ func (a *Agent) Continue(ctx context.Context) error {
 	switch tail.Role {
 	case RoleAssistant:
 		if queued := a.dequeueSteering(); len(queued) > 0 {
-			next, runErr = a.engine.RunWithHooks(runCtx, definition, &snapshot, queued, a.processLoopEvent, a.runtimeHooks())
+			next, runErr = a.engine.RunWithHooks(runCtx, definition, &snapshot, queued, a.processLoopEvent, a.runtimeHooksSkippingInitialSteering())
 		} else if queued := a.dequeueFollowUp(); len(queued) > 0 {
 			next, runErr = a.engine.RunWithHooks(runCtx, definition, &snapshot, queued, a.processLoopEvent, a.runtimeHooks())
 		} else {
@@ -425,9 +425,14 @@ func (a *Agent) ClearMessages() {
 }
 
 // Reset clears runtime conversation state while preserving configuration.
-func (a *Agent) Reset() {
+// It rejects an active run so the in-flight snapshot cannot overwrite the
+// reset state when that run finishes.
+func (a *Agent) Reset() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.running {
+		return ErrAlreadyRunning
+	}
 
 	a.snapshot.Messages = nil
 	a.snapshot.PendingToolCalls = nil
@@ -439,6 +444,7 @@ func (a *Agent) Reset() {
 	a.state.IsStreaming = false
 	a.steeringQueue = nil
 	a.followUpQueue = nil
+	return nil
 }
 
 func (a *Agent) startRun(ctx context.Context) (context.Context, AgentDefinition, AgentSnapshot, chan struct{}, error) {
@@ -499,6 +505,7 @@ func (a *Agent) finishRun(snapshot *AgentSnapshot, idle chan struct{}) {
 }
 
 func (a *Agent) handleRuntimeError(ctx context.Context, snapshot AgentSnapshot, runErr error) *AgentSnapshot {
+	newMessages, previousTurnEnded := engineRunErrorContext(runErr)
 	stopReason := StopReasonError
 	if ctx.Err() == context.Canceled {
 		stopReason = StopReasonAborted
@@ -517,6 +524,17 @@ func (a *Agent) handleRuntimeError(ctx context.Context, snapshot AgentSnapshot, 
 	next.Error = runErr.Error()
 	next.Messages = append(next.Messages, errorMessage)
 
+	if previousTurnEnded {
+		a.processLoopEvent(AgentEvent{Type: EventTurnStart})
+	}
+	a.processLoopEvent(AgentEvent{Type: EventMessageStart, Message: &errorMessage})
+	a.processLoopEvent(AgentEvent{Type: EventMessageEnd, Message: &errorMessage})
+	a.processLoopEvent(AgentEvent{Type: EventTurnEnd, Message: &errorMessage})
+	a.processLoopEvent(AgentEvent{
+		Type:     EventAgentEnd,
+		Messages: append(newMessages, cloneMessage(errorMessage)),
+	})
+
 	a.mu.Lock()
 	a.snapshot = cloneSnapshotValue(*next)
 	a.refreshStateLocked()
@@ -524,11 +542,6 @@ func (a *Agent) handleRuntimeError(ctx context.Context, snapshot AgentSnapshot, 
 	a.state.StreamMessage = nil
 	a.state.PendingToolCalls = make(map[string]PendingToolCall)
 	a.mu.Unlock()
-
-	a.dispatchEvent(AgentEvent{
-		Type:     EventAgentEnd,
-		Messages: []Message{cloneMessage(errorMessage)},
-	})
 
 	return next
 }
@@ -606,7 +619,7 @@ func (a *Agent) dispatchEvent(event AgentEvent) {
 	a.mu.RUnlock()
 
 	for _, listener := range listeners {
-		listener(event)
+		listener(cloneAgentEvent(event))
 	}
 }
 
@@ -667,6 +680,20 @@ func (a *Agent) runtimeHooks() LoopHooks {
 			return a.dequeueFollowUp(), nil
 		},
 	}
+}
+
+func (a *Agent) runtimeHooksSkippingInitialSteering() LoopHooks {
+	hooks := a.runtimeHooks()
+	dequeueSteering := hooks.GetSteeringMessages
+	firstPoll := true
+	hooks.GetSteeringMessages = func(ctx context.Context) ([]Message, error) {
+		if firstPoll {
+			firstPoll = false
+			return nil, nil
+		}
+		return dequeueSteering(ctx)
+	}
+	return hooks
 }
 
 func (a *Agent) setActiveDefinition(definition AgentDefinition) {

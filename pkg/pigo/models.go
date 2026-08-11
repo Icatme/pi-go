@@ -87,6 +87,11 @@ func SupportsXHigh(model Model) bool {
 	return false
 }
 
+func SupportsMax(model Model) bool {
+	mapped, ok := model.ThinkingLevelMap[ModelThinkingLevelMax]
+	return ok && mapped != ""
+}
+
 var extendedThinkingLevels = []ModelThinkingLevel{
 	ModelThinkingLevelOff,
 	ModelThinkingLevelMinimal,
@@ -94,6 +99,7 @@ var extendedThinkingLevels = []ModelThinkingLevel{
 	ModelThinkingLevelMedium,
 	ModelThinkingLevelHigh,
 	ModelThinkingLevelXHigh,
+	ModelThinkingLevelMax,
 }
 
 func GetSupportedThinkingLevels(model Model) []ModelThinkingLevel {
@@ -107,7 +113,7 @@ func GetSupportedThinkingLevels(model Model) []ModelThinkingLevel {
 		if mapped == "" && hasMapping {
 			continue
 		}
-		if level == ModelThinkingLevelXHigh && !hasMapping {
+		if (level == ModelThinkingLevelXHigh || level == ModelThinkingLevelMax) && !hasMapping {
 			continue
 		}
 		result = append(result, level)

@@ -4,30 +4,36 @@ import "context"
 
 // AgentDefinition describes an agent runtime blueprint.
 type AgentDefinition struct {
-	Name             string             `json:"name,omitempty"`
-	SystemPrompt     string             `json:"system_prompt,omitempty"`
-	DefaultModel     ModelRef           `json:"default_model,omitempty"`
-	ThinkingLevel    ThinkingLevel      `json:"thinking_level,omitempty"`
-	SessionID        string             `json:"session_id,omitempty"`
-	Transport        Transport          `json:"transport,omitempty"`
-	MaxRetryDelayMs  int                `json:"max_retry_delay_ms,omitempty"`
-	ThinkingBudgets  ThinkingBudgets    `json:"thinking_budgets,omitempty"`
-	Model            StreamModel        `json:"-"`
-	ModelResolver    ModelResolver      `json:"-"`
-	Tools            []ToolDefinition   `json:"-"`
-	ToolResolver     ToolResolver       `json:"-"`
-	TransformContext TransformContext   `json:"-"`
-	ConvertToLLM     ConvertToLLM       `json:"-"`
-	BeforeToolCall   BeforeToolCallHook `json:"-"`
-	AfterToolCall    AfterToolCallHook  `json:"-"`
-	ToolExecution    ToolExecutionMode  `json:"tool_execution,omitempty"`
-	SteeringMode     QueueMode          `json:"steering_mode,omitempty"`
-	FollowUpMode     QueueMode          `json:"follow_up_mode,omitempty"`
-	MaxTurns         int                `json:"max_turns,omitempty"`
+	Name                string                  `json:"name,omitempty"`
+	SystemPrompt        string                  `json:"system_prompt,omitempty"`
+	DefaultModel        ModelRef                `json:"default_model,omitempty"`
+	ThinkingLevel       ThinkingLevel           `json:"thinking_level,omitempty"`
+	SessionID           string                  `json:"session_id,omitempty"`
+	Transport           Transport               `json:"transport,omitempty"`
+	MaxRetryDelayMs     int                     `json:"max_retry_delay_ms,omitempty"`
+	ThinkingBudgets     ThinkingBudgets         `json:"thinking_budgets,omitempty"`
+	Model               StreamModel             `json:"-"`
+	ModelResolver       ModelResolver           `json:"-"`
+	Tools               []ToolDefinition        `json:"-"`
+	ToolResolver        ToolResolver            `json:"-"`
+	TransformContext    TransformContext        `json:"-"`
+	ConvertToLLM        ConvertToLLM            `json:"-"`
+	BeforeToolCall      BeforeToolCallHook      `json:"-"`
+	AfterToolCall       AfterToolCallHook       `json:"-"`
+	PrepareNextTurn     PrepareNextTurnHook     `json:"-"`
+	ShouldStopAfterTurn ShouldStopAfterTurnHook `json:"-"`
+	ToolExecution       ToolExecutionMode       `json:"tool_execution,omitempty"`
+	SteeringMode        QueueMode               `json:"steering_mode,omitempty"`
+	FollowUpMode        QueueMode               `json:"follow_up_mode,omitempty"`
+	MaxTurns            int                     `json:"max_turns,omitempty"`
 }
 
 // Validate returns a copy of the definition with defaults applied.
 func (d AgentDefinition) Validate() (AgentDefinition, error) {
+	d.Tools = cloneTools(d.Tools)
+	if err := validateToolDefinitions(d.Tools); err != nil {
+		return AgentDefinition{}, err
+	}
 	if d.ToolExecution == "" {
 		d.ToolExecution = ToolExecutionParallel
 	}
@@ -44,7 +50,7 @@ func (d AgentDefinition) Validate() (AgentDefinition, error) {
 		d.ThinkingLevel = ThinkingOff
 	}
 	if d.Transport == "" {
-		d.Transport = TransportSSE
+		d.Transport = TransportAuto
 	}
 	if d.TransformContext == nil {
 		d.TransformContext = DefaultTransformContext
@@ -86,9 +92,21 @@ func (d AgentDefinition) ResolveModel(ctx context.Context, snapshot AgentSnapsho
 // ResolveTools returns the effective tools for a snapshot.
 func (d AgentDefinition) ResolveTools(ctx context.Context, snapshot AgentSnapshot) ([]ToolDefinition, error) {
 	if d.ToolResolver != nil {
-		return d.ToolResolver(ctx, snapshot)
+		tools, err := d.ToolResolver(ctx, snapshot)
+		if err != nil {
+			return nil, err
+		}
+		tools = cloneTools(tools)
+		if err := validateToolDefinitions(tools); err != nil {
+			return nil, err
+		}
+		return tools, nil
 	}
-	return cloneTools(d.Tools), nil
+	tools := cloneTools(d.Tools)
+	if err := validateToolDefinitions(tools); err != nil {
+		return nil, err
+	}
+	return tools, nil
 }
 
 // DefaultTransformContext returns a shallow-cloned message slice.

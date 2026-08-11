@@ -13,20 +13,23 @@ type AgentInitialState struct {
 
 // AgentOptions is the higher-level user-facing constructor contract for Agent.
 type AgentOptions struct {
-	InitialState     AgentInitialState  `json:"initial_state,omitempty"`
-	Model            StreamModel        `json:"-"`
-	ModelResolver    ModelResolver      `json:"-"`
-	Stream           StreamFunc         `json:"-"`
-	ConvertToLLM     ConvertToLLM       `json:"-"`
-	TransformContext TransformContext   `json:"-"`
-	SteeringMode     QueueMode          `json:"steering_mode,omitempty"`
-	FollowUpMode     QueueMode          `json:"follow_up_mode,omitempty"`
-	ThinkingBudgets  ThinkingBudgets    `json:"thinking_budgets,omitempty"`
-	Transport        Transport          `json:"transport,omitempty"`
-	MaxRetryDelayMs  int                `json:"max_retry_delay_ms,omitempty"`
-	ToolExecution    ToolExecutionMode  `json:"tool_execution,omitempty"`
-	BeforeToolCall   BeforeToolCallHook `json:"-"`
-	AfterToolCall    AfterToolCallHook  `json:"-"`
+	InitialState        AgentInitialState       `json:"initial_state,omitempty"`
+	Model               StreamModel             `json:"-"`
+	ModelResolver       ModelResolver           `json:"-"`
+	Stream              StreamFunc              `json:"-"`
+	ConvertToLLM        ConvertToLLM            `json:"-"`
+	TransformContext    TransformContext        `json:"-"`
+	SteeringMode        QueueMode               `json:"steering_mode,omitempty"`
+	FollowUpMode        QueueMode               `json:"follow_up_mode,omitempty"`
+	ThinkingBudgets     ThinkingBudgets         `json:"thinking_budgets,omitempty"`
+	Transport           Transport               `json:"transport,omitempty"`
+	MaxRetryDelayMs     int                     `json:"max_retry_delay_ms,omitempty"`
+	ToolExecution       ToolExecutionMode       `json:"tool_execution,omitempty"`
+	BeforeToolCall      BeforeToolCallHook      `json:"-"`
+	AfterToolCall       AfterToolCallHook       `json:"-"`
+	PrepareNextTurn     PrepareNextTurnHook     `json:"-"`
+	ShouldStopAfterTurn ShouldStopAfterTurnHook `json:"-"`
+	MaxTurns            int                     `json:"max_turns,omitempty"`
 }
 
 // NewAgentWithOptions creates an Agent from a higher-level AgentOptions contract.
@@ -42,23 +45,26 @@ func (o AgentOptions) build() (AgentDefinition, AgentSnapshot) {
 	}
 
 	definition := AgentDefinition{
-		SystemPrompt:     o.InitialState.SystemPrompt,
-		DefaultModel:     cloneModelRef(o.InitialState.ModelRef),
-		ThinkingLevel:    o.InitialState.ThinkingLevel,
-		SessionID:        o.InitialState.SessionID,
-		Transport:        o.Transport,
-		MaxRetryDelayMs:  o.MaxRetryDelayMs,
-		ThinkingBudgets:  cloneThinkingBudgets(o.ThinkingBudgets),
-		Model:            model,
-		ModelResolver:    o.ModelResolver,
-		Tools:            cloneTools(o.InitialState.Tools),
-		TransformContext: o.TransformContext,
-		ConvertToLLM:     o.ConvertToLLM,
-		BeforeToolCall:   o.BeforeToolCall,
-		AfterToolCall:    o.AfterToolCall,
-		ToolExecution:    o.ToolExecution,
-		SteeringMode:     o.SteeringMode,
-		FollowUpMode:     o.FollowUpMode,
+		SystemPrompt:        o.InitialState.SystemPrompt,
+		DefaultModel:        cloneModelRef(o.InitialState.ModelRef),
+		ThinkingLevel:       o.InitialState.ThinkingLevel,
+		SessionID:           o.InitialState.SessionID,
+		Transport:           o.Transport,
+		MaxRetryDelayMs:     o.MaxRetryDelayMs,
+		ThinkingBudgets:     cloneThinkingBudgets(o.ThinkingBudgets),
+		Model:               model,
+		ModelResolver:       o.ModelResolver,
+		Tools:               cloneTools(o.InitialState.Tools),
+		TransformContext:    o.TransformContext,
+		ConvertToLLM:        o.ConvertToLLM,
+		BeforeToolCall:      o.BeforeToolCall,
+		AfterToolCall:       o.AfterToolCall,
+		PrepareNextTurn:     o.PrepareNextTurn,
+		ShouldStopAfterTurn: o.ShouldStopAfterTurn,
+		ToolExecution:       o.ToolExecution,
+		SteeringMode:        o.SteeringMode,
+		FollowUpMode:        o.FollowUpMode,
+		MaxTurns:            o.MaxTurns,
 	}
 
 	snapshot := AgentSnapshot{

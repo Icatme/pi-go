@@ -493,7 +493,7 @@ func TestEngineInjectsSteeringAfterAllToolCallsComplete(t *testing.T) {
 	}
 }
 
-func TestEngineBeforeToolCallMutatesExecutionArgsWithoutRevalidation(t *testing.T) {
+func TestEngineBeforeToolCallMutationIsRevalidatedBeforeExecution(t *testing.T) {
 	engine := NewEngine()
 
 	var (
@@ -641,12 +641,21 @@ func TestEngineBeforeToolCallBlockProducesErrorToolResult(t *testing.T) {
 	}
 }
 
-func TestEngineBeforeToolCallErrorStopsRun(t *testing.T) {
+func TestEngineBeforeToolCallErrorBecomesToolResult(t *testing.T) {
 	engine := NewEngine()
+	callIndex := 0
 
 	definition, err := AgentDefinition{
 		Model: staticModel{
 			streamFn: func(_ context.Context, _ ModelRequest) (AssistantStream, error) {
+				if callIndex > 0 {
+					return newStaticAssistantStream(Message{
+						Role:       RoleAssistant,
+						StopReason: StopReasonStop,
+						Timestamp:  time.Now().UTC(),
+					}, nil), nil
+				}
+				callIndex++
 				return newStaticAssistantStream(Message{
 					Role: RoleAssistant,
 					ToolCalls: []ToolCall{
@@ -667,14 +676,14 @@ func TestEngineBeforeToolCallErrorStopsRun(t *testing.T) {
 	}
 
 	next, err := engine.Run(context.Background(), definition, &AgentSnapshot{}, []Message{NewTextMessage(RoleUser, "run")}, nil)
-	if err == nil || err.Error() != "before hook boom" {
-		t.Fatalf("expected before-hook error, got %v", err)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
 	}
-	if next == nil || next.Error != "before hook boom" {
-		t.Fatalf("expected snapshot error to be preserved, got %+v", next)
+	if len(next.Messages) != 4 || next.Messages[2].ToolResult == nil || !next.Messages[2].ToolResult.IsError {
+		t.Fatalf("expected before-hook error tool result, got %+v", next.Messages)
 	}
-	if len(next.Messages) != 2 {
-		t.Fatalf("expected run to stop before tool result append, got %d messages", len(next.Messages))
+	if next.Messages[2].ToolResult.Content[0].Text != "before hook boom" {
+		t.Fatalf("unexpected before-hook tool result: %+v", next.Messages[2].ToolResult)
 	}
 }
 
@@ -742,12 +751,21 @@ func TestEngineAfterToolCallOverridesResultAndErrorFlag(t *testing.T) {
 	}
 }
 
-func TestEngineAfterToolCallErrorStopsRun(t *testing.T) {
+func TestEngineAfterToolCallErrorBecomesToolResult(t *testing.T) {
 	engine := NewEngine()
+	callIndex := 0
 
 	definition, err := AgentDefinition{
 		Model: staticModel{
 			streamFn: func(_ context.Context, _ ModelRequest) (AssistantStream, error) {
+				if callIndex > 0 {
+					return newStaticAssistantStream(Message{
+						Role:       RoleAssistant,
+						StopReason: StopReasonStop,
+						Timestamp:  time.Now().UTC(),
+					}, nil), nil
+				}
+				callIndex++
 				return newStaticAssistantStream(Message{
 					Role: RoleAssistant,
 					ToolCalls: []ToolCall{
@@ -775,14 +793,14 @@ func TestEngineAfterToolCallErrorStopsRun(t *testing.T) {
 	}
 
 	next, err := engine.Run(context.Background(), definition, &AgentSnapshot{}, []Message{NewTextMessage(RoleUser, "run")}, nil)
-	if err == nil || err.Error() != "after hook boom" {
-		t.Fatalf("expected after-hook error, got %v", err)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
 	}
-	if next == nil || next.Error != "after hook boom" {
-		t.Fatalf("expected snapshot error to be preserved, got %+v", next)
+	if len(next.Messages) != 4 || next.Messages[2].ToolResult == nil || !next.Messages[2].ToolResult.IsError {
+		t.Fatalf("expected after-hook error tool result, got %+v", next.Messages)
 	}
-	if len(next.Messages) != 2 {
-		t.Fatalf("expected run to stop before tool result append, got %d messages", len(next.Messages))
+	if next.Messages[2].ToolResult.Content[0].Text != "after hook boom" {
+		t.Fatalf("unexpected after-hook tool result: %+v", next.Messages[2].ToolResult)
 	}
 }
 

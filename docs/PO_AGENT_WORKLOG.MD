@@ -85,3 +85,13 @@
 - Added hermetic protocol/routing coverage and a gated live OpenCode Go request; no live subscription request was run during this change.
 - Finalized the backward-compatible feature release as `v0.6.0`, including the package version, examples dependency pin, and release-facing agent installation guidance.
 - Verified with focused provider and CLI tests, `go test ./... -count=1`, `.\scripts\test.ps1`, `go vet ./...` in the root and examples modules, and `git diff --check` under `GOWORK=off`.
+
+## 2026-08-09 - Agent core safety parity
+
+- Hardened the single-agent loop against truncated tool calls, active reset,
+  late progress, cancellation during preflight, and hook-mutated invalid args.
+- Added per-tool sequential execution, all-results termination hints,
+  turn-boundary prepare/stop hooks, automatic transport defaults, cached
+  WebSocket selection, and model-aware maximum reasoning support.
+- Added pinned, actively maintained JSON Schema validation with focused offline
+  and race regressions; no live provider test was run for this change.

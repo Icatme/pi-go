@@ -18,7 +18,7 @@ func buildOpenAIResponsesProviderOptions(model Model, options SimpleStreamOption
 	providerOptions := OpenAIResponsesProviderOptions{
 		StreamOptions: streamOptionsFromSimple(model, options),
 	}
-	if SupportsXHigh(model) {
+	if SupportsXHigh(model) || SupportsMax(model) {
 		providerOptions.Reasoning = options.Reasoning
 	} else {
 		providerOptions.Reasoning = clampReasoning(options.Reasoning)

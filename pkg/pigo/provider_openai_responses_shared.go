@@ -1100,6 +1100,16 @@ func clampOpenAIResponsesReasoningEffort(model Model, level ThinkingLevel) strin
 		parts := strings.Split(id, "/")
 		id = parts[len(parts)-1]
 	}
+	if effort == string(ThinkingLevelMax) {
+		if mapped := strings.TrimSpace(model.ThinkingLevelMap[ModelThinkingLevelMax]); mapped != "" {
+			return mapped
+		}
+		if SupportsXHigh(model) {
+			effort = string(ThinkingLevelXHigh)
+		} else {
+			effort = string(ThinkingLevelHigh)
+		}
+	}
 
 	if (strings.HasPrefix(id, "gpt-5.2") || strings.HasPrefix(id, "gpt-5.3") || strings.HasPrefix(id, "gpt-5.4")) && effort == string(ThinkingLevelMinimal) {
 		return string(ThinkingLevelLow)

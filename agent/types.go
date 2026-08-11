@@ -140,6 +140,8 @@ const (
 	ThinkingHigh ThinkingLevel = "high"
 	// ThinkingXHigh requests extra high reasoning effort.
 	ThinkingXHigh ThinkingLevel = "xhigh"
+	// ThinkingMax requests the highest reasoning effort supported by the model.
+	ThinkingMax ThinkingLevel = "max"
 )
 
 // Transport identifies the preferred model transport.
@@ -150,6 +152,8 @@ const (
 	TransportSSE Transport = "sse"
 	// TransportWebSocket prefers a websocket stream when the provider supports it.
 	TransportWebSocket Transport = "websocket"
+	// TransportWebSocketCached prefers a cached websocket connection when supported.
+	TransportWebSocketCached Transport = "websocket-cached"
 	// TransportAuto lets the provider choose the best available stream transport.
 	TransportAuto Transport = "auto"
 )
@@ -180,8 +184,9 @@ type ToolCall struct {
 
 // ToolResult is the normalized output of a tool execution.
 type ToolResult struct {
-	Content []Part `json:"content,omitempty"`
-	Details any    `json:"details,omitempty"`
+	Content   []Part `json:"content,omitempty"`
+	Details   any    `json:"details,omitempty"`
+	Terminate bool   `json:"terminate,omitempty"`
 }
 
 // ToolResultPayload stores tool-result specific message data.
@@ -331,6 +336,7 @@ type ToolDefinition struct {
 	Label          string                      `json:"label,omitempty"`
 	Description    string                      `json:"description,omitempty"`
 	Parameters     map[string]any              `json:"parameters,omitempty"`
+	ExecutionMode  ToolExecutionMode           `json:"execution_mode,omitempty"`
 	ParseArguments func(ToolCall) (any, error) `json:"-"`
 	Execute        ToolExecutorFunc            `json:"-"`
 }
@@ -345,8 +351,9 @@ type BeforeToolCallContext struct {
 
 // BeforeToolCallResult can block tool execution during preflight.
 type BeforeToolCallResult struct {
-	Block  bool   `json:"block,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	Block     bool   `json:"block,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Terminate bool   `json:"terminate,omitempty"`
 }
 
 // BeforeToolCallHook runs before a tool body executes.
@@ -364,12 +371,42 @@ type AfterToolCallContext struct {
 
 // AfterToolCallResult can override a tool result before it is emitted.
 type AfterToolCallResult struct {
-	Result  *ToolResult `json:"result,omitempty"`
-	IsError *bool       `json:"is_error,omitempty"`
+	Result    *ToolResult `json:"result,omitempty"`
+	IsError   *bool       `json:"is_error,omitempty"`
+	Terminate *bool       `json:"terminate,omitempty"`
 }
 
 // AfterToolCallHook runs after a tool body completes.
 type AfterToolCallHook func(context.Context, AfterToolCallContext) (AfterToolCallResult, error)
+
+// ShouldStopAfterTurnContext describes a completed turn after its tool results
+// have been appended to the snapshot.
+type ShouldStopAfterTurnContext struct {
+	Message     Message      `json:"message"`
+	ToolResults []Message    `json:"tool_results,omitempty"`
+	Context     AgentContext `json:"context"`
+	NewMessages []Message    `json:"new_messages,omitempty"`
+}
+
+// PrepareNextTurnContext describes the state available before another model
+// request is started.
+type PrepareNextTurnContext = ShouldStopAfterTurnContext
+
+// AgentLoopTurnUpdate replaces selected state used by the next turn. A nil
+// field preserves the current value.
+type AgentLoopTurnUpdate struct {
+	Context       *AgentContext  `json:"context,omitempty"`
+	Model         StreamModel    `json:"-"`
+	ModelRef      *ModelRef      `json:"model,omitempty"`
+	ThinkingLevel *ThinkingLevel `json:"thinking_level,omitempty"`
+}
+
+// ShouldStopAfterTurnHook can stop the run at a completed turn boundary.
+type ShouldStopAfterTurnHook func(context.Context, ShouldStopAfterTurnContext) (bool, error)
+
+// PrepareNextTurnHook can replace context, model, or thinking state for the
+// next turn in the same run.
+type PrepareNextTurnHook func(context.Context, PrepareNextTurnContext) (*AgentLoopTurnUpdate, error)
 
 // TransformContext allows pruning or enriching messages before model conversion.
 type TransformContext func(context.Context, []Message) ([]Message, error)
@@ -449,7 +486,7 @@ func NewToolResultMessage(call ToolCall, result ToolResult, isError bool) Messag
 			OriginalToolCallID: call.OriginalID,
 			ToolName:           call.Name,
 			Content:            cloneParts(result.Content),
-			Details:            result.Details,
+			Details:            cloneAny(result.Details),
 			IsError:            isError,
 		},
 		Timestamp: time.Now().UTC(),

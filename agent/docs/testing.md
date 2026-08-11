@@ -17,6 +17,9 @@ The default offline suite covers:
 
 - core prompt / continue / steer / follow-up behavior
 - tool execution lifecycle, including `beforeToolCall` / `afterToolCall`
+- schema validation before and after tool-hook mutation, truncated tool-call
+  rejection, per-tool execution mode, termination hints, and late-update gating
+- active-reset rejection and turn-boundary hook ordering
 - mixed replay invariants for provider metadata, reasoning signatures, images,
   raw tool ids, and tool results
 - provider error mapping on the built-in `pi-go` path

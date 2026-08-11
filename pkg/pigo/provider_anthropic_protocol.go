@@ -53,6 +53,14 @@ func mapAnthropicReasoningEffort(model Model, level ThinkingLevel) string {
 			return "max"
 		}
 		return "high"
+	case ThinkingLevelMax:
+		if SupportsMax(model) {
+			return model.ThinkingLevelMap[ModelThinkingLevelMax]
+		}
+		if SupportsXHigh(model) {
+			return mapAnthropicReasoningEffort(model, ThinkingLevelXHigh)
+		}
+		return "high"
 	default:
 		return "high"
 	}

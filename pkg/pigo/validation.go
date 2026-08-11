@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"regexp"
 	"strconv"
 	"strings"
@@ -222,11 +223,13 @@ func validateTypedSchema(schema map[string]any, schemaType any, value any, path 
 func matchesJSONType(value any, schemaType string) bool {
 	switch schemaType {
 	case "number":
-		_, ok := value.(float64)
-		return ok
+		return isNativeNumber(value)
 	case "integer":
-		n, ok := value.(float64)
-		return ok && math.Trunc(n) == n
+		if !isNativeNumber(value) {
+			return false
+		}
+		_, number, ok := coerceInteger(value)
+		return ok && number.IsInt()
 	case "boolean":
 		_, ok := value.(bool)
 		return ok
@@ -443,7 +446,21 @@ func validateStringSchema(schema map[string]any, value any, path string) (any, [
 }
 
 func validateNumberSchema(schema map[string]any, value any, path string, integerOnly bool) (any, []schemaValidationError) {
-	numberValue, ok := coerceNumber(value, integerOnly)
+	var (
+		validated   any
+		numberValue *big.Rat
+		ok          bool
+	)
+	if integerOnly {
+		validated, numberValue, ok = coerceInteger(value)
+	} else {
+		var number float64
+		number, ok = coerceNumber(value, false)
+		if ok {
+			validated = number
+			numberValue, ok = numberToRat(number)
+		}
+	}
 	if !ok {
 		message := "must be number"
 		if integerOnly {
@@ -455,8 +472,8 @@ func validateNumberSchema(schema map[string]any, value any, path string, integer
 	if enumValues, ok := schema["enum"].([]any); ok && len(enumValues) > 0 {
 		matched := false
 		for _, enumValue := range enumValues {
-			enumNumber, ok := toFloat64(enumValue)
-			if ok && numberValue == enumNumber {
+			enumNumber, ok := numberToRat(enumValue)
+			if ok && numberValue.Cmp(enumNumber) == 0 {
 				matched = true
 				break
 			}
@@ -466,23 +483,20 @@ func validateNumberSchema(schema map[string]any, value any, path string, integer
 		}
 	}
 
-	if minimum, ok := toFloat64(schema["minimum"]); ok && numberValue < minimum {
-		return nil, []schemaValidationError{{Path: path, Message: fmt.Sprintf("must be >= %v", trimFloat(minimum))}}
+	if minimum, ok := numberToRat(schema["minimum"]); ok && numberValue.Cmp(minimum) < 0 {
+		return nil, []schemaValidationError{{Path: path, Message: fmt.Sprintf("must be >= %v", schema["minimum"])}}
 	}
-	if maximum, ok := toFloat64(schema["maximum"]); ok && numberValue > maximum {
-		return nil, []schemaValidationError{{Path: path, Message: fmt.Sprintf("must be <= %v", trimFloat(maximum))}}
+	if maximum, ok := numberToRat(schema["maximum"]); ok && numberValue.Cmp(maximum) > 0 {
+		return nil, []schemaValidationError{{Path: path, Message: fmt.Sprintf("must be <= %v", schema["maximum"])}}
 	}
-	if exclusiveMinimum, ok := toFloat64(schema["exclusiveMinimum"]); ok && numberValue <= exclusiveMinimum {
-		return nil, []schemaValidationError{{Path: path, Message: fmt.Sprintf("must be > %v", trimFloat(exclusiveMinimum))}}
+	if exclusiveMinimum, ok := numberToRat(schema["exclusiveMinimum"]); ok && numberValue.Cmp(exclusiveMinimum) <= 0 {
+		return nil, []schemaValidationError{{Path: path, Message: fmt.Sprintf("must be > %v", schema["exclusiveMinimum"])}}
 	}
-	if exclusiveMaximum, ok := toFloat64(schema["exclusiveMaximum"]); ok && numberValue >= exclusiveMaximum {
-		return nil, []schemaValidationError{{Path: path, Message: fmt.Sprintf("must be < %v", trimFloat(exclusiveMaximum))}}
+	if exclusiveMaximum, ok := numberToRat(schema["exclusiveMaximum"]); ok && numberValue.Cmp(exclusiveMaximum) >= 0 {
+		return nil, []schemaValidationError{{Path: path, Message: fmt.Sprintf("must be < %v", schema["exclusiveMaximum"])}}
 	}
 
-	if integerOnly {
-		return int(numberValue), nil
-	}
-	return numberValue, nil
+	return validated, nil
 }
 
 func validateBooleanSchema(schema map[string]any, value any, path string) (any, []schemaValidationError) {
@@ -594,6 +608,145 @@ func coerceNumber(value any, integerOnly bool) (float64, bool) {
 	return numberValue, true
 }
 
+func coerceInteger(value any) (any, *big.Rat, bool) {
+	switch typed := value.(type) {
+	case nil:
+		return int(0), new(big.Rat), true
+	case bool:
+		if typed {
+			return int(1), big.NewRat(1, 1), true
+		}
+		return int(0), new(big.Rat), true
+	case int:
+		return typed, big.NewRat(int64(typed), 1), true
+	case int8:
+		return typed, big.NewRat(int64(typed), 1), true
+	case int16:
+		return typed, big.NewRat(int64(typed), 1), true
+	case int32:
+		return typed, big.NewRat(int64(typed), 1), true
+	case int64:
+		return typed, big.NewRat(typed, 1), true
+	case uint:
+		integer := new(big.Int).SetUint64(uint64(typed))
+		return typed, new(big.Rat).SetInt(integer), true
+	case uint8:
+		return typed, big.NewRat(int64(typed), 1), true
+	case uint16:
+		return typed, big.NewRat(int64(typed), 1), true
+	case uint32:
+		return typed, big.NewRat(int64(typed), 1), true
+	case uint64:
+		integer := new(big.Int).SetUint64(typed)
+		return typed, new(big.Rat).SetInt(integer), true
+	case float32:
+		return integerFromFloat64(float64(typed))
+	case float64:
+		return integerFromFloat64(typed)
+	case json.Number:
+		return integerFromString(typed.String())
+	case string:
+		return integerFromString(strings.TrimSpace(typed))
+	default:
+		return nil, nil, false
+	}
+}
+
+func integerFromFloat64(value float64) (any, *big.Rat, bool) {
+	if math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value {
+		return nil, nil, false
+	}
+	return integerFromString(strconv.FormatFloat(value, 'f', -1, 64))
+}
+
+func integerFromString(value string) (any, *big.Rat, bool) {
+	integer := new(big.Int)
+	if _, ok := integer.SetString(value, 10); !ok {
+		number, numberOK := numberToRat(value)
+		if !numberOK || !number.IsInt() {
+			return nil, nil, false
+		}
+		integer.Set(number.Num())
+	}
+
+	var validated any
+	switch {
+	case integer.IsInt64():
+		signed := integer.Int64()
+		if strconv.IntSize == 64 || (signed >= math.MinInt32 && signed <= math.MaxInt32) {
+			validated = int(signed)
+		} else {
+			validated = signed
+		}
+	case integer.Sign() >= 0 && integer.BitLen() <= 64:
+		validated = integer.Uint64()
+	default:
+		return nil, nil, false
+	}
+	return validated, new(big.Rat).SetInt(integer), true
+}
+
+func isNativeNumber(value any) bool {
+	switch value.(type) {
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64, json.Number:
+		return true
+	default:
+		return false
+	}
+}
+
+func numberToRat(value any) (*big.Rat, bool) {
+	var text string
+	switch typed := value.(type) {
+	case int:
+		return big.NewRat(int64(typed), 1), true
+	case int8:
+		return big.NewRat(int64(typed), 1), true
+	case int16:
+		return big.NewRat(int64(typed), 1), true
+	case int32:
+		return big.NewRat(int64(typed), 1), true
+	case int64:
+		return big.NewRat(typed, 1), true
+	case uint:
+		return new(big.Rat).SetInt(new(big.Int).SetUint64(uint64(typed))), true
+	case uint8:
+		return big.NewRat(int64(typed), 1), true
+	case uint16:
+		return big.NewRat(int64(typed), 1), true
+	case uint32:
+		return big.NewRat(int64(typed), 1), true
+	case uint64:
+		return new(big.Rat).SetInt(new(big.Int).SetUint64(typed)), true
+	case float32:
+		if math.IsNaN(float64(typed)) || math.IsInf(float64(typed), 0) {
+			return nil, false
+		}
+		return new(big.Rat).SetFloat64(float64(typed)), true
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) {
+			return nil, false
+		}
+		return new(big.Rat).SetFloat64(typed), true
+	case json.Number:
+		text = typed.String()
+	case string:
+		text = strings.TrimSpace(typed)
+	default:
+		return nil, false
+	}
+	if number, ok := new(big.Rat).SetString(text); ok {
+		return number, true
+	}
+	number, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
+		return nil, false
+	}
+	return new(big.Rat).SetFloat64(number), true
+}
+
 func toFloat64(value any) (float64, bool) {
 	switch typed := value.(type) {
 	case int:
@@ -694,11 +847,4 @@ func schemaInt(value any) (int, bool) {
 		return 0, false
 	}
 	return int(number), true
-}
-
-func trimFloat(value float64) any {
-	if math.Trunc(value) == value {
-		return int(value)
-	}
-	return value
 }

@@ -393,6 +393,8 @@ func toPigoTransport(transport Transport) pigo.Transport {
 	switch transport {
 	case TransportWebSocket:
 		return pigo.TransportWebSocket
+	case TransportWebSocketCached:
+		return pigo.TransportWebSocketCached
 	case TransportAuto:
 		return pigo.TransportAuto
 	default:
@@ -412,6 +414,8 @@ func toPigoThinkingLevel(level ThinkingLevel) pigo.ThinkingLevel {
 		return pigo.ThinkingLevelHigh
 	case ThinkingXHigh:
 		return pigo.ThinkingLevelXHigh
+	case ThinkingMax:
+		return pigo.ThinkingLevelMax
 	default:
 		return ""
 	}
