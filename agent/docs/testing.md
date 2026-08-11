@@ -28,6 +28,9 @@ The default offline suite covers:
 - flat assistant-update event fields and balanced stream-close error lifecycle
 - stateless runner snapshot isolation, run metadata, bounded lossless
   backpressure, and concurrent `Wait` / `Close`
+- shared memory/JSONL session storage conformance, strict replay, torn-tail
+  repair, repository writer claims, and path isolation
+- pure lane/context reduction plus complete-turn, tool-pair-safe compaction
 
 ## Race Checks
 
@@ -90,6 +93,7 @@ The current stable core runtime surface is:
 Secondary integration surfaces:
 
 - `prebuilt`
+- `session`
 
 Non-goals for this test plan:
 

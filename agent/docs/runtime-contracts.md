@@ -168,6 +168,40 @@ between model updates and context cancellation, then calls `Close` before
 `Wait`. Event-loop, wait, and close failures are joined and normalized into one
 terminal assistant message so message lifecycle events stay balanced.
 
+## Durable Session Contract
+
+The `agent/session` child package stores finalized entries outside the core
+loop. Its format and replay rules are provider-independent:
+
+- every session starts with a versioned JSONL header and an empty `main` lane
+- every entry or lane-pointer mutation receives one globally consecutive
+  sequence number
+- a new entry's parent must equal the selected lane's current leaf
+- ids are unique and each entry has exactly one message, compaction, or custom
+  payload
+- memory and JSONL reads return detached values
+- JSONL append returns only after flush and file sync; a failed append does not
+  advance the in-memory projection
+- open repairs only a non-newline-terminated final JSON syntax fragment; a
+  complete unterminated item, a newline-terminated malformed item, or an
+  invalid intermediate item is rejected
+
+`Reduce` is a pure replay boundary over `[]LogItem`. `State.Branch` reconstructs
+the parent chain for a lane. `State.Context` applies only the latest compaction,
+using its summary and retained tail before later message entries. Summary text
+remains a separate field and must be explicitly projected by the application.
+
+Compaction never splits a turn or an assistant tool-call/result group. Missing,
+duplicate, or orphan results reject compaction. If no complete older user turn
+can be removed, preparation returns no plan instead of splitting the active
+turn. Summary generation is supplied by a provider-independent callback and no
+storage mutation happens when it fails or is cancelled.
+
+Repository writer claims prevent two writers only within the same repository
+instance. Cross-process writer coordination is deliberately not claimed by
+this format. The upstream experimental operation-record/Harness protocol is
+not part of this API because it is not yet converged.
+
 ## Provider Config Contract
 
 The typed provider runtime configuration lives in [`ProviderConfig`](../types.go).
