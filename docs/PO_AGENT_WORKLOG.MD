@@ -159,3 +159,14 @@
 - Kept Eino-style active-turn safe-point preemption, graph orchestration,
   checkpoint resume, and persistence out of this layer; no live provider
   request was run for this change.
+
+## 2026-08-11 - v0.7.0 agent runtime release
+
+- Merged the six reviewed agent-runtime PRs in dependency order while
+  preserving their commit ancestry on `master`.
+- Finalized the pre-1.0 minor release as `v0.7.0` for the new Runner, session,
+  AgentTool, checkpoint/HITL, TurnLoop, and core-safety contracts.
+- Updated the package version, examples dependency pin, and release-facing
+  agent installation guidance without modifying unrelated dependency versions.
+- Verified root and examples tests, race tests, vet, module integrity, semantic
+  tidy state, and diff cleanliness; no live provider request was run.
