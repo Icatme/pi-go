@@ -48,6 +48,8 @@ Success means:
   - `continue`
 - A higher-level `Agent` wrapper
 - A stateless `Runner` for asynchronous, snapshot-in/snapshot-out execution
+- Generic whole-batch tool gating and explicit pending-tool resume primitives
+- An optional `agent/checkpoint` package for revisioned, targeted tool approval
 - An optional `agent/session` package for append-only lane logs, repositories,
   pure replay, and turn-safe compaction
 - A native `prebuilt.PiAgent` direct re-export of `agent.Agent`
@@ -65,6 +67,10 @@ Success means:
   - native high-level wrappers implemented on top of the core runtime
   - task-scoped child agents and structured reflection evaluators
   - does not reintroduce graph orchestration into the root module
+- `agent/checkpoint`
+  - revisioned checkpoint envelopes and targeted tool-approval decisions
+  - a concurrency-safe memory store plus a trusted `Store` boundary
+  - fixed tool bindings only; no graph or supervisor runtime
 - `agent/session`
   - provider-independent durable conversation primitives
   - memory and versioned JSONL repositories
@@ -132,6 +138,68 @@ _ = err
 
 Runner events are lossless and use a bounded buffer. Drain `Events` before
 calling `Wait`; call `Close` to cancel and drain a run that is being abandoned.
+
+## Tool Approval Checkpoints
+
+The root runtime exposes a provider-neutral `ToolGate` hook. A gate runs after
+argument parsing, schema validation, and `BeforeToolCall`, but before any tool
+lifecycle event or tool body. If one call returns `suspend`, the complete batch
+is left pending with no tool result or side effect. The open turn can later be
+completed with `ResumePendingToolCallsWithHooks` and an explicit non-nil gate;
+ordinary Run/Continue calls reject a snapshot while that batch is pending.
+
+`agent/checkpoint` builds targeted external approval on that primitive:
+
+```go
+store := checkpoint.NewMemoryStore()
+checkpointID, err := checkpoint.NewCheckpointID()
+if err != nil {
+	panic(err)
+}
+
+durable, err := checkpoint.NewRunner(checkpoint.RunnerConfig{
+	Definition:        definition,
+	DefinitionVersion: "tools-v1",
+	Store:             store,
+	ApprovalPolicy: func(_ context.Context, request checkpoint.ToolApprovalRequest) (checkpoint.ApprovalRequirement, error) {
+		return checkpoint.ApprovalRequirement{Required: request.ToolName == "write_file"}, nil
+	},
+})
+if err != nil {
+	panic(err)
+}
+
+run := durable.Run(context.Background(), checkpointID, core.AgentSnapshot{}, []core.Message{
+	core.NewUserTextMessage("update the file"),
+})
+for range run.Events() {
+}
+outcome, err := run.Wait()
+```
+
+An interrupted outcome contains single-use interrupt IDs. `Resume` accepts a
+targeted subset of those IDs; partial decisions execute nothing and rotate all
+remaining IDs. Approval and rejection capabilities are consumed once, so an
+identical call in a later turn requires a new decision.
+
+If resume fails before the original pending batch commits and no tool lifecycle
+has started, the checkpoint returns to `interrupted`, rotates every approval ID,
+and preserves the original error for the caller. Once execution has advanced to
+a different batch, failures remain conservative and may be indeterminate.
+
+Checkpoint runners require fixed `AgentDefinition.Tools`, an explicit
+`DefinitionVersion`, and no `PrepareNextTurn`: dynamic executable bindings and
+invocation-local model/context overrides cannot be reconstructed safely after a
+durable boundary. Custom argument parsers and `BeforeToolCall` hooks may rerun
+during resume and therefore must be pure and deterministic. Argument drift
+invalidates the old approval and interrupts the whole batch again.
+
+The built-in store is process-local memory. Custom `Store` implementations are
+a trusted, secret-bearing boundary because `AgentSnapshot.Model.ProviderConfig`
+may contain API keys or OAuth tokens. A stored `running` checkpoint is reported
+as busy and is never replayed automatically. If a tool side effect succeeds but
+the terminal compare-and-swap fails, the returned outcome is
+`StatusIndeterminate` with `Persisted=false`; it is not an exactly-once claim.
 
 ## Agents As Task Tools
 
@@ -240,6 +308,7 @@ The current stable core runtime surface is:
 Secondary integration surfaces:
 
 - `prebuilt`
+- `checkpoint`
 - `session`
 
 This package does not keep a compatibility shim for legacy image URLs.
@@ -270,7 +339,7 @@ Keep these concerns in outer orchestration packages:
 
 - multi-agent orchestration
 - conditional routing
-- checkpointing / time travel / HITL
+- time travel and general workflow checkpointing
 - graph composition
 
 Durable transcript storage and safe compaction live in `agent/session`; they do
@@ -279,7 +348,11 @@ not add orchestration behavior to the root `agent` package.
 Task-scoped child execution lives in `agent/prebuilt`; it composes independent
 single-agent runners and does not add routing or graph state to the core.
 
+Targeted tool approval lives in `agent/checkpoint`; the root package contains
+only generic batch suspension/resume primitives.
+
 ## Current Limitations
 
-- Multi-node orchestration, supervisor-style routing, checkpointing, time travel,
-  and human-in-the-loop workflows are intentionally outside the core runtime.
+- Multi-node orchestration, supervisor-style routing, time travel, and general
+  human-in-the-loop workflows remain outside the core runtime. The checkpoint
+  child package intentionally supports only targeted tool approval.

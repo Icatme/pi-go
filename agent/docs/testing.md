@@ -28,6 +28,14 @@ The default offline suite covers:
 - flat assistant-update event fields and balanced stream-close error lifecycle
 - stateless runner snapshot isolation, run metadata, bounded lossless
   backpressure, nested parent lineage, and concurrent `Wait` / `Close`
+- whole-batch tool-gate fail-closed behavior, canonical pending bindings,
+  lossless JSON-number/raw-presence round trips, lifecycle-free suspension,
+  exact resume validation, pre-execution retry, MaxTurns continuity, and resume
+  turn-hook ordering
+- targeted checkpoint approval, partial/stale decision handling, capability ID
+  rotation and consumption, argument-drift re-interruption, strict envelopes,
+  recoverable pre-commit errors, CAS concurrency, indeterminate terminal writes,
+  and stream ownership
 - task-only AgentTool input, transient child events, depth/turn/time budgets,
   child termination isolation, error draining, and final-result persistence
 - strict structured reflection verdicts, complete generation/evaluation pairs,
@@ -97,6 +105,7 @@ The current stable core runtime surface is:
 Secondary integration surfaces:
 
 - `prebuilt`
+- `checkpoint`
 - `session`
 
 Non-goals for this test plan:

@@ -127,3 +127,22 @@
   every generated draft.
 - Added ordinary, race, vet, cancellation, ownership, lineage, and example
   coverage; no live provider request was run for this change.
+
+## 2026-08-09 - Targeted tool approval checkpoints
+
+- Added generic whole-batch tool gating and exact pending-batch resume to the
+  single-agent core without adding graph or supervisor orchestration.
+- Added `agent/checkpoint` with strict versioned envelopes, revisioned CAS,
+  targeted partial approval/rejection, single-use capabilities, and a
+  process-local memory store.
+- Kept resumable bindings static by rejecting `ToolResolver` and
+  `PrepareNextTurn`; canonical argument bindings re-interrupt on parser/hook
+  drift, survive JSON number/type normalization, and preserve the original
+  MaxTurns budget across attempts.
+- Made pending state fail closed across Run/Continue/Resume, and made
+  pre-execution resume failures return the intact original batch to a new set of
+  single-use interrupt IDs before exposing the terminal event.
+- Documented the trusted secret-bearing Store boundary and the non-exactly-once
+  terminal-CAS failure case (`StatusIndeterminate`, `Persisted=false`).
+- Added ordinary, race, vet, strict-codec, concurrency, lifecycle, ownership,
+  stale-decision, and side-effect regressions; no live provider request was run.

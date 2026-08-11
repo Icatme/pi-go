@@ -36,7 +36,12 @@ func NewRunner(definition AgentDefinition) (*Runner, error) {
 // Events are delivered losslessly through a bounded channel. Callers must
 // drain Events before Wait, or call Close to cancel and drain an abandoned run.
 func (r *Runner) Run(ctx context.Context, snapshot AgentSnapshot, prompts []Message) *RunStream {
-	return r.start(ctx, snapshot, prompts, false)
+	return r.RunWithHooks(ctx, snapshot, prompts, LoopHooks{})
+}
+
+// RunWithHooks starts a new run with invocation-local runtime hooks.
+func (r *Runner) RunWithHooks(ctx context.Context, snapshot AgentSnapshot, prompts []Message, hooks LoopHooks) *RunStream {
+	return r.start(ctx, snapshot, prompts, runnerStartRun, hooks)
 }
 
 // Query starts a new run from an empty snapshot with one user-text prompt.
@@ -46,7 +51,13 @@ func (r *Runner) Query(ctx context.Context, query string) *RunStream {
 
 // Continue resumes a run from snapshot without appending prompt messages.
 func (r *Runner) Continue(ctx context.Context, snapshot AgentSnapshot) *RunStream {
-	return r.start(ctx, snapshot, nil, true)
+	return r.start(ctx, snapshot, nil, runnerStartContinue, LoopHooks{})
+}
+
+// ResumePendingToolCallsWithHooks resumes the exact pending tool-call batch in
+// snapshot with invocation-local runtime hooks.
+func (r *Runner) ResumePendingToolCallsWithHooks(ctx context.Context, snapshot AgentSnapshot, hooks LoopHooks) *RunStream {
+	return r.start(ctx, snapshot, nil, runnerStartPendingTools, hooks)
 }
 
 // RunStream exposes one asynchronous runner invocation.
@@ -87,7 +98,15 @@ func (s *RunStream) Close() error {
 	return nil
 }
 
-func (r *Runner) start(ctx context.Context, snapshot AgentSnapshot, prompts []Message, continuing bool) *RunStream {
+type runnerStartMode uint8
+
+const (
+	runnerStartRun runnerStartMode = iota
+	runnerStartContinue
+	runnerStartPendingTools
+)
+
+func (r *Runner) start(ctx context.Context, snapshot AgentSnapshot, prompts []Message, mode runnerStartMode, hooks LoopHooks) *RunStream {
 	parentRunID := runnerRunIDFromContext(ctx)
 	runID := newRunnerRunID()
 	runCtx, cancel := context.WithCancel(ctx)
@@ -114,10 +133,13 @@ func (r *Runner) start(ctx context.Context, snapshot AgentSnapshot, prompts []Me
 			next *AgentSnapshot
 			err  error
 		)
-		if continuing {
+		switch mode {
+		case runnerStartContinue:
 			next, err = NewEngine().Continue(runCtx, definition, &initial, publisher.emit)
-		} else {
-			next, err = NewEngine().Run(runCtx, definition, &initial, normalizedPrompts, publisher.emit)
+		case runnerStartPendingTools:
+			next, err = NewEngine().ResumePendingToolCallsWithHooks(runCtx, definition, &initial, publisher.emit, hooks)
+		default:
+			next, err = NewEngine().RunWithHooks(runCtx, definition, &initial, normalizedPrompts, publisher.emit, hooks)
 		}
 
 		finalSnapshot := initial

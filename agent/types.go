@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"time"
 )
 
@@ -182,6 +185,25 @@ type ToolCall struct {
 	ThoughtSignature string          `json:"thought_signature,omitempty"`
 }
 
+// UnmarshalJSON preserves arbitrary-precision JSON numbers inside ParsedArgs.
+func (c *ToolCall) UnmarshalJSON(data []byte) error {
+	type toolCallJSON ToolCall
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var decoded toolCallJSON
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("agent: multiple JSON values for tool call")
+		}
+		return err
+	}
+	*c = ToolCall(decoded)
+	return nil
+}
+
 // ToolResult is the normalized output of a tool execution.
 type ToolResult struct {
 	Content   []Part `json:"content,omitempty"`
@@ -218,11 +240,19 @@ type Message struct {
 	ErrorMessage string             `json:"error_message,omitempty"`
 }
 
-// PendingToolCall tracks tool calls that are currently in-flight.
+// PendingToolCall tracks outstanding tool calls that are suspended before
+// execution or currently in flight.
 type PendingToolCall struct {
 	ToolCallID         string `json:"tool_call_id"`
 	OriginalToolCallID string `json:"original_tool_call_id,omitempty"`
 	ToolName           string `json:"tool_name"`
+}
+
+// PendingToolControl stores the durable binding and turn position for one
+// suspended tool-call batch.
+type PendingToolControl struct {
+	Turn    int    `json:"turn"`
+	Binding string `json:"binding"`
 }
 
 // ProviderAuthType identifies the provider credential strategy.
@@ -267,13 +297,14 @@ type ModelRef struct {
 
 // AgentSnapshot is the serializable runtime state for a session.
 type AgentSnapshot struct {
-	SessionID        string            `json:"session_id,omitempty"`
-	SystemPrompt     string            `json:"system_prompt,omitempty"`
-	Model            ModelRef          `json:"model,omitempty"`
-	Messages         []Message         `json:"messages,omitempty"`
-	PendingToolCalls []PendingToolCall `json:"pending_tool_calls,omitempty"`
-	Error            string            `json:"error,omitempty"`
-	Metadata         map[string]any    `json:"metadata,omitempty"`
+	SessionID          string              `json:"session_id,omitempty"`
+	SystemPrompt       string              `json:"system_prompt,omitempty"`
+	Model              ModelRef            `json:"model,omitempty"`
+	Messages           []Message           `json:"messages,omitempty"`
+	PendingToolCalls   []PendingToolCall   `json:"pending_tool_calls,omitempty"`
+	PendingToolControl *PendingToolControl `json:"pending_tool_control,omitempty"`
+	Error              string              `json:"error,omitempty"`
+	Metadata           map[string]any      `json:"metadata,omitempty"`
 }
 
 // AgentContext is the message/tool context consumed by one agent turn.
@@ -364,6 +395,37 @@ type BeforeToolCallResult struct {
 
 // BeforeToolCallHook runs before a tool body executes.
 type BeforeToolCallHook func(context.Context, BeforeToolCallContext) (BeforeToolCallResult, error)
+
+// ToolGateAction selects how a runtime gate handles one fully prepared tool
+// call. Gates run after BeforeToolCall and schema revalidation, but before any
+// tool execution lifecycle event or tool body.
+type ToolGateAction string
+
+const (
+	// ToolGateActionAllow permits the prepared tool call to execute.
+	ToolGateActionAllow ToolGateAction = "allow"
+	// ToolGateActionBlock converts the prepared tool call into an error tool result.
+	ToolGateActionBlock ToolGateAction = "block"
+	// ToolGateActionSuspend pauses the entire tool-call batch without executing it.
+	ToolGateActionSuspend ToolGateAction = "suspend"
+)
+
+// ToolGateResult is the decision returned by a ToolGateHook.
+type ToolGateResult struct {
+	Action    ToolGateAction `json:"action"`
+	Reason    string         `json:"reason,omitempty"`
+	Terminate bool           `json:"terminate,omitempty"`
+}
+
+// ToolGateHook evaluates final, schema-valid tool arguments before execution.
+type ToolGateHook func(context.Context, BeforeToolCallContext) (ToolGateResult, error)
+
+// SuspendedToolCall describes a prepared call that requested suspension.
+type SuspendedToolCall struct {
+	ToolCall  ToolCall        `json:"tool_call"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	Reason    string          `json:"reason,omitempty"`
+}
 
 // AfterToolCallContext is passed to an after-tool hook.
 type AfterToolCallContext struct {
