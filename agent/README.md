@@ -53,7 +53,8 @@ Success means:
 - A native `prebuilt.PiAgent` direct re-export of `agent.Agent`
 - A native `prebuilt.CreateAgent(...)` helper for the common model-plus-tools constructor path
 - A native `prebuilt.ChatAgent` session wrapper built on the same runtime
-- A native `prebuilt.ReflectionAgent` helper for sequential draft-and-reflect passes
+- A task-only `prebuilt.AgentTool` that runs one isolated child `Runner`
+- A structured `prebuilt.ReflectionAgent` with typed accept/revise evaluations
 - Package-level loop façades: `RunAgentLoop`, `RunAgentLoopContinue`
 
 ## Package Layout
@@ -62,6 +63,7 @@ Success means:
   - core runtime types, state, engine, and agent wrapper
 - `agent/prebuilt`
   - native high-level wrappers implemented on top of the core runtime
+  - task-scoped child agents and structured reflection evaluators
   - does not reintroduce graph orchestration into the root module
 - `agent/session`
   - provider-independent durable conversation primitives
@@ -106,7 +108,9 @@ func main() {
 
 For application boundaries that should not retain mutable agent state, use a
 `Runner`. Each invocation owns a run id and monotonically sequenced event
-stream, and returns a new snapshot without mutating the caller's input:
+stream, and returns a new snapshot without mutating the caller's input. A
+`Runner` started from another run's context automatically records the outer
+run as its `ParentRunID`:
 
 ```go
 runner, err := core.NewRunner(core.AgentDefinition{
@@ -128,6 +132,41 @@ _ = err
 
 Runner events are lossless and use a bounded buffer. Drain `Events` before
 calling `Wait`; call `Close` to cancel and drain a run that is being abandoned.
+
+## Agents As Task Tools
+
+`prebuilt.NewAgentTool` exposes one named definition as a strict
+`{"task":"..."}` tool. The child receives only that task in a fresh snapshot;
+its internal events are forwarded as transient tool updates and its final
+output becomes one ordinary parent tool result:
+
+```go
+delegate, err := prebuilt.NewAgentTool(prebuilt.AgentToolConfig{
+	Definition: core.AgentDefinition{
+		Name:  "researcher",
+		Model: echoModel{},
+	},
+	Description: "Research one isolated question.",
+	Limits: prebuilt.AgentToolLimits{
+		MaxDepth: 1,
+		MaxTurns: 4,
+		Timeout:  30 * time.Second,
+	},
+})
+```
+
+Depth limits are absolute across nested task tools and cannot be widened by a
+child. `MaxTurns` is a per-child upper bound. `Timeout` derives a cooperative
+child cancellation deadline; the earlier parent deadline still wins, and child
+models, tools, and streams must honor context cancellation. It is not a hard
+wall-clock bound over implementations that ignore context. A child's
+termination hint never terminates its parent.
+
+Reflection uses an exact `accept` / `revise` verdict rather than searching
+critic prose for keywords. Every generated draft, including the last allowed
+draft, has a matching evaluation. The built-in model evaluator requires one
+strict JSON object; applications may inject a typed `ReflectionEvaluator`
+instead.
 
 ## Durable Sessions
 
@@ -236,6 +275,9 @@ Keep these concerns in outer orchestration packages:
 
 Durable transcript storage and safe compaction live in `agent/session`; they do
 not add orchestration behavior to the root `agent` package.
+
+Task-scoped child execution lives in `agent/prebuilt`; it composes independent
+single-agent runners and does not add routing or graph state to the core.
 
 ## Current Limitations
 

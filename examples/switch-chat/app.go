@@ -256,13 +256,19 @@ func (a *App) sendReflection(ctx context.Context, preset PresetSpec, input strin
 	if critic == nil {
 		critic = model
 	}
+	evaluator, err := prebuilt.NewModelReflectionEvaluator(prebuilt.ModelReflectionEvaluatorConfig{
+		Model:        critic,
+		SystemPrompt: preset.ReflectionPrompt,
+	})
+	if err != nil {
+		return err
+	}
 
 	agent, err := prebuilt.CreateReflectionAgent(prebuilt.ReflectionAgentConfig{
-		Model:            model,
-		ReflectionModel:  critic,
-		MaxIterations:    a.config.ReflectionMaxTurns,
-		SystemMessage:    preset.SystemPrompt,
-		ReflectionPrompt: preset.ReflectionPrompt,
+		Model:         model,
+		Evaluator:     evaluator,
+		MaxIterations: a.config.ReflectionMaxTurns,
+		SystemMessage: preset.SystemPrompt,
 	})
 	if err != nil {
 		return err

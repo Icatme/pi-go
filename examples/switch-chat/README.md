@@ -10,16 +10,21 @@
 ## Usage
 
 ```powershell
-go run ./example/switch-chat --auth-root ../pi-go
+Set-Location examples
+$env:GOWORK='off'
+$switchChatExe = Join-Path $env:TEMP 'pi-go-switch-chat.exe'
+go build -o $switchChatExe ./switch-chat
+& $switchChatExe --auth-root 'C:\path\to\pi-go' --data-dir '.\switch-chat\.data'
 ```
 
 Common flags:
 
-- `--auth-root ../pi-go`: points to the directory that contains `.pigo/auth.json` and `.pigo/.env`
+- `--auth-root C:\path\to\pi-go`: points to the directory that contains `.pigo/auth.json` and `.pigo/.env`
 - `--provider openai-codex`
 - `--model gpt-5.4`
-- `--data-dir example/switch-chat/.data`
+- `--data-dir .\switch-chat\.data`
 - `--preset chat`
+- `--reflection-max-turns 3`
 
 Available commands:
 
@@ -35,8 +40,26 @@ Available commands:
 - `coder`: code-focused chat
 - `reflect`: single-run reflection mode
 
-`reflect` intentionally does not restore a live runtime snapshot. The current
-`prebuilt.ReflectionAgent` treats the first user message as the original request
-for one reflection run, so replaying a whole transcript into it would change the
-behavior. The example therefore persists only the visible transcript for that
-mode.
+`reflect` uses a generator model and a model-backed structured evaluator. Every
+draft, including the final allowed draft, is evaluated once. The critic must
+return exactly one JSON object with no code fence or surrounding text:
+
+```json
+{
+  "verdict": "accept",
+  "summary": "The draft satisfies the complete request.",
+  "revision_instructions": []
+}
+```
+
+`verdict` is exactly `accept` or `revise`. An accepted draft has no revision
+instructions; a draft marked for revision has at least one non-empty
+instruction. Invalid, contradictory, truncated, or malformed critic output is
+an error rather than a keyword-based decision. A revision pass retains the
+complete original request, including prior turns and images, and adds the prior
+draft plus the structured revision instructions.
+
+The loop stops when a draft is accepted or after `--reflection-max-turns`
+generation/evaluation pairs. Reflection mode intentionally does not restore a
+live runtime snapshot; the example persists only its visible user/final-draft
+transcript.

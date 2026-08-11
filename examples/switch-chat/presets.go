@@ -16,7 +16,7 @@ func builtInPresets() []PresetSpec {
 			Name:             "reflect",
 			Mode:             RuntimeModeReflection,
 			SystemPrompt:     "You are a helpful assistant. Draft a strong answer to the user's request.",
-			ReflectionPrompt: "You are a critical reviewer. Evaluate the draft, identify weaknesses, and say \"no major issues\" only when the answer is already strong enough.",
+			ReflectionPrompt: "You are a rigorous critic. Evaluate each draft against the complete user request and identify concrete revisions when it falls short.",
 		},
 	}
 }

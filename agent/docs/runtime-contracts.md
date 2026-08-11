@@ -151,7 +151,8 @@ Every event in one run has:
 - a non-empty, stable `RunID`
 - an `AgentName` copied from the definition
 - a `Sequence` beginning at 1 and increasing by one
-- an optional `ParentRunID` reserved for outer orchestration
+- a `ParentRunID` equal to the directly enclosing run when a `Runner` is
+  started with that run's context
 
 Low-level model updates are flattened onto `AgentEvent` through `UpdateType`,
 `ContentIndex`, `Reason`, `Delta`, `ToolCall`, and `Err`. There is no nested
@@ -167,6 +168,47 @@ Every `AssistantStream` implementation must provide `Close`. The engine selects
 between model updates and context cancellation, then calls `Close` before
 `Wait`. Event-loop, wait, and close failures are joined and normalized into one
 terminal assistant message so message lifecycle events stay balanced.
+
+## Task Agent Tool Contract
+
+`prebuilt.NewAgentTool` is an outer helper over `Runner`, not a multi-agent
+runtime inside the core loop:
+
+- its schema accepts exactly one required string field, `task`
+- each invocation starts a fresh child snapshot and does not inherit parent
+  transcript messages
+- child events keep their own `RunID`, point to the caller through
+  `ParentRunID`, and are forwarded only through transient tool updates
+- the durable parent tool result contains final child run metadata and output,
+  not the forwarded internal event stream
+- child termination remains scoped to the child; the wrapper's final
+  `ToolResult.Terminate` is always false
+- child errors cancel no parent context, but they do become the ordinary error
+  result for that parent tool call
+
+The first child is at depth 1. A zero root limit defaults to depth 1; nested
+tools inherit the current absolute limit, and a child may only tighten it.
+`MaxTurns` is a per-child upper bound over `AgentDefinition.MaxTurns`. A tool
+timeout derives a cooperative child cancellation context, so an earlier parent
+deadline still wins. Model, tool, and stream implementations must honor that
+context; the timeout cannot be a hard wall-clock bound over blocking code that
+ignores cancellation. Child event streams are always drained before the tool
+returns, including the error path.
+
+## Structured Reflection Contract
+
+`prebuilt.ReflectionAgent` pairs every generated draft with exactly one typed
+evaluation. `ReflectionVerdict` is exactly `accept` or `revise`; summary text
+does not influence the decision. A revise verdict requires at least one
+non-empty instruction, while an accept verdict has none.
+
+The model-backed evaluator accepts one strict JSON object with no unknown
+fields, code fence, trailing content, or keyword fallback. Revisions replay the
+complete original request, including images and prior turns, then append the
+previous draft and structured revision instructions. Error, aborted, length-
+truncated, empty, malformed, or cancelled generation/evaluation output is not
+treated as acceptance. Reaching the configured maximum still evaluates the
+final draft before returning `max_iterations`.
 
 ## Durable Session Contract
 

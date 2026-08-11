@@ -27,7 +27,11 @@ The default offline suite covers:
 - concurrent request rejection and state consistency under burst message updates
 - flat assistant-update event fields and balanced stream-close error lifecycle
 - stateless runner snapshot isolation, run metadata, bounded lossless
-  backpressure, and concurrent `Wait` / `Close`
+  backpressure, nested parent lineage, and concurrent `Wait` / `Close`
+- task-only AgentTool input, transient child events, depth/turn/time budgets,
+  child termination isolation, error draining, and final-result persistence
+- strict structured reflection verdicts, complete generation/evaluation pairs,
+  ownership isolation, cancellation, and terminal-output rejection
 - shared memory/JSONL session storage conformance, strict replay, torn-tail
   repair, repository writer claims, and path isolation
 - pure lane/context reduction plus complete-turn, tool-pair-safe compaction

@@ -20,6 +20,8 @@ type Runner struct {
 	definition AgentDefinition
 }
 
+type runnerRunIDContextKey struct{}
+
 // NewRunner validates and snapshots an agent definition for stateless runs.
 func NewRunner(definition AgentDefinition) (*Runner, error) {
 	validated, err := definition.Validate()
@@ -86,7 +88,10 @@ func (s *RunStream) Close() error {
 }
 
 func (r *Runner) start(ctx context.Context, snapshot AgentSnapshot, prompts []Message, continuing bool) *RunStream {
+	parentRunID := runnerRunIDFromContext(ctx)
+	runID := newRunnerRunID()
 	runCtx, cancel := context.WithCancel(ctx)
+	runCtx = context.WithValue(runCtx, runnerRunIDContextKey{}, runID)
 	stream := &RunStream{
 		events: make(chan AgentEvent, runnerEventBufferSize),
 		done:   make(chan struct{}),
@@ -96,9 +101,10 @@ func (r *Runner) start(ctx context.Context, snapshot AgentSnapshot, prompts []Me
 	initial := cloneSnapshotValue(snapshot)
 	normalizedPrompts := cloneMessages(prompts)
 	publisher := &runnerEventPublisher{
-		events:    stream.events,
-		runID:     newRunnerRunID(),
-		agentName: definition.Name,
+		events:      stream.events,
+		runID:       runID,
+		parentRunID: parentRunID,
+		agentName:   definition.Name,
 	}
 
 	go func() {
@@ -132,13 +138,14 @@ func (r *Runner) start(ctx context.Context, snapshot AgentSnapshot, prompts []Me
 }
 
 type runnerEventPublisher struct {
-	mu        sync.Mutex
-	events    chan<- AgentEvent
-	runID     string
-	agentName string
-	sequence  uint64
-	started   bool
-	ended     bool
+	mu          sync.Mutex
+	events      chan<- AgentEvent
+	runID       string
+	parentRunID string
+	agentName   string
+	sequence    uint64
+	started     bool
+	ended       bool
 }
 
 func (p *runnerEventPublisher) emit(event AgentEvent) {
@@ -192,10 +199,18 @@ func (p *runnerEventPublisher) publishLocked(event AgentEvent) {
 		event.Timestamp = time.Now().UTC()
 	}
 	event.RunID = p.runID
-	event.ParentRunID = ""
+	event.ParentRunID = p.parentRunID
 	event.Sequence = p.sequence
 	event.AgentName = p.agentName
 	p.events <- event
+}
+
+func runnerRunIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	runID, _ := ctx.Value(runnerRunIDContextKey{}).(string)
+	return runID
 }
 
 func cloneRunnerDefinition(definition AgentDefinition) AgentDefinition {
