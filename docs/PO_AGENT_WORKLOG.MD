@@ -146,3 +146,16 @@
   terminal-CAS failure case (`StatusIndeterminate`, `Persisted=false`).
 - Added ordinary, race, vet, strict-codec, concurrency, lifecycle, ownership,
   stale-decision, and side-effect regressions; no live provider request was run.
+
+## 2026-08-11 - Bounded external input turn loop
+
+- Added the `agent/turnloop` child package as a bounded, non-blocking external
+  input boundary over sequential stateless Runner invocations and one persistent
+  snapshot.
+- Added explicit next-run, steering, and follow-up delivery, graceful draining,
+  cooperative immediate cancellation, Runner-compatible cloned results, and
+  single-consumer ordered event draining without moving queue policy into the
+  root runtime.
+- Kept Eino-style active-turn safe-point preemption, graph orchestration,
+  checkpoint resume, and persistence out of this layer; no live provider
+  request was run for this change.
