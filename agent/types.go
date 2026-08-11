@@ -303,22 +303,28 @@ type AgentState struct {
 
 // AgentEvent is emitted to subscribers for lifecycle, message, and tool updates.
 type AgentEvent struct {
-	Type               EventType       `json:"type"`
-	Timestamp          time.Time       `json:"timestamp"`
-	Message            *Message        `json:"message,omitempty"`
-	Messages           []Message       `json:"messages,omitempty"`
-	Delta              string          `json:"delta,omitempty"`
-	AssistantEvent     *AssistantEvent `json:"assistant_event,omitempty"`
-	ToolCall           *ToolCall       `json:"tool_call,omitempty"`
-	ToolCallID         string          `json:"tool_call_id,omitempty"`
-	OriginalToolCallID string          `json:"original_tool_call_id,omitempty"`
-	ToolName           string          `json:"tool_name,omitempty"`
-	Args               any             `json:"args,omitempty"`
-	ToolResult         *ToolResult     `json:"tool_result,omitempty"`
-	PartialToolResult  *ToolResult     `json:"partial_tool_result,omitempty"`
-	ToolMessages       []Message       `json:"tool_messages,omitempty"`
-	IsError            bool            `json:"is_error,omitempty"`
-	Err                error           `json:"-"`
+	Type               EventType          `json:"type"`
+	Timestamp          time.Time          `json:"timestamp"`
+	RunID              string             `json:"run_id,omitempty"`
+	ParentRunID        string             `json:"parent_run_id,omitempty"`
+	AgentName          string             `json:"agent_name,omitempty"`
+	Sequence           uint64             `json:"sequence,omitempty"`
+	Message            *Message           `json:"message,omitempty"`
+	Messages           []Message          `json:"messages,omitempty"`
+	Delta              string             `json:"delta,omitempty"`
+	UpdateType         AssistantEventType `json:"update_type,omitempty"`
+	ContentIndex       int                `json:"content_index,omitempty"`
+	Reason             StopReason         `json:"reason,omitempty"`
+	ToolCall           *ToolCall          `json:"tool_call,omitempty"`
+	ToolCallID         string             `json:"tool_call_id,omitempty"`
+	OriginalToolCallID string             `json:"original_tool_call_id,omitempty"`
+	ToolName           string             `json:"tool_name,omitempty"`
+	Args               any                `json:"args,omitempty"`
+	ToolResult         *ToolResult        `json:"tool_result,omitempty"`
+	PartialToolResult  *ToolResult        `json:"partial_tool_result,omitempty"`
+	ToolMessages       []Message          `json:"tool_messages,omitempty"`
+	IsError            bool               `json:"is_error,omitempty"`
+	Err                error              `json:"-"`
 }
 
 // EventSink receives runtime events from an engine.
@@ -443,6 +449,7 @@ type AssistantEvent struct {
 type AssistantStream interface {
 	Events() <-chan AssistantEvent
 	Wait() (Message, error)
+	Close() error
 }
 
 // StreamModel is the model contract consumed by the runtime engine.

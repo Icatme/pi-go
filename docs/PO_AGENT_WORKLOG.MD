@@ -95,3 +95,12 @@
   WebSocket selection, and model-aware maximum reasoning support.
 - Added pinned, actively maintained JSON Schema validation with focused offline
   and race regressions; no live provider test was run for this change.
+
+## 2026-08-09 - Agent runner and flat event streams
+
+- Added a stateless asynchronous Runner with cloned snapshot boundaries,
+  lossless bounded events, run metadata, and concurrent-safe Wait/Close.
+- Flattened assistant update metadata onto AgentEvent and made AssistantStream
+  cleanup explicit and cancellation-aware across the built-in adapters.
+- Added lifecycle, backpressure, adapter, cancellation, race, and vet coverage;
+  no live provider test was run for this change.

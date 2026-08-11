@@ -60,6 +60,10 @@ func (s *staticAssistantStream) Wait() (core.Message, error) {
 	return s.final, s.err
 }
 
+func (s *staticAssistantStream) Close() error {
+	return nil
+}
+
 func TestPiAgentMessageDuplication(t *testing.T) {
 	model := &scriptedStreamModel{
 		responses: []core.Message{

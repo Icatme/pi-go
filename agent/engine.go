@@ -321,7 +321,22 @@ func (e *Engine) generateAssistant(ctx context.Context, definition AgentDefiniti
 
 	started := false
 	var lastPartial Message
-	for event := range stream.Events() {
+	var eventErr error
+	events := stream.Events()
+eventLoop:
+	for {
+		var event AssistantEvent
+		var ok bool
+		select {
+		case <-ctx.Done():
+			eventErr = ctx.Err()
+			break eventLoop
+		case event, ok = <-events:
+			if !ok {
+				break eventLoop
+			}
+		}
+
 		partial := cloneMessage(event.Message)
 		if partial.Role == "" {
 			partial.Role = RoleAssistant
@@ -345,27 +360,36 @@ func (e *Engine) generateAssistant(ctx context.Context, definition AgentDefiniti
 			started = true
 			emitEvent(emit, AgentEvent{Type: EventMessageStart, Message: &partial})
 		}
-		assistantEvent := event
 		emitEvent(emit, AgentEvent{
-			Type:           EventMessageUpdate,
-			Message:        &partial,
-			Delta:          event.Delta,
-			AssistantEvent: &assistantEvent,
-			ToolCall:       cloneToolCallPtr(event.ToolCall),
-			Err:            event.Err,
+			Type:         EventMessageUpdate,
+			Message:      &partial,
+			Delta:        event.Delta,
+			UpdateType:   event.Type,
+			ContentIndex: event.ContentIndex,
+			Reason:       event.Reason,
+			ToolCall:     cloneToolCallPtr(event.ToolCall),
+			Err:          event.Err,
 		})
 	}
 
-	finalMessage, err := stream.Wait()
-	if err != nil && !isErrorAssistantMessage(finalMessage) {
+	closeErr := stream.Close()
+	finalMessage, waitErr := stream.Wait()
+	streamErr := errors.Join(eventErr, waitErr, closeErr)
+	if streamErr != nil {
 		if finalMessage.Role == "" && len(finalMessage.Parts) == 0 && len(finalMessage.ToolCalls) == 0 && started {
 			finalMessage = cloneMessage(lastPartial)
 		}
-		finalMessage.StopReason = StopReasonError
-		if ctx.Err() == context.Canceled {
-			finalMessage.StopReason = StopReasonAborted
+		if !isErrorAssistantMessage(finalMessage) {
+			finalMessage.StopReason = StopReasonError
+			if errors.Is(streamErr, context.Canceled) {
+				finalMessage.StopReason = StopReasonAborted
+			}
 		}
-		finalMessage.ErrorMessage = err.Error()
+		if finalMessage.ErrorMessage == "" || finalMessage.ErrorMessage == streamErr.Error() {
+			finalMessage.ErrorMessage = streamErr.Error()
+		} else {
+			finalMessage.ErrorMessage += "\n" + streamErr.Error()
+		}
 	}
 	finalMessage = cloneMessage(finalMessage)
 	if finalMessage.Role == "" {
@@ -750,12 +774,6 @@ func cloneAgentEvent(event AgentEvent) AgentEvent {
 	cloned := event
 	cloned.Message = cloneMessagePtr(event.Message)
 	cloned.Messages = cloneMessages(event.Messages)
-	if event.AssistantEvent != nil {
-		assistantEvent := *event.AssistantEvent
-		assistantEvent.Message = cloneMessage(event.AssistantEvent.Message)
-		assistantEvent.ToolCall = cloneToolCallPtr(event.AssistantEvent.ToolCall)
-		cloned.AssistantEvent = &assistantEvent
-	}
 	cloned.ToolCall = cloneToolCallPtr(event.ToolCall)
 	cloned.Args = cloneAny(event.Args)
 	if event.ToolResult != nil {

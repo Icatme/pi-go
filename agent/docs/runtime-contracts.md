@@ -138,6 +138,36 @@ true from `ShouldStopAfterTurn` ends the invocation before queues are polled.
 `Agent.Reset` returns `ErrAlreadyRunning` while a run is active and leaves the
 in-flight state unchanged. Abort the run and wait for idle before resetting.
 
+## Runner And Event Contract
+
+`Runner` is a stateless application boundary over `Engine`. `Run`, `Query`, and
+`Continue` clone their definition, input snapshot, and prompt messages. A single
+`Runner` may therefore start independent runs concurrently without sharing
+mutable runtime state.
+
+Each `RunStream` emits exactly one `EventAgentStart` and one `EventAgentEnd`.
+Every event in one run has:
+
+- a non-empty, stable `RunID`
+- an `AgentName` copied from the definition
+- a `Sequence` beginning at 1 and increasing by one
+- an optional `ParentRunID` reserved for outer orchestration
+
+Low-level model updates are flattened onto `AgentEvent` through `UpdateType`,
+`ContentIndex`, `Reason`, `Delta`, `ToolCall`, and `Err`. There is no nested
+assistant-event envelope. Event values are cloned at the runner boundary so a
+subscriber cannot mutate the stored result.
+
+`RunStream.Events` is lossless and bounded. Consumers must drain it before
+calling `Wait`; `Wait` intentionally participates in backpressure. `Close`
+cancels the invocation, drains outstanding events, and waits for shutdown. Both
+`Wait` and `Close` are safe to call repeatedly or concurrently.
+
+Every `AssistantStream` implementation must provide `Close`. The engine selects
+between model updates and context cancellation, then calls `Close` before
+`Wait`. Event-loop, wait, and close failures are joined and normalized into one
+terminal assistant message so message lifecycle events stay balanced.
+
 ## Provider Config Contract
 
 The typed provider runtime configuration lives in [`ProviderConfig`](../types.go).

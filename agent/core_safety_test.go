@@ -885,6 +885,124 @@ func TestEngineWaitErrorAfterPartialStreamClosesMessageLifecycle(t *testing.T) {
 	}
 }
 
+func TestEngineClosesStreamBeforeWaitAndJoinsCleanupErrors(t *testing.T) {
+	waitErr := errors.New("stream wait failed")
+	closeErr := errors.New("stream close failed")
+	stream := newCloseAwareAssistantStream(true)
+	stream.message = Message{
+		Role:       RoleAssistant,
+		Parts:      []Part{{Type: PartTypeText, Text: "partial"}},
+		Timestamp:  time.Now().UTC(),
+		StopReason: StopReasonStop,
+	}
+	stream.waitErr = waitErr
+	stream.closeErr = closeErr
+	definition := AgentDefinition{
+		Model: staticModel{streamFn: func(_ context.Context, _ ModelRequest) (AssistantStream, error) {
+			return stream, nil
+		}},
+	}
+
+	next, err := NewEngine().Run(context.Background(), definition, &AgentSnapshot{}, []Message{NewUserTextMessage("run")}, nil)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if got := stream.closeCalls.Load(); got != 1 {
+		t.Fatalf("expected Close to be called once, got %d", got)
+	}
+	if len(next.Messages) != 2 {
+		t.Fatalf("expected user and assistant messages, got %+v", next.Messages)
+	}
+	final := next.Messages[1]
+	if final.StopReason != StopReasonError {
+		t.Fatalf("expected cleanup failure to produce error stop reason, got %q", final.StopReason)
+	}
+	if want := errors.Join(waitErr, closeErr).Error(); final.ErrorMessage != want {
+		t.Fatalf("expected joined stream errors %q, got %q", want, final.ErrorMessage)
+	}
+}
+
+func TestEngineCancellationClosesBlockedStreamBeforeWait(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := newCloseAwareAssistantStream(false)
+	started := make(chan struct{})
+	definition := AgentDefinition{
+		Model: staticModel{streamFn: func(_ context.Context, _ ModelRequest) (AssistantStream, error) {
+			close(started)
+			return stream, nil
+		}},
+	}
+
+	type runResult struct {
+		snapshot *AgentSnapshot
+		err      error
+	}
+	done := make(chan runResult, 1)
+	go func() {
+		next, err := NewEngine().Run(ctx, definition, &AgentSnapshot{}, []Message{NewUserTextMessage("run")}, nil)
+		done <- runResult{snapshot: next, err: err}
+	}()
+	<-started
+	cancel()
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("Run returned error: %v", result.err)
+		}
+		if got := stream.closeCalls.Load(); got != 1 {
+			t.Fatalf("expected Close to be called once, got %d", got)
+		}
+		if len(result.snapshot.Messages) != 2 {
+			t.Fatalf("expected user and assistant messages, got %+v", result.snapshot.Messages)
+		}
+		final := result.snapshot.Messages[1]
+		if final.StopReason != StopReasonAborted || final.ErrorMessage != context.Canceled.Error() {
+			t.Fatalf("unexpected canceled stream message: %+v", final)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not close the blocked stream after cancellation")
+	}
+}
+
+type closeAwareAssistantStream struct {
+	events     chan AssistantEvent
+	closed     chan struct{}
+	closeOnce  sync.Once
+	closeCalls atomic.Int32
+	message    Message
+	waitErr    error
+	closeErr   error
+}
+
+func newCloseAwareAssistantStream(closeEvents bool) *closeAwareAssistantStream {
+	events := make(chan AssistantEvent)
+	if closeEvents {
+		close(events)
+	}
+	return &closeAwareAssistantStream{
+		events: events,
+		closed: make(chan struct{}),
+	}
+}
+
+func (s *closeAwareAssistantStream) Events() <-chan AssistantEvent {
+	return s.events
+}
+
+func (s *closeAwareAssistantStream) Wait() (Message, error) {
+	<-s.closed
+	return s.message, s.waitErr
+}
+
+func (s *closeAwareAssistantStream) Close() error {
+	s.closeCalls.Add(1)
+	s.closeOnce.Do(func() {
+		close(s.closed)
+	})
+	return s.closeErr
+}
+
 func TestEnginePerToolSequentialModeForcesWholeBatchSequential(t *testing.T) {
 	var (
 		active    atomic.Int32

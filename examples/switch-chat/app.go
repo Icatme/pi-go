@@ -210,7 +210,7 @@ func (a *App) sendChat(ctx context.Context, preset PresetSpec, input string) err
 		if event.Message == nil || event.Message.Role != core.RoleAssistant {
 			return
 		}
-		if event.AssistantEvent != nil && event.AssistantEvent.Type != core.AssistantEventTextDelta {
+		if event.UpdateType != core.AssistantEventTextDelta {
 			return
 		}
 		if event.Delta == "" {

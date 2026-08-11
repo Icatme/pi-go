@@ -58,6 +58,10 @@ func (s *chatAssistantStream) Wait() (core.Message, error) {
 	return s.final, s.err
 }
 
+func (s *chatAssistantStream) Close() error {
+	return nil
+}
+
 func TestChatAgentMaintainsSessionAndHistory(t *testing.T) {
 	model := &chatScriptedModel{
 		responses: []chatScriptedResponse{
@@ -218,6 +222,7 @@ func TestChatAgentAsyncChatStreamsDeltas(t *testing.T) {
 			{
 				events: []core.AssistantEvent{
 					{Type: core.AssistantEventStart, Message: core.Message{Role: core.RoleAssistant}},
+					{Type: core.AssistantEventThinkingDelta, Message: core.Message{Role: core.RoleAssistant}, Delta: "hidden"},
 					{Type: core.AssistantEventTextDelta, Message: core.Message{Role: core.RoleAssistant}, Delta: "Hello "},
 					{Type: core.AssistantEventTextDelta, Message: core.Message{Role: core.RoleAssistant}, Delta: "world"},
 				},

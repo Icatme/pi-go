@@ -1296,6 +1296,10 @@ func (s *staticAssistantStream) Wait() (Message, error) {
 	return s.message, s.err
 }
 
+func (s *staticAssistantStream) Close() error {
+	return nil
+}
+
 type blockingModel struct {
 	started chan struct{}
 	once    sync.Once
@@ -1352,6 +1356,10 @@ func (s *blockingAssistantStream) Events() <-chan AssistantEvent {
 func (s *blockingAssistantStream) Wait() (Message, error) {
 	<-s.done
 	return s.message, nil
+}
+
+func (s *blockingAssistantStream) Close() error {
+	return nil
 }
 
 type streamingStateModel struct {
@@ -1417,4 +1425,8 @@ func (s *streamingStateAssistantStream) Events() <-chan AssistantEvent {
 func (s *streamingStateAssistantStream) Wait() (Message, error) {
 	<-s.done
 	return s.message, nil
+}
+
+func (s *streamingStateAssistantStream) Close() error {
+	return nil
 }
