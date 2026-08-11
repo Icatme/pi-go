@@ -48,6 +48,8 @@ Success means:
   - `continue`
 - A higher-level `Agent` wrapper
 - A stateless `Runner` for asynchronous, snapshot-in/snapshot-out execution
+- An optional `agent/turnloop` package for bounded external input admission over
+  sequential `Runner` invocations
 - Generic whole-batch tool gating and explicit pending-tool resume primitives
 - An optional `agent/checkpoint` package for revisioned, targeted tool approval
 - An optional `agent/session` package for append-only lane logs, repositories,
@@ -75,6 +77,9 @@ Success means:
   - provider-independent durable conversation primitives
   - memory and versioned JSONL repositories
   - pure lane/context replay and pluggable compaction summaries
+- `agent/turnloop`
+  - bounded, non-blocking external input admission over one persistent snapshot
+  - next-run, steering, and follow-up delivery without graph orchestration
 
 ## Direct Usage
 
@@ -138,6 +143,52 @@ _ = err
 
 Runner events are lossless and use a bounded buffer. Drain `Events` before
 calling `Wait`; call `Close` to cancel and drain a run that is being abandoned.
+
+For applications that receive messages independently of a single request, the
+optional `agent/turnloop` package serializes multiple `Runner` invocations over
+one snapshot:
+
+```go
+import "github.com/Icatme/pi-go/agent/turnloop"
+```
+
+```go
+inputs, err := turnloop.New(context.Background(), turnloop.Config{
+	Definition:    definition,
+	Initial:       snapshot,
+	QueueCapacity: 32,
+	OnEvent: func(event core.AgentEvent) {
+		fmt.Println(event.RunID, event.Type)
+	},
+})
+if err != nil {
+	panic(err)
+}
+
+if err := inputs.Push(turnloop.Input{
+	Delivery: turnloop.DeliveryNextRun,
+	Message:  core.NewUserTextMessage("Hello"),
+}); err != nil {
+	panic(err)
+}
+
+_ = inputs.Stop(turnloop.StopGraceful)
+result, err := inputs.Wait(context.Background())
+_ = result.Snapshot
+_ = err
+```
+
+`Push` is non-blocking: a full queue returns `ErrQueueFull`, and an accepted
+input is cloned by the loop but is not a completion acknowledgement. Cloning
+matches Runner's in-memory contract: JSON-like map values and slices,
+pointer-reachable exported fields, and cycles are detached. Map keys retain
+their lookup identity, and opaque mutable unexported state must be treated as
+immutable. Steering and follow-up use the existing engine polling boundaries
+during an active invocation; either class may start a new invocation while the
+loop is idle. They do not cancel an active model stream or tool batch. Graceful
+stop drains all admitted inputs, while immediate stop cooperatively cancels
+active work and returns inputs that were never handed to the engine in
+`Result.Unhandled`.
 
 ## Tool Approval Checkpoints
 
@@ -310,6 +361,7 @@ Secondary integration surfaces:
 - `prebuilt`
 - `checkpoint`
 - `session`
+- `turnloop`
 
 This package does not keep a compatibility shim for legacy image URLs.
 
@@ -351,8 +403,16 @@ single-agent runners and does not add routing or graph state to the core.
 Targeted tool approval lives in `agent/checkpoint`; the root package contains
 only generic batch suspension/resume primitives.
 
+Bounded external input delivery lives in `agent/turnloop`; it composes
+sequential Runners and does not add graph state or queue policy to the root
+runtime.
+
 ## Current Limitations
 
 - Multi-node orchestration, supervisor-style routing, time travel, and general
   human-in-the-loop workflows remain outside the core runtime. The checkpoint
   child package intentionally supports only targeted tool approval.
+- `agent/turnloop` does not implement Eino-style active-turn safe-point
+  cancellation or preemption. Pushes wait for the core runtime's existing
+  steering/follow-up boundaries, and immediate stop remains cooperative for
+  models and tools that honor context cancellation.

@@ -28,6 +28,10 @@ The default offline suite covers:
 - flat assistant-update event fields and balanced stream-close error lifecycle
 - stateless runner snapshot isolation, run metadata, bounded lossless
   backpressure, nested parent lineage, and concurrent `Wait` / `Close`
+- bounded external-input admission, per-class FIFO and queue-mode batching,
+  next-run isolation, cross-run snapshot continuity, MaxTurns handoff safety,
+  synchronous event backpressure, graceful drain, cooperative immediate stop,
+  push/stop races, and detached concurrent TurnLoop waits
 - whole-batch tool-gate fail-closed behavior, canonical pending bindings,
   lossless JSON-number/raw-presence round trips, lifecycle-free suspension,
   exact resume validation, pre-execution retry, MaxTurns continuity, and resume
@@ -107,6 +111,7 @@ Secondary integration surfaces:
 - `prebuilt`
 - `checkpoint`
 - `session`
+- `turnloop`
 
 Non-goals for this test plan:
 

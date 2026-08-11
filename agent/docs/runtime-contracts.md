@@ -169,6 +169,76 @@ between model updates and context cancellation, then calls `Close` before
 `Wait`. Event-loop, wait, and close failures are joined and normalized into one
 terminal assistant message so message lifecycle events stay balanced.
 
+## External Input Turn Loop Contract
+
+The optional `agent/turnloop` child package owns a single persistent snapshot
+and serializes independent `Runner` invocations. It is an application boundary,
+not a graph runtime and not durable storage.
+
+- `QueueCapacity` must be positive and bounds the shared waiting queue across
+  all delivery classes; an input already handed to an active Runner is no
+  longer waiting.
+- `Push` is non-blocking and uses RejectNewest: a full queue returns
+  `ErrQueueFull`, and any stop rejects new input with `ErrNotAccepting`.
+- A successful `Push` synchronously clones the message and means admitted, not
+  executed or completed. `Wait` results and unhandled inputs are independently
+  cloned on every call. This matches Runner's in-memory ownership contract:
+  JSON-like map values and slices, pointer-reachable exported fields, and
+  cycles are detached. Map keys retain identity for stable lookup semantics,
+  and mutable unexported struct internals are opaque; both must be treated as
+  immutable rather than cloned through unsafe reflection.
+- `DeliveryNextRun` starts a later Runner invocation and is never injected into
+  an active invocation. `DeliverySteering` and `DeliveryFollowUp` use the
+  engine's existing queue hooks and respect the definition's `one-at-a-time`
+  or `all` mode.
+- Safe delivery classes may bypass an earlier next-run input while a run is
+  active; order remains FIFO within each delivery class. When idle, the oldest
+  admitted input starts the next invocation regardless of class.
+- An idle steering or follow-up starter forms a prompt batch according to its
+  delivery class's queue mode. A steering starter then skips exactly the
+  engine's initial steering poll, so `one-at-a-time` still means one input per
+  model turn.
+- Steering has priority if it arrives between the engine's last steering poll
+  and its follow-up poll.
+- The loop will not dequeue a safe-boundary input when doing so would hand it to
+  an invocation that has exhausted `MaxTurns`. The input remains queued: it
+  starts a later invocation after normal completion, or is returned in
+  `Result.Unhandled` if a required tool continuation makes the core limit error
+  terminate the loop.
+
+The loop is the only consumer of each `RunStream`: it drains `Events` before
+calling `Wait`. `OnEvent` is synchronous, serialized, and participates in
+Runner backpressure. It is called without the loop mutex, so it may call
+`Push`; because Runner events are buffered, a push made from an event callback
+is not guaranteed to reach the same engine polling boundary. A nil callback
+discards events while still draining the stream. This boundary forwards every
+event produced by Runner, but cannot restore deltas discarded earlier by a
+custom or built-in model-stream adapter. `OnEvent` runs on the sole loop worker
+and therefore must not synchronously call `Wait` or otherwise wait for loop
+termination; `Push` and non-blocking `Stop` calls are safe.
+
+`StopGraceful` closes admission and completes active work plus every already
+admitted input. `StopImmediate` may upgrade a graceful stop, closes admission,
+cooperatively cancels active work, and returns inputs not yet handed to the
+engine in `Result.Unhandled`. Cancellation of the parent context has the same
+effective stop mode and is returned as an error. Explicit stop is normal
+control flow, so a cancellation caused only by `StopImmediate` is not returned
+as a runtime error. A context passed to `Wait` cancels only that waiter and does
+not stop the loop; repeated and concurrent successful waits return detached
+results.
+
+Once an input is handed to the engine it belongs to the returned snapshot and
+is never automatically retried, even if the invocation later fails. A Runner
+error stops the loop, preserves its returned snapshot, and reports only still
+queued inputs as unhandled; `Result.StopMode` is empty when no explicit or
+parent-context stop became effective. Suspended initial snapshots are rejected:
+pending tool approval remains the separate `agent/checkpoint` workflow.
+
+Pushes do not interrupt an active model request or tool batch. Steering and
+follow-up delivery waits for the existing core polling boundaries, and
+immediate stop cannot impose a hard deadline on model, stream, or tool
+implementations that ignore context cancellation.
+
 ## Tool Gate And Pending Resume Contract
 
 `LoopHooks.ToolGate` is an invocation-local execution gate. It is not stored in
