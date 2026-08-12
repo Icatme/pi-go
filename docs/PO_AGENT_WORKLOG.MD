@@ -170,3 +170,15 @@
   agent installation guidance without modifying unrelated dependency versions.
 - Verified root and examples tests, race tests, vet, module integrity, semantic
   tidy state, and diff cleanliness; no live provider request was run.
+
+## 2026-08-12 - v0.7.1 CommandCode usage accounting release
+
+- Fixed CommandCode cached input accounting so `Usage.Input` contains only
+  uncached input, preferring `noCacheTokens` and otherwise subtracting cache
+  reads and writes from the provider-reported total input.
+- Counted cache writes in CommandCode long-context tier selection and added
+  regression coverage for explicit, derived, malformed, and clamped usage.
+- Bumped the patch release surfaces to `v0.7.1`; no `ai-relay` compatibility
+  workaround was added because the defect belonged to the provider parser.
+- Verified root and examples tests, race tests, vet, module integrity, semantic
+  tidy state, and diff cleanliness; no live CommandCode request was run.
