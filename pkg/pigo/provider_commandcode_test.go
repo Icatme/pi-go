@@ -82,6 +82,64 @@ func TestCommandCodeLongContextPricing(t *testing.T) {
 	if math.Abs(long.Input-0.306) > 1e-12 || math.Abs(long.CacheRead-0.00024024) > 1e-12 || math.Abs(long.Output-0.0048) > 1e-12 {
 		t.Fatalf("unexpected long-context cost: %+v", long)
 	}
+	longCacheWrite := calculateCommandCodeCost(model, Usage{Input: 255_000, CacheWrite: 1_001, Output: 1_000})
+	if math.Abs(longCacheWrite.Input-0.306) > 1e-12 || math.Abs(longCacheWrite.CacheWrite-0.0015015) > 1e-12 || math.Abs(longCacheWrite.Output-0.0048) > 1e-12 {
+		t.Fatalf("unexpected cache-write long-context cost: %+v", longCacheWrite)
+	}
+}
+
+func TestApplyCommandCodeUsageSplitsCachedInput(t *testing.T) {
+	tests := []struct {
+		name       string
+		totalInput int
+		details    map[string]any
+		wantInput  int
+		wantTotal  int
+	}{
+		{
+			name:       "derive uncached input from total",
+			totalInput: 10,
+			details:    map[string]any{"cacheReadTokens": 3, "cacheWriteTokens": 2},
+			wantInput:  5,
+			wantTotal:  14,
+		},
+		{
+			name:       "prefer explicit uncached input",
+			totalInput: 10,
+			details:    map[string]any{"noCacheTokens": 4, "cacheReadTokens": 3, "cacheWriteTokens": 2},
+			wantInput:  4,
+			wantTotal:  13,
+		},
+		{
+			name:       "ignore nonnumeric uncached input",
+			totalInput: 10,
+			details:    map[string]any{"noCacheTokens": nil, "cacheReadTokens": 3, "cacheWriteTokens": 2},
+			wantInput:  5,
+			wantTotal:  14,
+		},
+		{
+			name:       "clamp derived uncached input",
+			totalInput: 4,
+			details:    map[string]any{"cacheReadTokens": 3, "cacheWriteTokens": 2},
+			wantInput:  0,
+			wantTotal:  9,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := &AssistantMessage{}
+			applyCommandCodeUsage(map[string]any{
+				"totalUsage": map[string]any{
+					"inputTokens":       test.totalInput,
+					"outputTokens":      4,
+					"inputTokenDetails": test.details,
+				},
+			}, Model{}, response)
+			if response.Usage.Input != test.wantInput || response.Usage.CacheRead != 3 || response.Usage.CacheWrite != 2 || response.Usage.Output != 4 || response.Usage.TotalTokens != test.wantTotal {
+				t.Fatalf("unexpected usage: %+v", response.Usage)
+			}
+		})
+	}
 }
 
 func TestCommandCodeJSONSchemaPreservesStandardSchema(t *testing.T) {
@@ -269,10 +327,10 @@ func TestCommandCodeStreamMatchesPiExtensionProtocol(t *testing.T) {
 	if call, ok := response.Content[2].(ToolCall); !ok || call.ID != "new-call" || call.Arguments["path"] != "a.go" {
 		t.Fatalf("unexpected tool call: %+v", response.Content[2])
 	}
-	if response.Usage.Input != 10 || response.Usage.Output != 4 || response.Usage.CacheRead != 3 || response.Usage.CacheWrite != 2 || response.Usage.TotalTokens != 19 {
+	if response.Usage.Input != 5 || response.Usage.Output != 4 || response.Usage.CacheRead != 3 || response.Usage.CacheWrite != 2 || response.Usage.TotalTokens != 14 {
 		t.Fatalf("unexpected usage: %+v", response.Usage)
 	}
-	if math.Abs(response.Usage.Cost.Total-0.0000255) > 1e-12 {
+	if math.Abs(response.Usage.Cost.Total-0.0000205) > 1e-12 {
 		t.Fatalf("unexpected calculated cost: %+v", response.Usage.Cost)
 	}
 	wantEventTypes := []AssistantMessageEventType{

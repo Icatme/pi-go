@@ -489,18 +489,24 @@ func applyCommandCodeUsage(event map[string]any, model Model, response *Assistan
 		return
 	}
 	details := commandCodeRecord(totalUsage["inputTokenDetails"])
+	cacheRead := commandCodeInt(details["cacheReadTokens"])
+	cacheWrite := commandCodeInt(details["cacheWriteTokens"])
+	input := maxInt(0, commandCodeInt(totalUsage["inputTokens"])-cacheRead-cacheWrite)
+	if noCacheTokens, ok := commandCodeOptionalInt(details["noCacheTokens"]); ok {
+		input = noCacheTokens
+	}
 	response.Usage = Usage{
-		Input:      commandCodeInt(totalUsage["inputTokens"]),
+		Input:      input,
 		Output:     commandCodeInt(totalUsage["outputTokens"]),
-		CacheRead:  commandCodeInt(details["cacheReadTokens"]),
-		CacheWrite: commandCodeInt(details["cacheWriteTokens"]),
+		CacheRead:  cacheRead,
+		CacheWrite: cacheWrite,
 	}
 	response.Usage.TotalTokens = response.Usage.Input + response.Usage.Output + response.Usage.CacheRead + response.Usage.CacheWrite
 	response.Usage.Cost = calculateCommandCodeCost(model, response.Usage)
 }
 
 func calculateCommandCodeCost(model Model, usage Usage) UsageCost {
-	if tier, ok := commandCodeLongContextCosts[model.ID]; ok && usage.Input+usage.CacheRead > tier.Threshold {
+	if tier, ok := commandCodeLongContextCosts[model.ID]; ok && usage.Input+usage.CacheRead+usage.CacheWrite > tier.Threshold {
 		model.Cost = tier.Cost
 	}
 	return CalculateCost(model, usage)
@@ -869,17 +875,22 @@ func commandCodeRecord(value any) map[string]any {
 }
 
 func commandCodeInt(value any) int {
+	result, _ := commandCodeOptionalInt(value)
+	return result
+}
+
+func commandCodeOptionalInt(value any) (int, bool) {
 	switch typed := value.(type) {
 	case float64:
-		return int(typed)
+		return int(typed), true
 	case float32:
-		return int(typed)
+		return int(typed), true
 	case int:
-		return typed
+		return typed, true
 	case int64:
-		return int(typed)
+		return int(typed), true
 	default:
-		return 0
+		return 0, false
 	}
 }
 
