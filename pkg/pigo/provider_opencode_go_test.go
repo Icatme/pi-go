@@ -71,8 +71,8 @@ func TestOpenCodeGoProviderCatalogAndProtocolRouting(t *testing.T) {
 	if deepseek == nil {
 		t.Fatal("expected DeepSeek V4 Flash model")
 	}
-	if got := GetSupportedThinkingLevels(*deepseek); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelHigh, ModelThinkingLevelXHigh}) {
-		t.Fatalf("expected DeepSeek V4 off/high/max-equivalent levels, got %v", got)
+	if got := GetSupportedThinkingLevels(*deepseek); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelLow, ModelThinkingLevelHigh, ModelThinkingLevelXHigh}) {
+		t.Fatalf("expected DeepSeek V4 Flash off/low/high/max-equivalent levels, got %v", got)
 	}
 	kimi := GetModel("opencode-go", "kimi-k2.6")
 	if kimi == nil {
@@ -266,6 +266,39 @@ func TestOpenCodeGoChatCompletionsThinkingFormats(t *testing.T) {
 	qwenRequest := buildOpenAICompletionsRequest(*qwen, Context{}, BuildProviderStreamOptions(*qwen, SimpleStreamOptions{Reasoning: ThinkingLevelHigh}))
 	if qwenRequest.EnableThinking == nil || !*qwenRequest.EnableThinking || qwenRequest.ReasoningEffort != "high" {
 		t.Fatalf("Qwen3.6 Plus must use enable_thinking: %+v", qwenRequest)
+	}
+}
+
+func TestOpenCodeGoDeepSeekV4FlashSendsLowReasoningEffort(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"id":"chatcmpl-deepseek","model":"deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}` + "\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	model := GetModel("opencode-go", "deepseek-v4-flash")
+	if model == nil {
+		t.Fatal("expected DeepSeek V4 Flash model")
+	}
+	model.BaseURL = server.URL + "/v1"
+	response := Complete(*model, Context{Messages: []Message{UserMessage{Content: "solve"}}}, BuildProviderStreamOptions(*model, SimpleStreamOptions{
+		APIKey:    "test-key",
+		Reasoning: ThinkingLevelLow,
+	}))
+	if response.StopReason != StopReasonStop {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+	if captured["reasoning_effort"] != "low" {
+		t.Fatalf("expected low reasoning_effort on the wire, got %#v", captured["reasoning_effort"])
+	}
+	thinking, ok := captured["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "enabled" {
+		t.Fatalf("expected DeepSeek thinking to be enabled, got %#v", captured["thinking"])
 	}
 }
 

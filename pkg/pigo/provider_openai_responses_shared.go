@@ -2,6 +2,7 @@ package pigo
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -547,13 +548,7 @@ func processOpenAIResponsesStreamEventWithProvider(
 				response.ErrorMessage = "response failed"
 			}
 		}
-		stream.push(AssistantMessageEvent{
-			Type:   AssistantMessageEventError,
-			Reason: response.StopReason,
-			Error:  *response,
-		})
-		stream.finish(*response)
-		return true, nil
+		return true, errors.New(response.ErrorMessage)
 	case "error":
 		if message, ok := event["message"].(string); ok && strings.TrimSpace(message) != "" {
 			response.ErrorMessage = message
@@ -561,13 +556,7 @@ func processOpenAIResponsesStreamEventWithProvider(
 			response.ErrorMessage = "error"
 		}
 		response.StopReason = StopReasonError
-		stream.push(AssistantMessageEvent{
-			Type:   AssistantMessageEventError,
-			Reason: response.StopReason,
-			Error:  *response,
-		})
-		stream.finish(*response)
-		return true, nil
+		return true, errors.New(response.ErrorMessage)
 	}
 
 	return false, nil
@@ -1144,5 +1133,6 @@ func shouldRetryOpenAIResponsesRequest(status int, message string) bool {
 		strings.Contains(lower, "overloaded") ||
 		strings.Contains(lower, "service unavailable") ||
 		strings.Contains(lower, "upstream connect") ||
-		strings.Contains(lower, "connection refused")
+		strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "exceeded request buffer limit while retrying upstream")
 }

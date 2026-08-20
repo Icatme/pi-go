@@ -182,3 +182,17 @@
   workaround was added because the defect belonged to the provider parser.
 - Verified root and examples tests, race tests, vet, module integrity, semantic
   tidy state, and diff cleanliness; no live CommandCode request was run.
+
+## 2026-08-20 - pi-mono provider P0 parity
+
+- Preserved ordered OpenAI-compatible `reasoning_details` in the existing
+  thinking signature and replayed only validated summary, encrypted, and text
+  details without adding a legacy tool-call compatibility path.
+- Added Kimi top-level `cached_tokens` accounting with normalized usage totals,
+  exposed DeepSeek V4 Flash low reasoning on OpenCode Go, and retried the exact
+  transient request-buffer failure across pre-output Responses, Codex, and
+  Completions SSE streams without replaying streams that already emitted output.
+- Added streaming, replay, usage, request-wire, retry-classification, real SSE
+  retry, and no-duplicate-output regressions. Verified root and examples tests
+  and vet, `pkg/pigo` race tests, module integrity, and diff cleanliness; no live
+  provider request was run.

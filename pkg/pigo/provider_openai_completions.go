@@ -46,6 +46,7 @@ type openAICompletionsMessage struct {
 	ToolCallID       string                      `json:"tool_call_id,omitempty"`
 	Name             string                      `json:"name,omitempty"`
 	ToolCalls        []openAICompletionsToolCall `json:"tool_calls,omitempty"`
+	ReasoningDetails []json.RawMessage           `json:"reasoning_details,omitempty"`
 	ReasoningContent *string                     `json:"reasoning_content,omitempty"`
 	Reasoning        string                      `json:"reasoning,omitempty"`
 	ReasoningText    string                      `json:"reasoning_text,omitempty"`
@@ -93,6 +94,7 @@ type openAICompletionsDelta struct {
 	ReasoningContent string                           `json:"reasoning_content,omitempty"`
 	Reasoning        string                           `json:"reasoning,omitempty"`
 	ReasoningText    string                           `json:"reasoning_text,omitempty"`
+	ReasoningDetails json.RawMessage                  `json:"reasoning_details,omitempty"`
 	ToolCalls        []openAICompletionsDeltaToolCall `json:"tool_calls,omitempty"`
 }
 
@@ -107,6 +109,7 @@ type openAICompletionsUsage struct {
 	PromptTokens             int                                  `json:"prompt_tokens"`
 	CompletionTokens         int                                  `json:"completion_tokens"`
 	TotalTokens              int                                  `json:"total_tokens"`
+	CachedTokens             int                                  `json:"cached_tokens"`
 	PromptCacheHitTokens     int                                  `json:"prompt_cache_hit_tokens"`
 	PromptCacheMissTokens    int                                  `json:"prompt_cache_miss_tokens"`
 	CacheReadInputTokens     int                                  `json:"cache_read_input_tokens"`
@@ -161,6 +164,7 @@ type openAICompletionsStreamState struct {
 	ThinkingStarted   bool
 	Thinking          strings.Builder
 	ThinkingSignature string
+	ReasoningDetails  []json.RawMessage
 	ToolCalls         map[int]*openAICompletionsToolCallState
 	FinishSeen        bool
 	DoneSeen          bool
@@ -225,6 +229,7 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 		}
 
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: response})
+		baselineResponse := cloneAssistantMessage(response)
 		state := &openAICompletionsStreamState{ToolCalls: map[int]*openAICompletionsToolCallState{}}
 		headers := mergeRequestHeaders(
 			map[string]string{
@@ -255,6 +260,13 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 				}
 			},
 			ShouldRetry: shouldRetryOpenAIResponsesRequest,
+			CanRetryStreamError: func() bool {
+				return len(response.Content) == 0 && len(response.HostedToolExecutions) == 0
+			},
+			OnStreamRetry: func() {
+				response = cloneAssistantMessage(baselineResponse)
+				*state = openAICompletionsStreamState{ToolCalls: map[int]*openAICompletionsToolCallState{}}
+			},
 			ParseError: func(body []byte, status string) string {
 				return fmt.Sprintf("openai completions upstream returned %s: %s", status, parseOpenAICompletionsError(body))
 			},
@@ -565,6 +577,9 @@ func openAICompletionsAssistantMessage(model Model, message AssistantMessage, co
 		case TextContent:
 			text.WriteString(typed.Text)
 		case ThinkingContent:
+			if len(converted.ReasoningDetails) == 0 {
+				converted.ReasoningDetails = parseOpenAICompletionsReasoningDetails(typed.ThinkingSignature)
+			}
 			if compat.RequiresThinkingAsText {
 				if text.Len() > 0 {
 					text.WriteString("\n\n")
@@ -590,7 +605,7 @@ func openAICompletionsAssistantMessage(model Model, message AssistantMessage, co
 	if text.Len() > 0 {
 		converted.Content = text.String()
 	}
-	if thinking.Len() > 0 {
+	if thinking.Len() > 0 && len(converted.ReasoningDetails) == 0 {
 		if model.Provider == "opencode-go" && thinkingSignature == "reasoning" {
 			thinkingSignature = "reasoning_content"
 		}
@@ -697,6 +712,7 @@ func processOpenAICompletionsStreamEvent(data string, model Model, response *Ass
 		if reasoning, signature := openAICompletionsReasoningDelta(delta, model.Provider); reasoning != "" {
 			appendOpenAICompletionsThinking(response, stream, state, reasoning, signature)
 		}
+		appendOpenAICompletionsReasoningDetails(response, stream, state, delta.ReasoningDetails)
 		if delta.Content != "" {
 			appendOpenAICompletionsText(response, stream, state, delta.Content)
 		}
@@ -745,6 +761,118 @@ func appendOpenAICompletionsThinking(response *AssistantMessage, stream *Assista
 	state.Thinking.WriteString(delta)
 	response.Content[state.ThinkingIndex] = ThinkingContent{Thinking: state.Thinking.String(), ThinkingSignature: state.ThinkingSignature}
 	stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingDelta, ContentIndex: state.ThinkingIndex, Delta: delta, Partial: *response})
+}
+
+func appendOpenAICompletionsReasoningDetails(response *AssistantMessage, stream *AssistantMessageEventStream, state *openAICompletionsStreamState, raw json.RawMessage) {
+	var details []json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &details) != nil {
+		return
+	}
+	for _, detail := range details {
+		if !isOpenAICompletionsReasoningDetail(detail) {
+			continue
+		}
+		state.ReasoningDetails = append(state.ReasoningDetails, detail)
+	}
+	if len(state.ReasoningDetails) == 0 {
+		return
+	}
+	if !state.ThinkingStarted {
+		state.ThinkingStarted = true
+		state.ThinkingIndex = len(response.Content)
+		response.Content = append(response.Content, ThinkingContent{})
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingStart, ContentIndex: state.ThinkingIndex, Partial: *response})
+	}
+	signature, err := json.Marshal(state.ReasoningDetails)
+	if err != nil {
+		return
+	}
+	state.ThinkingSignature = string(signature)
+	response.Content[state.ThinkingIndex] = ThinkingContent{
+		Thinking:          state.Thinking.String(),
+		ThinkingSignature: state.ThinkingSignature,
+	}
+}
+
+func parseOpenAICompletionsReasoningDetails(signature string) []json.RawMessage {
+	if signature == "" {
+		return nil
+	}
+	var details []json.RawMessage
+	if json.Unmarshal([]byte(signature), &details) != nil || len(details) == 0 {
+		return nil
+	}
+	for _, detail := range details {
+		if !isOpenAICompletionsReasoningDetail(detail) {
+			return nil
+		}
+	}
+	return details
+}
+
+func isOpenAICompletionsReasoningDetail(raw json.RawMessage) bool {
+	var detail map[string]json.RawMessage
+	if json.Unmarshal(raw, &detail) != nil || detail == nil ||
+		!hasOptionalOpenAICompletionsStringField(detail, "id", true) ||
+		!hasOptionalOpenAICompletionsStringField(detail, "format", false) ||
+		!hasOptionalOpenAICompletionsNumberField(detail, "index") {
+		return false
+	}
+	typeName, ok := requiredOpenAICompletionsStringField(detail, "type")
+	if !ok {
+		return false
+	}
+	switch typeName {
+	case "reasoning.summary":
+		_, ok = requiredOpenAICompletionsStringField(detail, "summary")
+		return ok
+	case "reasoning.encrypted":
+		_, ok = requiredOpenAICompletionsStringField(detail, "data")
+		return ok
+	case "reasoning.text":
+		if _, ok = requiredOpenAICompletionsStringField(detail, "text"); !ok {
+			return false
+		}
+		return hasOptionalOpenAICompletionsStringField(detail, "signature", true)
+	default:
+		return false
+	}
+}
+
+func requiredOpenAICompletionsStringField(detail map[string]json.RawMessage, name string) (string, bool) {
+	raw, ok := detail[name]
+	if !ok || strings.TrimSpace(string(raw)) == "null" {
+		return "", false
+	}
+	var value string
+	if json.Unmarshal(raw, &value) != nil {
+		return "", false
+	}
+	return value, true
+}
+
+func hasOptionalOpenAICompletionsStringField(detail map[string]json.RawMessage, name string, allowNull bool) bool {
+	raw, ok := detail[name]
+	if !ok {
+		return true
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return allowNull
+	}
+	var value string
+	return json.Unmarshal(raw, &value) == nil
+}
+
+func hasOptionalOpenAICompletionsNumberField(detail map[string]json.RawMessage, name string) bool {
+	raw, ok := detail[name]
+	if !ok {
+		return true
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return false
+	}
+	var value float64
+	return json.Unmarshal(raw, &value) == nil
 }
 
 func appendOpenAICompletionsText(response *AssistantMessage, stream *AssistantMessageEventStream, state *openAICompletionsStreamState, delta string) {
@@ -814,7 +942,8 @@ func finalizeOpenAICompletionsResponse(response *AssistantMessage, stream *Assis
 }
 
 func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage openAICompletionsUsage) {
-	cacheRead := maxInt(usage.PromptTokensDetails.CachedTokens, usage.PromptCacheHitTokens)
+	cacheRead := maxInt(usage.CachedTokens, usage.PromptTokensDetails.CachedTokens)
+	cacheRead = maxInt(cacheRead, usage.PromptCacheHitTokens)
 	cacheRead = maxInt(cacheRead, usage.CacheReadInputTokens)
 	cacheWrite := maxInt(usage.PromptTokensDetails.CacheWriteTokens, usage.PromptTokensDetails.CacheCreationTokens)
 	cacheWrite = maxInt(cacheWrite, usage.CacheCreationInputTokens)
@@ -825,10 +954,7 @@ func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage 
 	if input < 0 {
 		input = 0
 	}
-	total := usage.TotalTokens
-	if total == 0 {
-		total = usage.PromptTokens + usage.CompletionTokens
-	}
+	total := input + usage.CompletionTokens + cacheRead + cacheWrite
 	response.Usage = Usage{
 		Input:       input,
 		Output:      usage.CompletionTokens,

@@ -103,6 +103,8 @@ func streamOpenAICodexSSE(
 		CurrentToolIndex:     -1,
 		FinalizedItemKeys:    map[string]bool{},
 	}
+	baselineResponse := cloneAssistantMessage(*response)
+	streamStarted := false
 	terminalSeen := false
 	err := client.postStream(requestContext, resolveOpenAICodexURL(model.BaseURL), httpStreamRequest{
 		Headers: buildOpenAICodexSSEHeaders(options, apiKey, accountID),
@@ -115,8 +117,24 @@ func streamOpenAICodexSSE(
 		},
 		ShouldRetry: shouldRetryOpenAIResponsesRequest,
 		OnOpen: func(_ *http.Response) error {
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: *response})
+			if !streamStarted {
+				stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: *response})
+				streamStarted = true
+			}
 			return nil
+		},
+		CanRetryStreamError: func() bool {
+			return len(response.Content) == 0 && len(response.HostedToolExecutions) == 0
+		},
+		OnStreamRetry: func() {
+			*response = cloneAssistantMessage(baselineResponse)
+			state = openAIResponsesStreamingState{
+				CurrentTextIndex:     -1,
+				CurrentThinkingIndex: -1,
+				CurrentToolIndex:     -1,
+				FinalizedItemKeys:    map[string]bool{},
+			}
+			terminalSeen = false
 		},
 		OnEvent: func(_ string, data string) (bool, error) {
 			done, err := processOpenAIResponsesStreamEventWithProvider(data, model, response, stream, &state, options.ServiceTier, "codex")

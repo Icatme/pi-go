@@ -18,13 +18,15 @@ type HTTPStreamClient struct {
 }
 
 type httpStreamRequest struct {
-	Headers     map[string]string
-	Body        []byte
-	OnOpen      func(*http.Response) error
-	OnEvent     func(eventName, data string) (bool, error)
-	OnResponse  func(*http.Response)
-	ShouldRetry func(status int, message string) bool
-	ParseError  func(body []byte, status string) string
+	Headers             map[string]string
+	Body                []byte
+	OnOpen              func(*http.Response) error
+	OnEvent             func(eventName, data string) (bool, error)
+	OnResponse          func(*http.Response)
+	ShouldRetry         func(status int, message string) bool
+	ParseError          func(body []byte, status string) string
+	CanRetryStreamError func() bool
+	OnStreamRetry       func()
 }
 
 // PostStream performs a streaming POST request and dispatches SSE events.
@@ -113,6 +115,19 @@ func (c *HTTPStreamClient) postStream(ctx context.Context, url string, requestOp
 		err = readSSEStream(httpResponse.Body, requestOptions.OnEvent)
 		_ = httpResponse.Body.Close()
 		if err != nil {
+			if requestOptions.ShouldRetry != nil &&
+				requestOptions.CanRetryStreamError != nil &&
+				requestOptions.CanRetryStreamError() &&
+				requestOptions.ShouldRetry(0, err.Error()) &&
+				attempt < maxRetries {
+				if waitErr := c.waitRetryDelay(ctx, attempt, baseRetryDelay); waitErr != nil {
+					return waitErr
+				}
+				if requestOptions.OnStreamRetry != nil {
+					requestOptions.OnStreamRetry()
+				}
+				continue
+			}
 			return err
 		}
 		return nil

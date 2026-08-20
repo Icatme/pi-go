@@ -29,7 +29,7 @@ var openCodeGoModelSpecs = []openCodeGoModelSpec{
 		Reasoning: true,
 		ThinkingLevelMap: ThinkingLevelMap{
 			ModelThinkingLevelMinimal: "",
-			ModelThinkingLevelLow:     "",
+			ModelThinkingLevelLow:     "low",
 			ModelThinkingLevelMedium:  "",
 			ModelThinkingLevelHigh:    "high",
 			ModelThinkingLevelXHigh:   "max",

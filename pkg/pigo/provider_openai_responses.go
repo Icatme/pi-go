@@ -227,6 +227,8 @@ func streamOpenAIResponsesSSE(
 	}
 
 	maxRetries := maxInt(options.MaxRetries, 3)
+	baselineResponse := cloneAssistantMessage(*response)
+	streamStarted := false
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		var httpResponse *http.Response
 		err := sdkClient.Post(requestContext, "responses", payload, &httpResponse, requestOptions...)
@@ -281,7 +283,10 @@ func streamOpenAIResponsesSSE(
 			FinalizedItemKeys:    map[string]bool{},
 		}
 		terminalSeen := false
-		stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: *response})
+		if !streamStarted {
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: *response})
+			streamStarted = true
+		}
 		err = readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
 			done, eventErr := processOpenAIResponsesStreamEvent(data, model, response, stream, &state, options.ServiceTier)
 			if done {
@@ -291,6 +296,16 @@ func streamOpenAIResponsesSSE(
 		})
 		_ = httpResponse.Body.Close()
 		if err != nil {
+			if len(response.Content) == 0 &&
+				len(response.HostedToolExecutions) == 0 &&
+				shouldRetryOpenAIResponsesRequest(0, err.Error()) &&
+				attempt < maxRetries {
+				if waitErr := waitOpenAIResponsesRetryDelay(requestContext, options.MaxRetryDelay, attempt, time.Second); waitErr != nil {
+					return waitErr
+				}
+				*response = cloneAssistantMessage(baselineResponse)
+				continue
+			}
 			return err
 		}
 		if !terminalSeen {
