@@ -128,19 +128,42 @@ func TestOpenAICompletionsInvalidReasoningDetailsFallBackToExistingReasoningFiel
 	}
 }
 
-func TestOpenAICompletionsUsageReadsTopLevelCachedTokens(t *testing.T) {
+func TestOpenAICompletionsUsageUsesUpstreamCacheFieldPrecedence(t *testing.T) {
 	tests := []struct {
 		name      string
 		payload   string
 		wantInput int
 		wantCache int
+		wantWrite int
 		wantTotal int
 	}{
 		{
-			name:      "top level wins max",
+			name:      "prompt details wins over larger aliases",
 			payload:   `{"prompt_tokens":20,"completion_tokens":3,"cached_tokens":12,"prompt_cache_hit_tokens":8,"cache_read_input_tokens":10,"prompt_tokens_details":{"cached_tokens":9}}`,
-			wantInput: 8,
-			wantCache: 12,
+			wantInput: 11,
+			wantCache: 9,
+			wantTotal: 23,
+		},
+		{
+			name:      "explicit zero prompt details wins",
+			payload:   `{"prompt_tokens":20,"completion_tokens":3,"cached_tokens":12,"prompt_cache_hit_tokens":8,"prompt_tokens_details":{"cached_tokens":0}}`,
+			wantInput: 20,
+			wantCache: 0,
+			wantTotal: 23,
+		},
+		{
+			name:      "prompt cache hit wins over top level",
+			payload:   `{"prompt_tokens":20,"completion_tokens":3,"cached_tokens":12,"prompt_cache_hit_tokens":8}`,
+			wantInput: 12,
+			wantCache: 8,
+			wantTotal: 23,
+		},
+		{
+			name:      "documented cache write wins over aliases",
+			payload:   `{"prompt_tokens":20,"completion_tokens":3,"cache_creation_input_tokens":8,"prompt_tokens_details":{"cached_tokens":4,"cache_write_tokens":2,"cache_creation_tokens":6}}`,
+			wantInput: 14,
+			wantCache: 4,
+			wantWrite: 2,
 			wantTotal: 23,
 		},
 		{
@@ -159,7 +182,7 @@ func TestOpenAICompletionsUsageReadsTopLevelCachedTokens(t *testing.T) {
 			}
 			response := AssistantMessage{}
 			applyOpenAICompletionsUsage(&response, Model{}, usage)
-			if response.Usage.Input != test.wantInput || response.Usage.CacheRead != test.wantCache || response.Usage.Output != 3 || response.Usage.TotalTokens != test.wantTotal {
+			if response.Usage.Input != test.wantInput || response.Usage.CacheRead != test.wantCache || response.Usage.CacheWrite != test.wantWrite || response.Usage.Output != 3 || response.Usage.TotalTokens != test.wantTotal {
 				t.Fatalf("unexpected usage: %+v", response.Usage)
 			}
 			if response.Usage.TotalTokens != response.Usage.Input+response.Usage.Output+response.Usage.CacheRead+response.Usage.CacheWrite {

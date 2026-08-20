@@ -226,7 +226,7 @@ func streamOpenAIResponsesSSE(
 		requestOptions = append(requestOptions, openaioption.WithHeader(key, value))
 	}
 
-	maxRetries := maxInt(options.MaxRetries, 3)
+	maxRetries := maxInt(0, options.MaxRetries)
 	baselineResponse := cloneAssistantMessage(*response)
 	streamStarted := false
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -238,7 +238,11 @@ func streamOpenAIResponsesSSE(
 			if errors.As(err, &apiErr) {
 				status = apiErr.StatusCode
 			}
-			if shouldRetryOpenAIResponsesRequest(status, err.Error()) && attempt < maxRetries {
+			shouldRetry := shouldRetryOpenAIResponsesRequest(status, err.Error())
+			if apiErr != nil {
+				shouldRetry = shouldRetryOpenAIProviderError(status, apiErr.Code, apiErr.Type, apiErr.Message, err.Error())
+			}
+			if shouldRetry && attempt < maxRetries {
 				if waitErr := waitOpenAIResponsesRetryDelay(requestContext, options.MaxRetryDelay, attempt, time.Second); waitErr != nil {
 					return waitErr
 				}
@@ -267,7 +271,7 @@ func streamOpenAIResponsesSSE(
 				return readErr
 			}
 			message := parseOpenAIResponsesError(body, httpResponse.Status)
-			if shouldRetryOpenAIResponsesRequest(httpResponse.StatusCode, message) && attempt < maxRetries {
+			if shouldRetryOpenAIProviderResponse(httpResponse.StatusCode, body, message) && attempt < maxRetries {
 				if waitErr := waitOpenAIResponsesRetryDelay(requestContext, options.MaxRetryDelay, attempt, time.Second); waitErr != nil {
 					return waitErr
 				}

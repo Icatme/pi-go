@@ -676,7 +676,7 @@ func processAnthropicStreamEvent(
 			applyAnthropicUsage(response, model, usage)
 		}
 	case "message_stop":
-		response.Usage.Cost = CalculateCost(model, response.Usage)
+		response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
 		if emitTerminal {
 			pushAssistantMessageEvent(stream, AssistantMessageEvent{
 				Type:    AssistantMessageEventDone,
@@ -729,7 +729,7 @@ func applyAnthropicUsage(response *AssistantMessage, model Model, usage anthropi
 		CacheWrite:  usage.CacheCreationTokens,
 		TotalTokens: usage.InputTokens + usage.OutputTokens + usage.CacheReadTokens + usage.CacheCreationTokens,
 	}
-	response.Usage.Cost = CalculateCost(model, response.Usage)
+	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
 }
 
 func defaultMaxTokens(model Model, override int) int {

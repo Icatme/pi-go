@@ -2,7 +2,6 @@ package pigo
 
 import (
 	"encoding/json"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -23,8 +22,8 @@ func TestOpenCodeGoProviderCatalogAndProtocolRouting(t *testing.T) {
 	if got := GetEnvAPIKey("opencode-go"); got != "opencode-go-env-key" {
 		t.Fatalf("expected OPENCODE_API_KEY, got %q", got)
 	}
-	if len(module.Models) != 18 {
-		t.Fatalf("expected 18 active OpenCode Go models, got %d", len(module.Models))
+	if len(module.Models) != 20 {
+		t.Fatalf("expected 20 documented active OpenCode Go models, got %d", len(module.Models))
 	}
 	if !module.Capabilities.SupportsStreaming || !module.Capabilities.SupportsToolChoice {
 		t.Fatalf("expected capabilities shared by every OpenCode Go route, got %+v", module.Capabilities)
@@ -33,46 +32,88 @@ func TestOpenCodeGoProviderCatalogAndProtocolRouting(t *testing.T) {
 		t.Fatalf("mixed OpenCode Go protocols must not advertise route-specific capabilities globally: %+v", module.Capabilities)
 	}
 
-	tests := []struct {
-		id      string
-		api     API
-		baseURL string
-		image   bool
-	}{
-		{id: "glm-5.2", api: "openai-completions", baseURL: openCodeGoBaseURL},
-		{id: "gpt-5.6-luna", api: "openai-responses", baseURL: openCodeGoBaseURL, image: true},
-		{id: "minimax-m2.7", api: "openai-completions", baseURL: openCodeGoBaseURL},
-		{id: "qwen3.6-plus", api: "openai-completions", baseURL: openCodeGoBaseURL, image: true},
-		{id: "qwen3.8-max", api: "anthropic-messages", baseURL: openCodeGoAnthropicBaseURL, image: true},
+	expectedAPIs := map[string]API{
+		"deepseek-v4-flash":          "openai-completions",
+		"deepseek-v4-pro":            "openai-completions",
+		"glm-5.1":                    "openai-completions",
+		"glm-5.2":                    "openai-completions",
+		"glm-5.3":                    "openai-completions",
+		"gpt-5.6-luna":               "openai-responses",
+		"grok-4.5":                   "openai-responses",
+		"hy3":                        "openai-completions",
+		"kimi-k2.6":                  "openai-completions",
+		"kimi-k2.7-code":             "openai-completions",
+		"kimi-k3":                    "openai-completions",
+		"mimo-v2.5":                  "openai-completions",
+		"mimo-v2.5-pro":              "openai-completions",
+		"minimax-m2.7":               "anthropic-messages",
+		"minimax-m3":                 "anthropic-messages",
+		"muse-spark-1.2-contributor": "openai-responses",
+		"qwen3.6-plus":               "anthropic-messages",
+		"qwen3.7-max":                "anthropic-messages",
+		"qwen3.7-plus":               "anthropic-messages",
+		"qwen3.8-max":                "anthropic-messages",
 	}
-	for _, test := range tests {
-		t.Run(test.id, func(t *testing.T) {
-			model := GetModel("opencode-go", test.id)
+	for id, api := range expectedAPIs {
+		t.Run(id, func(t *testing.T) {
+			model := GetModel("opencode-go", id)
 			if model == nil {
-				t.Fatalf("expected model %s", test.id)
+				t.Fatalf("expected model %s", id)
 			}
-			if model.Provider != "opencode-go" || model.API != test.api || model.BaseURL != test.baseURL {
+			baseURL := openCodeGoBaseURL
+			if api == "anthropic-messages" {
+				baseURL = openCodeGoAnthropicBaseURL
+			}
+			if model.Provider != "opencode-go" || model.API != api || model.BaseURL != baseURL {
 				t.Fatalf("unexpected model routing: %+v", model)
 			}
-			if modelSupportsImages(*model) != test.image {
-				t.Fatalf("unexpected image capability for %s: %+v", test.id, model.Input)
+			if model.Cost != (UsageCost{}) || len(model.CostTiers) != 0 {
+				t.Fatalf("OpenCode Go model %s must not carry price metadata: %+v", id, model)
 			}
 		})
 	}
+	for _, excluded := range []string{
+		"glm-5",
+		"hy3-preview",
+		"kimi-k2.5",
+		"mimo-v2-omni",
+		"mimo-v2-pro",
+		"minimax-m2.5",
+		"muse-spark-1.2",
+		"qwen3.5-plus",
+	} {
+		if model := GetModel("opencode-go", excluded); model != nil {
+			t.Fatalf("deprecated or live-only model %s must not enter the stable catalog: %+v", excluded, model)
+		}
+	}
 
 	glm := GetModel("opencode-go", "glm-5.2")
-	if glm == nil || glm.ContextWindow != 1_000_000 || glm.MaxTokens != 131_072 || glm.Cost.CacheRead != 0.26 {
+	if glm == nil || glm.ContextWindow != 1_000_000 || glm.MaxTokens != 131_072 {
 		t.Fatalf("unexpected GLM-5.2 metadata: %+v", glm)
 	}
-	if !SupportsXHigh(*glm) || glm.ThinkingLevelMap[ModelThinkingLevelXHigh] != "max" {
-		t.Fatalf("expected GLM-5.2 xhigh to map to max: %+v", glm.ThinkingLevelMap)
+	if got := GetSupportedThinkingLevels(*glm); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelHigh, ModelThinkingLevelMax}) {
+		t.Fatalf("expected GLM-5.2 high/max levels, got %v", got)
+	}
+	glm53 := GetModel("opencode-go", "glm-5.3")
+	if glm53 == nil || glm53.ContextWindow != 1_000_000 || glm53.MaxTokens != 131_072 {
+		t.Fatalf("unexpected GLM-5.3 metadata: %+v", glm53)
+	}
+	if got := GetSupportedThinkingLevels(*glm53); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelLow, ModelThinkingLevelHigh, ModelThinkingLevelMax}) {
+		t.Fatalf("expected GLM-5.3 low/high/max levels, got %v", got)
 	}
 	deepseek := GetModel("opencode-go", "deepseek-v4-flash")
 	if deepseek == nil {
 		t.Fatal("expected DeepSeek V4 Flash model")
 	}
-	if got := GetSupportedThinkingLevels(*deepseek); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelLow, ModelThinkingLevelHigh, ModelThinkingLevelXHigh}) {
-		t.Fatalf("expected DeepSeek V4 Flash off/low/high/max-equivalent levels, got %v", got)
+	if got := GetSupportedThinkingLevels(*deepseek); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelLow, ModelThinkingLevelHigh, ModelThinkingLevelMax}) {
+		t.Fatalf("expected DeepSeek V4 Flash low/high/max levels, got %v", got)
+	}
+	deepseekPro := GetModel("opencode-go", "deepseek-v4-pro")
+	if deepseekPro == nil {
+		t.Fatal("expected DeepSeek V4 Pro model")
+	}
+	if got := GetSupportedThinkingLevels(*deepseekPro); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelHigh, ModelThinkingLevelMax}) {
+		t.Fatalf("expected DeepSeek V4 Pro high/max levels, got %v", got)
 	}
 	kimi := GetModel("opencode-go", "kimi-k2.6")
 	if kimi == nil {
@@ -81,42 +122,40 @@ func TestOpenCodeGoProviderCatalogAndProtocolRouting(t *testing.T) {
 	if got := GetSupportedThinkingLevels(*kimi); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelHigh}) {
 		t.Fatalf("expected Kimi K2.6 on/off levels, got %v", got)
 	}
-
-	qwen := GetModel("opencode-go", "qwen3.6-plus")
-	compat, ok := qwen.Compat.(*OpenAICompletionsCompat)
-	if !ok || compat.ThinkingFormat != "qwen" || compat.MaxTokensField != "max_tokens" {
-		t.Fatalf("unexpected Qwen compatibility metadata: %#v", qwen.Compat)
+	kimi3 := GetModel("opencode-go", "kimi-k3")
+	if kimi3 == nil {
+		t.Fatal("expected Kimi K3 model")
+	}
+	if got := GetSupportedThinkingLevels(*kimi3); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelMax}) {
+		t.Fatalf("expected Kimi K3 max-only reasoning, got %v", got)
+	}
+	for _, id := range []string{"deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2", "glm-5.3", "kimi-k3"} {
+		model := GetModel("opencode-go", id)
+		options := BuildProviderStreamOptions(*model, SimpleStreamOptions{Reasoning: ThinkingLevelMax})
+		request := buildOpenAICompletionsRequest(*model, Context{}, options)
+		if options.Reasoning != ThinkingLevelMax || request.ReasoningEffort != "max" {
+			t.Fatalf("expected %s max reasoning on the completions wire, options=%q request=%+v", id, options.Reasoning, request)
+		}
+	}
+	muse := GetModel("opencode-go", "muse-spark-1.2-contributor")
+	if muse == nil || muse.ContextWindow != 1_048_576 || muse.MaxTokens != 131_072 || !modelSupportsImages(*muse) {
+		t.Fatalf("unexpected Muse Spark metadata: %+v", muse)
+	}
+	if got := GetSupportedThinkingLevels(*muse); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelMinimal, ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh, ModelThinkingLevelXHigh}) {
+		t.Fatalf("expected Muse Spark minimal through xhigh reasoning levels, got %v", got)
 	}
 
 	luna := GetModel("opencode-go", "gpt-5.6-luna")
-	if len(luna.CostTiers) != 1 || luna.CostTiers[0].InputTokensAbove != 272_000 || luna.CostTiers[0].Rates.Input != 0.2 {
-		t.Fatalf("unexpected Luna long-context pricing: %+v", luna.CostTiers)
+	if luna == nil || !SupportsMax(*luna) || luna.ThinkingLevelMap[ModelThinkingLevelMax] != "max" {
+		t.Fatalf("expected Luna max reasoning support: %+v", luna)
 	}
-	options := BuildProviderStreamOptions(*luna, SimpleStreamOptions{Reasoning: ThinkingLevelXHigh})
-	if options.Reasoning != ThinkingLevelXHigh {
-		t.Fatalf("expected Luna xhigh reasoning to survive provider dispatch, got %q", options.Reasoning)
+	options := BuildProviderStreamOptions(*luna, SimpleStreamOptions{Reasoning: ThinkingLevelMax})
+	if options.Reasoning != ThinkingLevelMax {
+		t.Fatalf("expected Luna max reasoning to survive provider dispatch, got %q", options.Reasoning)
 	}
-}
-
-func TestOpenCodeGoLongContextCostTierAndCloneIsolation(t *testing.T) {
-	model := GetModel("opencode-go", "qwen3.6-plus")
-	if model == nil || len(model.CostTiers) != 1 {
-		t.Fatalf("expected Qwen3.6 Plus long-context pricing, got %+v", model)
-	}
-
-	atThreshold := CalculateCost(*model, Usage{Input: 246_000, Output: 1_000, CacheRead: 10_000})
-	if math.Abs(atThreshold.Total-0.1265) > 1e-12 {
-		t.Fatalf("expected base cost at threshold, got %+v", atThreshold)
-	}
-	aboveThreshold := CalculateCost(*model, Usage{Input: 246_000, Output: 1_000, CacheRead: 10_000, CacheWrite: 1})
-	if math.Abs(aboveThreshold.Total-0.5000025) > 1e-12 {
-		t.Fatalf("expected long-context tier above threshold, got %+v", aboveThreshold)
-	}
-
-	model.CostTiers[0].Rates.Input = 999
-	fresh := GetModel("opencode-go", "qwen3.6-plus")
-	if fresh.CostTiers[0].Rates.Input != 2 {
-		t.Fatalf("expected cloned cost tiers, got %+v", fresh.CostTiers)
+	request := buildOpenAIResponsesRequest(*luna, Context{}, options)
+	if request.Reasoning == nil || request.Reasoning.Effort != "max" {
+		t.Fatalf("expected Luna max reasoning on the Responses wire, got %+v", request.Reasoning)
 	}
 }
 
@@ -145,6 +184,8 @@ func TestOpenCodeGoChatCompletionsStreamsReasoningToolsAndUsage(t *testing.T) {
 	if model == nil {
 		t.Fatal("expected Kimi K3 model")
 	}
+	model.Cost = UsageCost{Input: 1, Output: 1, CacheRead: 1, CacheWrite: 1}
+	model.CostTiers = []ModelCostTier{{InputTokensAbove: 1, Rates: UsageCost{Input: 2, Output: 2}}}
 	model.BaseURL = server.URL + "/v1"
 	ctx := Context{
 		SystemPrompt: "Use tools when needed.",
@@ -167,7 +208,7 @@ func TestOpenCodeGoChatCompletionsStreamsReasoningToolsAndUsage(t *testing.T) {
 		APIKey:         "base-key",
 		Headers:        map[string]string{"authorization": "Bearer request-override"},
 		MaxTokens:      4096,
-		Reasoning:      ThinkingLevelXHigh,
+		Reasoning:      ThinkingLevelMax,
 		SessionID:      "session-1",
 		CacheRetention: CacheRetentionLong,
 	})
@@ -195,8 +236,8 @@ func TestOpenCodeGoChatCompletionsStreamsReasoningToolsAndUsage(t *testing.T) {
 	if response.Usage.Input != 6 || response.Usage.CacheRead != 4 || response.Usage.Output != 3 || response.Usage.TotalTokens != 13 {
 		t.Fatalf("unexpected usage: %+v", response.Usage)
 	}
-	if math.Abs(response.Usage.Cost.Total-0.0000642) > 1e-12 {
-		t.Fatalf("unexpected calculated cost: %+v", response.Usage.Cost)
+	if response.Usage.Cost != (UsageCost{}) {
+		t.Fatalf("OpenCode Go completions must report tokens without calculating price: %+v", response.Usage)
 	}
 
 	if captured["model"] != "kimi-k3" || captured["max_tokens"] != float64(4096) {
@@ -206,7 +247,7 @@ func TestOpenCodeGoChatCompletionsStreamsReasoningToolsAndUsage(t *testing.T) {
 		t.Fatalf("OpenCode Go must use max_tokens: %#v", captured)
 	}
 	if captured["reasoning_effort"] != "max" {
-		t.Fatalf("expected xhigh to map to max, got %#v", captured["reasoning_effort"])
+		t.Fatalf("expected max reasoning effort, got %#v", captured["reasoning_effort"])
 	}
 	if captured["prompt_cache_key"] != "session-1" || captured["prompt_cache_retention"] != "24h" {
 		t.Fatalf("expected long-cache session fields, got %#v", captured)
@@ -255,18 +296,10 @@ func TestOpenCodeGoChatCompletionsThinkingFormats(t *testing.T) {
 		t.Fatal("expected DeepSeek V4 Flash model")
 	}
 	deepseekOff := buildOpenAICompletionsRequest(*deepseek, Context{}, BuildProviderStreamOptions(*deepseek, SimpleStreamOptions{}))
-	if deepseekOff.Thinking == nil || deepseekOff.Thinking.Type != "disabled" {
-		t.Fatalf("DeepSeek V4 must explicitly disable thinking when off: %+v", deepseekOff)
+	if deepseekOff.Thinking != nil || deepseekOff.ReasoningEffort != "" {
+		t.Fatalf("DeepSeek V4 must omit unsupported off reasoning controls: %+v", deepseekOff)
 	}
 
-	qwen := GetModel("opencode-go", "qwen3.6-plus")
-	if qwen == nil {
-		t.Fatal("expected Qwen3.6 Plus model")
-	}
-	qwenRequest := buildOpenAICompletionsRequest(*qwen, Context{}, BuildProviderStreamOptions(*qwen, SimpleStreamOptions{Reasoning: ThinkingLevelHigh}))
-	if qwenRequest.EnableThinking == nil || !*qwenRequest.EnableThinking || qwenRequest.ReasoningEffort != "high" {
-		t.Fatalf("Qwen3.6 Plus must use enable_thinking: %+v", qwenRequest)
-	}
 }
 
 func TestOpenCodeGoDeepSeekV4FlashSendsLowReasoningEffort(t *testing.T) {
@@ -371,10 +404,11 @@ func TestOpenCodeGoChatCompletionsKeepsParallelToolResultsBeforeImages(t *testin
 }
 
 func TestOpenAICompletionsUsagePreservesCacheWriteTokens(t *testing.T) {
-	model := GetModel("opencode-go", "qwen3.6-plus")
+	model := GetModel("opencode-go", "kimi-k3")
 	if model == nil {
-		t.Fatal("expected Qwen3.6 Plus model")
+		t.Fatal("expected Kimi K3 model")
 	}
+	model.Cost = UsageCost{Input: 1, Output: 1, CacheRead: 1, CacheWrite: 1}
 	var usage openAICompletionsUsage
 	if err := json.Unmarshal([]byte(`{
 		"prompt_tokens": 100,
@@ -390,8 +424,8 @@ func TestOpenAICompletionsUsagePreservesCacheWriteTokens(t *testing.T) {
 	if response.Usage.Input != 50 || response.Usage.Output != 10 || response.Usage.CacheRead != 20 || response.Usage.CacheWrite != 30 || response.Usage.TotalTokens != 110 {
 		t.Fatalf("unexpected cache-write usage: %+v", response.Usage)
 	}
-	if math.Abs(response.Usage.Cost.Total-0.00007475) > 1e-12 {
-		t.Fatalf("unexpected cache-write cost: %+v", response.Usage.Cost)
+	if response.Usage.Cost != (UsageCost{}) {
+		t.Fatalf("OpenCode Go cache usage must not calculate price: %+v", response.Usage)
 	}
 }
 
@@ -470,10 +504,14 @@ func TestOpenCodeGoRoutesAnthropicAndResponsesModels(t *testing.T) {
 		defer server.Close()
 
 		model := GetModel("opencode-go", "qwen3.8-max")
+		model.Cost = UsageCost{Input: 1, Output: 1}
 		model.BaseURL = server.URL
 		response := CompleteSimple(*model, Context{Messages: []Message{UserMessage{Content: "ping"}}}, SimpleStreamOptions{APIKey: "go-key"})
 		if response.StopReason != StopReasonStop || response.Content[0].(TextContent).Text != "anthropic ok" {
 			t.Fatalf("unexpected Anthropic response: %+v", response)
+		}
+		if response.Usage.Input != 2 || response.Usage.Output != 2 || response.Usage.TotalTokens != 4 || response.Usage.Cost != (UsageCost{}) {
+			t.Fatalf("OpenCode Go Anthropic route must report tokens without price: %+v", response.Usage)
 		}
 	})
 
@@ -491,10 +529,14 @@ func TestOpenCodeGoRoutesAnthropicAndResponsesModels(t *testing.T) {
 		defer server.Close()
 
 		model := GetModel("opencode-go", "gpt-5.6-luna")
+		model.Cost = UsageCost{Input: 1, Output: 1}
 		model.BaseURL = server.URL
 		response := CompleteSimple(*model, Context{Messages: []Message{UserMessage{Content: "ping"}}}, SimpleStreamOptions{APIKey: "go-key"})
 		if response.StopReason != StopReasonStop || response.Content[0].(TextContent).Text != "responses ok" {
 			t.Fatalf("unexpected Responses response: %+v", response)
+		}
+		if response.Usage.Input != 2 || response.Usage.Output != 2 || response.Usage.TotalTokens != 4 || response.Usage.Cost != (UsageCost{}) {
+			t.Fatalf("OpenCode Go Responses route must report tokens without price: %+v", response.Usage)
 		}
 	})
 }
