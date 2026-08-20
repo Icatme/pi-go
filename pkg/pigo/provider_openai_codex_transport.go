@@ -116,6 +116,9 @@ func streamOpenAICodexSSE(
 			return parseOpenAIResponsesErrorWithProvider(body, status, "codex")
 		},
 		ShouldRetry: shouldRetryOpenAIResponsesRequest,
+		ShouldRetryResponse: func(status int, body []byte, message string) bool {
+			return shouldRetryOpenAIProviderResponse(status, body, message)
+		},
 		OnOpen: func(_ *http.Response) error {
 			if !streamStarted {
 				stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: *response})

@@ -109,18 +109,18 @@ type openAICompletionsUsage struct {
 	PromptTokens             int                                  `json:"prompt_tokens"`
 	CompletionTokens         int                                  `json:"completion_tokens"`
 	TotalTokens              int                                  `json:"total_tokens"`
-	CachedTokens             int                                  `json:"cached_tokens"`
-	PromptCacheHitTokens     int                                  `json:"prompt_cache_hit_tokens"`
+	CachedTokens             *int                                 `json:"cached_tokens"`
+	PromptCacheHitTokens     *int                                 `json:"prompt_cache_hit_tokens"`
 	PromptCacheMissTokens    int                                  `json:"prompt_cache_miss_tokens"`
-	CacheReadInputTokens     int                                  `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens int                                  `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     *int                                 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens *int                                 `json:"cache_creation_input_tokens"`
 	PromptTokensDetails      openAICompletionsPromptTokensDetails `json:"prompt_tokens_details"`
 }
 
 type openAICompletionsPromptTokensDetails struct {
-	CachedTokens        int `json:"cached_tokens"`
-	CacheWriteTokens    int `json:"cache_write_tokens"`
-	CacheCreationTokens int `json:"cache_creation_tokens"`
+	CachedTokens        *int `json:"cached_tokens"`
+	CacheWriteTokens    *int `json:"cache_write_tokens"`
+	CacheCreationTokens *int `json:"cache_creation_tokens"`
 }
 
 type openAICompletionsErrorEnvelope struct {
@@ -260,6 +260,9 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 				}
 			},
 			ShouldRetry: shouldRetryOpenAIResponsesRequest,
+			ShouldRetryResponse: func(status int, body []byte, message string) bool {
+				return shouldRetryOpenAIProviderResponse(status, body, message)
+			},
 			CanRetryStreamError: func() bool {
 				return len(response.Content) == 0 && len(response.HostedToolExecutions) == 0
 			},
@@ -942,11 +945,17 @@ func finalizeOpenAICompletionsResponse(response *AssistantMessage, stream *Assis
 }
 
 func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage openAICompletionsUsage) {
-	cacheRead := maxInt(usage.CachedTokens, usage.PromptTokensDetails.CachedTokens)
-	cacheRead = maxInt(cacheRead, usage.PromptCacheHitTokens)
-	cacheRead = maxInt(cacheRead, usage.CacheReadInputTokens)
-	cacheWrite := maxInt(usage.PromptTokensDetails.CacheWriteTokens, usage.PromptTokensDetails.CacheCreationTokens)
-	cacheWrite = maxInt(cacheWrite, usage.CacheCreationInputTokens)
+	cacheRead := firstOpenAICompletionsTokenCount(
+		usage.PromptTokensDetails.CachedTokens,
+		usage.PromptCacheHitTokens,
+		usage.CachedTokens,
+		usage.CacheReadInputTokens,
+	)
+	cacheWrite := firstOpenAICompletionsTokenCount(
+		usage.PromptTokensDetails.CacheWriteTokens,
+		usage.PromptTokensDetails.CacheCreationTokens,
+		usage.CacheCreationInputTokens,
+	)
 	input := usage.PromptTokens - cacheRead - cacheWrite
 	if usage.PromptCacheMissTokens > 0 {
 		input = usage.PromptCacheMissTokens
@@ -962,7 +971,16 @@ func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage 
 		CacheWrite:  cacheWrite,
 		TotalTokens: total,
 	}
-	response.Usage.Cost = CalculateCost(model, response.Usage)
+	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
+}
+
+func firstOpenAICompletionsTokenCount(counts ...*int) int {
+	for _, count := range counts {
+		if count != nil {
+			return maxInt(0, *count)
+		}
+	}
+	return 0
 }
 
 func mapOpenAICompletionsFinishReason(reason string, content []ContentBlock) StopReason {
