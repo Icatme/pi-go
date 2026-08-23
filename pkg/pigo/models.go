@@ -67,6 +67,13 @@ func CalculateCost(model Model, usage Usage) UsageCost {
 	}
 }
 
+func calculateProviderUsageCost(model Model, usage Usage) UsageCost {
+	if model.Provider == "opencode-go" {
+		return UsageCost{}
+	}
+	return CalculateCost(model, usage)
+}
+
 func ModelsAreEqual(a, b *Model) bool {
 	if a == nil || b == nil {
 		return false

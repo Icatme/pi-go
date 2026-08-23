@@ -24,6 +24,7 @@ type httpStreamRequest struct {
 	OnEvent             func(eventName, data string) (bool, error)
 	OnResponse          func(*http.Response)
 	ShouldRetry         func(status int, message string) bool
+	ShouldRetryResponse func(status int, body []byte, message string) bool
 	ParseError          func(body []byte, status string) string
 	CanRetryStreamError func() bool
 	OnStreamRetry       func()
@@ -96,7 +97,13 @@ func (c *HTTPStreamClient) postStream(ctx context.Context, url string, requestOp
 			if requestOptions.ParseError != nil {
 				message = requestOptions.ParseError(body, httpResponse.Status)
 			}
-			if requestOptions.ShouldRetry != nil && requestOptions.ShouldRetry(httpResponse.StatusCode, message) && attempt < maxRetries {
+			shouldRetry := false
+			if requestOptions.ShouldRetryResponse != nil {
+				shouldRetry = requestOptions.ShouldRetryResponse(httpResponse.StatusCode, body, message)
+			} else if requestOptions.ShouldRetry != nil {
+				shouldRetry = requestOptions.ShouldRetry(httpResponse.StatusCode, message)
+			}
+			if shouldRetry && attempt < maxRetries {
 				if waitErr := c.waitRetryDelay(ctx, attempt, baseRetryDelay); waitErr != nil {
 					return waitErr
 				}

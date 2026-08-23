@@ -898,8 +898,10 @@ func applyOpenAIResponsesTerminal(model Model, response *AssistantMessage, termi
 		CacheWrite:  0,
 		TotalTokens: terminal.Usage.TotalTokens,
 	}
-	response.Usage.Cost = CalculateCost(model, response.Usage)
-	applyOpenAIResponsesServiceTierPricing(&response.Usage, resolveOpenAIResponsesServiceTier(terminal.ServiceTier, requestServiceTier))
+	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
+	if model.Provider != "opencode-go" {
+		applyOpenAIResponsesServiceTierPricing(&response.Usage, resolveOpenAIResponsesServiceTier(terminal.ServiceTier, requestServiceTier))
+	}
 }
 
 func parseOpenAIResponsesResponseOutput(items []openAIResponsesResponseItem) []ContentBlock {
@@ -1123,6 +1125,9 @@ func clampOpenAIResponsesReasoningEffort(model Model, level ThinkingLevel) strin
 // ============================================================================
 
 func shouldRetryOpenAIResponsesRequest(status int, message string) bool {
+	if isOpenAINonRetryableLimitError("", "", message) {
+		return false
+	}
 	if status == 429 || status == 500 || status == 502 || status == 503 || status == 504 {
 		return true
 	}
@@ -1135,4 +1140,71 @@ func shouldRetryOpenAIResponsesRequest(status int, message string) bool {
 		strings.Contains(lower, "upstream connect") ||
 		strings.Contains(lower, "connection refused") ||
 		strings.Contains(lower, "exceeded request buffer limit while retrying upstream")
+}
+
+func shouldRetryOpenAIProviderResponse(status int, body []byte, message string) bool {
+	var envelope struct {
+		Error struct {
+			Code    any    `json:"code"`
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &envelope) == nil {
+		return shouldRetryOpenAIProviderError(
+			status,
+			openAIProviderErrorCode(envelope.Error.Code),
+			envelope.Error.Type,
+			envelope.Error.Message,
+			message,
+		)
+	}
+	return shouldRetryOpenAIResponsesRequest(status, message)
+}
+
+func shouldRetryOpenAIProviderError(status int, code string, errorType string, providerMessage string, fallback string) bool {
+	identifier := strings.ToLower(strings.TrimSpace(code + " " + errorType))
+	if strings.Contains(identifier, "rate_limit_exceeded") || strings.Contains(identifier, "rate limit exceeded") {
+		return true
+	}
+	if isOpenAINonRetryableLimitError(code, errorType, providerMessage) {
+		return false
+	}
+	if strings.TrimSpace(code) != "" || strings.TrimSpace(errorType) != "" || strings.TrimSpace(providerMessage) != "" {
+		return shouldRetryOpenAIResponsesRequest(status, providerMessage)
+	}
+	return shouldRetryOpenAIResponsesRequest(status, fallback)
+}
+
+func openAIProviderErrorCode(code any) string {
+	if code == nil {
+		return ""
+	}
+	return fmt.Sprint(code)
+}
+
+func isOpenAINonRetryableLimitError(code string, errorType string, message string) bool {
+	lower := strings.ToLower(strings.Join([]string{code, errorType, message}, " "))
+	patterns := []string{
+		"gousagelimiterror",
+		"freeusagelimiterror",
+		"usage_limit",
+		"usage limit",
+		"usage_not_included",
+		"insufficient_quota",
+		"quota exceeded",
+		"quota_exceeded",
+		"billing",
+		"payment_required",
+		"payment required",
+		"available balance",
+		"credit balance",
+		"monthly limit",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
 }

@@ -40,6 +40,140 @@ func TestShouldRetryOpenAIResponsesRequestBufferLimit(t *testing.T) {
 	}
 }
 
+func TestOpenAIProviderRetryClassification(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		message   string
+		wantRetry bool
+	}{
+		{
+			name:      "transient rate limit",
+			status:    http.StatusTooManyRequests,
+			body:      `{"error":{"type":"rate_limit_exceeded","message":"You have hit your usage limit."}}`,
+			message:   "You have hit your usage limit.",
+			wantRetry: true,
+		},
+		{
+			name:    "OpenCode Go usage limit",
+			status:  http.StatusTooManyRequests,
+			body:    `{"error":{"type":"GoUsageLimitError","message":"monthly limit reached"}}`,
+			message: "monthly limit reached",
+		},
+		{
+			name:    "free usage limit",
+			status:  http.StatusTooManyRequests,
+			body:    `{"error":{"type":"FreeUsageLimitError","message":"free usage limit reached"}}`,
+			message: "free usage limit reached",
+		},
+		{
+			name:    "quota exhausted",
+			status:  http.StatusTooManyRequests,
+			body:    `{"error":{"code":"insufficient_quota","message":"quota exceeded"}}`,
+			message: "quota exceeded",
+		},
+		{
+			name:    "billing required",
+			status:  http.StatusTooManyRequests,
+			body:    `{"error":{"code":"billing_not_active","message":"billing is not active"}}`,
+			message: "billing is not active",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := shouldRetryOpenAIProviderResponse(test.status, []byte(test.body), test.message)
+			if got != test.wantRetry {
+				t.Fatalf("shouldRetryOpenAIProviderResponse() = %t, want %t", got, test.wantRetry)
+			}
+		})
+	}
+}
+
+func TestOpenAIResponsesMaxRetriesZeroDoesNotRetry(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"type":"server_error","message":"temporary upstream failure"}}`))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected openai model")
+	}
+	model.BaseURL = server.URL
+	response := CompleteSimple(*model, Context{Messages: []Message{UserMessage{Content: "do not retry"}}}, SimpleStreamOptions{
+		APIKey:     "test-key",
+		MaxRetries: 0,
+	})
+	if attempts.Load() != 1 {
+		t.Fatalf("MaxRetries=0 must make exactly one attempt, got %d", attempts.Load())
+	}
+	if response.StopReason != StopReasonError {
+		t.Fatalf("expected terminal error without retry, got %+v", response)
+	}
+}
+
+func TestOpenAIResponsesDoesNotRetryUsageLimit429(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"type":"GoUsageLimitError","message":"monthly limit reached"}}`))
+	}))
+	defer server.Close()
+
+	model := GetModel("openai", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected openai model")
+	}
+	model.BaseURL = server.URL
+	response := CompleteSimple(*model, Context{Messages: []Message{UserMessage{Content: "quota"}}}, SimpleStreamOptions{
+		APIKey:        "test-key",
+		MaxRetries:    2,
+		MaxRetryDelay: 1,
+	})
+	if attempts.Load() != 1 {
+		t.Fatalf("usage-limit 429 must not retry, got %d attempts", attempts.Load())
+	}
+	if response.StopReason != StopReasonError {
+		t.Fatalf("expected usage-limit error, got %+v", response)
+	}
+}
+
+func TestOpenAICompletionsDoesNotRetryQuota429(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"code":"insufficient_quota","type":"insufficient_quota","message":"quota exceeded"}}`))
+	}))
+	defer server.Close()
+
+	model := Model{
+		API:           "openai-completions",
+		Provider:      "openrouter",
+		ID:            "test-model",
+		BaseURL:       server.URL,
+		ContextWindow: 4096,
+		MaxTokens:     256,
+	}
+	response := CompleteSimple(model, Context{Messages: []Message{UserMessage{Content: "quota"}}}, SimpleStreamOptions{
+		APIKey:        "test-key",
+		MaxRetries:    2,
+		MaxRetryDelay: 1,
+	})
+	if attempts.Load() != 1 {
+		t.Fatalf("quota 429 must not retry, got %d attempts", attempts.Load())
+	}
+	if response.StopReason != StopReasonError {
+		t.Fatalf("expected quota error, got %+v", response)
+	}
+}
+
 func TestOpenAIResponsesRetriesRequestBufferFailureFromSSEBeforeOutput(t *testing.T) {
 	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

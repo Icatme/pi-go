@@ -196,3 +196,16 @@
   retry, and no-duplicate-output regressions. Verified root and examples tests
   and vet, `pkg/pigo` race tests, module integrity, and diff cleanliness; no live
   provider request was run.
+
+## 2026-08-20 - OpenCode Go stability contracts
+
+- Made OpenAI Responses honor explicit zero retries and classified structured
+  usage-limit, quota, and billing 429 responses as terminal while retaining
+  opt-in transient HTTP and pre-output SSE retries.
+- Refreshed the stable OpenCode Go catalog to the 20 documented active models,
+  corrected Anthropic routes, and added GPT-5.6 Luna max reasoning.
+- Kept OpenCode Go usage token-only across Responses, Completions, and Anthropic
+  aggregation even if price metadata is injected; aligned compatible cache
+  aliases with pi-mono's documented precedence.
+- Added catalog, routing, retry, cache precedence, and three-protocol token-only
+  regressions. No paid live request, release, or deployment was performed.
