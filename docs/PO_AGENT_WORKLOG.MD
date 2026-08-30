@@ -209,3 +209,12 @@
   aliases with pi-mono's documented precedence.
 - Added catalog, routing, retry, cache precedence, and three-protocol token-only
   regressions. No paid live request, release, or deployment was performed.
+
+## 2026-08-31 - v0.7.2 OpenCode Go structured output
+
+- Fixed the model-scoped capability contract that rejected GPT-5.6 Luna
+  `json_object` and strict `json_schema` output before sending a provider request.
+- Kept mixed-protocol OpenCode Go capabilities scoped to Luna rather than
+  advertising structured output for every OpenCode Go model.
+- Added hermetic capability regressions and an opt-in live Luna structured-output
+  test; verified the live OpenCode Go Responses endpoint with strict JSON Schema.
