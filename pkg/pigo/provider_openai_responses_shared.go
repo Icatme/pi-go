@@ -64,13 +64,15 @@ type openAIResponsesResponse struct {
 }
 
 type openAIResponsesResponseItem struct {
-	Type      string                               `json:"type"`
-	ID        string                               `json:"id,omitempty"`
-	CallID    string                               `json:"call_id,omitempty"`
-	Name      string                               `json:"name,omitempty"`
-	Arguments string                               `json:"arguments,omitempty"`
-	Summary   []openAIResponsesReasoningSummary    `json:"summary,omitempty"`
-	Content   []openAIResponsesResponseContentPart `json:"content,omitempty"`
+	Type             string                               `json:"type"`
+	ID               string                               `json:"id,omitempty"`
+	Status           string                               `json:"status,omitempty"`
+	CallID           string                               `json:"call_id,omitempty"`
+	Name             string                               `json:"name,omitempty"`
+	Arguments        string                               `json:"arguments,omitempty"`
+	Summary          []openAIResponsesReasoningSummary    `json:"summary,omitempty"`
+	Content          []openAIResponsesResponseContentPart `json:"content,omitempty"`
+	EncryptedContent string                               `json:"encrypted_content,omitempty"`
 }
 
 type openAIResponsesReasoningSummary struct {
@@ -812,16 +814,8 @@ func finalizeOpenAIResponsesStreamItem(
 			return
 		}
 		block, _ := response.Content[state.CurrentThinkingIndex].(ThinkingContent)
-		if len(item.Summary) > 0 {
-			parts := make([]string, 0, len(item.Summary))
-			for _, summary := range item.Summary {
-				if strings.TrimSpace(summary.Text) != "" {
-					parts = append(parts, summary.Text)
-				}
-			}
-			if len(parts) > 0 {
-				block.Thinking = strings.Join(parts, "\n\n")
-			}
+		if text := openAIResponsesReasoningText(item); text != "" {
+			block.Thinking = text
 		}
 		signatureBytes, err := json.Marshal(item)
 		if err == nil {
@@ -922,16 +916,8 @@ func parseOpenAIResponsesResponseOutput(items []openAIResponsesResponseItem) []C
 				blocks = append(blocks, TextContent{Text: strings.Join(parts, "")})
 			}
 		case "reasoning":
-			if len(item.Summary) == 0 {
-				continue
-			}
-			parts := make([]string, 0, len(item.Summary))
-			for _, summary := range item.Summary {
-				if strings.TrimSpace(summary.Text) != "" {
-					parts = append(parts, summary.Text)
-				}
-			}
-			if len(parts) == 0 {
+			thinking := openAIResponsesReasoningText(item)
+			if thinking == "" && strings.TrimSpace(item.EncryptedContent) == "" {
 				continue
 			}
 			signatureBytes, err := json.Marshal(item)
@@ -939,7 +925,7 @@ func parseOpenAIResponsesResponseOutput(items []openAIResponsesResponseItem) []C
 				signatureBytes = nil
 			}
 			blocks = append(blocks, ThinkingContent{
-				Thinking:          strings.Join(parts, "\n\n"),
+				Thinking:          thinking,
 				ThinkingSignature: string(signatureBytes),
 			})
 		case "function_call":
@@ -959,6 +945,23 @@ func parseOpenAIResponsesResponseOutput(items []openAIResponsesResponseItem) []C
 		}
 	}
 	return blocks
+}
+
+func openAIResponsesReasoningText(item openAIResponsesResponseItem) string {
+	parts := make([]string, 0, len(item.Summary)+len(item.Content))
+	for _, summary := range item.Summary {
+		if strings.TrimSpace(summary.Text) != "" {
+			parts = append(parts, summary.Text)
+		}
+	}
+	if len(parts) == 0 {
+		for _, content := range item.Content {
+			if content.Type == "reasoning_text" && strings.TrimSpace(content.Text) != "" {
+				parts = append(parts, content.Text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func mapOpenAIResponsesStopReason(status string, content []ContentBlock) StopReason {
