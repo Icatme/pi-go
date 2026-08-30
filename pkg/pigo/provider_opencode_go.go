@@ -118,6 +118,10 @@ var openCodeGoModelSpecs = []openCodeGoModelSpec{
 		},
 		ContextWindow: 1_050_000,
 		MaxTokens:     128_000,
+		Compat: &OpenAIResponsesCompat{
+			SupportsJSONOutput: true,
+			SupportsJSONSchema: true,
+		},
 	},
 	{
 		ID:         "grok-4.5",

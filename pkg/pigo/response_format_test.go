@@ -66,6 +66,32 @@ func TestOpenAIResponsesMapsJSONSchema(t *testing.T) {
 	}
 }
 
+func TestOpenCodeGoLunaEnablesResponseFormatsAtModelScope(t *testing.T) {
+	luna := GetModel("opencode-go", "gpt-5.6-luna")
+	if luna == nil {
+		t.Fatal("expected OpenCode Go GPT-5.6 Luna model")
+	}
+	jsonObject := &ResponseFormat{Type: ResponseFormatJSON}
+	if err := ValidateResponseFormat(*luna, jsonObject); err != nil {
+		t.Fatalf("validate json_object: %v", err)
+	}
+	jsonSchema := &ResponseFormat{
+		Type: ResponseFormatJSONSchema, Name: "lead_analysis", Strict: true,
+		JSONSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["qualified"],"properties":{"qualified":{"type":"boolean"}}}`),
+	}
+	if err := ValidateResponseFormat(*luna, jsonSchema); err != nil {
+		t.Fatalf("validate json_schema: %v", err)
+	}
+
+	deepSeek := GetModel("opencode-go", "deepseek-v4-flash")
+	if deepSeek == nil {
+		t.Fatal("expected OpenCode Go DeepSeek V4 Flash model")
+	}
+	if err := ValidateResponseFormat(*deepSeek, jsonSchema); !errors.Is(err, ErrResponseFormatUnsupported) {
+		t.Fatalf("DeepSeek json_schema error = %v, want ErrResponseFormatUnsupported", err)
+	}
+}
+
 func TestUnsupportedProviderRejectsResponseFormat(t *testing.T) {
 	model := Model{Provider: "anthropic", API: "anthropic-messages", ID: "test"}
 	if err := ValidateResponseFormat(model, &ResponseFormat{Type: ResponseFormatJSON}); !errors.Is(err, ErrResponseFormatUnsupported) {

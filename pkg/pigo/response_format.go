@@ -41,7 +41,7 @@ func ValidateResponseFormat(model Model, format *ResponseFormat) error {
 	if format == nil {
 		return nil
 	}
-	capabilities := GetProviderCapabilities(model.Provider)
+	capabilities := responseFormatCapabilities(model)
 	switch format.Type {
 	case ResponseFormatJSON:
 		if strings.TrimSpace(format.Name) != "" || len(bytes.TrimSpace(format.JSONSchema)) != 0 || format.Strict {
@@ -65,6 +65,17 @@ func ValidateResponseFormat(model Model, format *ResponseFormat) error {
 	default:
 		return fmt.Errorf("%w: unknown type %q", ErrResponseFormatInvalid, format.Type)
 	}
+}
+
+func responseFormatCapabilities(model Model) ProviderCapabilities {
+	capabilities := GetProviderCapabilities(model.Provider)
+	compat, ok := model.Compat.(*OpenAIResponsesCompat)
+	if !ok || compat == nil {
+		return capabilities
+	}
+	capabilities.SupportsJSONOutput = capabilities.SupportsJSONOutput || compat.SupportsJSONOutput
+	capabilities.SupportsJSONSchema = capabilities.SupportsJSONSchema || compat.SupportsJSONSchema
+	return capabilities
 }
 
 func validateResponseJSONSchema(raw json.RawMessage) error {
