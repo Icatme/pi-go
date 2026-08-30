@@ -28,7 +28,8 @@ func TestOpenCodeGoProviderCatalogAndProtocolRouting(t *testing.T) {
 	if !module.Capabilities.SupportsStreaming || !module.Capabilities.SupportsToolChoice {
 		t.Fatalf("expected capabilities shared by every OpenCode Go route, got %+v", module.Capabilities)
 	}
-	if module.Capabilities.SupportsSession || module.Capabilities.SupportsThinkingBudget || module.Capabilities.SupportsReasoningSummary {
+	if module.Capabilities.SupportsJSONOutput || module.Capabilities.SupportsJSONSchema || module.Capabilities.SupportsSession ||
+		module.Capabilities.SupportsThinkingBudget || module.Capabilities.SupportsReasoningSummary {
 		t.Fatalf("mixed OpenCode Go protocols must not advertise route-specific capabilities globally: %+v", module.Capabilities)
 	}
 

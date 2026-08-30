@@ -46,6 +46,8 @@ func (c *OpenAICompletionsCompat) compatAPI() string { return "openai-completion
 type OpenAIResponsesCompat struct {
 	SendSessionIdHeader        *bool
 	SupportsLongCacheRetention *bool
+	SupportsJSONOutput         bool
+	SupportsJSONSchema         bool
 }
 
 func (c *OpenAIResponsesCompat) compatAPI() string { return "openai-responses" }
