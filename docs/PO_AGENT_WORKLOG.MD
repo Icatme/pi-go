@@ -218,3 +218,13 @@
   advertising structured output for every OpenCode Go model.
 - Added hermetic capability regressions and an opt-in live Luna structured-output
   test; verified the live OpenCode Go Responses endpoint with strict JSON Schema.
+
+## 2026-08-31 - v0.7.3 stateless Responses reasoning replay
+
+- Preserved `status` and `encrypted_content` from terminal Responses reasoning
+  items so same-model stateless continuations can replay the complete provider
+  payload instead of a lossy summary.
+- Accepted terminal-only `reasoning_text` items when a provider omits reasoning
+  summary events, covering native DeepSeek Responses as well as OpenAI.
+- Added a hermetic terminal SSE regression and advanced the package release to
+  v0.7.3 for ai-relay's portable Responses contract.
