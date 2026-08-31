@@ -94,7 +94,8 @@ type openAIResponsesUsage struct {
 }
 
 type openAIResponsesInputTokenDetails struct {
-	CachedTokens int `json:"cached_tokens"`
+	CachedTokens     int `json:"cached_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens"`
 }
 
 type openAIResponsesResponseError struct {
@@ -890,7 +891,7 @@ func applyOpenAIResponsesTerminal(model Model, response *AssistantMessage, termi
 }
 
 func applyOpenAIResponsesUsage(model Model, response *AssistantMessage, usage openAIResponsesUsage, responseServiceTier string, requestServiceTier string) {
-	inputTokens := usage.InputTokens - usage.InputDetails.CachedTokens
+	inputTokens := usage.InputTokens - usage.InputDetails.CachedTokens - usage.InputDetails.CacheWriteTokens
 	if inputTokens < 0 {
 		inputTokens = 0
 	}
@@ -898,7 +899,7 @@ func applyOpenAIResponsesUsage(model Model, response *AssistantMessage, usage op
 		Input:       inputTokens,
 		Output:      usage.OutputTokens,
 		CacheRead:   usage.InputDetails.CachedTokens,
-		CacheWrite:  0,
+		CacheWrite:  usage.InputDetails.CacheWriteTokens,
 		TotalTokens: usage.TotalTokens,
 	}
 	response.UsageReported = true
@@ -1094,9 +1095,16 @@ func resolveOpenAIResponsesServiceTier(responseServiceTier string, requestServic
 // ============================================================================
 
 func clampOpenAIResponsesReasoningEffort(model Model, level ThinkingLevel) string {
-	effort := string(level)
+	effort := strings.TrimSpace(string(level))
 	if effort == "" {
 		return ""
+	}
+	if len(model.ThinkingLevelMap) > 0 {
+		clamped := ClampThinkingLevel(model, ModelThinkingLevel(effort))
+		if mapped, ok := model.ThinkingLevelMap[clamped]; ok {
+			return strings.TrimSpace(mapped)
+		}
+		return string(clamped)
 	}
 
 	id := model.ID

@@ -137,6 +137,51 @@ func TestOpenAIGPT56CatalogUsesExactOfficialCapabilityFacts(t *testing.T) {
 	}
 }
 
+func TestOpenAIGPT56ReasoningPayloadMatchesCapabilitySnapshot(t *testing.T) {
+	tests := []struct {
+		requested  ModelThinkingLevel
+		wantEffort string
+		wantLevel  ModelThinkingLevel
+		advertised bool
+	}{
+		{requested: ModelThinkingLevelOff, wantEffort: "none", wantLevel: ModelThinkingLevelOff, advertised: true},
+		{requested: ModelThinkingLevelMinimal, wantEffort: "low", wantLevel: ModelThinkingLevelLow, advertised: false},
+		{requested: ModelThinkingLevelMax, wantEffort: "max", wantLevel: ModelThinkingLevelMax, advertised: true},
+	}
+
+	for _, modelID := range []string{"gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		t.Run(modelID, func(t *testing.T) {
+			model := GetModel("openai", modelID)
+			if model == nil {
+				t.Fatalf("expected exact OpenAI model %q", modelID)
+			}
+			snapshot, ok := LookupModelCapabilities("openai", modelID)
+			if !ok {
+				t.Fatalf("expected exact capability snapshot for %q", modelID)
+			}
+
+			for _, test := range tests {
+				t.Run(string(test.requested), func(t *testing.T) {
+					request := buildOpenAIResponsesRequest(*model, Context{}, ProviderStreamOptions{
+						Reasoning: ThinkingLevel(test.requested),
+					})
+					if request.Reasoning == nil || request.Reasoning.Effort != test.wantEffort {
+						t.Fatalf("reasoning effort for %q = %+v, want %q", test.requested, request.Reasoning, test.wantEffort)
+					}
+
+					advertised := slices.Contains(snapshot.Capabilities.SupportedReasoningLevels, test.requested)
+					if advertised != test.advertised {
+						t.Fatalf("snapshot advertised %q = %t, want %t", test.requested, advertised, test.advertised)
+					}
+					if !slices.Contains(snapshot.Capabilities.SupportedReasoningLevels, test.wantLevel) {
+						t.Fatalf("payload effort %q is absent from snapshot levels %+v", request.Reasoning.Effort, snapshot.Capabilities.SupportedReasoningLevels)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestDynamicCommandCodeCapabilitiesRemainUnknownWhenDiscoveryOmitsFacts(t *testing.T) {
 	isolateProviderRegistry(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
