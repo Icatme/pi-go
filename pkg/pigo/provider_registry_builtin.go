@@ -527,6 +527,58 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 		BuildOptions:     buildOpenAIResponsesProviderStreamOptions,
 		NormalizeOptions: normalizeOpenAIResponsesProviderStreamOptions,
 		Models: map[string]Model{
+			"gpt-5.6": {
+				ID:               "gpt-5.6",
+				Name:             "GPT-5.6",
+				API:              "openai-responses",
+				BaseURL:          "https://api.openai.com",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
+				Input:            []InputType{InputText, InputImage},
+				Cost:             UsageCost{Input: 4, Output: 20, CacheRead: 0.4, CacheWrite: 5},
+				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 8, Output: 30, CacheRead: 0.8, CacheWrite: 10}}},
+				ContextWindow:    1050000,
+				MaxTokens:        128000,
+			},
+			"gpt-5.6-sol": {
+				ID:               "gpt-5.6-sol",
+				Name:             "GPT-5.6 Sol",
+				API:              "openai-responses",
+				BaseURL:          "https://api.openai.com",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
+				Input:            []InputType{InputText, InputImage},
+				Cost:             UsageCost{Input: 4, Output: 20, CacheRead: 0.4, CacheWrite: 5},
+				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 8, Output: 30, CacheRead: 0.8, CacheWrite: 10}}},
+				ContextWindow:    1050000,
+				MaxTokens:        128000,
+			},
+			"gpt-5.6-terra": {
+				ID:               "gpt-5.6-terra",
+				Name:             "GPT-5.6 Terra",
+				API:              "openai-responses",
+				BaseURL:          "https://api.openai.com",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
+				Input:            []InputType{InputText, InputImage},
+				Cost:             UsageCost{Input: 2, Output: 12, CacheRead: 0.2, CacheWrite: 2.5},
+				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 4, Output: 18, CacheRead: 0.4, CacheWrite: 5}}},
+				ContextWindow:    1050000,
+				MaxTokens:        128000,
+			},
+			"gpt-5.6-luna": {
+				ID:               "gpt-5.6-luna",
+				Name:             "GPT-5.6 Luna",
+				API:              "openai-responses",
+				BaseURL:          "https://api.openai.com",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
+				Input:            []InputType{InputText, InputImage},
+				Cost:             UsageCost{Input: 0.2, Output: 1.2, CacheRead: 0.02, CacheWrite: 0.25},
+				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 0.4, Output: 1.8, CacheRead: 0.04, CacheWrite: 0.5}}},
+				ContextWindow:    1050000,
+				MaxTokens:        128000,
+			},
 			"gpt-5.1": {
 				ID:            "gpt-5.1",
 				Name:          "GPT-5.1",
@@ -572,6 +624,18 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				MaxTokens:     128000,
 			},
 		},
+	}
+}
+
+func openAIGPT56ThinkingLevelMap() ThinkingLevelMap {
+	return ThinkingLevelMap{
+		ModelThinkingLevelOff:     "none",
+		ModelThinkingLevelMinimal: "",
+		ModelThinkingLevelLow:     "low",
+		ModelThinkingLevelMedium:  "medium",
+		ModelThinkingLevelHigh:    "high",
+		ModelThinkingLevelXHigh:   "xhigh",
+		ModelThinkingLevelMax:     "max",
 	}
 }
 

@@ -98,6 +98,45 @@ func TestLookupModelCapabilitiesDistinguishesWireAPIsAndExplicitReasoningLevels(
 	}
 }
 
+func TestOpenAIGPT56CatalogUsesExactOfficialCapabilityFacts(t *testing.T) {
+	wantLevels := []ModelThinkingLevel{
+		ModelThinkingLevelOff,
+		ModelThinkingLevelLow,
+		ModelThinkingLevelMedium,
+		ModelThinkingLevelHigh,
+		ModelThinkingLevelXHigh,
+		ModelThinkingLevelMax,
+	}
+	for _, modelID := range []string{"gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		t.Run(modelID, func(t *testing.T) {
+			snapshot, ok := LookupModelCapabilities("openai", modelID)
+			if !ok {
+				t.Fatalf("expected exact OpenAI capability lookup for %q", modelID)
+			}
+			if snapshot.Provider != "openai" || snapshot.ModelID != modelID || snapshot.WireAPI != "openai-responses" {
+				t.Fatalf("unexpected identity for %q: %+v", modelID, snapshot)
+			}
+			if snapshot.ContextWindow != 1_050_000 || snapshot.MaxOutputTokens != 128_000 || !slices.Equal(snapshot.Input, []InputType{InputText, InputImage}) {
+				t.Fatalf("unexpected official limits or input modes for %q: %+v", modelID, snapshot)
+			}
+			assertCapability(t, "streaming", snapshot.Capabilities.Streaming, CapabilitySupported)
+			assertCapability(t, "function calling", snapshot.Capabilities.Tools, CapabilitySupported)
+			assertCapability(t, "reasoning", snapshot.Capabilities.Reasoning, CapabilitySupported)
+			assertCapability(t, "reasoning levels", snapshot.Capabilities.ReasoningLevels, CapabilitySupported)
+			if !slices.Equal(snapshot.Capabilities.SupportedReasoningLevels, wantLevels) {
+				t.Fatalf("unexpected reasoning levels for %q: %+v", modelID, snapshot.Capabilities.SupportedReasoningLevels)
+			}
+			assertCapability(t, "json_object", snapshot.ResponseFormats.JSONObject, CapabilitySupported)
+			assertCapability(t, "json_schema", snapshot.ResponseFormats.JSONSchema, CapabilitySupported)
+
+			model := GetModel("openai", modelID)
+			if model == nil || model.ThinkingLevelMap[ModelThinkingLevelMinimal] != "" || model.ThinkingLevelMap[ModelThinkingLevelOff] != "none" {
+				t.Fatalf("unexpected GPT-5.6 runtime reasoning map for %q: %+v", modelID, model)
+			}
+		})
+	}
+}
+
 func TestDynamicCommandCodeCapabilitiesRemainUnknownWhenDiscoveryOmitsFacts(t *testing.T) {
 	isolateProviderRegistry(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
