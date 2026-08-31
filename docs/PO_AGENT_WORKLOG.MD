@@ -266,3 +266,6 @@
 - Verified the follow-up with root and examples tests, race tests, vet, builds,
   and module verification; tidy remained content-clean apart from the existing
   `go.sum` line endings. No live provider request was run.
+- Removed README wording that presented untagged `v0.8.0` as an existing
+  release; installation now uses the version-neutral `@latest` form while the
+  local package version remains `0.8.0`.

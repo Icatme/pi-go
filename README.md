@@ -61,10 +61,10 @@ go install github.com/Icatme/pi-go/cmd/pigo@latest
 pigo --help
 ```
 
-The `agent` package is included in the current `v0.8.0` release:
+The `agent` package is part of this module:
 
 ```powershell
-go get github.com/Icatme/pi-go/agent@v0.8.0
+go get github.com/Icatme/pi-go/agent@latest
 ```
 
 Import it with:
