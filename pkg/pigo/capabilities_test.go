@@ -27,8 +27,8 @@ func TestLookupModelCapabilitiesUsesStaticRegistryFacts(t *testing.T) {
 	assertCapability(t, "strict tools", snapshot.Capabilities.StrictTools, CapabilityUnsupported)
 	assertCapability(t, "tool choice", snapshot.Capabilities.ToolChoice, CapabilitySupported)
 	assertCapability(t, "temperature", snapshot.Capabilities.Temperature, CapabilitySupported)
-	assertCapability(t, "top_p", snapshot.Capabilities.TopP, CapabilityUnsupported)
-	assertCapability(t, "parallel tool calls", snapshot.Capabilities.ParallelToolCalls, CapabilityUnsupported)
+	assertCapability(t, "top_p", snapshot.Capabilities.TopP, CapabilitySupported)
+	assertCapability(t, "parallel tool calls", snapshot.Capabilities.ParallelToolCalls, CapabilitySupported)
 	assertCapability(t, "reasoning", snapshot.Capabilities.Reasoning, CapabilitySupported)
 	assertCapability(t, "reasoning levels", snapshot.Capabilities.ReasoningLevels, CapabilityUnknown)
 	assertCapability(t, "json_object", snapshot.ResponseFormats.JSONObject, CapabilitySupported)
@@ -70,6 +70,8 @@ func TestLookupModelCapabilitiesDistinguishesWireAPIsAndExplicitReasoningLevels(
 	if luna.ResponseFormats.JSONObject != CapabilitySupported || luna.ResponseFormats.JSONSchema != CapabilitySupported {
 		t.Fatalf("expected Luna model-scoped structured output facts: %+v", luna.ResponseFormats)
 	}
+	assertCapability(t, "Luna top_p", luna.Capabilities.TopP, CapabilitySupported)
+	assertCapability(t, "Luna parallel tool calls", luna.Capabilities.ParallelToolCalls, CapabilitySupported)
 	if deepSeek.ResponseFormats.JSONObject != CapabilityUnsupported || deepSeek.ResponseFormats.JSONSchema != CapabilityUnsupported {
 		t.Fatalf("expected Completions response formats to fail closed: %+v", deepSeek.ResponseFormats)
 	}
@@ -121,6 +123,8 @@ func TestOpenAIGPT56CatalogUsesExactOfficialCapabilityFacts(t *testing.T) {
 			}
 			assertCapability(t, "streaming", snapshot.Capabilities.Streaming, CapabilitySupported)
 			assertCapability(t, "function calling", snapshot.Capabilities.Tools, CapabilitySupported)
+			assertCapability(t, "top_p", snapshot.Capabilities.TopP, CapabilitySupported)
+			assertCapability(t, "parallel tool calls", snapshot.Capabilities.ParallelToolCalls, CapabilitySupported)
 			assertCapability(t, "reasoning", snapshot.Capabilities.Reasoning, CapabilitySupported)
 			assertCapability(t, "reasoning levels", snapshot.Capabilities.ReasoningLevels, CapabilitySupported)
 			if !slices.Equal(snapshot.Capabilities.SupportedReasoningLevels, wantLevels) {
@@ -133,6 +137,33 @@ func TestOpenAIGPT56CatalogUsesExactOfficialCapabilityFacts(t *testing.T) {
 			if model == nil || model.ThinkingLevelMap[ModelThinkingLevelMinimal] != "" || model.ThinkingLevelMap[ModelThinkingLevelOff] != "none" {
 				t.Fatalf("unexpected GPT-5.6 runtime reasoning map for %q: %+v", modelID, model)
 			}
+		})
+	}
+}
+
+func TestOnlyOpenAIResponsesAdvertisesTopPAndParallelToolCalls(t *testing.T) {
+	tests := []struct {
+		api  API
+		want CapabilitySupport
+	}{
+		{api: "openai-responses", want: CapabilitySupported},
+		{api: "openai-codex-responses", want: CapabilityUnsupported},
+		{api: "openai-completions", want: CapabilityUnsupported},
+		{api: "anthropic-messages", want: CapabilityUnsupported},
+		{api: "commandcode-custom", want: CapabilityUnsupported},
+		{api: "deepseek-chat-completions", want: CapabilityUnsupported},
+		{api: "google-generative-ai", want: CapabilityUnsupported},
+		{api: "mistral-conversations", want: CapabilityUnsupported},
+	}
+
+	for _, test := range tests {
+		t.Run(string(test.api), func(t *testing.T) {
+			module := GetAPIModule(test.api)
+			if module == nil {
+				t.Fatalf("expected registered API module %q", test.api)
+			}
+			assertCapability(t, "top_p", module.Capabilities.TopP, test.want)
+			assertCapability(t, "parallel tool calls", module.Capabilities.ParallelToolCalls, test.want)
 		})
 	}
 }

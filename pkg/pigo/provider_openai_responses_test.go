@@ -31,6 +31,77 @@ func TestResolveOpenAIResponsesURLAddsV1ForRootBaseURL(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesOptionsPreserveTopPAndParallelToolCalls(t *testing.T) {
+	model := GetModel("openai", "gpt-5.6-sol")
+	if model == nil {
+		t.Fatal("expected GPT-5.6 Sol model")
+	}
+	topP := 0.35
+	parallelToolCalls := false
+
+	built := BuildProviderStreamOptions(*model, SimpleStreamOptions{
+		TopP:              &topP,
+		ParallelToolCalls: &parallelToolCalls,
+	})
+	if built.TopP == nil || *built.TopP != topP || built.ParallelToolCalls == nil || *built.ParallelToolCalls {
+		t.Fatalf("expected simple options to preserve top_p and explicit parallel=false, got %+v", built)
+	}
+
+	normalized := NormalizeProviderStreamOptions(*model, built)
+	if normalized.TopP == nil || *normalized.TopP != topP || normalized.ParallelToolCalls == nil || *normalized.ParallelToolCalls {
+		t.Fatalf("expected normalized provider options to preserve top_p and explicit parallel=false, got %+v", normalized)
+	}
+}
+
+func TestBuildOpenAIResponsesRequestSerializesSamplingAndParallelToolCalls(t *testing.T) {
+	model := GetModel("openai", "gpt-5.6-sol")
+	if model == nil {
+		t.Fatal("expected GPT-5.6 Sol model")
+	}
+
+	t.Run("defaults", func(t *testing.T) {
+		request := buildOpenAIResponsesRequest(*model, Context{}, ProviderStreamOptions{})
+		payload, err := json.Marshal(request)
+		if err != nil {
+			t.Fatalf("marshal default Responses request: %v", err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(payload, &fields); err != nil {
+			t.Fatalf("decode default Responses request: %v", err)
+		}
+		if _, ok := fields["top_p"]; ok {
+			t.Fatalf("expected nil top_p to be omitted, got %s", payload)
+		}
+		if parallel, ok := fields["parallel_tool_calls"].(bool); !ok || !parallel {
+			t.Fatalf("expected default parallel_tool_calls=true, got %s", payload)
+		}
+	})
+
+	t.Run("explicit values", func(t *testing.T) {
+		topP := 0.25
+		parallelToolCalls := false
+		options := BuildProviderStreamOptions(*model, SimpleStreamOptions{
+			TopP:              &topP,
+			ParallelToolCalls: &parallelToolCalls,
+		})
+		request := buildOpenAIResponsesRequest(*model, Context{}, options)
+		payload, err := json.Marshal(request)
+		if err != nil {
+			t.Fatalf("marshal explicit Responses request: %v", err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(payload, &fields); err != nil {
+			t.Fatalf("decode explicit Responses request: %v", err)
+		}
+		if got, ok := fields["top_p"].(float64); !ok || got != topP {
+			t.Fatalf("expected top_p=%v, got %s", topP, payload)
+		}
+		if parallel, ok := fields["parallel_tool_calls"].(bool); !ok || parallel {
+			t.Fatalf("expected explicit parallel_tool_calls=false, got %s", payload)
+		}
+	})
+}
+
 func TestCompleteSimpleOpenAIResponsesUsesAuthConfigAndV1ResponsesPath(t *testing.T) {
 	var (
 		requestPath string

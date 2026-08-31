@@ -240,6 +240,9 @@
 - Unified Responses reasoning effort normalization through each model's
   `ThinkingLevelMap` and clamp semantics, keeping GPT-5.6 payloads aligned with
   the advertised `none`/`low`/`medium`/`high`/`xhigh`/`max` surface.
+- Added typed `top_p` and optional `parallel_tool_calls` options for the OpenAI
+  Responses adapter, preserving the existing default `true` while serializing
+  explicit `false`; other wire APIs remain fail-closed for these capabilities.
 - Added explicit `UsageReported` evidence across provider parsers, failed
   Responses, stream retry gates, hosted-tool usage/cost aggregation, Responses
   cache-write accounting, message cloning, and context replay so reported

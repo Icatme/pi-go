@@ -89,6 +89,7 @@ func streamSimpleOpenAICodex(model Model, ctx Context, options SimpleStreamOptio
 
 func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOptions) openAIResponsesRequest {
 	resolvedOptions := resolveOpenAICodexProviderOptions(model, options)
+	parallelToolCalls := true
 
 	instructions := ctx.SystemPrompt
 	if strings.TrimSpace(instructions) == "" {
@@ -103,7 +104,7 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 		Input:             convertOpenAIResponsesMessages(model, ctx, false),
 		Tools:             convertOpenAIResponsesTools(ctx.Tools),
 		ToolChoice:        resolveOpenAICodexToolChoice(resolvedOptions.ToolChoice),
-		ParallelToolCalls: true,
+		ParallelToolCalls: &parallelToolCalls,
 		Include:           []string{"reasoning.encrypted_content"},
 		Text: &openAIResponsesTextOptions{
 			Verbosity: defaultTextVerbosity(resolvedOptions.TextVerbosity),

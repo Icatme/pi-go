@@ -138,8 +138,8 @@ func newOpenAIResponsesAPIModule() APIModule {
 			StrictTools:       CapabilityUnsupported,
 			ToolChoice:        CapabilitySupported,
 			Temperature:       CapabilitySupported,
-			TopP:              CapabilityUnsupported,
-			ParallelToolCalls: CapabilityUnsupported,
+			TopP:              CapabilitySupported,
+			ParallelToolCalls: CapabilitySupported,
 		},
 	}
 }

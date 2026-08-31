@@ -17,6 +17,8 @@ type StreamOptions struct {
 	Headers              map[string]string
 	MaxTokens            int
 	Temperature          *float64
+	TopP                 *float64
+	ParallelToolCalls    *bool
 	Transport            Transport
 	CacheRetention       CacheRetention
 	SessionID            string
@@ -62,6 +64,20 @@ func WithTemperature(temperature float64) Option {
 	}
 }
 
+// WithTopP sets the provider-specific nucleus sampling field on StreamOptions.
+func WithTopP(topP float64) Option {
+	return func(options *StreamOptions) {
+		options.TopP = &topP
+	}
+}
+
+// WithParallelToolCalls controls whether providers may issue tool calls in parallel.
+func WithParallelToolCalls(enabled bool) Option {
+	return func(options *StreamOptions) {
+		options.ParallelToolCalls = &enabled
+	}
+}
+
 // WithMaxTokens sets the shared max token limit on StreamOptions.
 func WithMaxTokens(maxTokens int) Option {
 	return func(options *StreamOptions) {
@@ -91,6 +107,8 @@ type ProviderStreamOptions struct {
 	Headers              map[string]string
 	MaxTokens            int
 	Temperature          *float64
+	TopP                 *float64
+	ParallelToolCalls    *bool
 	Transport            Transport
 	CacheRetention       CacheRetention
 	SessionID            string
@@ -121,6 +139,8 @@ type SimpleStreamOptions struct {
 	Headers            map[string]string
 	MaxTokens          int
 	Temperature        *float64
+	TopP               *float64
+	ParallelToolCalls  *bool
 	Transport          Transport
 	CacheRetention     CacheRetention
 	SessionID          string

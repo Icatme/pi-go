@@ -99,6 +99,10 @@ func streamSimpleOpenAIResponses(model Model, ctx Context, options SimpleStreamO
 
 func buildOpenAIResponsesRequest(model Model, ctx Context, options ProviderStreamOptions) openAIResponsesRequest {
 	resolvedOptions := resolveOpenAIResponsesProviderOptions(model, options)
+	parallelToolCalls := true
+	if resolvedOptions.ParallelToolCalls != nil {
+		parallelToolCalls = *resolvedOptions.ParallelToolCalls
+	}
 
 	requestBody := openAIResponsesRequest{
 		Model:             model.ID,
@@ -107,12 +111,15 @@ func buildOpenAIResponsesRequest(model Model, ctx Context, options ProviderStrea
 		Input:             convertOpenAIResponsesMessages(model, ctx, true),
 		Tools:             convertOpenAIResponsesTools(ctx.Tools),
 		ToolChoice:        resolveOpenAIResponsesToolChoice(resolvedOptions.ToolChoice),
-		ParallelToolCalls: true,
+		ParallelToolCalls: &parallelToolCalls,
 		Include:           []string{"reasoning.encrypted_content"},
 	}
 
 	if resolvedOptions.Temperature != nil {
 		requestBody.Temperature = resolvedOptions.Temperature
+	}
+	if resolvedOptions.TopP != nil {
+		requestBody.TopP = resolvedOptions.TopP
 	}
 	if resolvedOptions.SessionID != "" {
 		requestBody.PromptCacheKey = resolvedOptions.SessionID

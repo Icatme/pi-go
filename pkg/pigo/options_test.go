@@ -7,8 +7,11 @@ import (
 
 func TestNewStreamOptionsAppliesFunctionalOptions(t *testing.T) {
 	temperature := 0.7
+	topP := 0.4
 	options := NewStreamOptions(
 		WithTemperature(temperature),
+		WithTopP(topP),
+		WithParallelToolCalls(false),
 		WithMaxTokens(256),
 		WithToolChoice("required"),
 	)
@@ -19,12 +22,17 @@ func TestNewStreamOptionsAppliesFunctionalOptions(t *testing.T) {
 	if options.Common.MaxTokens != 256 {
 		t.Fatalf("expected functional options to populate common max tokens, got %d", options.Common.MaxTokens)
 	}
+	if options.TopP == nil || *options.TopP != topP || options.ParallelToolCalls == nil || *options.ParallelToolCalls {
+		t.Fatalf("expected functional options to preserve top_p and explicit parallel=false, got %+v", options)
+	}
 	if options.ToolChoice != "required" {
 		t.Fatalf("expected functional options to set tool choice, got %q", options.ToolChoice)
 	}
 
 	providerOptions := options.providerStreamOptions(Model{MaxTokens: 4096})
-	if providerOptions.MaxTokens != 256 || providerOptions.ToolChoice != "required" {
+	if providerOptions.MaxTokens != 256 || providerOptions.ToolChoice != "required" ||
+		providerOptions.TopP == nil || *providerOptions.TopP != topP ||
+		providerOptions.ParallelToolCalls == nil || *providerOptions.ParallelToolCalls {
 		t.Fatalf("expected provider conversion to preserve functional options, got %+v", providerOptions)
 	}
 }
