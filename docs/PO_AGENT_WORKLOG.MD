@@ -229,14 +229,21 @@
 - Added a hermetic terminal SSE regression and advanced the package release to
   v0.7.3 for ai-relay's portable Responses contract.
 
-## 2026-08-31 - Provider/model capability snapshots
+## 2026-08-31 - v0.8.0 provider/model capability snapshots
 
 - Added an extensible capability query with exact model lookup and deterministic
   provider snapshots for wire API, streaming, tools, structured output,
   reasoning tiers, temperature, top_p, and parallel calls.
+- Added exact OpenAI registry facts for `gpt-5.6`, `gpt-5.6-sol`,
+  `gpt-5.6-terra`, and `gpt-5.6-luna`, including their Responses capability
+  surface, reasoning levels, and limits.
+- Added explicit `UsageReported` evidence across provider parsers, failed
+  Responses, stream retry gates, hosted-tool continuations, message cloning,
+  and context replay so reported all-zero usage stays distinct from no usage.
 - Kept omitted dynamic Command Code facts explicit and fail closed, without
   model-name inference or adding AI Relay routing and resilience policy.
 - Added static, dynamic, mixed-wire, missing-fact, deep-copy, and concurrent
   catalog replacement regressions. Root and examples tests, race tests, vet,
   and module verification passed; tidy was content-clean apart from existing
-  `go.sum` line endings. No live provider request or release was run.
+  `go.sum` line endings. Bumped the feature version to `v0.8.0`; no live
+  provider request, tag, or release was run.
