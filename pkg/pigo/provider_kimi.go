@@ -104,7 +104,7 @@ type anthropicResponse struct {
 	ID         string                   `json:"id"`
 	Content    []anthropicResponseBlock `json:"content"`
 	StopReason string                   `json:"stop_reason"`
-	Usage      anthropicUsage           `json:"usage"`
+	Usage      *anthropicUsage          `json:"usage,omitempty"`
 }
 
 type anthropicResponseBlock struct {
@@ -234,6 +234,7 @@ func streamAnthropicMessagesWithHostedTools(model Model, ctx Context, options An
 func completeAnthropicHostedToolLoop(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool, onHostedCall func(AssistantMessage, HostedToolExecution), stream *AssistantMessageEventStream) (AssistantMessage, error) {
 	messages := cloneMessages(ctx.Messages)
 	executions := make([]HostedToolExecution, 0, len(ctx.HostedTools))
+	usageReported := false
 
 	for attempt := 0; attempt < 4; attempt++ {
 		loopCtx := ctx
@@ -243,6 +244,8 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 		if observedRequestContext != nil {
 			options.RequestContext = observedRequestContext
 		}
+		usageReported = usageReported || response.UsageReported
+		response.UsageReported = usageReported
 		if err != nil {
 			return response, err
 		}
@@ -277,12 +280,13 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 	}
 
 	return AssistantMessage{
-		API:          model.API,
-		Provider:     model.Provider,
-		Model:        model.ID,
-		StopReason:   StopReasonError,
-		ErrorMessage: "hosted tool continuation exceeded retry limit",
-		Timestamp:    time.Now().UTC(),
+		API:           model.API,
+		Provider:      model.Provider,
+		Model:         model.ID,
+		UsageReported: usageReported,
+		StopReason:    StopReasonError,
+		ErrorMessage:  "hosted tool continuation exceeded retry limit",
+		Timestamp:     time.Now().UTC(),
 	}, nil
 }
 
@@ -522,12 +526,9 @@ func processAnthropicStreamEvent(
 	case "message_start":
 		if event.Message != nil {
 			response.ResponseID = event.Message.ID
-			applyAnthropicUsage(response, model, anthropicUsage{
-				InputTokens:         event.Message.Usage.InputTokens,
-				OutputTokens:        event.Message.Usage.OutputTokens,
-				CacheReadTokens:     event.Message.Usage.CacheReadTokens,
-				CacheCreationTokens: event.Message.Usage.CacheCreationTokens,
-			})
+			if event.Message.Usage != nil {
+				applyAnthropicUsage(response, model, *event.Message.Usage)
+			}
 		}
 	case "content_block_start":
 		if event.ContentBlock == nil {
@@ -729,6 +730,7 @@ func applyAnthropicUsage(response *AssistantMessage, model Model, usage anthropi
 		CacheWrite:  usage.CacheCreationTokens,
 		TotalTokens: usage.InputTokens + usage.OutputTokens + usage.CacheReadTokens + usage.CacheCreationTokens,
 	}
+	response.UsageReported = true
 	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
 }
 

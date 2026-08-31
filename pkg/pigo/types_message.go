@@ -30,6 +30,7 @@ type AssistantMessage struct {
 	ResponseModel        string
 	ResponseID           string
 	Usage                Usage
+	UsageReported        bool
 	StopReason           StopReason
 	ErrorMessage         string
 	Diagnostics          []AssistantMessageDiagnostic
@@ -48,6 +49,7 @@ func (m AssistantMessage) clone() Message {
 		ResponseModel:        m.ResponseModel,
 		ResponseID:           m.ResponseID,
 		Usage:                m.Usage,
+		UsageReported:        m.UsageReported,
 		StopReason:           m.StopReason,
 		ErrorMessage:         m.ErrorMessage,
 		Diagnostics:          cloneDiagnostics(m.Diagnostics),

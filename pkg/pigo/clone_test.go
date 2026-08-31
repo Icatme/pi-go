@@ -88,6 +88,7 @@ func TestCloneMessagesDeepCopiesNestedData(t *testing.T) {
 				ToolCall{ID: "call-1", Name: "echo", Arguments: map[string]any{"count": 1}},
 			},
 			HostedToolExecutions: []HostedToolExecution{{ID: "exec-1", Arguments: map[string]any{"k": "v"}, Result: map[string]any{"done": true}}},
+			UsageReported:        true,
 			Diagnostics:          []AssistantMessageDiagnostic{{Type: "warn", Details: map[string]any{"step": 1}, Error: &DiagnosticErrorInfo{Name: "boom"}}},
 		},
 		ToolResultMessage{ToolCallID: "call-1", Details: map[string]any{"status": "ok"}, Content: []ContentBlock{TextContent{Text: "done"}}},
@@ -112,6 +113,9 @@ func TestCloneMessagesDeepCopiesNestedData(t *testing.T) {
 		t.Fatal("expected user message nested content to be cloned")
 	}
 	originalAssistant := messages[1].(AssistantMessage)
+	if !assistant.UsageReported || !originalAssistant.UsageReported {
+		t.Fatal("expected assistant usage presence to survive cloning")
+	}
 	if originalAssistant.Content[0].(ToolCall).Arguments["count"] != 1 {
 		t.Fatal("expected assistant tool call arguments to be cloned")
 	}

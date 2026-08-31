@@ -59,7 +59,7 @@ type openAIResponsesResponse struct {
 	Status      string                        `json:"status"`
 	ServiceTier string                        `json:"service_tier,omitempty"`
 	Output      []openAIResponsesResponseItem `json:"output"`
-	Usage       openAIResponsesUsage          `json:"usage"`
+	Usage       *openAIResponsesUsage         `json:"usage,omitempty"`
 	Error       *openAIResponsesResponseError `json:"error,omitempty"`
 }
 
@@ -539,6 +539,9 @@ func processOpenAIResponsesStreamEventWithProvider(
 		if terminal.ID != "" {
 			response.ResponseID = terminal.ID
 		}
+		if terminal.Usage != nil {
+			applyOpenAIResponsesUsage(model, response, *terminal.Usage, terminal.ServiceTier, requestServiceTier)
+		}
 		if terminal.Error != nil && strings.TrimSpace(terminal.Error.Message) != "" {
 			response.StopReason = StopReasonError
 			response.ErrorMessage = terminal.Error.Message
@@ -881,20 +884,27 @@ func applyOpenAIResponsesTerminal(model Model, response *AssistantMessage, termi
 		response.Content = append(response.Content, parseOpenAIResponsesResponseOutput(terminal.Output)...)
 	}
 	response.StopReason = mapOpenAIResponsesStopReason(terminal.Status, response.Content)
-	inputTokens := terminal.Usage.InputTokens - terminal.Usage.InputDetails.CachedTokens
+	if terminal.Usage != nil {
+		applyOpenAIResponsesUsage(model, response, *terminal.Usage, terminal.ServiceTier, requestServiceTier)
+	}
+}
+
+func applyOpenAIResponsesUsage(model Model, response *AssistantMessage, usage openAIResponsesUsage, responseServiceTier string, requestServiceTier string) {
+	inputTokens := usage.InputTokens - usage.InputDetails.CachedTokens
 	if inputTokens < 0 {
 		inputTokens = 0
 	}
 	response.Usage = Usage{
 		Input:       inputTokens,
-		Output:      terminal.Usage.OutputTokens,
-		CacheRead:   terminal.Usage.InputDetails.CachedTokens,
+		Output:      usage.OutputTokens,
+		CacheRead:   usage.InputDetails.CachedTokens,
 		CacheWrite:  0,
-		TotalTokens: terminal.Usage.TotalTokens,
+		TotalTokens: usage.TotalTokens,
 	}
+	response.UsageReported = true
 	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
 	if model.Provider != "opencode-go" {
-		applyOpenAIResponsesServiceTierPricing(&response.Usage, resolveOpenAIResponsesServiceTier(terminal.ServiceTier, requestServiceTier))
+		applyOpenAIResponsesServiceTierPricing(&response.Usage, resolveOpenAIResponsesServiceTier(responseServiceTier, requestServiceTier))
 	}
 }
 

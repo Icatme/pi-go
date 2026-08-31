@@ -264,7 +264,7 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 				return shouldRetryOpenAIProviderResponse(status, body, message)
 			},
 			CanRetryStreamError: func() bool {
-				return len(response.Content) == 0 && len(response.HostedToolExecutions) == 0
+				return len(response.Content) == 0 && len(response.HostedToolExecutions) == 0 && !response.UsageReported
 			},
 			OnStreamRetry: func() {
 				response = cloneAssistantMessage(baselineResponse)
@@ -971,6 +971,7 @@ func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage 
 		CacheWrite:  cacheWrite,
 		TotalTokens: total,
 	}
+	response.UsageReported = true
 	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
 }
 

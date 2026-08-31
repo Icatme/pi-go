@@ -492,8 +492,8 @@ func endCommandCodeThinking(response *AssistantMessage, stream *AssistantMessage
 }
 
 func applyCommandCodeUsage(event map[string]any, model Model, response *AssistantMessage) {
-	totalUsage := commandCodeRecord(event["totalUsage"])
-	if len(totalUsage) == 0 {
+	totalUsage, ok := commandCodeUsageRecord(event["totalUsage"])
+	if !ok {
 		return
 	}
 	details := commandCodeRecord(totalUsage["inputTokenDetails"])
@@ -510,6 +510,7 @@ func applyCommandCodeUsage(event map[string]any, model Model, response *Assistan
 		CacheWrite: cacheWrite,
 	}
 	response.Usage.TotalTokens = response.Usage.Input + response.Usage.Output + response.Usage.CacheRead + response.Usage.CacheWrite
+	response.UsageReported = true
 	response.Usage.Cost = calculateCommandCodeCost(model, response.Usage)
 }
 
@@ -523,6 +524,7 @@ func calculateCommandCodeCost(model Model, usage Usage) UsageCost {
 func resetCommandCodeResponse(response *AssistantMessage) {
 	response.Content = nil
 	response.Usage = Usage{}
+	response.UsageReported = false
 	response.StopReason = StopReasonStop
 	response.ErrorMessage = ""
 }
@@ -880,6 +882,19 @@ func commandCodeRecord(value any) map[string]any {
 		}
 	}
 	return map[string]any{}
+}
+
+func commandCodeUsageRecord(value any) (map[string]any, bool) {
+	if record, ok := value.(map[string]any); ok {
+		return cloneMap(record), true
+	}
+	if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
+		var record map[string]any
+		if json.Unmarshal([]byte(text), &record) == nil && record != nil {
+			return record, true
+		}
+	}
+	return nil, false
 }
 
 func commandCodeInt(value any) int {

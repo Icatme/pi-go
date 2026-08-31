@@ -188,6 +188,48 @@ func TestSerializeDeserializeContextHelpersRoundTrip(t *testing.T) {
 	}
 }
 
+func TestContextJSONRoundTripPreservesReportedZeroUsage(t *testing.T) {
+	source := Context{Messages: []Message{
+		AssistantMessage{Usage: Usage{}, UsageReported: true},
+		AssistantMessage{Usage: Usage{}},
+	}}
+
+	payload, err := SerializeContext(source)
+	if err != nil {
+		t.Fatalf("serialize context: %v", err)
+	}
+	if !json.Valid(payload) || !containsJSONField(payload, "usageReported") {
+		t.Fatalf("reported zero usage missing from wire payload: %s", payload)
+	}
+
+	restored, err := DeserializeContext(payload)
+	if err != nil {
+		t.Fatalf("deserialize context: %v", err)
+	}
+	if len(restored.Messages) != 2 {
+		t.Fatalf("restored message count = %d", len(restored.Messages))
+	}
+	reported := restored.Messages[0].(AssistantMessage)
+	missing := restored.Messages[1].(AssistantMessage)
+	if !reported.UsageReported || reported.Usage != (Usage{}) {
+		t.Fatalf("reported zero usage did not round-trip: %+v", reported)
+	}
+	if missing.UsageReported || missing.Usage != (Usage{}) {
+		t.Fatalf("missing usage changed during round-trip: %+v", missing)
+	}
+}
+
+func containsJSONField(payload []byte, field string) bool {
+	var encoded struct {
+		Messages []map[string]json.RawMessage `json:"messages"`
+	}
+	if json.Unmarshal(payload, &encoded) != nil || len(encoded.Messages) == 0 {
+		return false
+	}
+	_, ok := encoded.Messages[0][field]
+	return ok
+}
+
 func TestDeserializeContextErrorsOnUnknownRole(t *testing.T) {
 	_, err := DeserializeContext([]byte(`{"messages":[{"role":"unknown"}]}`))
 	if err == nil {

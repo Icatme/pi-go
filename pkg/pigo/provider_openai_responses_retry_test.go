@@ -297,6 +297,96 @@ func TestOpenAIResponsesDoesNotRetryRequestBufferFailureAfterOutput(t *testing.T
 	}
 }
 
+func TestOpenAIStreamsDoNotRetryAfterReportedZeroUsage(t *testing.T) {
+	const retryableMessage = "exceeded request buffer limit while retrying upstream"
+
+	previousRetryCount := openAICodexRetryCount
+	previousRetryDelay := openAICodexBaseRetryDelay
+	openAICodexRetryCount = 1
+	openAICodexBaseRetryDelay = time.Millisecond
+	t.Cleanup(func() {
+		openAICodexRetryCount = previousRetryCount
+		openAICodexBaseRetryDelay = previousRetryDelay
+	})
+
+	tests := []struct {
+		name    string
+		body    string
+		model   func(*testing.T, string) Model
+		options SimpleStreamOptions
+	}{
+		{
+			name: "responses",
+			body: buildOpenAICodexSSE(map[string]any{
+				"type": "response.failed",
+				"response": map[string]any{
+					"status": "failed",
+					"usage":  map[string]any{},
+					"error":  map[string]any{"message": retryableMessage},
+				},
+			}),
+			model: func(t *testing.T, baseURL string) Model {
+				model := GetModel("openai", "gpt-5.4")
+				if model == nil {
+					t.Fatal("expected OpenAI model")
+				}
+				model.BaseURL = baseURL
+				return *model
+			},
+			options: SimpleStreamOptions{APIKey: "test-key", MaxRetries: 1, MaxRetryDelay: 1},
+		},
+		{
+			name: "codex",
+			body: buildOpenAICodexSSE(map[string]any{
+				"type": "response.failed",
+				"response": map[string]any{
+					"status": "failed",
+					"usage":  map[string]any{},
+					"error":  map[string]any{"message": retryableMessage},
+				},
+			}),
+			model: func(t *testing.T, baseURL string) Model {
+				model := GetModel("openai-codex", "gpt-5.4")
+				if model == nil {
+					t.Fatal("expected OpenAI Codex model")
+				}
+				model.BaseURL = baseURL
+				return *model
+			},
+			options: SimpleStreamOptions{APIKey: makeOpenAICodexToken("acc_test"), MaxRetryDelay: 1, Transport: TransportSSE},
+		},
+		{
+			name: "completions",
+			body: "data: {\"usage\":{}}\n\n" +
+				"data: {\"error\":{\"message\":\"" + retryableMessage + "\"}}\n\n",
+			model: func(_ *testing.T, baseURL string) Model {
+				return Model{API: "openai-completions", Provider: "openrouter", ID: "test-model", BaseURL: baseURL, ContextWindow: 4096, MaxTokens: 256}
+			},
+			options: SimpleStreamOptions{APIKey: "test-key", MaxRetries: 1, MaxRetryDelay: 1},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var attempts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				attempts.Add(1)
+				w.Header().Set("content-type", "text/event-stream")
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			response := CompleteSimple(test.model(t, server.URL), Context{Messages: []Message{UserMessage{Content: "do not duplicate"}}}, test.options)
+			if attempts.Load() != 1 {
+				t.Fatalf("reported usage must stop retries, attempts=%d", attempts.Load())
+			}
+			if response.StopReason != StopReasonError || !response.UsageReported || response.Usage != (Usage{}) {
+				t.Fatalf("reported zero usage was not preserved on failure: %+v", response)
+			}
+		})
+	}
+}
+
 func TestOpenAICompletionsRetriesRequestBufferFailureFromSSEBeforeOutput(t *testing.T) {
 	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

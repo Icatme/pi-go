@@ -622,6 +622,7 @@ func applyMistralUsage(response *AssistantMessage, model Model, usage mistralCha
 		CacheWrite:  0,
 		TotalTokens: usage.TotalTokens,
 	}
+	response.UsageReported = true
 	response.Usage.Cost = CalculateCost(model, response.Usage)
 }
 

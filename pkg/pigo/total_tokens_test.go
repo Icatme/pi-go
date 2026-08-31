@@ -34,7 +34,7 @@ func TestApplyOpenAICodexTerminalPreservesTotalTokensAndCachedSplit(t *testing.T
 	applyOpenAIResponsesTerminal(*model, response, openAIResponsesResponse{
 		ID:     "resp_total_tokens",
 		Status: "completed",
-		Usage: openAIResponsesUsage{
+		Usage: &openAIResponsesUsage{
 			InputTokens:  10,
 			OutputTokens: 4,
 			TotalTokens:  14,

@@ -619,6 +619,7 @@ func applyGoogleUsage(response *AssistantMessage, model Model, usage googleUsage
 		CacheWrite:  0,
 		TotalTokens: usage.TotalTokenCount,
 	}
+	response.UsageReported = true
 	response.Usage.Cost = CalculateCost(model, response.Usage)
 }
 

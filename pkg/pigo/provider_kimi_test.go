@@ -618,13 +618,8 @@ func TestCompleteSimpleKimiCodingHostedWebSearchBuildsBuiltinFunctionAndAutoCont
 				map[string]any{
 					"type": "message_start",
 					"message": map[string]any{
-						"id": "msg_web_1",
-						"usage": map[string]any{
-							"input_tokens":                21,
-							"output_tokens":               0,
-							"cache_read_input_tokens":     0,
-							"cache_creation_input_tokens": 0,
-						},
+						"id":    "msg_web_1",
+						"usage": map[string]any{},
 					},
 				},
 				map[string]any{
@@ -654,9 +649,6 @@ func TestCompleteSimpleKimiCodingHostedWebSearchBuildsBuiltinFunctionAndAutoCont
 					"delta": map[string]any{
 						"stop_reason": "tool_use",
 					},
-					"usage": map[string]any{
-						"output_tokens": 11,
-					},
 				},
 				map[string]any{
 					"type": "message_stop",
@@ -668,12 +660,6 @@ func TestCompleteSimpleKimiCodingHostedWebSearchBuildsBuiltinFunctionAndAutoCont
 					"type": "message_start",
 					"message": map[string]any{
 						"id": "msg_web_2",
-						"usage": map[string]any{
-							"input_tokens":                13080,
-							"output_tokens":               0,
-							"cache_read_input_tokens":     0,
-							"cache_creation_input_tokens": 0,
-						},
 					},
 				},
 				map[string]any{
@@ -700,9 +686,6 @@ func TestCompleteSimpleKimiCodingHostedWebSearchBuildsBuiltinFunctionAndAutoCont
 					"type": "message_delta",
 					"delta": map[string]any{
 						"stop_reason": "end_turn",
-					},
-					"usage": map[string]any{
-						"output_tokens": 24,
 					},
 				},
 				map[string]any{
@@ -736,6 +719,9 @@ func TestCompleteSimpleKimiCodingHostedWebSearchBuildsBuiltinFunctionAndAutoCont
 	}
 	if response.StopReason != StopReasonStop {
 		t.Fatalf("expected stop response after hosted web search continuation, got %+v", response)
+	}
+	if !response.UsageReported || response.Usage != (Usage{}) {
+		t.Fatalf("expected first-round explicit zero usage to survive a usage-missing continuation, got %+v", response)
 	}
 	text, ok := response.Content[0].(TextContent)
 	if !ok || !strings.Contains(text.Text, "prompt caching") {

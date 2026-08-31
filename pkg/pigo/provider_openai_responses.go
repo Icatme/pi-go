@@ -302,6 +302,7 @@ func streamOpenAIResponsesSSE(
 		if err != nil {
 			if len(response.Content) == 0 &&
 				len(response.HostedToolExecutions) == 0 &&
+				!response.UsageReported &&
 				shouldRetryOpenAIResponsesRequest(0, err.Error()) &&
 				attempt < maxRetries {
 				if waitErr := waitOpenAIResponsesRetryDelay(requestContext, options.MaxRetryDelay, attempt, time.Second); waitErr != nil {

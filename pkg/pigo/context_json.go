@@ -31,6 +31,7 @@ type messageJSON struct {
 	ResponseID           string                           `json:"responseId,omitempty"`
 	HostedToolExecutions []hostedToolExecutionJSON        `json:"hostedToolExecutions,omitempty"`
 	Usage                Usage                            `json:"usage,omitempty"`
+	UsageReported        bool                             `json:"usageReported,omitempty"`
 	StopReason           StopReason                       `json:"stopReason,omitempty"`
 	ErrorMessage         string                           `json:"errorMessage,omitempty"`
 	Diagnostics          []assistantMessageDiagnosticJSON `json:"diagnostics,omitempty"`
@@ -192,6 +193,7 @@ func marshalMessageJSON(message Message) (messageJSON, error) {
 			ResponseID:           typed.ResponseID,
 			HostedToolExecutions: marshalHostedToolExecutionsJSON(typed.HostedToolExecutions),
 			Usage:                typed.Usage,
+			UsageReported:        typed.UsageReported,
 			StopReason:           typed.StopReason,
 			ErrorMessage:         typed.ErrorMessage,
 			Diagnostics:          marshalAssistantDiagnosticsJSON(typed.Diagnostics),
@@ -249,6 +251,7 @@ func unmarshalMessageJSON(encoded messageJSON) (Message, error) {
 			ResponseID:           encoded.ResponseID,
 			HostedToolExecutions: unmarshalHostedToolExecutionsJSON(encoded.HostedToolExecutions),
 			Usage:                encoded.Usage,
+			UsageReported:        encoded.UsageReported,
 			StopReason:           encoded.StopReason,
 			ErrorMessage:         encoded.ErrorMessage,
 			Diagnostics:          diagnostics,

@@ -501,6 +501,7 @@ func applyDeepSeekUsage(response *AssistantMessage, model Model, usage deepSeekC
 		TotalTokens: usage.TotalTokens,
 		Cost:        model.Cost,
 	}
+	response.UsageReported = true
 }
 
 func mapDeepSeekFinishReason(reason string, content []ContentBlock) StopReason {
