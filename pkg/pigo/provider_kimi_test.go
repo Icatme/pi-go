@@ -2,8 +2,10 @@ package pigo
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +19,53 @@ func buildAnthropicSSE(events ...map[string]any) string {
 	}
 	lines = append(lines, "data: [DONE]")
 	return strings.Join(lines, "\n\n") + "\n\n"
+}
+
+func buildAnthropicHostedUsageRoundSSE(messageID string, callID string, inputTokens int, outputTokens int, reportUsage bool, final bool) string {
+	message := map[string]any{"id": messageID}
+	if reportUsage {
+		message["usage"] = map[string]any{"input_tokens": inputTokens}
+	}
+	events := []map[string]any{{
+		"type":    "message_start",
+		"message": message,
+	}}
+	if !final {
+		events = append(events,
+			map[string]any{
+				"type":  "content_block_start",
+				"index": 0,
+				"content_block": map[string]any{
+					"type":  "tool_use",
+					"id":    callID,
+					"name":  "$web_search",
+					"input": map[string]any{},
+				},
+			},
+			map[string]any{
+				"type":  "content_block_delta",
+				"index": 0,
+				"delta": map[string]any{
+					"type":         "input_json_delta",
+					"partial_json": `{"query":"usage"}`,
+				},
+			},
+			map[string]any{"type": "content_block_stop", "index": 0},
+		)
+	}
+	stopReason := "tool_use"
+	if final {
+		stopReason = "end_turn"
+	}
+	messageDelta := map[string]any{
+		"type":  "message_delta",
+		"delta": map[string]any{"stop_reason": stopReason},
+	}
+	if reportUsage {
+		messageDelta["usage"] = map[string]any{"output_tokens": outputTokens}
+	}
+	events = append(events, messageDelta, map[string]any{"type": "message_stop"})
+	return buildAnthropicSSE(events...)
 }
 
 func writeAnthropicSSEEvent(t *testing.T, w http.ResponseWriter, event map[string]any) {
@@ -619,7 +668,7 @@ func TestCompleteSimpleKimiCodingHostedWebSearchBuildsBuiltinFunctionAndAutoCont
 					"type": "message_start",
 					"message": map[string]any{
 						"id":    "msg_web_1",
-						"usage": map[string]any{},
+						"usage": map[string]any{"input_tokens": 21},
 					},
 				},
 				map[string]any{
@@ -649,6 +698,7 @@ func TestCompleteSimpleKimiCodingHostedWebSearchBuildsBuiltinFunctionAndAutoCont
 					"delta": map[string]any{
 						"stop_reason": "tool_use",
 					},
+					"usage": map[string]any{"output_tokens": 11},
 				},
 				map[string]any{
 					"type": "message_stop",
@@ -720,8 +770,8 @@ func TestCompleteSimpleKimiCodingHostedWebSearchBuildsBuiltinFunctionAndAutoCont
 	if response.StopReason != StopReasonStop {
 		t.Fatalf("expected stop response after hosted web search continuation, got %+v", response)
 	}
-	if !response.UsageReported || response.Usage != (Usage{}) {
-		t.Fatalf("expected first-round explicit zero usage to survive a usage-missing continuation, got %+v", response)
+	if !response.UsageReported || response.Usage.Input != 21 || response.Usage.Output != 11 || response.Usage.TotalTokens != 32 {
+		t.Fatalf("expected first-round usage to survive a usage-missing continuation, got %+v", response)
 	}
 	text, ok := response.Content[0].(TextContent)
 	if !ok || !strings.Contains(text.Text, "prompt caching") {
@@ -779,6 +829,90 @@ func TestCompleteSimpleKimiCodingHostedWebSearchBuildsBuiltinFunctionAndAutoCont
 	contentText, ok := toolBlock["content"].(string)
 	if !ok || contentText != `{"query":"Moonshot AI Context Caching","usage":{"total_tokens":13046}}` {
 		t.Fatalf("expected hosted tool_result continuation payload to carry serialized call arguments for provider-side execution, got %#v", toolBlock["content"])
+	}
+}
+
+func TestCompleteSimpleKimiCodingHostedAggregatesUsageAndCostAcrossRounds(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount++
+		w.Header().Set("content-type", "text/event-stream")
+		switch requestCount {
+		case 1:
+			_, _ = w.Write([]byte(buildAnthropicHostedUsageRoundSSE("msg_usage_1", "call_usage_1", 10, 2, true, false)))
+		case 2:
+			_, _ = w.Write([]byte(buildAnthropicHostedUsageRoundSSE("msg_usage_2", "", 20, 3, true, true)))
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+		}
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+	model.Cost = UsageCost{Input: 1, Output: 2}
+	model.CostTiers = nil
+
+	response := Complete(*model, Context{
+		Messages:    []Message{UserMessage{Content: "Search."}},
+		HostedTools: []HostedTool{{Type: HostedToolTypeWebSearch, Name: "web_search"}},
+	}, ProviderStreamOptions{APIKey: "kimi-test-key"})
+
+	if requestCount != 2 || response.StopReason != StopReasonStop {
+		t.Fatalf("expected two-round hosted completion, got requests=%d response=%+v", requestCount, response)
+	}
+	if !response.UsageReported || response.Usage.Input != 30 || response.Usage.Output != 5 || response.Usage.TotalTokens != 35 {
+		t.Fatalf("expected usage from both hosted rounds, got %+v", response.Usage)
+	}
+	if math.Abs(response.Usage.Cost.Input-0.00003) > 1e-12 ||
+		math.Abs(response.Usage.Cost.Output-0.00001) > 1e-12 ||
+		math.Abs(response.Usage.Cost.Total-0.00004) > 1e-12 {
+		t.Fatalf("expected independently billed round costs to be summed, got %+v", response.Usage.Cost)
+	}
+}
+
+func TestCompleteSimpleKimiCodingHostedContinuationLimitPreservesUsageAndCost(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount++
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(buildAnthropicHostedUsageRoundSSE(
+			"msg_limit_"+strconv.Itoa(requestCount),
+			"call_limit_"+strconv.Itoa(requestCount),
+			requestCount,
+			1,
+			true,
+			false,
+		)))
+	}))
+	defer server.Close()
+
+	model := GetModel("kimi-coding", "k2p5")
+	if model == nil {
+		t.Fatal("expected kimi model")
+	}
+	model.BaseURL = server.URL
+	model.Cost = UsageCost{Input: 1, Output: 2}
+	model.CostTiers = nil
+
+	response := Complete(*model, Context{
+		Messages:    []Message{UserMessage{Content: "Search repeatedly."}},
+		HostedTools: []HostedTool{{Type: HostedToolTypeWebSearch, Name: "web_search"}},
+	}, ProviderStreamOptions{APIKey: "kimi-test-key"})
+
+	if requestCount != 4 || response.StopReason != StopReasonError || !strings.Contains(response.ErrorMessage, "continuation exceeded retry limit") {
+		t.Fatalf("expected hosted continuation limit after four requests, got requests=%d response=%+v", requestCount, response)
+	}
+	if !response.UsageReported || response.Usage.Input != 10 || response.Usage.Output != 4 || response.Usage.TotalTokens != 14 {
+		t.Fatalf("expected continuation-limit response to preserve all usage, got %+v", response.Usage)
+	}
+	if math.Abs(response.Usage.Cost.Input-0.00001) > 1e-12 ||
+		math.Abs(response.Usage.Cost.Output-0.000008) > 1e-12 ||
+		math.Abs(response.Usage.Cost.Total-0.000018) > 1e-12 {
+		t.Fatalf("expected continuation-limit response to preserve all cost, got %+v", response.Usage.Cost)
 	}
 }
 

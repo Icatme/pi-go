@@ -234,6 +234,7 @@ func streamAnthropicMessagesWithHostedTools(model Model, ctx Context, options An
 func completeAnthropicHostedToolLoop(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool, onHostedCall func(AssistantMessage, HostedToolExecution), stream *AssistantMessageEventStream) (AssistantMessage, error) {
 	messages := cloneMessages(ctx.Messages)
 	executions := make([]HostedToolExecution, 0, len(ctx.HostedTools))
+	usage := Usage{}
 	usageReported := false
 
 	for attempt := 0; attempt < 4; attempt++ {
@@ -244,7 +245,11 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 		if observedRequestContext != nil {
 			options.RequestContext = observedRequestContext
 		}
-		usageReported = usageReported || response.UsageReported
+		if response.UsageReported {
+			usage = addAnthropicHostedToolUsage(usage, response.Usage)
+			usageReported = true
+		}
+		response.Usage = usage
 		response.UsageReported = usageReported
 		if err != nil {
 			return response, err
@@ -262,7 +267,7 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 			}
 			payloadText, err := json.Marshal(call.Arguments)
 			if err != nil {
-				return AssistantMessage{}, err
+				return response, err
 			}
 			messages = append(messages, ToolResultMessage{
 				ToolCallID: call.ID,
@@ -283,11 +288,26 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 		API:           model.API,
 		Provider:      model.Provider,
 		Model:         model.ID,
+		Usage:         usage,
 		UsageReported: usageReported,
 		StopReason:    StopReasonError,
 		ErrorMessage:  "hosted tool continuation exceeded retry limit",
 		Timestamp:     time.Now().UTC(),
 	}, nil
+}
+
+func addAnthropicHostedToolUsage(total Usage, next Usage) Usage {
+	total.Input += next.Input
+	total.Output += next.Output
+	total.CacheRead += next.CacheRead
+	total.CacheWrite += next.CacheWrite
+	total.TotalTokens += next.TotalTokens
+	total.Cost.Input += next.Cost.Input
+	total.Cost.Output += next.Cost.Output
+	total.Cost.CacheRead += next.Cost.CacheRead
+	total.Cost.CacheWrite += next.Cost.CacheWrite
+	total.Cost.Total += next.Cost.Total
+	return total
 }
 
 func emitHostedToolLifecycle(stream *AssistantMessageEventStream, partial AssistantMessage, call HostedToolExecution) {

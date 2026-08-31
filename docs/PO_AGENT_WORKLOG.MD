@@ -237,9 +237,13 @@
 - Added exact OpenAI registry facts for `gpt-5.6`, `gpt-5.6-sol`,
   `gpt-5.6-terra`, and `gpt-5.6-luna`, including their Responses capability
   surface, reasoning levels, and limits.
+- Unified Responses reasoning effort normalization through each model's
+  `ThinkingLevelMap` and clamp semantics, keeping GPT-5.6 payloads aligned with
+  the advertised `none`/`low`/`medium`/`high`/`xhigh`/`max` surface.
 - Added explicit `UsageReported` evidence across provider parsers, failed
-  Responses, stream retry gates, hosted-tool continuations, message cloning,
-  and context replay so reported all-zero usage stays distinct from no usage.
+  Responses, stream retry gates, hosted-tool usage/cost aggregation, Responses
+  cache-write accounting, message cloning, and context replay so reported
+  all-zero usage stays distinct from no usage.
 - Kept omitted dynamic Command Code facts explicit and fail closed, without
   model-name inference or adding AI Relay routing and resilience policy.
 - Added static, dynamic, mixed-wire, missing-fact, deep-copy, and concurrent
