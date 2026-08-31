@@ -254,3 +254,15 @@
   and module verification passed; tidy was content-clean apart from existing
   `go.sum` line endings. Bumped the feature version to `v0.8.0`; no live
   provider request, tag, or release was run.
+- Replaced the OpenAI Responses API-wide sampling claim with exact model facts:
+  GPT-5.1/5.2/5.4 allow `temperature` and `top_p` only at `none`, while the
+  registered GPT-5.6 family records its `medium` default and supported levels;
+  undocumented model/provider combinations remain unknown and fail closed.
+- Reject invalid sampling/reasoning combinations before network dispatch, and
+  expose each registered model's exact base endpoint in capability snapshots so
+  downstream plans can freeze both capability and dispatch identity.
+- Kept the capability contract unversioned and the package at `v0.8.0`; this
+  follow-up adds fields directly without schema-version branches or aliases.
+- Verified the follow-up with root and examples tests, race tests, vet, builds,
+  and module verification; tidy remained content-clean apart from the existing
+  `go.sum` line endings. No live provider request was run.

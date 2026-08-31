@@ -16,7 +16,7 @@ func TestLookupModelCapabilitiesUsesStaticRegistryFacts(t *testing.T) {
 	if !ok {
 		t.Fatal("expected registered OpenAI model capability snapshot")
 	}
-	if snapshot.Provider != "openai" || snapshot.ModelID != "gpt-5.4" || snapshot.WireAPI != "openai-responses" {
+	if snapshot.Provider != "openai" || snapshot.ModelID != "gpt-5.4" || snapshot.WireAPI != "openai-responses" || snapshot.BaseURL != "https://api.openai.com" {
 		t.Fatalf("unexpected identity: %+v", snapshot)
 	}
 	if !slices.Equal(snapshot.Input, []InputType{InputText, InputImage}) || snapshot.ContextWindow != 272_000 || snapshot.MaxOutputTokens != 128_000 {
@@ -30,7 +30,19 @@ func TestLookupModelCapabilitiesUsesStaticRegistryFacts(t *testing.T) {
 	assertCapability(t, "top_p", snapshot.Capabilities.TopP, CapabilitySupported)
 	assertCapability(t, "parallel tool calls", snapshot.Capabilities.ParallelToolCalls, CapabilitySupported)
 	assertCapability(t, "reasoning", snapshot.Capabilities.Reasoning, CapabilitySupported)
-	assertCapability(t, "reasoning levels", snapshot.Capabilities.ReasoningLevels, CapabilityUnknown)
+	assertCapability(t, "reasoning levels", snapshot.Capabilities.ReasoningLevels, CapabilitySupported)
+	if snapshot.Capabilities.DefaultReasoningLevel != ModelThinkingLevelOff ||
+		!slices.Equal(snapshot.Capabilities.SupportedReasoningLevels, []ModelThinkingLevel{
+			ModelThinkingLevelOff,
+			ModelThinkingLevelLow,
+			ModelThinkingLevelMedium,
+			ModelThinkingLevelHigh,
+			ModelThinkingLevelXHigh,
+		}) ||
+		!slices.Equal(snapshot.Capabilities.TemperatureReasoningLevels, []ModelThinkingLevel{ModelThinkingLevelOff}) ||
+		!slices.Equal(snapshot.Capabilities.TopPReasoningLevels, []ModelThinkingLevel{ModelThinkingLevelOff}) {
+		t.Fatalf("unexpected GPT-5.4 reasoning and sampling constraints: %+v", snapshot.Capabilities)
+	}
 	assertCapability(t, "json_object", snapshot.ResponseFormats.JSONObject, CapabilitySupported)
 	assertCapability(t, "json_schema", snapshot.ResponseFormats.JSONSchema, CapabilitySupported)
 
@@ -70,7 +82,7 @@ func TestLookupModelCapabilitiesDistinguishesWireAPIsAndExplicitReasoningLevels(
 	if luna.ResponseFormats.JSONObject != CapabilitySupported || luna.ResponseFormats.JSONSchema != CapabilitySupported {
 		t.Fatalf("expected Luna model-scoped structured output facts: %+v", luna.ResponseFormats)
 	}
-	assertCapability(t, "Luna top_p", luna.Capabilities.TopP, CapabilitySupported)
+	assertCapability(t, "Luna top_p", luna.Capabilities.TopP, CapabilityUnknown)
 	assertCapability(t, "Luna parallel tool calls", luna.Capabilities.ParallelToolCalls, CapabilitySupported)
 	if deepSeek.ResponseFormats.JSONObject != CapabilityUnsupported || deepSeek.ResponseFormats.JSONSchema != CapabilityUnsupported {
 		t.Fatalf("expected Completions response formats to fail closed: %+v", deepSeek.ResponseFormats)
@@ -100,6 +112,30 @@ func TestLookupModelCapabilitiesDistinguishesWireAPIsAndExplicitReasoningLevels(
 	}
 }
 
+func TestCapabilitySnapshotsIncludeExactDispatchEndpoints(t *testing.T) {
+	tests := []struct {
+		provider Provider
+		modelID  string
+		wantURL  string
+	}{
+		{provider: "openai", modelID: "gpt-5.6-sol", wantURL: "https://api.openai.com"},
+		{provider: "deepseek", modelID: "deepseek-v4-flash", wantURL: "https://api.deepseek.com"},
+		{provider: "opencode-go", modelID: "gpt-5.6-luna", wantURL: openCodeGoBaseURL},
+	}
+
+	for _, test := range tests {
+		t.Run(string(test.provider)+"/"+test.modelID, func(t *testing.T) {
+			snapshot, ok := LookupModelCapabilities(test.provider, test.modelID)
+			if !ok {
+				t.Fatalf("expected exact capability snapshot for %q/%q", test.provider, test.modelID)
+			}
+			if snapshot.BaseURL != test.wantURL {
+				t.Fatalf("base URL = %q, want %q", snapshot.BaseURL, test.wantURL)
+			}
+		})
+	}
+}
+
 func TestOpenAIGPT56CatalogUsesExactOfficialCapabilityFacts(t *testing.T) {
 	wantLevels := []ModelThinkingLevel{
 		ModelThinkingLevelOff,
@@ -115,7 +151,7 @@ func TestOpenAIGPT56CatalogUsesExactOfficialCapabilityFacts(t *testing.T) {
 			if !ok {
 				t.Fatalf("expected exact OpenAI capability lookup for %q", modelID)
 			}
-			if snapshot.Provider != "openai" || snapshot.ModelID != modelID || snapshot.WireAPI != "openai-responses" {
+			if snapshot.Provider != "openai" || snapshot.ModelID != modelID || snapshot.WireAPI != "openai-responses" || snapshot.BaseURL != "https://api.openai.com" {
 				t.Fatalf("unexpected identity for %q: %+v", modelID, snapshot)
 			}
 			if snapshot.ContextWindow != 1_050_000 || snapshot.MaxOutputTokens != 128_000 || !slices.Equal(snapshot.Input, []InputType{InputText, InputImage}) {
@@ -127,8 +163,11 @@ func TestOpenAIGPT56CatalogUsesExactOfficialCapabilityFacts(t *testing.T) {
 			assertCapability(t, "parallel tool calls", snapshot.Capabilities.ParallelToolCalls, CapabilitySupported)
 			assertCapability(t, "reasoning", snapshot.Capabilities.Reasoning, CapabilitySupported)
 			assertCapability(t, "reasoning levels", snapshot.Capabilities.ReasoningLevels, CapabilitySupported)
-			if !slices.Equal(snapshot.Capabilities.SupportedReasoningLevels, wantLevels) {
-				t.Fatalf("unexpected reasoning levels for %q: %+v", modelID, snapshot.Capabilities.SupportedReasoningLevels)
+			if snapshot.Capabilities.DefaultReasoningLevel != ModelThinkingLevelMedium ||
+				!slices.Equal(snapshot.Capabilities.SupportedReasoningLevels, wantLevels) ||
+				!slices.Equal(snapshot.Capabilities.TemperatureReasoningLevels, wantLevels) ||
+				!slices.Equal(snapshot.Capabilities.TopPReasoningLevels, wantLevels) {
+				t.Fatalf("unexpected reasoning or sampling levels for %q: %+v", modelID, snapshot.Capabilities)
 			}
 			assertCapability(t, "json_object", snapshot.ResponseFormats.JSONObject, CapabilitySupported)
 			assertCapability(t, "json_schema", snapshot.ResponseFormats.JSONSchema, CapabilitySupported)
@@ -141,19 +180,49 @@ func TestOpenAIGPT56CatalogUsesExactOfficialCapabilityFacts(t *testing.T) {
 	}
 }
 
-func TestOnlyOpenAIResponsesAdvertisesTopPAndParallelToolCalls(t *testing.T) {
+func TestOpenAIResponsesSamplingConstraintsAreExactPerModel(t *testing.T) {
+	for _, modelID := range []string{"gpt-5.1", "gpt-5.2", "gpt-5.4"} {
+		t.Run(modelID, func(t *testing.T) {
+			snapshot, ok := LookupModelCapabilities("openai", modelID)
+			if !ok {
+				t.Fatalf("expected exact OpenAI capability lookup for %q", modelID)
+			}
+			assertCapability(t, "temperature", snapshot.Capabilities.Temperature, CapabilitySupported)
+			assertCapability(t, "top_p", snapshot.Capabilities.TopP, CapabilitySupported)
+			if snapshot.Capabilities.DefaultReasoningLevel != ModelThinkingLevelOff ||
+				!slices.Equal(snapshot.Capabilities.TemperatureReasoningLevels, []ModelThinkingLevel{ModelThinkingLevelOff}) ||
+				!slices.Equal(snapshot.Capabilities.TopPReasoningLevels, []ModelThinkingLevel{ModelThinkingLevelOff}) {
+				t.Fatalf("unexpected sampling constraints for %q: %+v", modelID, snapshot.Capabilities)
+			}
+		})
+	}
+
+	mini, ok := LookupModelCapabilities("openai", "gpt-5.4-mini")
+	if !ok {
+		t.Fatal("expected exact OpenAI GPT-5.4 Mini capability lookup")
+	}
+	assertCapability(t, "GPT-5.4 Mini temperature", mini.Capabilities.Temperature, CapabilityUnknown)
+	assertCapability(t, "GPT-5.4 Mini top_p", mini.Capabilities.TopP, CapabilityUnknown)
+	if len(mini.Capabilities.TemperatureReasoningLevels) != 0 || len(mini.Capabilities.TopPReasoningLevels) != 0 {
+		t.Fatalf("GPT-5.4 Mini must not invent sampling constraints: %+v", mini.Capabilities)
+	}
+}
+
+func TestOpenAIResponsesKeepsSamplingModelScoped(t *testing.T) {
 	tests := []struct {
-		api  API
-		want CapabilitySupport
+		api          API
+		wantTemp     CapabilitySupport
+		wantTopP     CapabilitySupport
+		wantParallel CapabilitySupport
 	}{
-		{api: "openai-responses", want: CapabilitySupported},
-		{api: "openai-codex-responses", want: CapabilityUnsupported},
-		{api: "openai-completions", want: CapabilityUnsupported},
-		{api: "anthropic-messages", want: CapabilityUnsupported},
-		{api: "commandcode-custom", want: CapabilityUnsupported},
-		{api: "deepseek-chat-completions", want: CapabilityUnsupported},
-		{api: "google-generative-ai", want: CapabilityUnsupported},
-		{api: "mistral-conversations", want: CapabilityUnsupported},
+		{api: "openai-responses", wantTemp: CapabilityUnknown, wantTopP: CapabilityUnknown, wantParallel: CapabilitySupported},
+		{api: "openai-codex-responses", wantTemp: CapabilitySupported, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
+		{api: "openai-completions", wantTemp: CapabilitySupported, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
+		{api: "anthropic-messages", wantTemp: CapabilityUnknown, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
+		{api: "commandcode-custom", wantTemp: CapabilityUnsupported, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
+		{api: "deepseek-chat-completions", wantTemp: CapabilitySupported, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
+		{api: "google-generative-ai", wantTemp: CapabilitySupported, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
+		{api: "mistral-conversations", wantTemp: CapabilitySupported, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
 	}
 
 	for _, test := range tests {
@@ -162,8 +231,9 @@ func TestOnlyOpenAIResponsesAdvertisesTopPAndParallelToolCalls(t *testing.T) {
 			if module == nil {
 				t.Fatalf("expected registered API module %q", test.api)
 			}
-			assertCapability(t, "top_p", module.Capabilities.TopP, test.want)
-			assertCapability(t, "parallel tool calls", module.Capabilities.ParallelToolCalls, test.want)
+			assertCapability(t, "temperature", module.Capabilities.Temperature, test.wantTemp)
+			assertCapability(t, "top_p", module.Capabilities.TopP, test.wantTopP)
+			assertCapability(t, "parallel tool calls", module.Capabilities.ParallelToolCalls, test.wantParallel)
 		})
 	}
 }
@@ -343,8 +413,10 @@ func TestGetAPIModuleDoesNotExposeCapabilityMetadata(t *testing.T) {
 	RegisterAPIModule(APIModule{
 		API: api,
 		Capabilities: ModelCapabilities{
-			ReasoningLevels:          CapabilitySupported,
-			SupportedReasoningLevels: []ModelThinkingLevel{ModelThinkingLevelLow},
+			ReasoningLevels:            CapabilitySupported,
+			SupportedReasoningLevels:   []ModelThinkingLevel{ModelThinkingLevelLow},
+			TemperatureReasoningLevels: []ModelThinkingLevel{ModelThinkingLevelOff},
+			TopPReasoningLevels:        []ModelThinkingLevel{ModelThinkingLevelOff},
 		},
 	})
 
@@ -353,9 +425,14 @@ func TestGetAPIModuleDoesNotExposeCapabilityMetadata(t *testing.T) {
 		t.Fatal("expected registered API module")
 	}
 	module.Capabilities.SupportedReasoningLevels[0] = ModelThinkingLevelMax
+	module.Capabilities.TemperatureReasoningLevels[0] = ModelThinkingLevelMax
+	module.Capabilities.TopPReasoningLevels[0] = ModelThinkingLevelMax
 
 	again := GetAPIModule(api)
-	if again == nil || !slices.Equal(again.Capabilities.SupportedReasoningLevels, []ModelThinkingLevel{ModelThinkingLevelLow}) {
+	if again == nil ||
+		!slices.Equal(again.Capabilities.SupportedReasoningLevels, []ModelThinkingLevel{ModelThinkingLevelLow}) ||
+		!slices.Equal(again.Capabilities.TemperatureReasoningLevels, []ModelThinkingLevel{ModelThinkingLevelOff}) ||
+		!slices.Equal(again.Capabilities.TopPReasoningLevels, []ModelThinkingLevel{ModelThinkingLevelOff}) {
 		t.Fatalf("API module capability mutation leaked into registry: %+v", again)
 	}
 }
@@ -389,12 +466,13 @@ func TestCapabilitySnapshotsAreDeepCopiedAndSorted(t *testing.T) {
 	}
 	luna.Input[0] = "mutated"
 	luna.Capabilities.SupportedReasoningLevels[0] = "mutated"
+	luna.BaseURL = "https://mutated.invalid"
 
 	again, ok := LookupModelCapabilities("opencode-go", "gpt-5.6-luna")
 	if !ok {
 		t.Fatal("expected Luna lookup after snapshot mutation")
 	}
-	if again.Input[0] == "mutated" || again.Capabilities.SupportedReasoningLevels[0] == "mutated" {
+	if again.Input[0] == "mutated" || again.Capabilities.SupportedReasoningLevels[0] == "mutated" || again.BaseURL == "https://mutated.invalid" {
 		t.Fatalf("snapshot mutation leaked into registry: %+v", again)
 	}
 }

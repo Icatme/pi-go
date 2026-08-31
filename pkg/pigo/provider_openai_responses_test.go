@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -83,7 +85,11 @@ func TestBuildOpenAIResponsesRequestSerializesSamplingAndParallelToolCalls(t *te
 		options := BuildProviderStreamOptions(*model, SimpleStreamOptions{
 			TopP:              &topP,
 			ParallelToolCalls: &parallelToolCalls,
+			Reasoning:         ThinkingLevelHigh,
 		})
+		if err := validateOpenAIResponsesSamplingOptions(*model, options); err != nil {
+			t.Fatalf("validate GPT-5.6 sampling at high reasoning: %v", err)
+		}
 		request := buildOpenAIResponsesRequest(*model, Context{}, options)
 		payload, err := json.Marshal(request)
 		if err != nil {
@@ -99,7 +105,128 @@ func TestBuildOpenAIResponsesRequestSerializesSamplingAndParallelToolCalls(t *te
 		if parallel, ok := fields["parallel_tool_calls"].(bool); !ok || parallel {
 			t.Fatalf("expected explicit parallel_tool_calls=false, got %s", payload)
 		}
+		if request.Reasoning == nil || request.Reasoning.Effort != "high" {
+			t.Fatalf("expected GPT-5.6 high reasoning with top_p, got %+v", request.Reasoning)
+		}
 	})
+}
+
+func TestOpenAIResponsesSamplingMatchesExactModelReasoningConstraints(t *testing.T) {
+	topP := 0.25
+	temperature := 0.4
+
+	tests := []struct {
+		name      string
+		modelID   string
+		options   ProviderStreamOptions
+		wantError string
+	}{
+		{
+			name:    "GPT-5.4 omitted reasoning uses documented none default",
+			modelID: "gpt-5.4",
+			options: ProviderStreamOptions{TopP: &topP},
+		},
+		{
+			name:    "GPT-5.4 explicit off maps to none",
+			modelID: "gpt-5.4",
+			options: ProviderStreamOptions{TopP: &topP, Reasoning: ThinkingLevel(ModelThinkingLevelOff)},
+		},
+		{
+			name:      "GPT-5.4 high rejects top_p",
+			modelID:   "gpt-5.4",
+			options:   ProviderStreamOptions{TopP: &topP, Reasoning: ThinkingLevelHigh},
+			wantError: errOpenAIResponsesSamplingReasoning.Error(),
+		},
+		{
+			name:      "GPT-5.2 low rejects temperature",
+			modelID:   "gpt-5.2",
+			options:   ProviderStreamOptions{Temperature: &temperature, Reasoning: ThinkingLevelLow},
+			wantError: errOpenAIResponsesSamplingReasoning.Error(),
+		},
+		{
+			name:      "GPT-5.4 Mini sampling remains unknown",
+			modelID:   "gpt-5.4-mini",
+			options:   ProviderStreamOptions{TopP: &topP},
+			wantError: errOpenAIResponsesSamplingUnsupported.Error(),
+		},
+		{
+			name:    "GPT-5.6 high accepts top_p",
+			modelID: "gpt-5.6-sol",
+			options: ProviderStreamOptions{TopP: &topP, Reasoning: ThinkingLevelHigh},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			model := GetModel("openai", test.modelID)
+			if model == nil {
+				t.Fatalf("expected OpenAI model %q", test.modelID)
+			}
+			resolved := resolveOpenAIResponsesProviderOptions(*model, test.options).toProviderStreamOptions(*model)
+			err := validateOpenAIResponsesSamplingOptions(*model, resolved)
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("validate sampling: %v", err)
+				}
+				if test.options.Reasoning == ThinkingLevel(ModelThinkingLevelOff) {
+					request := buildOpenAIResponsesRequest(*model, Context{}, resolved)
+					if request.Reasoning == nil || request.Reasoning.Effort != "none" {
+						t.Fatalf("explicit off reasoning payload = %+v", request.Reasoning)
+					}
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("error = %v, want %q", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestOpenAIResponsesSamplingRejectsMutatedWireReasoningMap(t *testing.T) {
+	model := GetModel("openai", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected GPT-5.4 model")
+	}
+	model.ThinkingLevelMap[ModelThinkingLevelHigh] = "invented"
+	topP := 0.25
+	resolved := resolveOpenAIResponsesProviderOptions(*model, ProviderStreamOptions{
+		TopP:      &topP,
+		Reasoning: ThinkingLevelHigh,
+	}).toProviderStreamOptions(*model)
+
+	err := validateOpenAIResponsesSamplingOptions(*model, resolved)
+	if err == nil || !strings.Contains(err.Error(), errOpenAIResponsesSamplingReasoning.Error()) {
+		t.Fatalf("error = %v, want exact registered reasoning constraint", err)
+	}
+}
+
+func TestOpenAIResponsesRejectsInvalidSamplingCombinationBeforeRequest(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests.Add(1)
+	}))
+	defer server.Close()
+
+	model := GetModel("openai", "gpt-5.4")
+	if model == nil {
+		t.Fatal("expected GPT-5.4 model")
+	}
+	model.BaseURL = server.URL
+	topP := 0.25
+	response := Complete(*model, Context{}, ProviderStreamOptions{
+		APIKey:     "test-key",
+		HTTPClient: server.Client(),
+		Reasoning:  ThinkingLevelHigh,
+		TopP:       &topP,
+	})
+
+	if response.StopReason != StopReasonError || !strings.Contains(response.ErrorMessage, errOpenAIResponsesSamplingReasoning.Error()) {
+		t.Fatalf("response = %+v", response)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("invalid sampling combination sent %d HTTP requests", got)
+	}
 }
 
 func TestCompleteSimpleOpenAIResponsesUsesAuthConfigAndV1ResponsesPath(t *testing.T) {

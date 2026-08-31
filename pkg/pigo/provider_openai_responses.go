@@ -17,6 +17,9 @@ import (
 
 func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
 	options = resolveOpenAIResponsesProviderOptions(model, NormalizeProviderStreamOptions(model, options)).toProviderStreamOptions(model)
+	if err := validateOpenAIResponsesSamplingOptions(model, options); err != nil {
+		return streamAPIUnavailable(model, err.Error())
+	}
 	stream := newAssistantMessageEventStream()
 	stream.setObserver(options.Observer, model)
 

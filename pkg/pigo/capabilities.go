@@ -18,18 +18,23 @@ const (
 // ModelCapabilities contains model-contract facts. On APIModule,
 // ProviderModule.ModelCapabilities, and Model.Capabilities, empty fields mean
 // unspecified and later registry layers may refine them. Lookup snapshots
-// normalize every status to unknown, unsupported, or supported.
+// normalize every status to unknown, unsupported, or supported. For a
+// reasoning model, sampling support is only actionable at the listed reasoning
+// levels; a supported sampling field without such a list normalizes to unknown.
 type ModelCapabilities struct {
-	Streaming                CapabilitySupport    `json:"streaming"`
-	Tools                    CapabilitySupport    `json:"tools"`
-	StrictTools              CapabilitySupport    `json:"strict_tools"`
-	ToolChoice               CapabilitySupport    `json:"tool_choice"`
-	Reasoning                CapabilitySupport    `json:"reasoning"`
-	ReasoningLevels          CapabilitySupport    `json:"reasoning_levels"`
-	SupportedReasoningLevels []ModelThinkingLevel `json:"supported_reasoning_levels,omitempty"`
-	Temperature              CapabilitySupport    `json:"temperature"`
-	TopP                     CapabilitySupport    `json:"top_p"`
-	ParallelToolCalls        CapabilitySupport    `json:"parallel_tool_calls"`
+	Streaming                  CapabilitySupport    `json:"streaming"`
+	Tools                      CapabilitySupport    `json:"tools"`
+	StrictTools                CapabilitySupport    `json:"strict_tools"`
+	ToolChoice                 CapabilitySupport    `json:"tool_choice"`
+	Reasoning                  CapabilitySupport    `json:"reasoning"`
+	ReasoningLevels            CapabilitySupport    `json:"reasoning_levels"`
+	SupportedReasoningLevels   []ModelThinkingLevel `json:"supported_reasoning_levels,omitempty"`
+	DefaultReasoningLevel      ModelThinkingLevel   `json:"default_reasoning_level,omitempty"`
+	Temperature                CapabilitySupport    `json:"temperature"`
+	TemperatureReasoningLevels []ModelThinkingLevel `json:"temperature_reasoning_levels,omitempty"`
+	TopP                       CapabilitySupport    `json:"top_p"`
+	TopPReasoningLevels        []ModelThinkingLevel `json:"top_p_reasoning_levels,omitempty"`
+	ParallelToolCalls          CapabilitySupport    `json:"parallel_tool_calls"`
 }
 
 // ResponseFormatCapabilities describes the structured-output formats accepted
@@ -45,6 +50,7 @@ type ModelCapabilitySnapshot struct {
 	Provider        Provider                   `json:"provider"`
 	ModelID         string                     `json:"model_id"`
 	WireAPI         API                        `json:"wire_api"`
+	BaseURL         string                     `json:"base_url"`
 	Input           []InputType                `json:"input,omitempty"`
 	ContextWindow   int                        `json:"context_window,omitempty"`
 	MaxOutputTokens int                        `json:"max_output_tokens,omitempty"`
@@ -125,8 +131,11 @@ func buildModelCapabilitySnapshot(module ProviderModule, model Model) ModelCapab
 		capabilities.Reasoning = CapabilityUnsupported
 		capabilities.ReasoningLevels = CapabilityUnsupported
 		capabilities.SupportedReasoningLevels = nil
+		capabilities.DefaultReasoningLevel = ""
 		capabilities.Temperature = CapabilityUnsupported
+		capabilities.TemperatureReasoningLevels = nil
 		capabilities.TopP = CapabilityUnsupported
+		capabilities.TopPReasoningLevels = nil
 		capabilities.ParallelToolCalls = CapabilityUnsupported
 	}
 
@@ -138,6 +147,7 @@ func buildModelCapabilitySnapshot(module ProviderModule, model Model) ModelCapab
 		}
 	}
 	resolveReasoningLevelCapabilities(&capabilities, model)
+	resolveSamplingReasoningCapabilities(&capabilities, model)
 	normalizeModelCapabilities(&capabilities)
 
 	responseFormats := responseFormatCapabilitiesFromFacts(module.Capabilities, model)
@@ -150,6 +160,7 @@ func buildModelCapabilitySnapshot(module ProviderModule, model Model) ModelCapab
 		Provider:        model.Provider,
 		ModelID:         model.ID,
 		WireAPI:         model.API,
+		BaseURL:         model.BaseURL,
 		Input:           append([]InputType(nil), model.Input...),
 		ContextWindow:   model.ContextWindow,
 		MaxOutputTokens: model.MaxTokens,
@@ -159,6 +170,36 @@ func buildModelCapabilitySnapshot(module ProviderModule, model Model) ModelCapab
 			JSONSchema: capabilitySupport(responseFormats.SupportsJSONSchema),
 		},
 		HostedTools: supportedHostedToolTypes(module.Capabilities.HostedTools, model.HostedTools),
+	}
+}
+
+func resolveSamplingReasoningCapabilities(capabilities *ModelCapabilities, model Model) {
+	if !model.Reasoning {
+		capabilities.DefaultReasoningLevel = ""
+		capabilities.TemperatureReasoningLevels = nil
+		capabilities.TopPReasoningLevels = nil
+		return
+	}
+
+	capabilities.DefaultReasoningLevel = normalizeReasoningLevel(capabilities.DefaultReasoningLevel)
+	capabilities.Temperature = normalizeCapabilitySupport(capabilities.Temperature)
+	if capabilities.Temperature == CapabilitySupported {
+		capabilities.TemperatureReasoningLevels = normalizeReasoningLevels(capabilities.TemperatureReasoningLevels)
+		if len(capabilities.TemperatureReasoningLevels) == 0 {
+			capabilities.Temperature = CapabilityUnknown
+		}
+	} else {
+		capabilities.TemperatureReasoningLevels = nil
+	}
+
+	capabilities.TopP = normalizeCapabilitySupport(capabilities.TopP)
+	if capabilities.TopP == CapabilitySupported {
+		capabilities.TopPReasoningLevels = normalizeReasoningLevels(capabilities.TopPReasoningLevels)
+		if len(capabilities.TopPReasoningLevels) == 0 {
+			capabilities.TopP = CapabilityUnknown
+		}
+	} else {
+		capabilities.TopPReasoningLevels = nil
 	}
 }
 
@@ -227,6 +268,15 @@ func normalizeReasoningLevels(levels []ModelThinkingLevel) []ModelThinkingLevel 
 	return result
 }
 
+func normalizeReasoningLevel(level ModelThinkingLevel) ModelThinkingLevel {
+	for _, candidate := range extendedThinkingLevels {
+		if level == candidate {
+			return level
+		}
+	}
+	return ""
+}
+
 func mergeModelCapabilities(base, override ModelCapabilities) ModelCapabilities {
 	merged := cloneModelCapabilities(base)
 	if override.Streaming != "" {
@@ -250,11 +300,20 @@ func mergeModelCapabilities(base, override ModelCapabilities) ModelCapabilities 
 	if override.SupportedReasoningLevels != nil {
 		merged.SupportedReasoningLevels = append([]ModelThinkingLevel(nil), override.SupportedReasoningLevels...)
 	}
+	if override.DefaultReasoningLevel != "" {
+		merged.DefaultReasoningLevel = override.DefaultReasoningLevel
+	}
 	if override.Temperature != "" {
 		merged.Temperature = override.Temperature
 	}
+	if override.TemperatureReasoningLevels != nil {
+		merged.TemperatureReasoningLevels = append([]ModelThinkingLevel(nil), override.TemperatureReasoningLevels...)
+	}
 	if override.TopP != "" {
 		merged.TopP = override.TopP
+	}
+	if override.TopPReasoningLevels != nil {
+		merged.TopPReasoningLevels = append([]ModelThinkingLevel(nil), override.TopPReasoningLevels...)
 	}
 	if override.ParallelToolCalls != "" {
 		merged.ParallelToolCalls = override.ParallelToolCalls
@@ -309,5 +368,7 @@ func supportedHostedToolTypes(provider, model HostedToolCapabilities) []HostedTo
 func cloneModelCapabilities(capabilities ModelCapabilities) ModelCapabilities {
 	cloned := capabilities
 	cloned.SupportedReasoningLevels = append([]ModelThinkingLevel(nil), capabilities.SupportedReasoningLevels...)
+	cloned.TemperatureReasoningLevels = append([]ModelThinkingLevel(nil), capabilities.TemperatureReasoningLevels...)
+	cloned.TopPReasoningLevels = append([]ModelThinkingLevel(nil), capabilities.TopPReasoningLevels...)
 	return cloned
 }

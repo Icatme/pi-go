@@ -137,8 +137,8 @@ func newOpenAIResponsesAPIModule() APIModule {
 			Tools:             CapabilitySupported,
 			StrictTools:       CapabilityUnsupported,
 			ToolChoice:        CapabilitySupported,
-			Temperature:       CapabilitySupported,
-			TopP:              CapabilitySupported,
+			Temperature:       CapabilityUnknown,
+			TopP:              CapabilityUnknown,
 			ParallelToolCalls: CapabilitySupported,
 		},
 	}
@@ -534,6 +534,7 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				BaseURL:          "https://api.openai.com",
 				Reasoning:        true,
 				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
+				Capabilities:     openAIResponsesSamplingCapabilities(ModelThinkingLevelMedium, openAIGPT56ReasoningLevels()),
 				Input:            []InputType{InputText, InputImage},
 				Cost:             UsageCost{Input: 4, Output: 20, CacheRead: 0.4, CacheWrite: 5},
 				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 8, Output: 30, CacheRead: 0.8, CacheWrite: 10}}},
@@ -547,6 +548,7 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				BaseURL:          "https://api.openai.com",
 				Reasoning:        true,
 				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
+				Capabilities:     openAIResponsesSamplingCapabilities(ModelThinkingLevelMedium, openAIGPT56ReasoningLevels()),
 				Input:            []InputType{InputText, InputImage},
 				Cost:             UsageCost{Input: 4, Output: 20, CacheRead: 0.4, CacheWrite: 5},
 				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 8, Output: 30, CacheRead: 0.8, CacheWrite: 10}}},
@@ -560,6 +562,7 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				BaseURL:          "https://api.openai.com",
 				Reasoning:        true,
 				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
+				Capabilities:     openAIResponsesSamplingCapabilities(ModelThinkingLevelMedium, openAIGPT56ReasoningLevels()),
 				Input:            []InputType{InputText, InputImage},
 				Cost:             UsageCost{Input: 2, Output: 12, CacheRead: 0.2, CacheWrite: 2.5},
 				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 4, Output: 18, CacheRead: 0.4, CacheWrite: 5}}},
@@ -573,6 +576,7 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				BaseURL:          "https://api.openai.com",
 				Reasoning:        true,
 				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
+				Capabilities:     openAIResponsesSamplingCapabilities(ModelThinkingLevelMedium, openAIGPT56ReasoningLevels()),
 				Input:            []InputType{InputText, InputImage},
 				Cost:             UsageCost{Input: 0.2, Output: 1.2, CacheRead: 0.02, CacheWrite: 0.25},
 				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 0.4, Output: 1.8, CacheRead: 0.04, CacheWrite: 0.5}}},
@@ -580,37 +584,43 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				MaxTokens:        128000,
 			},
 			"gpt-5.1": {
-				ID:            "gpt-5.1",
-				Name:          "GPT-5.1",
-				API:           "openai-responses",
-				BaseURL:       "https://api.openai.com",
-				Reasoning:     true,
-				Input:         []InputType{InputText, InputImage},
-				Cost:          UsageCost{Input: 1.25, Output: 10, CacheRead: 0.125},
-				ContextWindow: 272000,
-				MaxTokens:     128000,
+				ID:               "gpt-5.1",
+				Name:             "GPT-5.1",
+				API:              "openai-responses",
+				BaseURL:          "https://api.openai.com",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT51ThinkingLevelMap(),
+				Capabilities:     openAIResponsesSamplingCapabilities(ModelThinkingLevelOff, []ModelThinkingLevel{ModelThinkingLevelOff}),
+				Input:            []InputType{InputText, InputImage},
+				Cost:             UsageCost{Input: 1.25, Output: 10, CacheRead: 0.125},
+				ContextWindow:    272000,
+				MaxTokens:        128000,
 			},
 			"gpt-5.2": {
-				ID:            "gpt-5.2",
-				Name:          "GPT-5.2",
-				API:           "openai-responses",
-				BaseURL:       "https://api.openai.com",
-				Reasoning:     true,
-				Input:         []InputType{InputText, InputImage},
-				Cost:          UsageCost{Input: 1.75, Output: 14, CacheRead: 0.175},
-				ContextWindow: 272000,
-				MaxTokens:     128000,
+				ID:               "gpt-5.2",
+				Name:             "GPT-5.2",
+				API:              "openai-responses",
+				BaseURL:          "https://api.openai.com",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT52And54ThinkingLevelMap(),
+				Capabilities:     openAIResponsesSamplingCapabilities(ModelThinkingLevelOff, []ModelThinkingLevel{ModelThinkingLevelOff}),
+				Input:            []InputType{InputText, InputImage},
+				Cost:             UsageCost{Input: 1.75, Output: 14, CacheRead: 0.175},
+				ContextWindow:    272000,
+				MaxTokens:        128000,
 			},
 			"gpt-5.4": {
-				ID:            "gpt-5.4",
-				Name:          "GPT-5.4",
-				API:           "openai-responses",
-				BaseURL:       "https://api.openai.com",
-				Reasoning:     true,
-				Input:         []InputType{InputText, InputImage},
-				Cost:          UsageCost{Input: 2.5, Output: 15, CacheRead: 0.25},
-				ContextWindow: 272000,
-				MaxTokens:     128000,
+				ID:               "gpt-5.4",
+				Name:             "GPT-5.4",
+				API:              "openai-responses",
+				BaseURL:          "https://api.openai.com",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT52And54ThinkingLevelMap(),
+				Capabilities:     openAIResponsesSamplingCapabilities(ModelThinkingLevelOff, []ModelThinkingLevel{ModelThinkingLevelOff}),
+				Input:            []InputType{InputText, InputImage},
+				Cost:             UsageCost{Input: 2.5, Output: 15, CacheRead: 0.25},
+				ContextWindow:    272000,
+				MaxTokens:        128000,
 			},
 			"gpt-5.4-mini": {
 				ID:            "gpt-5.4-mini",
@@ -636,6 +646,51 @@ func openAIGPT56ThinkingLevelMap() ThinkingLevelMap {
 		ModelThinkingLevelHigh:    "high",
 		ModelThinkingLevelXHigh:   "xhigh",
 		ModelThinkingLevelMax:     "max",
+	}
+}
+
+func openAIGPT51ThinkingLevelMap() ThinkingLevelMap {
+	return ThinkingLevelMap{
+		ModelThinkingLevelOff:     "none",
+		ModelThinkingLevelMinimal: "",
+		ModelThinkingLevelLow:     "low",
+		ModelThinkingLevelMedium:  "medium",
+		ModelThinkingLevelHigh:    "high",
+		ModelThinkingLevelXHigh:   "",
+		ModelThinkingLevelMax:     "",
+	}
+}
+
+func openAIGPT52And54ThinkingLevelMap() ThinkingLevelMap {
+	return ThinkingLevelMap{
+		ModelThinkingLevelOff:     "none",
+		ModelThinkingLevelMinimal: "",
+		ModelThinkingLevelLow:     "low",
+		ModelThinkingLevelMedium:  "medium",
+		ModelThinkingLevelHigh:    "high",
+		ModelThinkingLevelXHigh:   "xhigh",
+		ModelThinkingLevelMax:     "",
+	}
+}
+
+func openAIGPT56ReasoningLevels() []ModelThinkingLevel {
+	return []ModelThinkingLevel{
+		ModelThinkingLevelOff,
+		ModelThinkingLevelLow,
+		ModelThinkingLevelMedium,
+		ModelThinkingLevelHigh,
+		ModelThinkingLevelXHigh,
+		ModelThinkingLevelMax,
+	}
+}
+
+func openAIResponsesSamplingCapabilities(defaultLevel ModelThinkingLevel, reasoningLevels []ModelThinkingLevel) ModelCapabilities {
+	return ModelCapabilities{
+		DefaultReasoningLevel:      defaultLevel,
+		Temperature:                CapabilitySupported,
+		TemperatureReasoningLevels: append([]ModelThinkingLevel(nil), reasoningLevels...),
+		TopP:                       CapabilitySupported,
+		TopPReasoningLevels:        append([]ModelThinkingLevel(nil), reasoningLevels...),
 	}
 }
 
