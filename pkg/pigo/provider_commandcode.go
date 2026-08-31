@@ -77,6 +77,14 @@ func newCommandCodeAPIModule() APIModule {
 		API:          "commandcode-custom",
 		Stream:       streamCommandCode,
 		StreamSimple: streamSimpleCommandCode,
+		Capabilities: ModelCapabilities{
+			Tools:             CapabilitySupported,
+			StrictTools:       CapabilityUnsupported,
+			ToolChoice:        CapabilityUnsupported,
+			Temperature:       CapabilityUnsupported,
+			TopP:              CapabilityUnsupported,
+			ParallelToolCalls: CapabilityUnsupported,
+		},
 	}
 }
 

@@ -40,6 +40,7 @@ func cloneAPIModulePointer(module *APIModule) *APIModule {
 		return nil
 	}
 	cloned := *module
+	cloned.Capabilities = cloneModelCapabilities(module.Capabilities)
 	return &cloned
 }
 

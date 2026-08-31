@@ -228,3 +228,15 @@
   summary events, covering native DeepSeek Responses as well as OpenAI.
 - Added a hermetic terminal SSE regression and advanced the package release to
   v0.7.3 for ai-relay's portable Responses contract.
+
+## 2026-08-31 - Provider/model capability snapshots
+
+- Added an extensible capability query with exact model lookup and deterministic
+  provider snapshots for wire API, streaming, tools, structured output,
+  reasoning tiers, temperature, top_p, and parallel calls.
+- Kept omitted dynamic Command Code facts explicit and fail closed, without
+  model-name inference or adding AI Relay routing and resilience policy.
+- Added static, dynamic, mixed-wire, missing-fact, deep-copy, and concurrent
+  catalog replacement regressions. Root and examples tests, race tests, vet,
+  and module verification passed; tidy was content-clean apart from existing
+  `go.sum` line endings. No live provider request or release was run.

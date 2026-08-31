@@ -66,6 +66,7 @@ type Model struct {
 	BaseURL          string
 	Reasoning        bool
 	ThinkingLevelMap ThinkingLevelMap
+	Capabilities     ModelCapabilities
 	Input            []InputType
 	HostedTools      HostedToolCapabilities
 	Cost             UsageCost

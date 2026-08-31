@@ -32,12 +32,13 @@ type ProviderCapabilities struct {
 }
 
 type ProviderModule struct {
-	Provider         Provider
-	Models           map[string]Model
-	Auth             ProviderAuth
-	Capabilities     ProviderCapabilities
-	BuildOptions     ProviderOptionsBuildFunc
-	NormalizeOptions ProviderOptionsNormalizeFunc
+	Provider          Provider
+	Models            map[string]Model
+	Auth              ProviderAuth
+	Capabilities      ProviderCapabilities
+	ModelCapabilities ModelCapabilities
+	BuildOptions      ProviderOptionsBuildFunc
+	NormalizeOptions  ProviderOptionsNormalizeFunc
 }
 
 type ProviderModuleFactory func() ProviderModule
@@ -106,12 +107,16 @@ func normalizeProviderModule(provider Provider, module ProviderModule) ProviderM
 	if module.Models == nil {
 		module.Models = map[string]Model{}
 	}
+	module.ModelCapabilities = cloneModelCapabilities(module.ModelCapabilities)
+	models := make(map[string]Model, len(module.Models))
 	for modelID, model := range module.Models {
+		model = cloneModel(model)
 		if model.ID == "" {
 			model.ID = modelID
 		}
 		model.Provider = provider
-		module.Models[modelID] = model
+		models[modelID] = model
 	}
+	module.Models = models
 	return module
 }

@@ -13,6 +13,7 @@ type APIModule struct {
 	API          API
 	Stream       APIStreamFunc
 	StreamSimple APISimpleStreamFunc
+	Capabilities ModelCapabilities
 }
 
 type APIModuleFactory func() APIModule
@@ -97,7 +98,13 @@ func ListAPIModules() []API {
 }
 
 func GetAPIModule(api API) *APIModule {
-	return resolveAPIModule(api)
+	module := resolveAPIModule(api)
+	if module == nil {
+		return nil
+	}
+	cloned := *module
+	cloned.Capabilities = cloneModelCapabilities(module.Capabilities)
+	return &cloned
 }
 
 func resolveAPIModule(api API) *APIModule {
@@ -111,6 +118,7 @@ func normalizeAPIModule(api API, module APIModule) APIModule {
 	if module.API != api {
 		panic(fmt.Sprintf("pigo: api module mismatch: registered=%q module=%q", api, module.API))
 	}
+	module.Capabilities = cloneModelCapabilities(module.Capabilities)
 	return module
 }
 

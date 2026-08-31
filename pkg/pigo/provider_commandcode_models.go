@@ -138,6 +138,11 @@ func newCommandCodeProviderModuleWithModels(models map[string]Model) ProviderMod
 		Capabilities: ProviderCapabilities{
 			SupportsStreaming: true,
 		},
+		ModelCapabilities: ModelCapabilities{
+			Tools:           CapabilityUnknown,
+			Reasoning:       CapabilityUnknown,
+			ReasoningLevels: CapabilityUnknown,
+		},
 		BuildOptions:     buildCommandCodeProviderStreamOptions,
 		NormalizeOptions: normalizeCommandCodeProviderStreamOptions,
 		Models:           models,

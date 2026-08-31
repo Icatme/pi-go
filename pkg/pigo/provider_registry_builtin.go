@@ -37,6 +37,14 @@ func newAnthropicMessagesAPIModule() APIModule {
 		API:          "anthropic-messages",
 		Stream:       streamAnthropicMessages,
 		StreamSimple: streamSimpleAnthropicMessages,
+		Capabilities: ModelCapabilities{
+			Tools:             CapabilitySupported,
+			StrictTools:       CapabilityUnsupported,
+			ToolChoice:        CapabilitySupported,
+			Temperature:       CapabilityUnknown,
+			TopP:              CapabilityUnsupported,
+			ParallelToolCalls: CapabilityUnsupported,
+		},
 	}
 }
 
@@ -45,6 +53,14 @@ func newDeepSeekChatCompletionsAPIModule() APIModule {
 		API:          "deepseek-chat-completions",
 		Stream:       streamDeepSeekChatCompletions,
 		StreamSimple: streamSimpleDeepSeekChatCompletions,
+		Capabilities: ModelCapabilities{
+			Tools:             CapabilitySupported,
+			StrictTools:       CapabilityUnsupported,
+			ToolChoice:        CapabilitySupported,
+			Temperature:       CapabilitySupported,
+			TopP:              CapabilityUnsupported,
+			ParallelToolCalls: CapabilityUnsupported,
+		},
 	}
 }
 
@@ -53,6 +69,14 @@ func newGoogleGenerativeAIAPIModule() APIModule {
 		API:          "google-generative-ai",
 		Stream:       streamGoogle,
 		StreamSimple: streamSimpleGoogle,
+		Capabilities: ModelCapabilities{
+			Tools:             CapabilitySupported,
+			StrictTools:       CapabilityUnsupported,
+			ToolChoice:        CapabilitySupported,
+			Temperature:       CapabilitySupported,
+			TopP:              CapabilityUnsupported,
+			ParallelToolCalls: CapabilityUnsupported,
+		},
 	}
 }
 
@@ -61,6 +85,14 @@ func newMistralConversationsAPIModule() APIModule {
 		API:          "mistral-conversations",
 		Stream:       streamMistral,
 		StreamSimple: streamSimpleMistral,
+		Capabilities: ModelCapabilities{
+			Tools:             CapabilitySupported,
+			StrictTools:       CapabilityUnsupported,
+			ToolChoice:        CapabilitySupported,
+			Temperature:       CapabilitySupported,
+			TopP:              CapabilityUnsupported,
+			ParallelToolCalls: CapabilityUnsupported,
+		},
 	}
 }
 
@@ -69,6 +101,14 @@ func newOpenAICodexResponsesAPIModule() APIModule {
 		API:          "openai-codex-responses",
 		Stream:       streamOpenAICodex,
 		StreamSimple: streamSimpleOpenAICodex,
+		Capabilities: ModelCapabilities{
+			Tools:             CapabilitySupported,
+			StrictTools:       CapabilityUnsupported,
+			ToolChoice:        CapabilitySupported,
+			Temperature:       CapabilitySupported,
+			TopP:              CapabilityUnsupported,
+			ParallelToolCalls: CapabilityUnsupported,
+		},
 	}
 }
 
@@ -77,6 +117,14 @@ func newOpenAICompletionsAPIModule() APIModule {
 		API:          "openai-completions",
 		Stream:       streamOpenAICompletions,
 		StreamSimple: streamSimpleOpenAICompletions,
+		Capabilities: ModelCapabilities{
+			Tools:             CapabilitySupported,
+			StrictTools:       CapabilityUnsupported,
+			ToolChoice:        CapabilitySupported,
+			Temperature:       CapabilitySupported,
+			TopP:              CapabilityUnsupported,
+			ParallelToolCalls: CapabilityUnsupported,
+		},
 	}
 }
 
@@ -85,6 +133,14 @@ func newOpenAIResponsesAPIModule() APIModule {
 		API:          "openai-responses",
 		Stream:       streamOpenAIResponses,
 		StreamSimple: streamSimpleOpenAIResponses,
+		Capabilities: ModelCapabilities{
+			Tools:             CapabilitySupported,
+			StrictTools:       CapabilityUnsupported,
+			ToolChoice:        CapabilitySupported,
+			Temperature:       CapabilitySupported,
+			TopP:              CapabilityUnsupported,
+			ParallelToolCalls: CapabilityUnsupported,
+		},
 	}
 }
 
@@ -530,6 +586,9 @@ func newKimiCodingProviderModule() ProviderModule {
 			SupportsPromptCacheControl: true,
 			SupportsThinkingBudget:     true,
 			HostedTools:                HostedToolCapabilities{WebSearch: true, Fetch: true, CodeRunner: true, Excel: true},
+		},
+		ModelCapabilities: ModelCapabilities{
+			ToolChoice: CapabilityUnsupported,
 		},
 		BuildOptions:     buildKimiCodingProviderStreamOptions,
 		NormalizeOptions: normalizeKimiCodingProviderStreamOptions,

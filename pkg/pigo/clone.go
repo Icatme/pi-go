@@ -2,6 +2,7 @@ package pigo
 
 func cloneModel(model Model) Model {
 	cloned := model
+	cloned.Capabilities = cloneModelCapabilities(model.Capabilities)
 	if len(model.Input) > 0 {
 		cloned.Input = append([]InputType(nil), model.Input...)
 	}

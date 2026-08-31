@@ -31,6 +31,7 @@ func cloneProviderRegistryEntries(entries map[Provider]*registryEntry[ProviderMo
 		entryCopy := *entry
 		if entry.value != nil {
 			moduleCopy := *entry.value
+			moduleCopy.ModelCapabilities = cloneModelCapabilities(entry.value.ModelCapabilities)
 			if entry.value.Models != nil {
 				moduleCopy.Models = make(map[string]Model, len(entry.value.Models))
 				for modelID, model := range entry.value.Models {
@@ -49,6 +50,7 @@ func cloneProviderModulePointer(module *ProviderModule) *ProviderModule {
 		return nil
 	}
 	cloned := *module
+	cloned.ModelCapabilities = cloneModelCapabilities(module.ModelCapabilities)
 	if module.Models != nil {
 		cloned.Models = make(map[string]Model, len(module.Models))
 		for modelID, model := range module.Models {

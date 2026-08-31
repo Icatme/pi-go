@@ -68,7 +68,10 @@ func ValidateResponseFormat(model Model, format *ResponseFormat) error {
 }
 
 func responseFormatCapabilities(model Model) ProviderCapabilities {
-	capabilities := GetProviderCapabilities(model.Provider)
+	return responseFormatCapabilitiesFromFacts(GetProviderCapabilities(model.Provider), model)
+}
+
+func responseFormatCapabilitiesFromFacts(capabilities ProviderCapabilities, model Model) ProviderCapabilities {
 	compat, ok := model.Compat.(*OpenAIResponsesCompat)
 	if !ok || compat == nil {
 		return capabilities
