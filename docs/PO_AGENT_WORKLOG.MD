@@ -269,3 +269,18 @@
 - Removed README wording that presented untagged `v0.8.0` as an existing
   release; installation now uses the version-neutral `@latest` form while the
   local package version remains `0.8.0`.
+
+## 2026-09-03 - v0.8.1 failed Responses metadata
+
+- Preserve the actual HTTP status, response headers, provider request ID, and
+  `Retry-After` callback evidence when an OpenAI Responses request terminates
+  on a non-2xx response before an SSE stream is established. This lets hosts
+  distinguish a provider rate limit from a generic upstream failure and apply
+  durable backoff without changing pi-go retry policy.
+- Extended the existing no-retry usage-limit regression to prove one provider
+  attempt and the complete 429 metadata callback. Bumped the patch release to
+  `v0.8.1`; root tests, race tests, vet, and builds passed with `GOWORK=off`.
+  The nested `switch-chat` example passed; `mattermost-chatbot` remains blocked
+  by its pre-existing duplicate `google.golang.org/genproto` package graph,
+  reproduced unchanged on the clean `v0.8.0` tag. No live provider request was
+  added.

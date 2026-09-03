@@ -258,6 +258,9 @@ func streamOpenAIResponsesSSE(
 				}
 				continue
 			}
+			if options.OnResponse != nil && httpResponse != nil {
+				options.OnResponse(providerResponseFromHTTPResponse(httpResponse), model)
+			}
 			return err
 		}
 		if httpResponse == nil {
@@ -265,13 +268,7 @@ func streamOpenAIResponsesSSE(
 		}
 
 		if options.OnResponse != nil {
-			headers := make(map[string]string)
-			for key, values := range httpResponse.Header {
-				if len(values) > 0 {
-					headers[key] = values[0]
-				}
-			}
-			options.OnResponse(ProviderResponse{Status: httpResponse.StatusCode, Headers: headers}, model)
+			options.OnResponse(providerResponseFromHTTPResponse(httpResponse), model)
 		}
 
 		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {

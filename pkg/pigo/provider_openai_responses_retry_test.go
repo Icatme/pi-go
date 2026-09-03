@@ -121,6 +121,8 @@ func TestOpenAIResponsesDoesNotRetryUsageLimit429(t *testing.T) {
 	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts.Add(1)
+		w.Header().Set("Retry-After", "3600")
+		w.Header().Set("X-Request-ID", "opencode-quota-1")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":{"type":"GoUsageLimitError","message":"monthly limit reached"}}`))
 	}))
@@ -131,13 +133,21 @@ func TestOpenAIResponsesDoesNotRetryUsageLimit429(t *testing.T) {
 		t.Fatal("expected openai model")
 	}
 	model.BaseURL = server.URL
+	var providerResponses []ProviderResponse
 	response := CompleteSimple(*model, Context{Messages: []Message{UserMessage{Content: "quota"}}}, SimpleStreamOptions{
 		APIKey:        "test-key",
 		MaxRetries:    2,
 		MaxRetryDelay: 1,
+		OnResponse: func(response ProviderResponse, _ Model) {
+			providerResponses = append(providerResponses, response)
+		},
 	})
 	if attempts.Load() != 1 {
 		t.Fatalf("usage-limit 429 must not retry, got %d attempts", attempts.Load())
+	}
+	if len(providerResponses) != 1 || providerResponses[0].Status != http.StatusTooManyRequests ||
+		providerResponses[0].Headers["Retry-After"] != "3600" || providerResponses[0].Headers["X-Request-Id"] != "opencode-quota-1" {
+		t.Fatalf("usage-limit response metadata=%#v", providerResponses)
 	}
 	if response.StopReason != StopReasonError {
 		t.Fatalf("expected usage-limit error, got %+v", response)
