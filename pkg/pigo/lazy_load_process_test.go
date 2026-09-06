@@ -1,6 +1,7 @@
 package pigo
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -54,8 +55,11 @@ func TestLazyLoadProcessCompleteSimpleKimiResolvesProviderAndAPI(t *testing.T) {
 func runLazyLoadProbe(t *testing.T, mode string) lazyLoadProbeResult {
 	t.Helper()
 
-	command := exec.Command("go", "test", "./pkg/pigo", "-run", "^TestLazyLoadProcessHelper$", "-count=1", "-v")
-	command.Dir = "V:\\gitdownload\\pi-go"
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(executable, "-test.run=^TestLazyLoadProcessHelper$", "-test.count=1", "-test.v")
 	command.Env = append(os.Environ(),
 		"PIGO_LAZY_LOAD_PROBE=1",
 		"PIGO_LAZY_LOAD_MODE="+mode,
@@ -110,6 +114,9 @@ func TestLazyLoadProcessHelper(t *testing.T) {
 		apiRegistry.SetResolveHook(nil)
 	}()
 
+	// Registration is what these probes test, never access to a live provider.
+	requestContext, cancel := context.WithCancel(context.Background())
+	cancel()
 	switch os.Getenv("PIGO_LAZY_LOAD_MODE") {
 	case "import_only":
 	case "get_model_openai_codex":
@@ -124,7 +131,8 @@ func TestLazyLoadProcessHelper(t *testing.T) {
 		_ = CompleteSimple(*model, Context{
 			Messages: []Message{UserMessage{Content: "hi"}},
 		}, SimpleStreamOptions{
-			APIKey: makeOpenAICodexToken("acc_probe"),
+			APIKey:         makeOpenAICodexToken("acc_probe"),
+			RequestContext: requestContext,
 		})
 	case "complete_simple_kimi":
 		model := GetModel("kimi-coding", "kimi-k2-thinking")
@@ -134,7 +142,8 @@ func TestLazyLoadProcessHelper(t *testing.T) {
 		_ = CompleteSimple(*model, Context{
 			Messages: []Message{UserMessage{Content: "hi"}},
 		}, SimpleStreamOptions{
-			APIKey: "kimi-probe-key",
+			APIKey:         "kimi-probe-key",
+			RequestContext: requestContext,
 		})
 	default:
 		t.Fatalf("unknown lazy load probe mode %q", os.Getenv("PIGO_LAZY_LOAD_MODE"))
