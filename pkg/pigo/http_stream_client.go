@@ -55,10 +55,7 @@ func (c *HTTPStreamClient) PostStream(
 }
 
 func (c *HTTPStreamClient) postStream(ctx context.Context, url string, requestOptions httpStreamRequest) error {
-	httpClient := c.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
+	httpClient := providerHTTPClient(c.HTTPClient)
 
 	maxRetries := c.MaxRetries
 	baseRetryDelay := c.BaseRetryDelay
