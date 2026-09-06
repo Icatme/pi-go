@@ -1,0 +1,30 @@
+name: Go tests
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: ['fix/relay-http-evidence']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Provider race tests
+        run: go test -race ./pkg/pigo
+      - name: All packages
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Cross-repository module checksum
+        if: always()
+        run: go mod download -json github.com/Icatme/pi-go@c51dd7ee4639c8dabfe77c02b218b9ea873aaa3e
