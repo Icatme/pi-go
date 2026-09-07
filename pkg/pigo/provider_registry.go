@@ -35,6 +35,7 @@ type ProviderModule struct {
 	Provider          Provider
 	Models            map[string]Model
 	Auth              ProviderAuth
+	Quota             QuotaQuerier
 	Capabilities      ProviderCapabilities
 	ModelCapabilities ModelCapabilities
 	BuildOptions      ProviderOptionsBuildFunc

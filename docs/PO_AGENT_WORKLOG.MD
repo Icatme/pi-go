@@ -308,3 +308,29 @@
   clients or transports must pass their client explicitly to retain that setup.
 - The source release includes the reviewed PR #10 and #11 commits; root and
   examples modules passed tests, full race tests and vet without skipped tests.
+
+## 2026-09-07 - provider account quota queries
+
+- Added the optional provider-level `QuotaQuerier` contract and Command Code
+  account adapter, keeping balance pools, rolling windows, subscription data,
+  and unavailable sections distinct from per-request model usage. Optional
+  amounts follow the cc-switch usage-data reference; missing values stay unknown.
+  Command Code keeps monthly/purchased/free pools separate with nonnegative
+  remaining amounts in provider credits, without an assumed USD conversion.
+  Window scope names only the monthly pool; purchased credits bypass those
+  windows, following the official usage policy.
+- Added `pigo quota [--json] <provider>` with existing CLI auth loading, separate
+  balance/window output and known pool scope, partial-result warnings, and
+  nonzero query/output errors.
+  Documented provider registration, auth/context options, alpha endpoint scope,
+  and the absence of model refresh, generation, retries, or quota caching.
+- Verified focused quota CLI regressions, the full CLI package tests and race
+  tests, and CLI vet with `GOWORK=off`; formatting and diff whitespace checks passed.
+- Integration validation built the CLI and successfully read real Command Code
+  credits, windows, and subscription using its three account GET endpoints.
+  No model generation, account mutation, commit, push, or release was performed.
+- Final validation passed the checked-in root/examples test script, full
+  `pkg/pigo` and CLI race suites, root vet, and the checked-in CLI build script.
+  The final compiled `bin/pigo.exe quota --json commandcode` returned the three
+  credit pools, monthly-scoped windows, and subscription with no unavailable
+  sections. All validation used `GOWORK=off`; live model tests stayed disabled.

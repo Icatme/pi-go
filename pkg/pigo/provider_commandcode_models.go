@@ -132,6 +132,7 @@ func newCommandCodeProviderModule() ProviderModule {
 func newCommandCodeProviderModuleWithModels(models map[string]Model) ProviderModule {
 	return ProviderModule{
 		Provider: "commandcode",
+		Quota:    commandCodeQuotaQuerier{},
 		Auth: ProviderAuth{
 			EnvAPIKeyName: "COMMANDCODE_API_KEY",
 		},

@@ -41,6 +41,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return 0
 	case "models":
 		return runModels(ctx, args[1:], stdout, stderr)
+	case "quota":
+		return runQuota(ctx, args[1:], stdout, stderr)
 	case "list":
 		return runList(stdout)
 	case "login":
@@ -67,7 +69,8 @@ func writeUsage(stdout io.Writer) {
 	writeLine(stdout, "  ask               Send a prompt with local .pigo credentials\n")
 	writeLine(stdout, "  login [provider]  Login to an OAuth provider\n")
 	writeLine(stdout, "  list              List available OAuth providers\n")
-	writeLine(stdout, "  models [provider] List available models\n\n")
+	writeLine(stdout, "  models [provider] List available models\n")
+	writeLine(stdout, "  quota [--json] <provider> Query account balances and usage windows\n\n")
 	writeLine(stdout, "Providers:\n")
 	for _, line := range lines {
 		writeLine(stdout, line+"\n")
@@ -79,6 +82,8 @@ func writeUsage(stdout io.Writer) {
 	writeLine(stdout, "  pigo login openai-codex\n")
 	writeLine(stdout, "  pigo list\n")
 	writeLine(stdout, "  pigo models openai-codex\n")
+	writeLine(stdout, "  pigo quota commandcode\n")
+	writeLine(stdout, "  pigo quota --json commandcode\n")
 }
 
 func runList(stdout io.Writer) int {
