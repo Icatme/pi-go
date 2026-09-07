@@ -299,3 +299,12 @@
 - Root-module tests, full race tests and vet passed with `GOWORK=off`; the SSE
   PR's exact original head also passed those checks independently. No real
   provider or production request was made.
+
+## 2026-09-07 - v0.9.0 provider transport boundaries
+
+- Advance the package and examples dependency to v0.9.0 for the HTTP delivery
+  observation API, private default transport and bounded HTTP/SSE behavior.
+- Keep supplied HTTP clients unchanged; callers that customized global HTTP
+  clients or transports must pass their client explicitly to retain that setup.
+- The source release includes the reviewed PR #10 and #11 commits; root and
+  examples modules passed tests, full race tests and vet without skipped tests.
