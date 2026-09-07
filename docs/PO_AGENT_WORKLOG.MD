@@ -334,3 +334,15 @@
   The final compiled `bin/pigo.exe quota --json commandcode` returned the three
   credit pools, monthly-scoped windows, and subscription with no unavailable
   sections. All validation used `GOWORK=off`; live model tests stayed disabled.
+
+## 2026-09-07 - v0.10.0 provider quota integration
+
+- Rebase the quota feature onto the existing v0.9.0 mainline while preserving
+  both the transport-boundary and account-quota work records.
+- Advance the package version and nested examples dependency to v0.10.0 for
+  the optional provider quota interface and Command Code account implementation.
+- Root and examples modules passed tests, full race suites, and vet with
+  `GOWORK=off` and live model tests disabled. Quota source was unchanged by
+  integration; the version bump adds no further provider request.
+- Integrate locally into master; remote publication and release tagging are
+  outside this merge and version-bump step.
