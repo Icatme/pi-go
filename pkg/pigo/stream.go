@@ -72,6 +72,7 @@ func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantM
 	if providerModule := resolveProviderModule(model.Provider); providerModule != nil && providerModule.NormalizeOptions != nil {
 		options = providerModule.NormalizeOptions(model, options)
 	}
+	options.HTTPClient = providerHTTPClient(options.HTTPClient)
 	if apiModule != nil && apiModule.Stream != nil {
 		return apiModule.Stream(model, ctx, options)
 	}
@@ -83,6 +84,7 @@ func StreamSimple(model Model, ctx Context, options SimpleStreamOptions) *Assist
 	if err := ValidateResponseFormat(model, options.ResponseFormat); err != nil {
 		return streamAPIUnavailable(model, err.Error())
 	}
+	options.HTTPClient = providerHTTPClient(options.HTTPClient)
 	apiModule := resolveAPIModule(model.API)
 	if apiModule != nil && apiModule.StreamSimple != nil {
 		return apiModule.StreamSimple(model, ctx, options)
