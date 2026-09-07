@@ -34,8 +34,8 @@ func TestProviderHTTPDeliveryEvidence(t *testing.T) {
 		want  HTTPDelivery
 	}{
 		{"no trace is not proof", func(*httptrace.ClientTrace) {}, HTTPDeliveryUnknown},
-		{"dns before connection", func(tr *httptrace.ClientTrace) { tr.DNSDone(httptrace.DNSDoneInfo{Err: boom}) }, HTTPDeliveryNotSent},
-		{"connect before write", func(tr *httptrace.ClientTrace) { tr.ConnectDone("tcp", "unused", boom) }, HTTPDeliveryNotSent},
+		{"dns before connection", func(tr *httptrace.ClientTrace) { tr.DNSDone(httptrace.DNSDoneInfo{Err: boom}) }, HTTPDeliveryUnknown},
+		{"connect before write", func(tr *httptrace.ClientTrace) { tr.ConnectDone("tcp", "unused", boom) }, HTTPDeliveryUnknown},
 		{"earlier connection remains ambiguous", func(tr *httptrace.ClientTrace) {
 			tr.GotConn(httptrace.GotConnInfo{})
 			tr.ConnectDone("tcp", "unused", boom)
@@ -52,6 +52,12 @@ func TestProviderHTTPDeliveryEvidence(t *testing.T) {
 			})}
 			client := NewProviderHTTPClient(base, ProviderHTTPPolicy{Observe: func(o HTTPObservation) { got = o }})
 			req, _ := http.NewRequest(http.MethodPost, "https://example.invalid", strings.NewReader("{}"))
+			req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+				DNSDone:      func(httptrace.DNSDoneInfo) {},
+				ConnectDone:  func(string, string, error) {},
+				GotConn:      func(httptrace.GotConnInfo) {},
+				WroteHeaders: func() {},
+			}))
 			_, err := client.Do(req)
 			if err == nil || calls != 1 || got.Delivery != tc.want {
 				t.Fatalf("calls=%d observation=%+v err=%v", calls, got, err)

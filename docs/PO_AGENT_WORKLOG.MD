@@ -284,3 +284,18 @@
   by its pre-existing duplicate `google.golang.org/genproto` package graph,
   reproduced unchanged on the clean `v0.8.0` tag. No live provider request was
   added.
+
+## 2026-09-07 - provider HTTP evidence and streaming boundaries
+
+- Restrict `not_sent` evidence to the private standard transport created for a
+  nil client. Preserve supplied clients and classify their failures as unknown,
+  including registered protocols that hide an earlier successful dispatch.
+- Preserve bounded error-body read failures and their error chains for SDK
+  consumers. Keep redirect bodies lazy and bounded so unused long bodies do
+  not stall normal redirects; close original bodies and observe each hop once.
+- Add real local HTTP regressions for connection reuse, partial writes, proxies,
+  TLS failure, cancellation, redirects, SDK entry points and cumulative SSE
+  limits. Preserve successful streams, existing output and upstream call counts.
+- Root-module tests, full race tests and vet passed with `GOWORK=off`; the SSE
+  PR's exact original head also passed those checks independently. No real
+  provider or production request was made.
