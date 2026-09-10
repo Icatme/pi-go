@@ -200,6 +200,7 @@ func newDeepSeekProviderModule() ProviderModule {
 		BuildOptions:     buildDeepSeekProviderStreamOptions,
 		NormalizeOptions: normalizeDeepSeekProviderStreamOptions,
 		Models: map[string]Model{
+			"deepseek-flash": newDeepSeekFlashModel(),
 			"deepseek-v4-flash": {
 				ID:        "deepseek-v4-flash",
 				Name:      "DeepSeek V4 Flash",

@@ -11,7 +11,7 @@ func normalizeDeepSeekProviderStreamOptions(model Model, options ProviderStreamO
 func buildDeepSeekProviderOptions(model Model, options SimpleStreamOptions) DeepSeekProviderOptions {
 	streamOptions := streamOptionsFromSimple(model, options)
 	if model.Reasoning && streamOptions.Reasoning == "" {
-		streamOptions.Reasoning = ThinkingLevelXHigh
+		streamOptions.Reasoning = deepSeekDefaultThinkingLevel(model)
 	}
 	streamOptions = streamOptions.withCommonSnapshot(model)
 	return DeepSeekProviderOptions{
@@ -22,7 +22,7 @@ func buildDeepSeekProviderOptions(model Model, options SimpleStreamOptions) Deep
 func resolveDeepSeekProviderOptions(model Model, options ProviderStreamOptions) DeepSeekProviderOptions {
 	streamOptions := streamOptionsFromProvider(model, options)
 	if model.Reasoning && streamOptions.Reasoning == "" {
-		streamOptions.Reasoning = ThinkingLevelXHigh
+		streamOptions.Reasoning = deepSeekDefaultThinkingLevel(model)
 	}
 	streamOptions = streamOptions.withCommonSnapshot(model)
 	return DeepSeekProviderOptions{
