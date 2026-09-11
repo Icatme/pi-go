@@ -18,7 +18,7 @@ func managedAssistantStream(parent context.Context, start func(context.Context) 
 		return stream
 	}
 	stream.cancelRequest = cancel
-	stream.stopContext = context.AfterFunc(parent, stream.Close)
+	stream.stopContext = context.AfterFunc(parent, func() { stream.abortDelivery(parent.Err()) })
 	overflowed := stream.bufferErr != nil
 	stream.queueMu.Unlock()
 	if overflowed {
@@ -61,4 +61,37 @@ func (s *AssistantMessageEventStream) releaseDelivery() {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+// Caller cancellation discards stale queued deltas, but unlike explicit Close it
+// preserves one aborted terminal notification for consumers still reading Events.
+func (s *AssistantMessageEventStream) abortDelivery(cause error) {
+	s.queueMu.Lock()
+	if !s.deliveryClosed {
+		s.deliveryErr = cause
+	}
+	s.queueMu.Unlock()
+	s.releaseDelivery()
+}
+
+// Only the dispatcher calls this, after it has stopped sending ordinary events.
+// Keep an already-delivered terminal event; adding another would race the provider's
+// own immediate-abort event and violate the single-terminal-event contract.
+func (s *AssistantMessageEventStream) closeEventChannel(terminalSent bool) {
+	s.queueMu.Lock()
+	cause := s.deliveryErr
+	s.queueMu.Unlock()
+	if cause != nil && !terminalSent {
+		// The public channel has one slot. With its sole writer stopped, draining
+		// that slot guarantees the compact terminal notification cannot block.
+		select {
+		case <-s.events:
+		default:
+		}
+		s.events <- AssistantMessageEvent{
+			Type: AssistantMessageEventError, Reason: StopReasonAborted,
+			Error: AssistantMessage{StopReason: StopReasonAborted, ErrorMessage: cause.Error()},
+		}
+	}
+	close(s.events)
 }

@@ -28,6 +28,7 @@ type AssistantMessageEventStream struct {
 	closing      bool
 	pendingBytes int
 	bufferErr    error
+	deliveryErr  error
 
 	deliveryDone   chan struct{}
 	dispatcherDone chan struct{}
@@ -245,8 +246,9 @@ func isDroppableAssistantMessageEvent(eventType AssistantMessageEventType) bool 
 }
 
 func (s *AssistantMessageEventStream) dispatchEvents() {
+	terminalSent := false
 	defer close(s.dispatcherDone)
-	defer close(s.events)
+	defer func() { s.closeEventChannel(terminalSent) }()
 	defer s.releaseDelivery()
 	for {
 		s.queueMu.Lock()
@@ -276,6 +278,9 @@ func (s *AssistantMessageEventStream) dispatchEvents() {
 
 		select {
 		case s.events <- queued.event:
+			if queued.event.Type == AssistantMessageEventDone || queued.event.Type == AssistantMessageEventError {
+				terminalSent = true
+			}
 		case <-s.deliveryDone:
 			return
 		}
