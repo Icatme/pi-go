@@ -413,3 +413,13 @@
   for tidy-diff; checksum contents and external dependency versions are unchanged.
   Rebuilt the Windows CLI and verified its displayed version is 0.11.0.
   The preceding full race validation covers the unchanged implementation.
+
+## 2026-09-11 - pi-go v0.11.1 completion event lifecycle fix
+
+- Complete and CompleteSimple now drain their private event streams before
+  returning, releasing dispatch goroutines and partial response snapshots.
+- Preserve explicit Stream/Result event consumption and observer callbacks.
+  Regression tests reproduce the old failure for success, error, and canceled
+  completions with more than 1024 events; full root tests, focused race, and vet pass.
+- Apply the same fix to the deployed 1ed9651 provider baseline as v0.9.1 for
+  JZBeacon, whose immutable route snapshots are incompatible with newer catalogs.
