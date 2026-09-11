@@ -123,20 +123,61 @@ For every non-error assistant turn, the runtime order is:
 
 1. finalize all tool results
 2. emit `EventTurnEnd`
-3. call `PrepareNextTurn`
-4. call `ShouldStopAfterTurn`
-5. poll steering and follow-up queues only if the run continues
+3. call `ShouldStopAfterTurn` with the completed-turn context
+4. poll steering and follow-up queues only if the stop hook returns false
+5. when another turn will run and the turn limit permits it, call `PrepareNextTurn`
+6. recheck cancellation and pick up steering queued during preparation if no input is already pending
+7. emit `EventTurnStart` and make the next model request
 
 `PrepareNextTurnContext.NewMessages` contains only messages added by the current
 `Run` or `Continue` invocation. A returned `AgentLoopTurnUpdate` may replace the
 next turn's provider context, model, model reference, or thinking level. Context
 replacement does not rewrite the invocation's append-only transcript. Returning
 true from `ShouldStopAfterTurn` ends the invocation before queues are polled.
+Preparation is not called after a final turn or once the turn budget is exhausted.
+A preparation failure leaves the previous turn complete and opens no new turn.
+Already-dequeued inputs still emit their message events and enter the durable
+transcript and invocation message window in queue order; they are not discarded
+or requeued. Inputs not yet dequeued remain queued.
+Only one queue read supplies a turn in one-at-a-time mode, including after a
+long-running preparation callback.
 
 ## Runtime mutation safety
 
 `Agent.Reset` returns `ErrAlreadyRunning` while a run is active and leaves the
 in-flight state unchanged. Abort the run and wait for idle before resetting.
+
+### Model and thinking state
+
+`ThinkingLevel` in definitions, constructor options, and next-turn updates is a
+requested preference and defaults to `off`. `AgentState` and `AgentSnapshot`
+store that preference as `RequestedThinkingLevel` and expose the model's
+effective value as `ThinkingLevel`. Snapshot restoration recomputes the effective
+value; a saved effective value is not a new preference. An explicit snapshot
+preference takes precedence over the initial definition.
+
+A snapshot stores only an explicit model selection. An empty model reference
+continues to use the current definition's default, including after restore and
+per-turn definition resolution. `Agent.State().Model` reports that effective
+model; resolving a default does not turn it into a saved selection. `SetModel`
+stores an explicit reference, and `SetModel(ModelRef{})` clears that selection.
+
+The built-in pigo backend resolves supported levels from the current model
+catalog. A custom `Model`, `Stream`, or `ModelResolver` preserves the requested
+level by default. Set `ThinkingLevelResolver` on the definition or constructor
+options to supply a pure, concurrent-safe resolver for custom capabilities.
+Resolvers must not call back into `Agent`, since setters resolve under its lock.
+Unknown built-in models retain the request until ordinary model resolution
+reports the unsupported model.
+
+`SetModel` and `SetThinkingLevel` commit the model, preference, and effective level
+under one lock. Changing to a model without reasoning keeps the preference for a
+later model switch. Changes made during a run apply at its next request and
+remain authoritative when the run finishes. `PrepareNextTurn` overrides remain
+local to the current invocation and do not replace the saved model or preference.
+Effective thinking is recomputed after those overrides and on resumed requests.
+DeepSeek receives an explicit off value because its omitted effort enables the
+provider's default reasoning; other providers retain their existing off encoding.
 
 ## Runner And Event Contract
 
@@ -272,7 +313,7 @@ event. Ordinary Run/Continue calls reject snapshots with pending tool state. A
 pre-execution resume error leaves the old turn open and the exact pending state
 retryable without emitting `EventTurnEnd`. A successful resume does not append
 the assistant again: it executes the old batch, emits its `EventTurnEnd`, runs
-`PrepareNextTurn` then `ShouldStopAfterTurn`, and only then starts another model
+`ShouldStopAfterTurn`, and if continuation is needed, `PrepareNextTurn` before another model
 turn. Re-suspension keeps the same open turn and does not reset `MaxTurns`.
 
 ## Targeted Checkpoint Approval Contract

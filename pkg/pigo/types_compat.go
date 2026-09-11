@@ -44,16 +44,19 @@ type OpenAICompletionsCompat struct {
 func (c *OpenAICompletionsCompat) compatAPI() string { return "openai-completions" }
 
 type OpenAIResponsesCompat struct {
-	SendSessionIdHeader        *bool
-	SupportsLongCacheRetention *bool
-	SupportsJSONOutput         bool
-	SupportsJSONSchema         bool
+	SendSessionIdHeader             *bool
+	SupportsLongCacheRetention      *bool
+	SupportsExplicitPromptCacheMode *bool
+	SupportsMaxOutputTokens         *bool
+	SupportsJSONOutput              bool
+	SupportsJSONSchema              bool
 }
 
 func (c *OpenAIResponsesCompat) compatAPI() string { return "openai-responses" }
 
 type AnthropicMessagesCompat struct {
 	SupportsEagerToolInputStreaming *bool
+	ForceAdaptiveThinking           *bool
 	SupportsLongCacheRetention      *bool
 }
 

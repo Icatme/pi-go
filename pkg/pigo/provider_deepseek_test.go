@@ -46,15 +46,15 @@ func TestDeepSeekBuildRequestDefaultsToProThinkingMax(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected thinking object, got %#v", captured["thinking"])
 	}
-	if thinking["type"] != "enabled" || thinking["reasoning_effort"] != "max" {
+	if thinking["type"] != "enabled" || captured["reasoning_effort"] != "max" {
 		t.Fatalf("expected thinking enabled/max, got %#v", thinking)
 	}
 }
 
 func TestDeepSeekSimpleOptionsDoNotRecurse(t *testing.T) {
-	model := GetModel("deepseek", "deepseek-v4-flash")
+	model := GetModel("deepseek", "deepseek-flash")
 	if model == nil {
-		t.Fatal("expected deepseek-v4-flash model")
+		t.Fatal("expected deepseek-flash model")
 	}
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{
@@ -63,7 +63,7 @@ func TestDeepSeekSimpleOptionsDoNotRecurse(t *testing.T) {
 	}, SimpleStreamOptions{
 		APIKey: "test-key",
 		HTTPClient: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-			return sseResponse(`data: {"id":"chatcmpl-test","model":"deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"pong"},"finish_reason":"stop"}]}` + "\n\n" + `data: [DONE]` + "\n\n"), nil
+			return sseResponse(`data: {"id":"chatcmpl-test","model":"deepseek-flash","choices":[{"index":0,"delta":{"content":"pong"},"finish_reason":"stop"}]}` + "\n\n" + `data: [DONE]` + "\n\n"), nil
 		}).Client(),
 	})
 	if response.StopReason != StopReasonStop {

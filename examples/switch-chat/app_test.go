@@ -17,7 +17,7 @@ func TestChatSessionsPersistAcrossSwitchAndRestart(t *testing.T) {
 	app, err := NewApp(AppConfig{
 		DataDir:         dataDir,
 		Provider:        "openai-codex",
-		Model:           "gpt-5.4",
+		Model:           "gpt-5.5",
 		ChatModel:       fakeChatModel("chat"),
 		ReflectionModel: fakeReflectionModel(),
 		Stdout:          stdout,
@@ -52,7 +52,7 @@ func TestChatSessionsPersistAcrossSwitchAndRestart(t *testing.T) {
 	reloaded, err := NewApp(AppConfig{
 		DataDir:         dataDir,
 		Provider:        "openai-codex",
-		Model:           "gpt-5.4",
+		Model:           "gpt-5.5",
 		ChatModel:       fakeChatModel("chat"),
 		ReflectionModel: fakeReflectionModel(),
 		Stdout:          &bytes.Buffer{},
@@ -87,7 +87,7 @@ func TestReflectionTranscriptIsPersistedWithoutLiveSnapshot(t *testing.T) {
 	app, err := NewApp(AppConfig{
 		DataDir:          dataDir,
 		Provider:         "openai-codex",
-		Model:            "gpt-5.4",
+		Model:            "gpt-5.5",
 		ChatModel:        fakeChatModel("chat"),
 		ReflectionModel:  fakeReflectionModel(),
 		ReflectionCritic: critic,
@@ -132,7 +132,7 @@ func TestResetCreatesFreshChatSession(t *testing.T) {
 	app, err := NewApp(AppConfig{
 		DataDir:         dataDir,
 		Provider:        "openai-codex",
-		Model:           "gpt-5.4",
+		Model:           "gpt-5.5",
 		ChatModel:       fakeChatModel("chat"),
 		ReflectionModel: fakeReflectionModel(),
 		Stdout:          &bytes.Buffer{},

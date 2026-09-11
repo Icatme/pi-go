@@ -78,6 +78,8 @@ func streamOpenAICodex(model Model, ctx Context, options ProviderStreamOptions) 
 			stream.finish(response)
 			return
 		}
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventDone, Reason: response.StopReason, Message: response})
+		stream.finish(response)
 	}()
 
 	return stream

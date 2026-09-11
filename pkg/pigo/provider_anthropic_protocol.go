@@ -37,10 +37,16 @@ func isAnthropicOAuthToken(token string) bool {
 }
 
 func supportsAdaptiveAnthropicThinking(model Model) bool {
+	if compat, ok := model.Compat.(*AnthropicMessagesCompat); ok && compat != nil && compat.ForceAdaptiveThinking != nil {
+		return *compat.ForceAdaptiveThinking
+	}
 	return contains(model.ID, "opus-4-6") || contains(model.ID, "opus-4.6") || contains(model.ID, "sonnet-4-6") || contains(model.ID, "sonnet-4.6")
 }
 
 func mapAnthropicReasoningEffort(model Model, level ThinkingLevel) string {
+	if mapped := model.ThinkingLevelMap[ModelThinkingLevel(level)]; mapped != "" {
+		return mapped
+	}
 	switch level {
 	case ThinkingLevelMinimal, ThinkingLevelLow:
 		return "low"

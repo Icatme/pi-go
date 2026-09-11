@@ -21,13 +21,13 @@ import (
 
 const (
 	commandCodeDefaultBaseURL       = "https://api.commandcode.ai"
-	commandCodeCLIVersion           = "0.29.0"
+	commandCodeCLIVersion           = "1.44.0"
 	commandCodeDefaultMaxTokens     = 64_000
 	commandCodeDefaultMaxRetryDelay = 60_000
 	commandCodeBaseRetryDelay       = 500
 )
 
-// This transport is a native Go port of pi-commandcode-provider v0.4.3's
+// This transport is a native Go port of pi-commandcode-provider v0.6.4's
 // commandcode-custom wire protocol. Provider discovery and credential lookup
 // live beside the transport; browser login is owned by the CLI package.
 
@@ -37,7 +37,7 @@ type commandCodeRequest struct {
 	Taste    any               `json:"taste"`
 	Skills   any               `json:"skills"`
 	Params   commandCodeParams `json:"params"`
-	ThreadID string            `json:"threadId"`
+	ThreadID string            `json:"threadId,omitempty"`
 }
 
 type commandCodeConfig struct {
@@ -53,16 +53,23 @@ type commandCodeConfig struct {
 }
 
 type commandCodeParams struct {
-	Model       string  `json:"model"`
-	Messages    []any   `json:"messages"`
-	Tools       []any   `json:"tools"`
-	System      string  `json:"system"`
-	MaxTokens   int     `json:"max_tokens"`
-	Temperature float64 `json:"temperature"`
-	Stream      bool    `json:"stream"`
+	Model           string   `json:"model"`
+	Messages        []any    `json:"messages"`
+	Tools           []any    `json:"tools"`
+	System          string   `json:"system"`
+	MaxTokens       int      `json:"max_tokens"`
+	Temperature     *float64 `json:"temperature,omitempty"`
+	ReasoningEffort string   `json:"reasoning_effort,omitempty"`
+	Stream          bool     `json:"stream"`
+}
+
+type commandCodeToolInput struct {
+	index     int
+	arguments string
 }
 
 type commandCodeStreamState struct {
+	toolInputs    map[string]*commandCodeToolInput
 	textIndex     int
 	textStarted   bool
 	text          strings.Builder
@@ -81,7 +88,7 @@ func newCommandCodeAPIModule() APIModule {
 			Tools:             CapabilitySupported,
 			StrictTools:       CapabilityUnsupported,
 			ToolChoice:        CapabilityUnsupported,
-			Temperature:       CapabilityUnsupported,
+			Temperature:       CapabilityUnknown,
 			TopP:              CapabilityUnsupported,
 			ParallelToolCalls: CapabilityUnsupported,
 		},
@@ -108,7 +115,7 @@ func streamSimpleCommandCode(model Model, ctx Context, options SimpleStreamOptio
 	return streamCommandCode(model, ctx, buildCommandCodeProviderStreamOptions(model, options))
 }
 
-func streamCommandCode(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+func streamCommandCodeGenerate(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
 	options = normalizeCommandCodeProviderStreamOptions(model, options)
 	stream := newAssistantMessageEventStream()
 	stream.setObserver(options.Observer, model)
@@ -169,6 +176,9 @@ func streamCommandCode(model Model, ctx Context, options ProviderStreamOptions) 
 			httpClient = http.DefaultClient
 		}
 		headers := commandCodeRequestHeaders(options.Headers, apiKey, workingDir)
+		if options.SessionID != "" {
+			headers = mergeRequestHeaders(map[string]string{"x-session-id": options.SessionID}, headers)
+		}
 		state, err := executeCommandCodeRequest(requestContext, httpClient, model, options, headers, body, &response, stream)
 		if err != nil {
 			applyRequestError(&response, err)
@@ -190,9 +200,18 @@ func buildCommandCodeRequest(model Model, ctx Context, options ProviderStreamOpt
 	if err != nil {
 		return commandCodeRequest{}, "", fmt.Errorf("resolve working directory: %w", err)
 	}
-	threadID, err := newCommandCodeThreadID()
+	threadID := options.SessionID
+	if threadID == "" {
+		threadID, err = newCommandCodeThreadID()
+		if err != nil {
+			return commandCodeRequest{}, "", fmt.Errorf("create Command Code thread id: %w", err)
+		}
+	} else if !commandCodeUUID(threadID) {
+		threadID = ""
+	}
+	messages, err := commandCodeMessages(model, ctx.Messages)
 	if err != nil {
-		return commandCodeRequest{}, "", fmt.Errorf("create Command Code thread id: %w", err)
+		return commandCodeRequest{}, "", err
 	}
 	maxTokens := options.MaxTokens
 	if maxTokens <= 0 {
@@ -217,13 +236,14 @@ func buildCommandCodeRequest(model Model, ctx Context, options ProviderStreamOpt
 		Taste:  nil,
 		Skills: nil,
 		Params: commandCodeParams{
-			Model:       model.ID,
-			Messages:    commandCodeMessages(ctx.Messages),
-			Tools:       commandCodeTools(ctx.Tools),
-			System:      ctx.SystemPrompt,
-			MaxTokens:   maxTokens,
-			Temperature: 0.3,
-			Stream:      true,
+			Model:           model.ID,
+			Messages:        messages,
+			Tools:           commandCodeTools(ctx.Tools),
+			System:          ctx.SystemPrompt,
+			MaxTokens:       maxTokens,
+			Temperature:     options.Temperature,
+			ReasoningEffort: commandCodeReasoningEffort(model, options.Reasoning),
+			Stream:          true,
 		},
 		ThreadID: threadID,
 	}, workingDir, nil
@@ -237,7 +257,7 @@ func commandCodeRequestHeaders(overrides map[string]string, apiKey, workingDir s
 		"Authorization":          "Bearer " + apiKey,
 		"Content-Type":           "application/json",
 		"Sec-Fetch-Mode":         "cors",
-		"User-Agent":             "node",
+		"User-Agent":             "cli",
 		"x-cli-environment":      "production",
 		"x-co-flag":              "false",
 		"x-command-code-version": commandCodeCLIVersion,
@@ -434,6 +454,37 @@ func processCommandCodeStreamEvent(event map[string]any, model Model, response *
 		endCommandCodeThinking(response, stream, state)
 	case "tool-result":
 		return false, nil
+	case "tool-input-start":
+		endCommandCodeText(response, stream, state)
+		endCommandCodeThinking(response, stream, state)
+		id := anyString(event["id"])
+		if id == "" {
+			return false, nil
+		}
+		if state.toolInputs == nil {
+			state.toolInputs = map[string]*commandCodeToolInput{}
+		}
+		if state.toolInputs[id] != nil {
+			return false, nil
+		}
+		index := len(response.Content)
+		call := ToolCall{ID: id, Name: anyString(event["toolName"]), Arguments: map[string]any{}}
+		response.Content = append(response.Content, call)
+		state.toolInputs[id] = &commandCodeToolInput{index: index}
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallStart, ContentIndex: index, ToolCall: call, Partial: *response})
+	case "tool-input-delta":
+		input := state.toolInputs[anyString(event["id"])]
+		if input == nil {
+			return false, nil
+		}
+		delta := anyString(event["delta"])
+		input.arguments += delta
+		call := response.Content[input.index].(ToolCall)
+		call.Arguments = parseStreamingJSON(input.arguments)
+		response.Content[input.index] = call
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallDelta, ContentIndex: input.index, Delta: delta, Partial: *response})
+	case "tool-input-end":
+		return false, nil
 	case "tool-call":
 		endCommandCodeText(response, stream, state)
 		endCommandCodeThinking(response, stream, state)
@@ -446,14 +497,30 @@ func processCommandCodeStreamEvent(event map[string]any, model Model, response *
 		}
 		toolCall := ToolCall{ID: anyString(event["toolCallId"]), Name: anyString(event["toolName"]), Arguments: arguments}
 		index := len(response.Content)
-		response.Content = append(response.Content, toolCall)
-		stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallStart, ContentIndex: index, ToolCall: toolCall, Partial: *response})
+		if active := state.toolInputs[toolCall.ID]; active != nil {
+			index = active.index
+			if toolCall.Name == "" {
+				toolCall.Name = response.Content[index].(ToolCall).Name
+			}
+			response.Content[index] = toolCall
+			delete(state.toolInputs, toolCall.ID)
+		} else {
+			response.Content = append(response.Content, toolCall)
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallStart, ContentIndex: index, ToolCall: toolCall, Partial: *response})
+		}
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallEnd, ContentIndex: index, ToolCall: toolCall, Partial: *response})
 	case "finish":
+		rawReason := strings.ToLower(anyString(event["rawFinishReason"]))
+		normalizedReason := strings.NewReplacer("-", "", "_", "", " ", "").Replace(rawReason)
+		if normalizedReason == "networkerror" || normalizedReason == "connectionerror" || normalizedReason == "upstreamerror" {
+			return false, fmt.Errorf("Command Code upstream connection failed mid-stream (%s)", rawReason)
+		}
 		applyCommandCodeUsage(event, model, response)
 		response.StopReason = mapCommandCodeFinishReason(anyString(event["finishReason"]))
 		state.finished = true
 		return true, nil
+	case "abort":
+		return false, context.Canceled
 	case "error":
 		message := "Stream error"
 		if errorRecord := commandCodeRecord(event["error"]); anyString(errorRecord["message"]) != "" {
@@ -515,110 +582,17 @@ func applyCommandCodeUsage(event map[string]any, model Model, response *Assistan
 }
 
 func calculateCommandCodeCost(model Model, usage Usage) UsageCost {
-	if tier, ok := commandCodeLongContextCosts[model.ID]; ok && usage.Input+usage.CacheRead+usage.CacheWrite > tier.Threshold {
-		model.Cost = tier.Cost
+	if len(model.CostTiers) == 0 {
+		model.CostTiers = commandCodeModelCostTiers[model.ID]
 	}
 	return CalculateCost(model, usage)
 }
-
 func resetCommandCodeResponse(response *AssistantMessage) {
 	response.Content = nil
 	response.Usage = Usage{}
 	response.UsageReported = false
 	response.StopReason = StopReasonStop
 	response.ErrorMessage = ""
-}
-
-func commandCodeMessages(messages []Message) []any {
-	paired := commandCodePairedToolCallIDs(messages)
-	result := make([]any, 0, len(messages))
-	for _, message := range messages {
-		switch typed := message.(type) {
-		case UserMessage:
-			result = append(result, map[string]any{"role": "user", "content": commandCodeUserContent(typed.Content)})
-		case AssistantMessage:
-			parts := make([]any, 0, len(typed.Content))
-			for _, block := range typed.Content {
-				switch content := block.(type) {
-				case TextContent:
-					parts = append(parts, map[string]any{"type": "text", "text": content.Text})
-				case ThinkingContent:
-					parts = append(parts, map[string]any{"type": "reasoning", "text": content.Thinking})
-				case ToolCall:
-					if paired[content.ID] {
-						arguments := cloneMap(content.Arguments)
-						if arguments == nil {
-							arguments = map[string]any{}
-						}
-						parts = append(parts, map[string]any{"type": "tool-call", "toolCallId": content.ID, "toolName": content.Name, "input": arguments})
-					}
-				}
-			}
-			if len(parts) > 0 {
-				result = append(result, map[string]any{"role": "assistant", "content": parts})
-			}
-		case ToolResultMessage:
-			if typed.ToolCallID == "" || !paired[typed.ToolCallID] {
-				continue
-			}
-			outputType := "text"
-			if typed.IsError {
-				outputType = "error-text"
-			}
-			result = append(result, map[string]any{
-				"role": "tool",
-				"content": []any{map[string]any{
-					"type":       "tool-result",
-					"toolCallId": typed.ToolCallID,
-					"toolName":   typed.ToolName,
-					"output":     map[string]any{"type": outputType, "value": commandCodeTextContent(typed.Content)},
-				}},
-			})
-		}
-	}
-	return result
-}
-
-func commandCodePairedToolCallIDs(messages []Message) map[string]bool {
-	calls := map[string]bool{}
-	results := map[string]bool{}
-	for _, message := range messages {
-		switch typed := message.(type) {
-		case AssistantMessage:
-			for _, block := range typed.Content {
-				if toolCall, ok := block.(ToolCall); ok && toolCall.ID != "" {
-					calls[toolCall.ID] = true
-				}
-			}
-		case ToolResultMessage:
-			if typed.ToolCallID != "" {
-				results[typed.ToolCallID] = true
-			}
-		}
-	}
-	paired := map[string]bool{}
-	for id := range calls {
-		paired[id] = results[id]
-	}
-	return paired
-}
-
-func commandCodeUserContent(content any) any {
-	switch typed := content.(type) {
-	case []ContentBlock:
-		parts := make([]any, 0, len(typed))
-		for _, block := range typed {
-			switch value := block.(type) {
-			case TextContent:
-				parts = append(parts, map[string]any{"type": "text", "text": value.Text})
-			case ImageContent:
-				parts = append(parts, map[string]any{"type": "image", "data": value.Data, "mimeType": value.MIMEType})
-			}
-		}
-		return parts
-	default:
-		return cloneAny(content)
-	}
 }
 
 func commandCodeTextContent(blocks []ContentBlock) string {
@@ -771,7 +745,7 @@ func resolveCommandCodeGenerateURL(baseURL string) string {
 	if strings.HasSuffix(trimmed, "/alpha/generate") {
 		return trimmed
 	}
-	return trimmed + "/alpha/generate"
+	return strings.TrimSuffix(trimmed, "/provider/v1") + "/alpha/generate"
 }
 
 func decodeCommandCodeResponseBody(response *http.Response) error {

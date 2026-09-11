@@ -406,7 +406,7 @@ func TestDefaultPigoStreamModelUsesCodexSessionAndPreservesResponseID(t *testing
 	definition := AgentDefinition{
 		DefaultModel: ModelRef{
 			Provider: "openai-codex",
-			Model:    "gpt-5.4",
+			Model:    "gpt-5.5",
 			ProviderConfig: ProviderConfig{
 				BaseURL: server.URL,
 				APIKey:  makeOpenAICodexToken("acc_test"),
@@ -440,7 +440,7 @@ func TestDefaultPigoStreamModelUsesCodexSessionAndPreservesResponseID(t *testing
 	if final.ResponseID != "resp_codex_1" {
 		t.Fatalf("expected response id resp_codex_1, got %q", final.ResponseID)
 	}
-	if final.Provider != "openai-codex" || final.API != "openai-codex-responses" || final.Model != "gpt-5.4" {
+	if final.Provider != "openai-codex" || final.API != "openai-codex-responses" || final.Model != "gpt-5.5" {
 		t.Fatalf("expected provider/api/model to be preserved, got %+v", final)
 	}
 	if len(final.Parts) != 1 || final.Parts[0].Text != "codex ok" {
@@ -670,7 +670,7 @@ func TestDefaultPigoStreamModelPreservesCodexFailureMetadata(t *testing.T) {
 	definition := AgentDefinition{
 		DefaultModel: ModelRef{
 			Provider: "openai-codex",
-			Model:    "gpt-5.4",
+			Model:    "gpt-5.5",
 			ProviderConfig: ProviderConfig{
 				BaseURL: server.URL,
 				APIKey:  makeOpenAICodexToken("acc_test"),
@@ -707,7 +707,7 @@ func TestDefaultPigoStreamModelPreservesCodexFailureMetadata(t *testing.T) {
 	if final.ResponseID != "resp_failed_1" {
 		t.Fatalf("expected failed response id to be preserved, got %+v", final)
 	}
-	if final.Provider != "openai-codex" || final.API != "openai-codex-responses" || final.Model != "gpt-5.4" {
+	if final.Provider != "openai-codex" || final.API != "openai-codex-responses" || final.Model != "gpt-5.5" {
 		t.Fatalf("expected provider/api/model fields on codex failure, got %+v", final)
 	}
 }

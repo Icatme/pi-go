@@ -416,3 +416,12 @@ runtime.
   cancellation or preemption. Pushes wait for the core runtime's existing
   steering/follow-up boundaries, and immediate stop remains cooperative for
   models and tools that honor context cancellation.
+
+Model and thinking updates keep the requested preference separately from the
+effective model capability. `Agent.State()` and `Agent.Snapshot()` expose
+`RequestedThinkingLevel` and `ThinkingLevel`; the requested default is `off`.
+`SetModel` preserves the preference and resolves both values atomically.
+Custom streaming implementations preserve the request by default, or can set
+`ThinkingLevelResolver` on `AgentDefinition` / `AgentOptions`. See
+[the runtime contracts](docs/runtime-contracts.md#model-and-thinking-state) for
+snapshot restoration and invocation-local next-turn overrides.

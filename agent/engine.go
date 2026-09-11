@@ -20,6 +20,7 @@ type LoopHooks struct {
 	GetSteeringMessages func(context.Context) ([]Message, error)
 	GetFollowUpMessages func(context.Context) ([]Message, error)
 	ToolGate            ToolGateHook
+	refreshModelState   func(*AgentSnapshot) AgentDefinition
 }
 
 // Engine executes agent turns against a mutable snapshot.
@@ -30,16 +31,19 @@ type loopRuntimeState struct {
 }
 
 type loopExecutionState struct {
-	firstTurn bool
-	turn      int
-	overrides turnOverrides
-	durable   *loopDurableState
+	firstTurn       bool
+	turn            int
+	completedTurn   *PrepareNextTurnContext
+	prepareNextTurn PrepareNextTurnHook
+	durable         *loopDurableState
 }
 
 type loopDurableState struct {
-	messages     []Message
-	systemPrompt string
-	model        ModelRef
+	messages               []Message
+	systemPrompt           string
+	model                  ModelRef
+	requestedThinkingLevel ThinkingLevel
+	thinkingLevel          ThinkingLevel
 }
 
 type engineRunError struct {
@@ -91,6 +95,7 @@ func (e *Engine) RunWithHooks(ctx context.Context, definition AgentDefinition, s
 	}
 
 	next := cloneSnapshotPtr(snapshot)
+	definition = initializeThinkingState(definition, next)
 	runtimeState := &loopRuntimeState{}
 	var newMessages []Message
 	started := false
@@ -145,6 +150,7 @@ func (e *Engine) ContinueWithHooks(ctx context.Context, definition AgentDefiniti
 	}
 
 	next := cloneSnapshotPtr(snapshot)
+	definition = initializeThinkingState(definition, next)
 	if hasPendingToolState(next) {
 		return nil, ErrPendingToolCallsRequireResume
 	}
@@ -202,6 +208,7 @@ func (e *Engine) ResumePendingToolCallsWithHooks(ctx context.Context, definition
 	}
 
 	next := cloneSnapshotPtr(snapshot)
+	definition = initializeThinkingState(definition, next)
 	assistant, err := validatePendingToolBatch(*next)
 	if err != nil {
 		return nil, err
@@ -289,26 +296,11 @@ func (e *Engine) ResumePendingToolCallsWithHooks(ctx context.Context, definition
 		NewMessages: cloneMessages(newMessages),
 	}
 	durable := &loopDurableState{
-		messages:     cloneMessages(next.Messages),
-		systemPrompt: originalSystemPrompt,
-		model:        originalModel,
-	}
-	var overrides turnOverrides
-	if resolvedDefinition.PrepareNextTurn != nil {
-		update, prepareErr := resolvedDefinition.PrepareNextTurn(ctx, turnContext)
-		if prepareErr != nil {
-			next.Error = prepareErr.Error()
-			err = wrapEngineRunError(prepareErr, newMessages, true)
-			return next, err
-		}
-		if update != nil {
-			overrides.merge(update, next)
-			resolvedDefinition = overrides.apply(resolvedDefinition, next)
-			if update.Context != nil {
-				tools = cloneTools(update.Context.Tools)
-			}
-			turnContext.Context = buildAgentContext(resolvedDefinition, *next, tools)
-		}
+		messages:               cloneMessages(next.Messages),
+		systemPrompt:           originalSystemPrompt,
+		model:                  originalModel,
+		requestedThinkingLevel: next.RequestedThinkingLevel,
+		thinkingLevel:          next.ThinkingLevel,
 	}
 
 	if resolvedDefinition.ShouldStopAfterTurn != nil {
@@ -340,10 +332,11 @@ func (e *Engine) ResumePendingToolCallsWithHooks(ctx context.Context, definition
 	}
 	runtimeState.turnEnded = true
 	next, newMessages, batchErr = e.runLoop(ctx, definition, next, emit, hooks, pendingMessages, newMessages, runtimeState, loopExecutionState{
-		firstTurn: false,
-		turn:      pendingTurn + 1,
-		overrides: overrides,
-		durable:   durable,
+		firstTurn:       false,
+		turn:            pendingTurn + 1,
+		completedTurn:   &turnContext,
+		prepareNextTurn: resolvedDefinition.PrepareNextTurn,
+		durable:         durable,
 	})
 	if batchErr != nil {
 		err = wrapEngineRunError(batchErr, newMessages, runtimeState.turnEnded)
@@ -427,6 +420,8 @@ func restoreLoopDurable(snapshot *AgentSnapshot, durable *loopDurableState) {
 	snapshot.Messages = cloneMessages(durable.messages)
 	snapshot.SystemPrompt = durable.systemPrompt
 	snapshot.Model = cloneModelRef(durable.model)
+	snapshot.RequestedThinkingLevel = durable.requestedThinkingLevel
+	snapshot.ThinkingLevel = durable.thinkingLevel
 }
 
 func pendingToolTurn(snapshot AgentSnapshot) (int, error) {
@@ -543,55 +538,103 @@ func isToolCallsSuspended(err error) bool {
 	return errors.As(err, &suspended)
 }
 
-func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink, hooks LoopHooks, pendingMessages []Message, initialNewMessages []Message, runtimeState *loopRuntimeState, executionState loopExecutionState) (*AgentSnapshot, []Message, error) {
+func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink, hooks LoopHooks, pendingMessages []Message, initialNewMessages []Message, runtimeState *loopRuntimeState, executionState loopExecutionState) (next *AgentSnapshot, newMessages []Message, err error) {
 	firstTurn := executionState.firstTurn
 	turn := executionState.turn
 	if turn <= 0 {
 		turn = 1
 	}
-	overrides := executionState.overrides
-	newMessages := cloneMessages(initialNewMessages)
+	var overrides turnOverrides
+	lastCompletedTurn := executionState.completedTurn
+	prepareNextTurn := executionState.prepareNextTurn
+	newMessages = cloneMessages(initialNewMessages)
 	transcript := cloneMessages(snapshot.Messages)
 	originalSystemPrompt := snapshot.SystemPrompt
 	originalModel := cloneModelRef(snapshot.Model)
+	originalRequestedThinking := snapshot.RequestedThinkingLevel
+	originalThinking := snapshot.ThinkingLevel
 	if executionState.durable != nil {
 		transcript = cloneMessages(executionState.durable.messages)
 		originalSystemPrompt = executionState.durable.systemPrompt
 		originalModel = cloneModelRef(executionState.durable.model)
+		originalRequestedThinking = executionState.durable.requestedThinkingLevel
+		originalThinking = executionState.durable.thinkingLevel
 	}
 	defer func() {
+		// Queue reads transfer ownership to this invocation, even if preparation
+		// fails before the next turn starts. Keep accepted input out of temporary
+		// provider context and include it in the invocation's final message window.
+		appended := appendMessagesWithEvents(snapshot, pendingMessages, emit)
+		newMessages = append(newMessages, appended...)
+		transcript = append(transcript, cloneMessages(appended)...)
 		snapshot.Messages = transcript
 		snapshot.SystemPrompt = originalSystemPrompt
 		snapshot.Model = originalModel
+		snapshot.RequestedThinkingLevel = originalRequestedThinking
+		snapshot.ThinkingLevel = originalThinking
 	}()
 
 	for {
 		hasMoreToolCalls := true
 
 		for hasMoreToolCalls || len(pendingMessages) > 0 {
-			if !firstTurn {
-				emitEvent(emit, AgentEvent{Type: EventTurnStart})
-			}
-			runtimeState.turnEnded = false
-			firstTurn = false
-
 			if definition.MaxTurns > 0 && turn > definition.MaxTurns {
 				err := fmt.Errorf("%w: %d", ErrMaxTurnsExceeded, definition.MaxTurns)
 				snapshot.Error = err.Error()
 				return snapshot, newMessages, err
 			}
-
+			if lastCompletedTurn != nil {
+				if err := ctx.Err(); err != nil {
+					snapshot.Error = err.Error()
+					return snapshot, newMessages, err
+				}
+				if prepareNextTurn != nil {
+					update, err := prepareNextTurn(ctx, *lastCompletedTurn)
+					if err != nil {
+						snapshot.Error = err.Error()
+						return snapshot, newMessages, err
+					}
+					if update != nil {
+						overrides.merge(update, snapshot)
+					}
+				}
+				if err := ctx.Err(); err != nil {
+					snapshot.Error = err.Error()
+					return snapshot, newMessages, err
+				}
+				if len(pendingMessages) == 0 {
+					var err error
+					pendingMessages, err = dequeueHookMessages(ctx, hooks.GetSteeringMessages)
+					if err != nil {
+						snapshot.Error = err.Error()
+						return snapshot, newMessages, err
+					}
+				}
+			}
+			if !firstTurn {
+				emitEvent(emit, AgentEvent{Type: EventTurnStart})
+			}
+			runtimeState.turnEnded = false
+			firstTurn = false
 			appended := appendMessagesWithEvents(snapshot, pendingMessages, emit)
 			newMessages = append(newMessages, appended...)
 			transcript = append(transcript, cloneMessages(appended)...)
 			pendingMessages = nil
 
-			resolvedDefinition, err := resolveLoopDefinition(ctx, hooks, definition, *snapshot)
+			currentDefinition := definition
+			if hooks.refreshModelState != nil {
+				currentDefinition = hooks.refreshModelState(snapshot)
+				originalModel = cloneModelRef(snapshot.Model)
+				originalRequestedThinking = snapshot.RequestedThinkingLevel
+				originalThinking = snapshot.ThinkingLevel
+			}
+			resolvedDefinition, err := resolveLoopDefinition(ctx, hooks, currentDefinition, *snapshot)
 			if err != nil {
 				snapshot.Error = err.Error()
 				return snapshot, newMessages, err
 			}
 			resolvedDefinition = overrides.apply(resolvedDefinition, snapshot)
+			updateThinkingState(resolvedDefinition, snapshot)
 
 			assistantMessage, tools, err := e.generateAssistant(ctx, resolvedDefinition, snapshot, emit)
 			if err != nil {
@@ -648,21 +691,8 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 				Context:     buildAgentContext(resolvedDefinition, *snapshot, tools),
 				NewMessages: cloneMessages(newMessages),
 			}
-			if resolvedDefinition.PrepareNextTurn != nil {
-				update, prepareErr := resolvedDefinition.PrepareNextTurn(ctx, turnContext)
-				if prepareErr != nil {
-					snapshot.Error = prepareErr.Error()
-					return snapshot, newMessages, prepareErr
-				}
-				if update != nil {
-					overrides.merge(update, snapshot)
-					resolvedDefinition = overrides.apply(resolvedDefinition, snapshot)
-					if update.Context != nil {
-						tools = cloneTools(update.Context.Tools)
-					}
-					turnContext.Context = buildAgentContext(resolvedDefinition, *snapshot, tools)
-				}
-			}
+			lastCompletedTurn = &turnContext
+			prepareNextTurn = resolvedDefinition.PrepareNextTurn
 
 			if resolvedDefinition.ShouldStopAfterTurn != nil {
 				stop, stopErr := resolvedDefinition.ShouldStopAfterTurn(ctx, turnContext)
@@ -729,7 +759,7 @@ func (e *Engine) generateAssistant(ctx context.Context, definition AgentDefiniti
 		SystemPrompt:    systemPrompt,
 		Messages:        modelMessages,
 		Tools:           tools,
-		ThinkingLevel:   definition.ThinkingLevel,
+		ThinkingLevel:   snapshot.ThinkingLevel,
 		SessionID:       snapshot.SessionID,
 		Transport:       definition.Transport,
 		MaxRetryDelayMs: definition.MaxRetryDelayMs,
@@ -1528,14 +1558,16 @@ func cloneSnapshotPtr(snapshot *AgentSnapshot) *AgentSnapshot {
 
 func cloneSnapshotValue(snapshot AgentSnapshot) AgentSnapshot {
 	return AgentSnapshot{
-		SessionID:          snapshot.SessionID,
-		SystemPrompt:       snapshot.SystemPrompt,
-		Model:              cloneModelRef(snapshot.Model),
-		Messages:           cloneMessages(snapshot.Messages),
-		PendingToolCalls:   clonePendingToolCalls(snapshot.PendingToolCalls),
-		PendingToolControl: clonePendingToolControl(snapshot.PendingToolControl),
-		Error:              snapshot.Error,
-		Metadata:           cloneStringAnyMap(snapshot.Metadata),
+		SessionID:              snapshot.SessionID,
+		SystemPrompt:           snapshot.SystemPrompt,
+		Model:                  cloneModelRef(snapshot.Model),
+		RequestedThinkingLevel: snapshot.RequestedThinkingLevel,
+		ThinkingLevel:          snapshot.ThinkingLevel,
+		Messages:               cloneMessages(snapshot.Messages),
+		PendingToolCalls:       clonePendingToolCalls(snapshot.PendingToolCalls),
+		PendingToolControl:     clonePendingToolControl(snapshot.PendingToolControl),
+		Error:                  snapshot.Error,
+		Metadata:               cloneStringAnyMap(snapshot.Metadata),
 	}
 }
 

@@ -53,7 +53,7 @@ func TestGetModelsReturnsClonedInputSlices(t *testing.T) {
 }
 
 func TestCalculateCostUsesPerMillionRates(t *testing.T) {
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai", "gpt-5.4")
 	if model == nil {
 		t.Fatal("expected gpt-5.4 model to exist")
 	}
@@ -83,8 +83,8 @@ func TestCalculateCostUsesPerMillionRates(t *testing.T) {
 }
 
 func TestModelsAreEqualComparesIDAndProvider(t *testing.T) {
-	left := GetModel("openai-codex", "gpt-5.4")
-	right := GetModel("openai-codex", "gpt-5.4")
+	left := GetModel("openai-codex", "gpt-5.5")
+	right := GetModel("openai-codex", "gpt-5.5")
 	other := GetModel("kimi-coding", "k2p5")
 
 	if !ModelsAreEqual(left, right) {
@@ -268,7 +268,7 @@ func TestSupportsHostedToolUsesModelAndProviderCapabilities(t *testing.T) {
 		t.Fatalf("expected kimi model to support hosted excel, got %+v", kimi)
 	}
 
-	codex := GetModel("openai-codex", "gpt-5.4")
+	codex := GetModel("openai-codex", "gpt-5.5")
 	if codex == nil {
 		t.Fatal("expected codex model")
 	}

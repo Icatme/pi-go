@@ -13,15 +13,16 @@ import (
 )
 
 type deepSeekChatRequest struct {
-	Model          string                   `json:"model"`
-	Messages       []deepSeekChatMessage    `json:"messages"`
-	Stream         bool                     `json:"stream"`
-	Thinking       *deepSeekThinkingOptions `json:"thinking,omitempty"`
-	MaxTokens      int                      `json:"max_tokens,omitempty"`
-	Temperature    *float64                 `json:"temperature,omitempty"`
-	Tools          []map[string]any         `json:"tools,omitempty"`
-	ToolChoice     any                      `json:"tool_choice,omitempty"`
-	ResponseFormat *deepSeekResponseFormat  `json:"response_format,omitempty"`
+	Model           string                   `json:"model"`
+	Messages        []deepSeekChatMessage    `json:"messages"`
+	Stream          bool                     `json:"stream"`
+	Thinking        *deepSeekThinkingOptions `json:"thinking,omitempty"`
+	ReasoningEffort string                   `json:"reasoning_effort,omitempty"`
+	MaxTokens       int                      `json:"max_tokens,omitempty"`
+	Temperature     *float64                 `json:"temperature,omitempty"`
+	Tools           []map[string]any         `json:"tools,omitempty"`
+	ToolChoice      any                      `json:"tool_choice,omitempty"`
+	ResponseFormat  *deepSeekResponseFormat  `json:"response_format,omitempty"`
 }
 
 type deepSeekResponseFormat struct {
@@ -30,7 +31,7 @@ type deepSeekResponseFormat struct {
 
 type deepSeekThinkingOptions struct {
 	Type            string `json:"type"`
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ReasoningEffort string `json:"-"`
 }
 
 type deepSeekChatMessage struct {
@@ -198,6 +199,7 @@ func buildDeepSeekChatRequest(model Model, ctx Context, options ProviderStreamOp
 	}
 	if thinking := resolveDeepSeekThinking(model, resolvedOptions.Reasoning); thinking != nil {
 		requestBody.Thinking = thinking
+		requestBody.ReasoningEffort = thinking.ReasoningEffort
 	}
 	if resolvedOptions.ResponseFormat != nil {
 		requestBody.ResponseFormat = &deepSeekResponseFormat{Type: string(resolvedOptions.ResponseFormat.Type)}
@@ -209,17 +211,19 @@ func resolveDeepSeekThinking(model Model, level ThinkingLevel) *deepSeekThinking
 	if !model.Reasoning {
 		return nil
 	}
+	if strings.TrimSpace(string(level)) == "off" || strings.TrimSpace(string(level)) == "disabled" {
+		return &deepSeekThinkingOptions{Type: "disabled"}
+	}
+	effective := ClampThinkingLevel(model, ModelThinkingLevel(level))
+	if mapped := strings.TrimSpace(model.ThinkingLevelMap[effective]); level != "" && mapped != "" {
+		return &deepSeekThinkingOptions{Type: "enabled", ReasoningEffort: mapped}
+	}
 	switch strings.TrimSpace(string(level)) {
 	case "", string(ThinkingLevelXHigh), string(ThinkingLevelMax):
 		return &deepSeekThinkingOptions{Type: "enabled", ReasoningEffort: "max"}
 	case string(ThinkingLevelHigh), string(ThinkingLevelMedium), string(ThinkingLevelLow), string(ThinkingLevelMinimal):
 		return &deepSeekThinkingOptions{Type: "enabled", ReasoningEffort: "high"}
-	case "off", "disabled":
-		return &deepSeekThinkingOptions{Type: "disabled"}
 	default:
-		if mapped := strings.TrimSpace(model.ThinkingLevelMap[ModelThinkingLevel(level)]); mapped != "" {
-			return &deepSeekThinkingOptions{Type: "enabled", ReasoningEffort: mapped}
-		}
 		return &deepSeekThinkingOptions{Type: "enabled", ReasoningEffort: "high"}
 	}
 }
@@ -233,7 +237,7 @@ func convertDeepSeekChatMessages(model Model, ctx Context) []deepSeekChatMessage
 	for _, message := range transformed {
 		switch typed := message.(type) {
 		case UserMessage:
-			if content := deepSeekTextFromContent(typed.Content); strings.TrimSpace(content) != "" {
+			if content := openAICompletionsUserContent(typed.Content); content != nil {
 				messages = append(messages, deepSeekChatMessage{Role: "user", Content: content})
 			}
 		case AssistantMessage:
@@ -242,9 +246,18 @@ func convertDeepSeekChatMessages(model Model, ctx Context) []deepSeekChatMessage
 				messages = append(messages, deepSeekChatMessage{Role: "assistant", Content: content, ToolCalls: toolCalls})
 			}
 		case ToolResultMessage:
+			var content any = deepSeekTextFromContent(typed.Content)
+			if modelSupportsImages(model) {
+				for _, block := range typed.Content {
+					if _, ok := block.(ImageContent); ok {
+						content = openAICompletionsUserContent(typed.Content)
+						break
+					}
+				}
+			}
 			messages = append(messages, deepSeekChatMessage{
 				Role:       "tool",
-				Content:    deepSeekTextFromContent(typed.Content),
+				Content:    content,
 				ToolCallID: typed.ToolCallID,
 			})
 		}
@@ -494,14 +507,21 @@ func finalizeDeepSeekChatResponse(response *AssistantMessage, stream *AssistantM
 }
 
 func applyDeepSeekUsage(response *AssistantMessage, model Model, usage deepSeekChatUsage) {
+	input := usage.PromptTokens - usage.PromptCacheHitTokens
+	if usage.PromptCacheMissTokens > 0 {
+		input = usage.PromptCacheMissTokens
+	}
+	if input < 0 {
+		input = 0
+	}
 	response.Usage = Usage{
-		Input:       usage.PromptTokens,
+		Input:       input,
 		Output:      usage.CompletionTokens,
 		CacheRead:   usage.PromptCacheHitTokens,
 		TotalTokens: usage.TotalTokens,
-		Cost:        model.Cost,
 	}
 	response.UsageReported = true
+	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
 }
 
 func mapDeepSeekFinishReason(reason string, content []ContentBlock) StopReason {

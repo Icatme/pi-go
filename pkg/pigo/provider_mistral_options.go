@@ -79,10 +79,10 @@ func (options MistralProviderOptions) toProviderStreamOptions(model Model) Provi
 
 func usesReasoningEffort(model Model) bool {
 	switch model.ID {
-	case "mistral-small-2603", "mistral-small-latest", "mistral-medium-3.5":
+	case "mistral-small-2603", "mistral-small-latest", "zai-glm-5-2":
 		return true
 	}
-	return false
+	return strings.HasPrefix(model.ID, "mistral-medium-")
 }
 
 func usesPromptModeReasoning(model Model) bool {

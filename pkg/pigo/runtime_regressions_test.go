@@ -42,7 +42,7 @@ func TestConvertAnthropicMessagesInsertsMissingToolResultBeforeNextUserTurn(t *t
 }
 
 func TestConvertOpenAICodexMessagesInsertsMissingToolResultBeforeNextUserTurn(t *testing.T) {
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -105,7 +105,7 @@ func TestConvertAnthropicMessagesSkipsEmptyTurnsAndPreservesFollowup(t *testing.
 }
 
 func TestConvertOpenAICodexMessagesSkipsEmptyTurnsAndPreservesFollowup(t *testing.T) {
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -133,7 +133,7 @@ func TestConvertOpenAICodexMessagesSkipsEmptyTurnsAndPreservesFollowup(t *testin
 }
 
 func TestOpenAICodexToolResultOutputSupportsImages(t *testing.T) {
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -171,7 +171,7 @@ func TestAnthropicToolResultContentSupportsImages(t *testing.T) {
 }
 
 func TestOpenAICodexRequestMarshalsWithInvalidToolResultText(t *testing.T) {
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}

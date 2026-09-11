@@ -109,7 +109,7 @@ func TestStreamSimpleOpenAICodexLive(t *testing.T) {
 		t.Skip("missing test-only openai codex token in 01_auth.json")
 	}
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected openai-codex model")
 	}
@@ -152,7 +152,7 @@ func TestStreamSimpleOpenAICodexLiveAbortAndReplay(t *testing.T) {
 		t.Skip("missing test-only openai codex token in 01_auth.json")
 	}
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected openai-codex model")
 	}

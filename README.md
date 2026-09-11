@@ -36,7 +36,7 @@ Current primary provider scope:
 - `openai-codex` via OpenAI OAuth and the Responses-style API surface
 - `opencode-go` via an OpenCode Go API key and model-specific OpenAI Completions, OpenAI Responses, or Anthropic Messages routing
 - `kimi-coding` via Anthropic-style Messages semantics
-- `commandcode` via the `commandcode-custom` streaming protocol used by `pi-commandcode-provider`
+- `commandcode` via the Command Code Provider API, with Go-plan fallback to its generate protocol
 - `anthropic` via the Anthropic Messages API
 - `deepseek` via DeepSeek chat completions
 - `google` via the Gemini Generative AI API
@@ -246,7 +246,7 @@ Some live paths also require credentials such as:
 
 - `OPENCODE_API_KEY`
 - `KIMI_API_KEY`
-- `COMMANDCODE_API_KEY`
+- `COMMAND_CODE_API_KEY` (or `COMMANDCODE_API_KEY`)
 - test-only OpenAI Codex credentials in `01_auth.json`
 
 Support-file boundaries:
@@ -256,13 +256,27 @@ Support-file boundaries:
 - `01_auth.json` is test-only and ignored by git
 - library runtime auth should normally be passed explicitly via options or auth config; `commandcode` additionally supports the upstream user-home auth files listed below
 
-The `commandcode` provider matches `pi-commandcode-provider` v0.4.3's setup
-surface. `pigo login commandcode` opens the browser-assisted login flow and
+The `commandcode` provider follows `pi-commandcode-provider` v0.6.4's provider
+transport and model capability catalog. `pigo login commandcode` opens the browser-assisted login flow and
 stores the returned API key in `.pigo/auth.json`. Runtime lookup also accepts
-`COMMANDCODE_API_KEY`, `SimpleStreamOptions.APIKey`, caller-supplied
+`COMMAND_CODE_API_KEY` (or `COMMANDCODE_API_KEY`), `SimpleStreamOptions.APIKey`, caller-supplied
 `AuthConfig`, and the supported Command Code/pi/OMP auth-file shapes under the
 user home directory: `.commandcode/auth.json`, `.omp/agent/auth.json`, and
 `.pi/agent/auth.json`.
+
+Generation prefers `/provider/v1/chat/completions`, or
+`/provider/v1/messages` for Claude models. Only an HTTP 403 with
+`upgrade_required` selects `/alpha/generate`; authentication errors, network
+failures, rate limits, and other provider errors do not trigger that fallback.
+The selection is isolated by endpoint and credential.
+Models keep `API=commandcode-custom` for routing; returned assistant messages retain
+their actual wire API so reasoning signatures replay only across matching protocols. Model capabilities,
+reasoning efforts, image encoding, and pricing follow the v0.6.4 snapshot;
+unknown dynamic model capabilities remain unknown. Generated responses that
+report an upstream/network failure in their finish metadata are errors.
+Completed reasoning is not replayed through the generate protocol, and missing
+tool results are represented explicitly. `CMD_ZDR=1` (or `COMMANDCODE_ZDR=1`) requests strict zero data
+retention through the provider's `x-cmd-zdr` header.
 
 The CLI refreshes Command Code models from
 `https://api.commandcode.ai/provider/v1/models` before `models` and `ask`, then
@@ -274,7 +288,7 @@ warning; the first offline load without a valid cache leaves Command Code
 unavailable without preventing other providers from loading.
 
 The `opencode-go` provider follows Pi's built-in OpenCode Go routing and reads
-`OPENCODE_API_KEY`. Its deterministic built-in catalog is the 2026-08-08
+`OPENCODE_API_KEY`. Its deterministic built-in catalog is the 2026-08-20
 snapshot of active, non-deprecated, tool-capable models from
 [`models.dev`](https://models.dev), which is also Pi's catalog source. OpenCode
 Go keys are managed at [`opencode.ai/auth`](https://opencode.ai/auth).
@@ -287,6 +301,21 @@ for callers that only need the applied model slice. Override the endpoints with
 `COMMANDCODE_MODELS_URL` and `COMMANDCODE_API_BASE`. As in the upstream
 extension, newly discovered models without a local pricing entry use zero
 display cost until the pricing table is updated.
+
+OpenCode Go sends `x-opencode-session` when `SessionID` is provided, across all
+three wire protocols; an explicit caller header takes precedence. For native
+OpenAI GPT-5.6 models and GPT-6 Astra, long prompt caching uses
+`prompt_cache_options.ttl: "30m"`; disabling caching uses explicit mode without
+an automatic cache key. Earlier models retain their supported cache format.
+Custom Responses models opt in through `SupportsExplicitPromptCacheMode` and
+can disable `max_output_tokens` with `SupportsMaxOutputTokens`.
+
+The September 2026 catalog adds GPT-6 Astra and uses `deepseek-flash` for native
+DeepSeek V4.1 Flash, including image input. Retired `openai-codex` GPT-5.4 and
+GPT-5.4 mini entries are removed; the CLI and examples now default to GPT-5.5.
+The OpenAI API entries and other providers' DeepSeek model identifiers are
+independent and remain available. Astra supports `low` through `max`; Off is
+clamped to a supported level by the built-in agent backend.
 
 ## CLI
 
@@ -306,7 +335,7 @@ $env:OPENCODE_API_KEY = "your-opencode-go-key"
 .\bin\pigo.exe ask --provider kimi-coding "hello"
 .\bin\pigo.exe ask --provider opencode-go --model kimi-k2.6 "hello"
 .\bin\pigo.exe ask --provider commandcode --model poolside/laguna-s-2.1-free "hello"
-.\bin\pigo.exe ask --provider openai-codex --model gpt-5.4 "hello"
+.\bin\pigo.exe ask --provider openai-codex --model gpt-5.5 "hello"
 ```
 
 Use `pigo quota [--json] <provider>` with flags before the provider. It reads

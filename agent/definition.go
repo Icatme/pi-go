@@ -4,28 +4,29 @@ import "context"
 
 // AgentDefinition describes an agent runtime blueprint.
 type AgentDefinition struct {
-	Name                string                  `json:"name,omitempty"`
-	SystemPrompt        string                  `json:"system_prompt,omitempty"`
-	DefaultModel        ModelRef                `json:"default_model,omitempty"`
-	ThinkingLevel       ThinkingLevel           `json:"thinking_level,omitempty"`
-	SessionID           string                  `json:"session_id,omitempty"`
-	Transport           Transport               `json:"transport,omitempty"`
-	MaxRetryDelayMs     int                     `json:"max_retry_delay_ms,omitempty"`
-	ThinkingBudgets     ThinkingBudgets         `json:"thinking_budgets,omitempty"`
-	Model               StreamModel             `json:"-"`
-	ModelResolver       ModelResolver           `json:"-"`
-	Tools               []ToolDefinition        `json:"-"`
-	ToolResolver        ToolResolver            `json:"-"`
-	TransformContext    TransformContext        `json:"-"`
-	ConvertToLLM        ConvertToLLM            `json:"-"`
-	BeforeToolCall      BeforeToolCallHook      `json:"-"`
-	AfterToolCall       AfterToolCallHook       `json:"-"`
-	PrepareNextTurn     PrepareNextTurnHook     `json:"-"`
-	ShouldStopAfterTurn ShouldStopAfterTurnHook `json:"-"`
-	ToolExecution       ToolExecutionMode       `json:"tool_execution,omitempty"`
-	SteeringMode        QueueMode               `json:"steering_mode,omitempty"`
-	FollowUpMode        QueueMode               `json:"follow_up_mode,omitempty"`
-	MaxTurns            int                     `json:"max_turns,omitempty"`
+	Name                  string                  `json:"name,omitempty"`
+	SystemPrompt          string                  `json:"system_prompt,omitempty"`
+	DefaultModel          ModelRef                `json:"default_model,omitempty"`
+	ThinkingLevel         ThinkingLevel           `json:"thinking_level,omitempty"`
+	SessionID             string                  `json:"session_id,omitempty"`
+	Transport             Transport               `json:"transport,omitempty"`
+	MaxRetryDelayMs       int                     `json:"max_retry_delay_ms,omitempty"`
+	ThinkingBudgets       ThinkingBudgets         `json:"thinking_budgets,omitempty"`
+	Model                 StreamModel             `json:"-"`
+	ThinkingLevelResolver ThinkingLevelResolver   `json:"-"`
+	ModelResolver         ModelResolver           `json:"-"`
+	Tools                 []ToolDefinition        `json:"-"`
+	ToolResolver          ToolResolver            `json:"-"`
+	TransformContext      TransformContext        `json:"-"`
+	ConvertToLLM          ConvertToLLM            `json:"-"`
+	BeforeToolCall        BeforeToolCallHook      `json:"-"`
+	AfterToolCall         AfterToolCallHook       `json:"-"`
+	PrepareNextTurn       PrepareNextTurnHook     `json:"-"`
+	ShouldStopAfterTurn   ShouldStopAfterTurnHook `json:"-"`
+	ToolExecution         ToolExecutionMode       `json:"tool_execution,omitempty"`
+	SteeringMode          QueueMode               `json:"steering_mode,omitempty"`
+	FollowUpMode          QueueMode               `json:"follow_up_mode,omitempty"`
+	MaxTurns              int                     `json:"max_turns,omitempty"`
 }
 
 // Validate returns a copy of the definition with defaults applied.
@@ -63,18 +64,11 @@ func (d AgentDefinition) Validate() (AgentDefinition, error) {
 
 // ResolveModel returns the effective runtime model for a snapshot.
 func (d AgentDefinition) ResolveModel(ctx context.Context, snapshot AgentSnapshot) (StreamModel, ModelRef, error) {
+	ref := effectiveModelRef(snapshot, d)
 	if d.Model != nil {
-		ref := snapshot.Model
-		if ref.Model == "" && d.DefaultModel.Model != "" {
-			ref = cloneModelRef(d.DefaultModel)
-		}
 		return d.Model, ref, nil
 	}
 
-	ref := snapshot.Model
-	if ref.Model == "" {
-		ref = cloneModelRef(d.DefaultModel)
-	}
 	if d.ModelResolver == nil {
 		if ref.Provider != "" && ref.Model != "" {
 			return defaultProviderStreamModel, ref, nil

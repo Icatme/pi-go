@@ -65,7 +65,7 @@ func TestCompleteSimpleOpenAICodexLive(t *testing.T) {
 		t.Skip("missing test-only openai codex token in 01_auth.json")
 	}
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected openai-codex model")
 	}
@@ -108,7 +108,7 @@ func TestCompleteSimpleOpenAICodexLiveWithSessionAndReasoning(t *testing.T) {
 		t.Skip("missing test-only openai codex token in 01_auth.json")
 	}
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected openai-codex model")
 	}
@@ -144,7 +144,7 @@ func TestCompleteSimpleOpenAICodexLiveRefresh(t *testing.T) {
 		t.Skip("missing test-only openai codex oauth credentials in 01_auth.json")
 	}
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected openai-codex model")
 	}
@@ -185,7 +185,7 @@ func TestCompleteSimpleOpenAICodexLiveSkipsEmptyAssistantHistory(t *testing.T) {
 		t.Skip("missing test-only openai codex token in 01_auth.json")
 	}
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected openai-codex model")
 	}
@@ -224,7 +224,7 @@ func TestCompleteSimpleOpenAICodexLiveSkipsAbortedReasoningOnlyHistory(t *testin
 		t.Skip("missing test-only openai codex token in 01_auth.json")
 	}
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected openai-codex model")
 	}
@@ -241,7 +241,7 @@ func TestCompleteSimpleOpenAICodexLiveSkipsAbortedReasoningOnlyHistory(t *testin
 				},
 				API:        "openai-codex-responses",
 				Provider:   "openai-codex",
-				Model:      "gpt-5.4",
+				Model:      "gpt-5.5",
 				StopReason: StopReasonAborted,
 			},
 			UserMessage{Content: "Reply with exactly OK to confirm you can continue."},

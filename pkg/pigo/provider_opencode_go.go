@@ -1,5 +1,7 @@
 package pigo
 
+import "strings"
+
 const (
 	openCodeGoBaseURL          = "https://opencode.ai/zen/go/v1"
 	openCodeGoAnthropicBaseURL = "https://opencode.ai/zen/go"
@@ -325,6 +327,7 @@ func newOpenCodeGoProviderModule() ProviderModule {
 		Capabilities: ProviderCapabilities{
 			SupportsStreaming:  true,
 			SupportsToolChoice: true,
+			SupportsSession:    true,
 		},
 		BuildOptions:     buildOpenCodeGoProviderStreamOptions,
 		NormalizeOptions: normalizeOpenCodeGoProviderStreamOptions,
@@ -333,29 +336,46 @@ func newOpenCodeGoProviderModule() ProviderModule {
 }
 
 func buildOpenCodeGoProviderStreamOptions(model Model, options SimpleStreamOptions) ProviderStreamOptions {
+	var result ProviderStreamOptions
 	switch model.API {
 	case "anthropic-messages":
-		return buildAnthropicMessagesProviderStreamOptions(model, options)
+		result = buildAnthropicMessagesProviderStreamOptions(model, options)
 	case "openai-responses":
-		return buildOpenAIResponsesProviderStreamOptions(model, options)
+		result = buildOpenAIResponsesProviderStreamOptions(model, options)
 	case "openai-completions":
-		return buildOpenAICompletionsProviderStreamOptions(model, options)
+		result = buildOpenAICompletionsProviderStreamOptions(model, options)
 	default:
-		return buildBaseProviderStreamOptions(model, options)
+		result = buildBaseProviderStreamOptions(model, options)
 	}
+	return withOpenCodeGoSessionHeader(result)
 }
 
 func normalizeOpenCodeGoProviderStreamOptions(model Model, options ProviderStreamOptions) ProviderStreamOptions {
+	var result ProviderStreamOptions
 	switch model.API {
 	case "anthropic-messages":
-		return resolveAnthropicMessagesProviderOptions(model, options).toProviderStreamOptions(model)
+		result = resolveAnthropicMessagesProviderOptions(model, options).toProviderStreamOptions(model)
 	case "openai-responses":
-		return normalizeOpenAIResponsesProviderStreamOptions(model, options)
+		result = normalizeOpenAIResponsesProviderStreamOptions(model, options)
 	case "openai-completions":
-		return normalizeOpenAICompletionsProviderStreamOptions(model, options)
+		result = normalizeOpenAICompletionsProviderStreamOptions(model, options)
 	default:
-		return streamOptionsFromProvider(model, options).providerStreamOptions(model)
+		result = streamOptionsFromProvider(model, options).providerStreamOptions(model)
 	}
+	return withOpenCodeGoSessionHeader(result)
+}
+
+func withOpenCodeGoSessionHeader(options ProviderStreamOptions) ProviderStreamOptions {
+	if options.SessionID == "" {
+		return options
+	}
+	for name := range options.Headers {
+		if strings.EqualFold(name, "x-opencode-session") {
+			return options
+		}
+	}
+	options.Headers = mergeRequestHeaders(options.Headers, map[string]string{"x-opencode-session": options.SessionID})
+	return options
 }
 
 func newOpenCodeGoCompletionsCompat(thinkingFormat string, supportsReasoningEffort bool, supportsLongCacheRetention bool) *OpenAICompletionsCompat {

@@ -21,7 +21,7 @@ Common flags:
 
 - `--auth-root C:\path\to\pi-go`: points to the directory that contains `.pigo/auth.json` and `.pigo/.env`
 - `--provider openai-codex`
-- `--model gpt-5.4`
+- `--model gpt-5.5`
 - `--data-dir .\switch-chat\.data`
 - `--preset chat`
 - `--reflection-max-turns 3`

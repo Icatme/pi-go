@@ -260,7 +260,6 @@ func readCommandCodeModelsCache(path string) ([]Model, error) {
 		models = append(models, newCommandCodeModel(
 			cached.ID,
 			cached.Name,
-			*cached.Reasoning,
 			cached.ContextWindow,
 			cached.MaxTokens,
 			commandCodeModelCosts[cached.ID],

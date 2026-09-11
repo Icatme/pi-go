@@ -71,12 +71,6 @@ func newAgent(definition AgentDefinition, baseSnapshot AgentSnapshot, opts ...Ag
 	if snapshot.SystemPrompt == "" {
 		snapshot.SystemPrompt = definition.SystemPrompt
 	}
-	if snapshot.Model.Model == "" &&
-		snapshot.Model.Provider == "" &&
-		isZeroProviderConfig(snapshot.Model.ProviderConfig) &&
-		len(snapshot.Model.Metadata) == 0 {
-		snapshot.Model = cloneModelRef(definition.DefaultModel)
-	}
 
 	agent := &Agent{
 		engine:           NewEngine(),
@@ -91,6 +85,8 @@ func newAgent(definition AgentDefinition, baseSnapshot AgentSnapshot, opts ...Ag
 	if agent.engine == nil {
 		agent.engine = NewEngine()
 	}
+	agent.definition = initializeThinkingState(agent.definition, &agent.snapshot)
+	agent.activeDefinition = agent.definition
 	agent.refreshStateLocked()
 	return agent, nil
 }
@@ -302,22 +298,22 @@ func (a *Agent) SetSystemPrompt(prompt string) {
 	a.state.SystemPrompt = prompt
 }
 
-// SetModel updates the effective model reference in state and snapshot.
+// SetModel atomically updates the model and its effective thinking level. The requested preference is preserved.
 func (a *Agent) SetModel(model ModelRef) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	cloned := cloneModelRef(model)
 	a.snapshot.Model = cloned
-	a.state.Model = cloned
+	a.refreshThinkingLocked()
 }
 
-// SetThinkingLevel updates the effective thinking level.
+// SetThinkingLevel stores the requested preference and atomically resolves the effective level for the current model.
 func (a *Agent) SetThinkingLevel(level ThinkingLevel) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.definition.ThinkingLevel = level
-	a.activeDefinition.ThinkingLevel = level
-	a.state.ThinkingLevel = level
+	a.definition.ThinkingLevel = requestedThinkingLevel(level)
+	a.activeDefinition.ThinkingLevel = a.definition.ThinkingLevel
+	a.refreshThinkingLocked()
 }
 
 // SetSteeringMode updates how steering messages are dequeued.
@@ -484,12 +480,21 @@ func (a *Agent) resolveDefinition(ctx context.Context, definition AgentDefinitio
 	return resolved.Validate()
 }
 
+// replaceRunSnapshotLocked keeps configuration setters authoritative even when
+// they run after the final request or from a completion/error listener.
+func (a *Agent) replaceRunSnapshotLocked(snapshot AgentSnapshot) {
+	model := a.snapshot.Model
+	a.snapshot = cloneSnapshotValue(snapshot)
+	a.snapshot.Model = model
+	updateThinkingState(a.definition, &a.snapshot)
+}
+
 func (a *Agent) finishRun(snapshot *AgentSnapshot, idle chan struct{}) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	if snapshot != nil {
-		a.snapshot = cloneSnapshotValue(*snapshot)
+		a.replaceRunSnapshotLocked(*snapshot)
 	}
 	a.refreshStateLocked()
 	a.state.IsStreaming = false
@@ -536,7 +541,7 @@ func (a *Agent) handleRuntimeError(ctx context.Context, snapshot AgentSnapshot, 
 	})
 
 	a.mu.Lock()
-	a.snapshot = cloneSnapshotValue(*next)
+	a.replaceRunSnapshotLocked(*next)
 	a.refreshStateLocked()
 	a.state.IsStreaming = false
 	a.state.StreamMessage = nil
@@ -632,22 +637,30 @@ func (a *Agent) appendMessageLocked(message Message) {
 	a.state.Messages = append(a.state.Messages, cloneMessage(normalized[0]))
 }
 
+func (a *Agent) refreshThinkingLocked() {
+	updateThinkingState(a.definition, &a.snapshot)
+	a.state.Model = effectiveModelRef(a.snapshot, a.definition)
+	a.state.RequestedThinkingLevel = a.snapshot.RequestedThinkingLevel
+	a.state.ThinkingLevel = a.snapshot.ThinkingLevel
+}
+
 func (a *Agent) refreshStateLocked() {
 	a.state = AgentState{
-		SystemPrompt:     effectiveSystemPrompt(a.snapshot, a.definition),
-		Model:            effectiveModelRef(a.snapshot, a.definition),
-		ThinkingLevel:    a.definition.ThinkingLevel,
-		Tools:            cloneTools(a.definition.Tools),
-		Messages:         cloneMessages(a.snapshot.Messages),
-		IsStreaming:      a.state.IsStreaming,
-		StreamMessage:    cloneMessagePtr(a.state.StreamMessage),
-		PendingToolCalls: clonePendingToolCallMap(a.state.PendingToolCalls),
-		Error:            a.snapshot.Error,
-		SessionID:        a.snapshot.SessionID,
-		Transport:        a.definition.Transport,
-		MaxRetryDelayMs:  a.definition.MaxRetryDelayMs,
-		ThinkingBudgets:  cloneThinkingBudgets(a.definition.ThinkingBudgets),
-		Metadata:         cloneStringAnyMap(a.snapshot.Metadata),
+		SystemPrompt:           effectiveSystemPrompt(a.snapshot, a.definition),
+		Model:                  effectiveModelRef(a.snapshot, a.definition),
+		ThinkingLevel:          a.snapshot.ThinkingLevel,
+		RequestedThinkingLevel: a.snapshot.RequestedThinkingLevel,
+		Tools:                  cloneTools(a.definition.Tools),
+		Messages:               cloneMessages(a.snapshot.Messages),
+		IsStreaming:            a.state.IsStreaming,
+		StreamMessage:          cloneMessagePtr(a.state.StreamMessage),
+		PendingToolCalls:       clonePendingToolCallMap(a.state.PendingToolCalls),
+		Error:                  a.snapshot.Error,
+		SessionID:              a.snapshot.SessionID,
+		Transport:              a.definition.Transport,
+		MaxRetryDelayMs:        a.definition.MaxRetryDelayMs,
+		ThinkingBudgets:        cloneThinkingBudgets(a.definition.ThinkingBudgets),
+		Metadata:               cloneStringAnyMap(a.snapshot.Metadata),
 	}
 }
 
@@ -665,6 +678,14 @@ func (a *Agent) dequeueFollowUp() []Message {
 
 func (a *Agent) runtimeHooks() LoopHooks {
 	return LoopHooks{
+		refreshModelState: func(snapshot *AgentSnapshot) AgentDefinition {
+			a.mu.RLock()
+			defer a.mu.RUnlock()
+			snapshot.Model = cloneModelRef(a.snapshot.Model)
+			snapshot.RequestedThinkingLevel = a.snapshot.RequestedThinkingLevel
+			snapshot.ThinkingLevel = a.snapshot.ThinkingLevel
+			return a.definition
+		},
 		ResolveDefinition: func(ctx context.Context, current AgentDefinition, snapshot AgentSnapshot) (AgentDefinition, error) {
 			resolved, err := a.resolveDefinition(ctx, current, snapshot)
 			if err != nil {
@@ -719,20 +740,21 @@ func dequeueByMode(queue *[]Message, mode QueueMode) []Message {
 
 func cloneAgentState(state AgentState) AgentState {
 	return AgentState{
-		SystemPrompt:     state.SystemPrompt,
-		Model:            cloneModelRef(state.Model),
-		ThinkingLevel:    state.ThinkingLevel,
-		Tools:            cloneTools(state.Tools),
-		Messages:         cloneMessages(state.Messages),
-		IsStreaming:      state.IsStreaming,
-		StreamMessage:    cloneMessagePtr(state.StreamMessage),
-		PendingToolCalls: clonePendingToolCallMap(state.PendingToolCalls),
-		Error:            state.Error,
-		SessionID:        state.SessionID,
-		Transport:        state.Transport,
-		MaxRetryDelayMs:  state.MaxRetryDelayMs,
-		ThinkingBudgets:  cloneThinkingBudgets(state.ThinkingBudgets),
-		Metadata:         cloneStringAnyMap(state.Metadata),
+		SystemPrompt:           state.SystemPrompt,
+		Model:                  cloneModelRef(state.Model),
+		ThinkingLevel:          state.ThinkingLevel,
+		RequestedThinkingLevel: state.RequestedThinkingLevel,
+		Tools:                  cloneTools(state.Tools),
+		Messages:               cloneMessages(state.Messages),
+		IsStreaming:            state.IsStreaming,
+		StreamMessage:          cloneMessagePtr(state.StreamMessage),
+		PendingToolCalls:       clonePendingToolCallMap(state.PendingToolCalls),
+		Error:                  state.Error,
+		SessionID:              state.SessionID,
+		Transport:              state.Transport,
+		MaxRetryDelayMs:        state.MaxRetryDelayMs,
+		ThinkingBudgets:        cloneThinkingBudgets(state.ThinkingBudgets),
+		Metadata:               cloneStringAnyMap(state.Metadata),
 	}
 }
 
@@ -763,18 +785,8 @@ func effectiveSystemPrompt(snapshot AgentSnapshot, definition AgentDefinition) s
 }
 
 func effectiveModelRef(snapshot AgentSnapshot, definition AgentDefinition) ModelRef {
-	if snapshot.Model.Model != "" ||
-		snapshot.Model.Provider != "" ||
-		!isZeroProviderConfig(snapshot.Model.ProviderConfig) ||
-		len(snapshot.Model.Metadata) > 0 {
-		return cloneModelRef(snapshot.Model)
+	if snapshot.Model.Model == "" && (definition.Model == nil || definition.DefaultModel.Model != "") {
+		return cloneModelRef(definition.DefaultModel)
 	}
-	return cloneModelRef(definition.DefaultModel)
-}
-
-func isZeroProviderConfig(config ProviderConfig) bool {
-	return config.BaseURL == "" &&
-		config.APIKey == "" &&
-		len(config.Headers) == 0 &&
-		config.Auth == nil
+	return cloneModelRef(snapshot.Model)
 }

@@ -18,7 +18,7 @@ Set the Mattermost connection details through flags or environment variables:
 ```powershell
 $env:MATTERMOST_URL = "http://localhost:8065"
 $env:MATTERMOST_TOKEN = "<your-bot-token>"
-go run ./example/mattermost-chatbot --provider openai-codex --model gpt-5.4
+go run ./example/mattermost-chatbot --provider openai-codex --model gpt-5.5
 ```
 
 Common flags:
@@ -27,7 +27,7 @@ Common flags:
 - `--mattermost-token <token>`
 - `--auth-root ../pi-go`
 - `--provider openai-codex`
-- `--model gpt-5.4`
+- `--model gpt-5.5`
 - `--system-prompt "You are a helpful Mattermost AI assistant."`
 
 ## Built-in Tools

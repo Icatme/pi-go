@@ -62,7 +62,7 @@ func normalizeAssistantForComparison(message AssistantMessage) AssistantMessage 
 }
 
 func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForMixedTerminalOutput(t *testing.T) {
-	fixture := runOpenAICodexFixture(t, "gpt-5.4", buildOpenAICodexSSE(
+	fixture := runOpenAICodexFixture(t, "gpt-5.5", buildOpenAICodexSSE(
 		map[string]any{
 			"type": "response.created",
 			"response": map[string]any{
@@ -145,7 +145,7 @@ func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForMixedTerminalOutpu
 }
 
 func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForMalformedTerminalResponse(t *testing.T) {
-	fixture := runOpenAICodexFixture(t, "gpt-5.4", buildOpenAICodexSSE(
+	fixture := runOpenAICodexFixture(t, "gpt-5.5", buildOpenAICodexSSE(
 		map[string]any{
 			"type": "response.created",
 			"response": map[string]any{
@@ -169,7 +169,7 @@ func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForMalformedTerminalR
 }
 
 func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForIncompleteResponse(t *testing.T) {
-	fixture := runOpenAICodexFixture(t, "gpt-5.4", buildOpenAICodexSSE(
+	fixture := runOpenAICodexFixture(t, "gpt-5.5", buildOpenAICodexSSE(
 		map[string]any{
 			"type": "response.output_item.done",
 			"item": map[string]any{
@@ -206,7 +206,7 @@ func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForIncompleteResponse
 }
 
 func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForFailedResponse(t *testing.T) {
-	fixture := runOpenAICodexFixture(t, "gpt-5.4", buildOpenAICodexSSE(
+	fixture := runOpenAICodexFixture(t, "gpt-5.5", buildOpenAICodexSSE(
 		map[string]any{
 			"type": "response.failed",
 			"response": map[string]any{
@@ -232,7 +232,7 @@ func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForFailedResponse(t *
 }
 
 func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForCreatedThenTopLevelError(t *testing.T) {
-	fixture := runOpenAICodexFixture(t, "gpt-5.4", buildOpenAICodexSSE(
+	fixture := runOpenAICodexFixture(t, "gpt-5.5", buildOpenAICodexSSE(
 		map[string]any{
 			"type": "response.created",
 			"response": map[string]any{
@@ -257,7 +257,7 @@ func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForCreatedThenTopLeve
 }
 
 func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForTerminalOnlyReasoningAndFunctionCall(t *testing.T) {
-	fixture := runOpenAICodexFixture(t, "gpt-5.4", buildOpenAICodexSSE(
+	fixture := runOpenAICodexFixture(t, "gpt-5.5", buildOpenAICodexSSE(
 		map[string]any{
 			"type": "response.done",
 			"response": map[string]any{
@@ -303,7 +303,7 @@ func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForTerminalOnlyReason
 }
 
 func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForTerminalArgumentOverride(t *testing.T) {
-	fixture := runOpenAICodexFixture(t, "gpt-5.4", buildOpenAICodexSSE(
+	fixture := runOpenAICodexFixture(t, "gpt-5.5", buildOpenAICodexSSE(
 		map[string]any{
 			"type": "response.output_item.added",
 			"item": map[string]any{
@@ -357,7 +357,7 @@ func TestOpenAICodexFixtureKeepsStreamAndCompleteConsistentForTerminalArgumentOv
 }
 
 func TestStreamSimpleOpenAICodexTerminalItemOverridesPartialMessageText(t *testing.T) {
-	fixture := runOpenAICodexFixture(t, "gpt-5.4", buildOpenAICodexSSE(
+	fixture := runOpenAICodexFixture(t, "gpt-5.5", buildOpenAICodexSSE(
 		map[string]any{
 			"type": "response.output_item.added",
 			"item": map[string]any{
@@ -421,7 +421,7 @@ func TestStreamSimpleOpenAICodexMalformedJSONAfterCreatedPreservesResponseID(t *
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}

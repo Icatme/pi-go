@@ -303,11 +303,11 @@ func TestRunAskAppliesDefaultSystemPromptForDefaultCodexModel(t *testing.T) {
 	}()
 
 	getModelFn = func(provider pigo.Provider, modelID string) *pigo.Model {
-		if provider != "openai-codex" || modelID != "gpt-5.4" {
+		if provider != "openai-codex" || modelID != "gpt-5.5" {
 			return nil
 		}
 		return &pigo.Model{
-			ID:       "gpt-5.4",
+			ID:       "gpt-5.5",
 			Provider: "openai-codex",
 			API:      "openai-codex-responses",
 		}

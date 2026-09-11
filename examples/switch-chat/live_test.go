@@ -23,7 +23,7 @@ func TestLiveSmokeChatAndReflection(t *testing.T) {
 	}
 	model := os.Getenv("PI_GO_AGENT_EXAMPLE_MODEL")
 	if model == "" {
-		model = "gpt-5.4"
+		model = "gpt-5.5"
 	}
 
 	app, err := NewApp(AppConfig{

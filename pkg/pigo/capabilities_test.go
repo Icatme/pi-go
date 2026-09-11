@@ -119,7 +119,7 @@ func TestCapabilitySnapshotsIncludeExactDispatchEndpoints(t *testing.T) {
 		wantURL  string
 	}{
 		{provider: "openai", modelID: "gpt-5.6-sol", wantURL: "https://api.openai.com"},
-		{provider: "deepseek", modelID: "deepseek-v4-flash", wantURL: "https://api.deepseek.com"},
+		{provider: "deepseek", modelID: "deepseek-flash", wantURL: "https://api.deepseek.com"},
 		{provider: "opencode-go", modelID: "gpt-5.6-luna", wantURL: openCodeGoBaseURL},
 	}
 
@@ -219,7 +219,7 @@ func TestOpenAIResponsesKeepsSamplingModelScoped(t *testing.T) {
 		{api: "openai-codex-responses", wantTemp: CapabilitySupported, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
 		{api: "openai-completions", wantTemp: CapabilitySupported, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
 		{api: "anthropic-messages", wantTemp: CapabilityUnknown, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
-		{api: "commandcode-custom", wantTemp: CapabilityUnsupported, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
+		{api: "commandcode-custom", wantTemp: CapabilityUnknown, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
 		{api: "deepseek-chat-completions", wantTemp: CapabilitySupported, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
 		{api: "google-generative-ai", wantTemp: CapabilitySupported, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
 		{api: "mistral-conversations", wantTemp: CapabilitySupported, wantTopP: CapabilityUnsupported, wantParallel: CapabilityUnsupported},
@@ -306,7 +306,7 @@ func TestDynamicCommandCodeCapabilitiesRemainUnknownWhenDiscoveryOmitsFacts(t *t
 	assertCapability(t, "tools", snapshot.Capabilities.Tools, CapabilityUnknown)
 	assertCapability(t, "reasoning", snapshot.Capabilities.Reasoning, CapabilityUnknown)
 	assertCapability(t, "reasoning levels", snapshot.Capabilities.ReasoningLevels, CapabilityUnknown)
-	assertCapability(t, "temperature", snapshot.Capabilities.Temperature, CapabilityUnsupported)
+	assertCapability(t, "temperature", snapshot.Capabilities.Temperature, CapabilityUnknown)
 	assertCapability(t, "top_p", snapshot.Capabilities.TopP, CapabilityUnsupported)
 	assertCapability(t, "parallel tool calls", snapshot.Capabilities.ParallelToolCalls, CapabilityUnsupported)
 	if len(snapshot.Capabilities.SupportedReasoningLevels) != 0 {
@@ -483,7 +483,7 @@ func TestCapabilitySnapshotConcurrentWithCatalogReplacement(t *testing.T) {
 	provider := Provider("commandcode")
 	replace := func(modelID string) error {
 		module := normalizeProviderModule(provider, newCommandCodeProviderModuleWithModels(map[string]Model{
-			modelID: newCommandCodeModel(modelID, modelID, true, 100_000, 65_536, UsageCost{}),
+			modelID: newCommandCodeModel(modelID, modelID, 100_000, 65_536, UsageCost{}),
 		}))
 		if !providerRegistry.Replace(provider, &module) {
 			return fmt.Errorf("provider %q not registered", provider)

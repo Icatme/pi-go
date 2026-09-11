@@ -53,9 +53,14 @@ func cloneCompat(compat ProviderCompat) ProviderCompat {
 		return &cloned
 	case *OpenAIResponsesCompat:
 		cloned := *typed
+		cloned.SendSessionIdHeader = cloneBoolPointer(typed.SendSessionIdHeader)
+		cloned.SupportsLongCacheRetention = cloneBoolPointer(typed.SupportsLongCacheRetention)
+		cloned.SupportsExplicitPromptCacheMode = cloneBoolPointer(typed.SupportsExplicitPromptCacheMode)
+		cloned.SupportsMaxOutputTokens = cloneBoolPointer(typed.SupportsMaxOutputTokens)
 		return &cloned
 	case *AnthropicMessagesCompat:
 		cloned := *typed
+		cloned.ForceAdaptiveThinking = cloneBoolPointer(typed.ForceAdaptiveThinking)
 		return &cloned
 	default:
 		return typed
@@ -181,4 +186,12 @@ func cloneStringSlice(values []string) []string {
 func anyString(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+func cloneBoolPointer(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }

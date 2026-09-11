@@ -26,7 +26,7 @@ func TestSupportsXHighFalseForNonOpusAnthropic(t *testing.T) {
 }
 
 func TestSupportsXHighForGPT54(t *testing.T) {
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai", "gpt-5.4")
 	if model == nil {
 		t.Fatal("expected model to exist")
 	}

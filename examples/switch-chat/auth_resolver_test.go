@@ -37,7 +37,7 @@ func TestResolveModelRefReadsOAuthFromAuthFile(t *testing.T) {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
 
-	ref, err := resolveModelRef("openai-codex", "gpt-5.4", root)
+	ref, err := resolveModelRef("openai-codex", "gpt-5.5", root)
 	if err != nil {
 		t.Fatalf("resolveModelRef returned error: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestResolveModelRefPrefersProcessEnvOverDotEnv(t *testing.T) {
 }
 
 func TestResolveModelRefErrorsWhenAuthRootIsMissing(t *testing.T) {
-	_, err := resolveModelRef("openai-codex", "gpt-5.4", filepath.Join(t.TempDir(), "missing"))
+	_, err := resolveModelRef("openai-codex", "gpt-5.5", filepath.Join(t.TempDir(), "missing"))
 	if err == nil {
 		t.Fatal("expected missing auth root error")
 	}

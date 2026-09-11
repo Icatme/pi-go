@@ -113,7 +113,7 @@ func TestCompleteSimpleOpenAICodexBuildsRequestAndParsesText(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -147,7 +147,7 @@ func TestCompleteSimpleOpenAICodexBuildsRequestAndParsesText(t *testing.T) {
 	if response.Usage.Input != 18 || response.Usage.CacheRead != 2 {
 		t.Fatalf("expected usage with cached token split, got %+v", response.Usage)
 	}
-	if requestBody.Model != "gpt-5.4" || !requestBody.Stream {
+	if requestBody.Model != "gpt-5.5" || !requestBody.Stream {
 		t.Fatalf("expected stream codex request, got %+v", requestBody)
 	}
 	if requestBody.Instructions != "You are concise." {
@@ -175,7 +175,7 @@ func TestCompleteSimpleOpenAICodexSSEInvokesOnResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -217,7 +217,7 @@ func TestCompleteSimpleOpenAICodexTimeoutCancelsSSERequest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -414,7 +414,7 @@ func TestCompleteSimpleOpenAICodexReturnsProviderErrorMessage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -510,7 +510,7 @@ func TestCompleteSimpleOpenAICodexParsesTerminalOnlyMixedOutput(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -582,7 +582,7 @@ func TestCompleteSimpleOpenAICodexMapsIncompleteResponseToLength(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -620,7 +620,7 @@ func TestCompleteSimpleOpenAICodexReturnsTerminalFailureMessage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -654,7 +654,7 @@ func TestCompleteSimpleOpenAICodexReturnsTopLevelErrorEventMessage(t *testing.T)
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -709,7 +709,7 @@ func TestCompleteSimpleOpenAICodexParsesRefusalMessageContent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -766,7 +766,7 @@ func TestCompleteSimpleOpenAICodexCombinesMultipleMessageContentParts(t *testing
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -804,7 +804,7 @@ func TestCompleteSimpleOpenAICodexFailedWithoutMessageUsesFallback(t *testing.T)
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -847,7 +847,7 @@ func TestCompleteSimpleOpenAICodexTopLevelErrorPreservesCreatedResponseID(t *tes
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -901,7 +901,7 @@ func TestCompleteSimpleOpenAICodexClampsNegativeComputedInputUsage(t *testing.T)
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -934,7 +934,7 @@ func TestCompleteSimpleOpenAICodexFailsOnMalformedTerminalResponse(t *testing.T)
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -998,7 +998,7 @@ func TestCompleteSimpleOpenAICodexSetsSessionCacheAndReasoningOptions(t *testing
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -1097,7 +1097,7 @@ func TestCompleteSimpleOpenAICodexRefreshesExpiredOAuthBeforeRequest(t *testing.
 	}()
 	openAICodexOAuthTokenURL = server.URL + "/oauth/token"
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -1151,7 +1151,7 @@ func TestCompleteSimpleOpenAICodexTimeoutIncludesOAuthRefresh(t *testing.T) {
 		openAICodexOAuthTokenURL = previousURL
 	}()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -1229,11 +1229,13 @@ func TestCompleteSimpleOpenAICodexUsesRequestedServiceTierWhenResponseEchoesDefa
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
 	model.BaseURL = server.URL
+	model.Cost = UsageCost{Input: 2.5, Output: 15}
+	model.CostTiers = nil
 
 	response := CompleteSimple(*model, Context{
 		Messages: []Message{UserMessage{Content: "hello"}},
@@ -1293,7 +1295,7 @@ func TestCompleteSimpleOpenAICodexAutoTransportFallsBackToSSEWhenWebSocketSetupF
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -1354,7 +1356,7 @@ func TestCompleteSimpleOpenAICodexWebSocketTransportDoesNotFallbackToSSE(t *test
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -1429,7 +1431,7 @@ func TestCompleteSimpleOpenAICodexSSERetriesTransientHTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -1469,7 +1471,7 @@ func TestCompleteSimpleOpenAICodexSSEFinalHTTPErrorUsesParsedMessage(t *testing.
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -1543,7 +1545,7 @@ func TestCompleteSimpleOpenAICodexAutoTransportDoesNotFallbackAfterWebSocketStar
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -1659,7 +1661,7 @@ func TestCompleteSimpleOpenAICodexWebSocketReusesSessionConnection(t *testing.T)
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -1763,7 +1765,7 @@ func TestCompleteSimpleOpenAICodexWebSocketTimeoutInterruptsReadAndEvictsSession
 		server.Close()
 	}()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -1874,7 +1876,7 @@ func TestCompleteSimpleOpenAICodexWebSocketCacheIsolatesEndpointAccountAndSessio
 		serverB.Close()
 	}()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -1988,7 +1990,7 @@ func TestCompleteSimpleOpenAICodexWebSocketSessionExpiresAfterIdleTTL(t *testing
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -2064,7 +2066,7 @@ func TestCompleteSimpleOpenAICodexPassesToolChoiceFromOptions(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -2129,7 +2131,7 @@ func TestCompleteSimpleOpenAICodexDefaultsToolChoiceToAuto(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -2185,7 +2187,7 @@ func TestCompleteSimpleOpenAICodexPassesPreviousResponseID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -2242,7 +2244,7 @@ func TestCompleteSimpleOpenAICodexOmitsEmptyPreviousResponseID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}

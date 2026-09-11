@@ -3,7 +3,7 @@ package pigo
 import "testing"
 
 func TestOpenAICodexToolResultOutputWithTextAndImage(t *testing.T) {
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}

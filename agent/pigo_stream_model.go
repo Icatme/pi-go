@@ -28,6 +28,15 @@ type pigoStreamResult struct {
 	err     error
 }
 
+func resolvePigoThinkingLevel(ref ModelRef, requested ThinkingLevel) ThinkingLevel {
+	model := pigo.GetModel(pigo.Provider(strings.TrimSpace(ref.Provider)), strings.TrimSpace(ref.Model))
+	if model == nil {
+		// ResolveModel/Stream reports an unconfigured or unknown model when used.
+		return requested
+	}
+	return ThinkingLevel(pigo.ClampThinkingLevel(*model, pigo.ModelThinkingLevel(requested)))
+}
+
 func (pigoStreamModel) Stream(ctx context.Context, request ModelRequest) (AssistantStream, error) {
 	provider := strings.TrimSpace(request.Model.Provider)
 	modelID := strings.TrimSpace(request.Model.Model)
@@ -113,6 +122,11 @@ func buildPigoStreamOptions(ctx context.Context, request ModelRequest, provider 
 		apiKey = pigo.GetEnvAPIKey(provider)
 	}
 
+	reasoning := toPigoThinkingLevel(request.ThinkingLevel)
+	if provider == "deepseek" && requestedThinkingLevel(request.ThinkingLevel) == ThinkingOff {
+		// DeepSeek treats an omitted effort as its default max, so off must be explicit.
+		reasoning = pigo.ThinkingLevel(ThinkingOff)
+	}
 	return pigo.SimpleStreamOptions{
 		APIKey:          apiKey,
 		Auth:            toPigoAuthConfigs(provider, request.Model.ProviderConfig.Auth),
@@ -121,7 +135,7 @@ func buildPigoStreamOptions(ctx context.Context, request ModelRequest, provider 
 		SessionID:       request.SessionID,
 		MaxRetryDelay:   request.MaxRetryDelayMs,
 		RequestContext:  ctx,
-		Reasoning:       toPigoThinkingLevel(request.ThinkingLevel),
+		Reasoning:       reasoning,
 		ThinkingBudgets: toPigoThinkingBudgets(request.ThinkingBudgets),
 	}
 }

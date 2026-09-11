@@ -35,7 +35,17 @@ func resolveOpenAICodexProviderOptions(model Model, options ProviderStreamOption
 		StreamOptions: streamOptionsFromProvider(model, options),
 	}
 
-	if resolved.Reasoning != "" {
+	switch resolved.Reasoning {
+	case "", ThinkingLevel(ModelThinkingLevelOff), "none":
+		resolved.Reasoning = ""
+		if model.Reasoning {
+			if off, mapped := model.ThinkingLevelMap[ModelThinkingLevelOff]; mapped {
+				resolved.Reasoning = ThinkingLevel(strings.TrimSpace(off))
+			} else {
+				resolved.Reasoning = "none"
+			}
+		}
+	default:
 		resolved.Reasoning = ThinkingLevel(clampOpenAIResponsesReasoningEffort(model, resolved.Reasoning))
 	}
 	if strings.TrimSpace(resolved.TextVerbosity) == "" {

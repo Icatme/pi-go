@@ -25,10 +25,10 @@ func TestOpenCodeGoProviderCatalogAndProtocolRouting(t *testing.T) {
 	if len(module.Models) != 20 {
 		t.Fatalf("expected 20 documented active OpenCode Go models, got %d", len(module.Models))
 	}
-	if !module.Capabilities.SupportsStreaming || !module.Capabilities.SupportsToolChoice {
+	if !module.Capabilities.SupportsStreaming || !module.Capabilities.SupportsToolChoice || !module.Capabilities.SupportsSession {
 		t.Fatalf("expected capabilities shared by every OpenCode Go route, got %+v", module.Capabilities)
 	}
-	if module.Capabilities.SupportsJSONOutput || module.Capabilities.SupportsJSONSchema || module.Capabilities.SupportsSession ||
+	if module.Capabilities.SupportsJSONOutput || module.Capabilities.SupportsJSONSchema ||
 		module.Capabilities.SupportsThinkingBudget || module.Capabilities.SupportsReasoningSummary {
 		t.Fatalf("mixed OpenCode Go protocols must not advertise route-specific capabilities globally: %+v", module.Capabilities)
 	}

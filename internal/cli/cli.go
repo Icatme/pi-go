@@ -76,7 +76,7 @@ func writeUsage(stdout io.Writer) {
 		writeLine(stdout, line+"\n")
 	}
 	writeLine(stdout, "\nExamples:\n")
-	writeLine(stdout, "  pigo ask --provider openai-codex --model gpt-5.4 \"hello\"\n")
+	writeLine(stdout, "  pigo ask --provider openai-codex --model gpt-5.5 \"hello\"\n")
 	writeLine(stdout, "  pigo ask --provider kimi-coding \"hello\"\n")
 	writeLine(stdout, "  pigo login\n")
 	writeLine(stdout, "  pigo login openai-codex\n")
@@ -361,7 +361,7 @@ func promptProviderSelection(stdin io.Reader, stdout io.Writer, providers []oaut
 func defaultModelID(provider pigo.Provider) string {
 	switch provider {
 	case "openai-codex":
-		return "gpt-5.4"
+		return "gpt-5.5"
 	case "kimi-coding":
 		return "kimi-k2-thinking"
 	case "opencode-go":
@@ -400,7 +400,7 @@ func defaultAskSystemPrompt(provider pigo.Provider, modelID string, explicit str
 		return strings.TrimSpace(explicit)
 	}
 
-	if provider == "openai-codex" && modelID == "gpt-5.4" {
+	if provider == "openai-codex" && modelID == "gpt-5.5" {
 		return "You are a helpful assistant. Answer directly and concisely."
 	}
 

@@ -11,7 +11,7 @@ func TestCompleteSimpleOpenAICodexImmediateAbort(t *testing.T) {
 	requestContext, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -71,7 +71,7 @@ func TestStreamSimpleOpenAICodexAbortedRequestKeepsZeroUsage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}

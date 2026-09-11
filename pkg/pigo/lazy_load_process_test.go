@@ -120,11 +120,11 @@ func TestLazyLoadProcessHelper(t *testing.T) {
 	switch os.Getenv("PIGO_LAZY_LOAD_MODE") {
 	case "import_only":
 	case "get_model_openai_codex":
-		if GetModel("openai-codex", "gpt-5.4") == nil {
+		if GetModel("openai-codex", "gpt-5.5") == nil {
 			t.Fatal("expected codex model during lazy load probe")
 		}
 	case "complete_simple_openai_codex":
-		model := GetModel("openai-codex", "gpt-5.4")
+		model := GetModel("openai-codex", "gpt-5.5")
 		if model == nil {
 			t.Fatal("expected codex model during lazy load probe")
 		}

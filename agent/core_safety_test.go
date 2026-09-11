@@ -1269,7 +1269,7 @@ func TestEngineToolHookErrorsRemainPerCallAndPreserveSiblings(t *testing.T) {
 	}
 }
 
-func TestEnginePreparesNextTurnBeforeStopDecision(t *testing.T) {
+func TestEnginePreparesNextTurnAfterStopDecision(t *testing.T) {
 	var (
 		primaryCalls   int
 		replacementReq ModelRequest
@@ -1292,7 +1292,7 @@ func TestEnginePreparesNextTurnBeforeStopDecision(t *testing.T) {
 		Tools: []ToolDefinition{{Name: "echo", Execute: terminatingTool(false)}},
 		PrepareNextTurn: func(_ context.Context, input PrepareNextTurnContext) (*AgentLoopTurnUpdate, error) {
 			order = append(order, "prepare")
-			if len(order) == 1 && (len(input.NewMessages) != 3 || input.NewMessages[0].Role != RoleUser) {
+			if len(order) == 2 && (len(input.NewMessages) != 3 || input.NewMessages[0].Role != RoleUser) {
 				t.Fatalf("unexpected new-message window: %+v", input.NewMessages)
 			}
 			level := ThinkingMax
@@ -1308,8 +1308,8 @@ func TestEnginePreparesNextTurnBeforeStopDecision(t *testing.T) {
 		},
 		ShouldStopAfterTurn: func(_ context.Context, input ShouldStopAfterTurnContext) (bool, error) {
 			order = append(order, "stop")
-			if input.Context.SystemPrompt != "updated" {
-				t.Fatalf("stop hook did not observe prepared state: %+v", input)
+			if len(order) == 1 && input.Context.SystemPrompt != "" {
+				t.Fatalf("stop hook did not observe completed-turn state: %+v", input)
 			}
 			return false, nil
 		},
@@ -1321,8 +1321,8 @@ func TestEnginePreparesNextTurnBeforeStopDecision(t *testing.T) {
 	if primaryCalls != 1 {
 		t.Fatalf("expected primary model once, got %d", primaryCalls)
 	}
-	if len(order) < 2 || order[0] != "prepare" || order[1] != "stop" {
-		t.Fatalf("expected prepare before stop, got %v", order)
+	if len(order) < 2 || order[0] != "stop" || order[1] != "prepare" {
+		t.Fatalf("expected stop before prepare, got %v", order)
 	}
 	if replacementReq.SystemPrompt != "updated" || replacementReq.ThinkingLevel != ThinkingMax || replacementReq.Model.Model != "replacement" {
 		t.Fatalf("replacement request did not receive turn update: %+v", replacementReq)
@@ -1449,8 +1449,17 @@ func TestEngineContinueContextPruningPreservesHistoryAndNewMessageWindow(t *test
 		NewUserTextMessage("continue"),
 	}
 	var agentEnd []Message
+	modelCalls := 0
+	prepareCalls := 0
 	definition := AgentDefinition{
-		Model: staticModel{streamFn: func(_ context.Context, _ ModelRequest) (AssistantStream, error) {
+		Model: staticModel{streamFn: func(_ context.Context, request ModelRequest) (AssistantStream, error) {
+			modelCalls++
+			if modelCalls == 2 {
+				if len(request.Messages) != 1 || request.Messages[0].Parts[0].Text != "compressed" {
+					t.Fatalf("next turn did not use pruned context: %+v", request.Messages)
+				}
+				return newStaticAssistantStream(Message{Role: RoleAssistant, StopReason: StopReasonStop}, nil), nil
+			}
 			return newStaticAssistantStream(Message{
 				Role:       RoleAssistant,
 				ToolCalls:  []ToolCall{{ID: "call", Name: "echo"}},
@@ -1460,12 +1469,13 @@ func TestEngineContinueContextPruningPreservesHistoryAndNewMessageWindow(t *test
 		}},
 		Tools: []ToolDefinition{{Name: "echo", Execute: terminatingTool(false)}},
 		PrepareNextTurn: func(_ context.Context, input PrepareNextTurnContext) (*AgentLoopTurnUpdate, error) {
+			prepareCalls++
 			pruned := cloneAgentContext(input.Context)
 			pruned.Messages = []Message{NewUserTextMessage("compressed")}
 			return &AgentLoopTurnUpdate{Context: &pruned}, nil
 		},
 		ShouldStopAfterTurn: func(context.Context, ShouldStopAfterTurnContext) (bool, error) {
-			return true, nil
+			return modelCalls == 2, nil
 		},
 	}
 
@@ -1477,10 +1487,10 @@ func TestEngineContinueContextPruningPreservesHistoryAndNewMessageWindow(t *test
 	if err != nil {
 		t.Fatalf("Continue returned error: %v", err)
 	}
-	if len(next.Messages) != 5 || next.Messages[0].Parts[0].Text != "old" || next.Messages[4].Role != RoleTool {
+	if prepareCalls != 1 || len(next.Messages) != 6 || next.Messages[0].Parts[0].Text != "old" || next.Messages[4].Role != RoleTool {
 		t.Fatalf("context pruning changed durable history: %+v", next.Messages)
 	}
-	if len(agentEnd) != 2 || agentEnd[0].Role != RoleAssistant || agentEnd[1].Role != RoleTool {
+	if len(agentEnd) != 3 || agentEnd[0].Role != RoleAssistant || agentEnd[1].Role != RoleTool || agentEnd[2].Role != RoleAssistant {
 		t.Fatalf("unexpected continue invocation window: %+v", agentEnd)
 	}
 }

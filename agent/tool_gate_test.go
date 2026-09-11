@@ -1150,7 +1150,7 @@ func TestToolGateRejectsNonDurableParsedArgsBeforeGateOrExecution(t *testing.T) 
 	}
 }
 
-func TestResumePendingToolCallsRunsPrepareThenStopWithResumeMessageWindow(t *testing.T) {
+func TestResumePendingToolCallsStopsBeforePrepareWithResumeMessageWindow(t *testing.T) {
 	assistant := Message{
 		Role:       RoleAssistant,
 		ToolCalls:  []ToolCall{{ID: "call", Name: "echo"}},
@@ -1204,7 +1204,7 @@ func TestResumePendingToolCallsRunsPrepareThenStopWithResumeMessageWindow(t *tes
 	if err != nil {
 		t.Fatalf("ResumePendingToolCallsWithHooks returned error: %v", err)
 	}
-	if fmt.Sprint(order) != fmt.Sprint([]string{"prepare", "stop"}) {
+	if fmt.Sprint(order) != fmt.Sprint([]string{"stop"}) {
 		t.Fatalf("unexpected post-tool hook order: %v", order)
 	}
 	if len(next.Messages) != 3 || next.Messages[1].Role != RoleAssistant || next.Messages[2].Role != RoleTool {
@@ -1409,7 +1409,7 @@ func TestResumePendingToolCallsPreservesMaxTurnBudgetAcrossAttempts(t *testing.T
 	if len(finalSnapshot.Messages) != 3 || finalSnapshot.Messages[2].Role != RoleTool || len(finalSnapshot.PendingToolCalls) != 0 {
 		t.Fatalf("resume did not complete the pending tool before enforcing turn budget: %+v", finalSnapshot)
 	}
-	assertGateLifecycle(t, events, 1, 2)
+	assertGateLifecycle(t, events, 0, 1)
 }
 
 func collectToolGateStream(t *testing.T, stream *RunStream) ([]AgentEvent, AgentSnapshot, error) {

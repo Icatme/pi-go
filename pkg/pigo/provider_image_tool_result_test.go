@@ -46,7 +46,7 @@ func TestCompleteSimpleOpenAICodexSendsImageOnlyToolResultInFunctionCallOutput(t
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -159,7 +159,7 @@ func TestCompleteSimpleOpenAICodexSendsMixedToolResultInFunctionCallOutput(t *te
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}

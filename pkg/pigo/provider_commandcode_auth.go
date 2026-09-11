@@ -12,7 +12,7 @@ const (
 	commandCodeAPIKeyDollarEnvReference = "$COMMANDCODE_API_KEY"
 )
 
-// ResolveCommandCodeAPIKey follows pi-commandcode-provider v0.4.3's
+// ResolveCommandCodeAPIKey follows pi-commandcode-provider v0.6.4's
 // credential lookup after considering caller-supplied runtime auth. Explicit
 // stream API keys are handled before this function by the transport.
 func ResolveCommandCodeAPIKey(auth map[Provider]AuthConfig) string {
@@ -32,7 +32,7 @@ func ResolveCommandCodeAPIKey(auth map[Provider]AuthConfig) string {
 
 func usableCommandCodeAPIKey(value string) string {
 	value = strings.TrimSpace(value)
-	if value == commandCodeAPIKeyEnvReference || value == commandCodeAPIKeyDollarEnvReference {
+	if value == commandCodeAPIKeyEnvReference || value == commandCodeAPIKeyDollarEnvReference || value == "COMMAND_CODE_API_KEY" || value == "$COMMAND_CODE_API_KEY" {
 		return ""
 	}
 	return value
@@ -90,4 +90,8 @@ func commandCodeCredentialAPIKey(value any) string {
 		}
 		return usableCommandCodeAPIKey(anyString(record["access"]))
 	}
+}
+
+func commandCodeZDR() bool {
+	return os.Getenv("CMD_ZDR") == "1" || os.Getenv("COMMANDCODE_ZDR") == "1"
 }

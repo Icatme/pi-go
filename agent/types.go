@@ -297,14 +297,17 @@ type ModelRef struct {
 
 // AgentSnapshot is the serializable runtime state for a session.
 type AgentSnapshot struct {
-	SessionID          string              `json:"session_id,omitempty"`
-	SystemPrompt       string              `json:"system_prompt,omitempty"`
-	Model              ModelRef            `json:"model,omitempty"`
-	Messages           []Message           `json:"messages,omitempty"`
-	PendingToolCalls   []PendingToolCall   `json:"pending_tool_calls,omitempty"`
-	PendingToolControl *PendingToolControl `json:"pending_tool_control,omitempty"`
-	Error              string              `json:"error,omitempty"`
-	Metadata           map[string]any      `json:"metadata,omitempty"`
+	// RequestedThinkingLevel is the saved preference; ThinkingLevel is derived from it and the effective model.
+	RequestedThinkingLevel ThinkingLevel       `json:"requested_thinking_level,omitempty"`
+	ThinkingLevel          ThinkingLevel       `json:"thinking_level,omitempty"`
+	SessionID              string              `json:"session_id,omitempty"`
+	SystemPrompt           string              `json:"system_prompt,omitempty"`
+	Model                  ModelRef            `json:"model,omitempty"`
+	Messages               []Message           `json:"messages,omitempty"`
+	PendingToolCalls       []PendingToolCall   `json:"pending_tool_calls,omitempty"`
+	PendingToolControl     *PendingToolControl `json:"pending_tool_control,omitempty"`
+	Error                  string              `json:"error,omitempty"`
+	Metadata               map[string]any      `json:"metadata,omitempty"`
 }
 
 // AgentContext is the message/tool context consumed by one agent turn.
@@ -316,20 +319,21 @@ type AgentContext struct {
 
 // AgentState is the in-memory runtime state exposed by Agent.
 type AgentState struct {
-	SystemPrompt     string                     `json:"system_prompt,omitempty"`
-	Model            ModelRef                   `json:"model,omitempty"`
-	ThinkingLevel    ThinkingLevel              `json:"thinking_level,omitempty"`
-	Tools            []ToolDefinition           `json:"-"`
-	Messages         []Message                  `json:"messages,omitempty"`
-	IsStreaming      bool                       `json:"is_streaming"`
-	StreamMessage    *Message                   `json:"stream_message,omitempty"`
-	PendingToolCalls map[string]PendingToolCall `json:"pending_tool_calls,omitempty"`
-	Error            string                     `json:"error,omitempty"`
-	SessionID        string                     `json:"session_id,omitempty"`
-	Transport        Transport                  `json:"transport,omitempty"`
-	MaxRetryDelayMs  int                        `json:"max_retry_delay_ms,omitempty"`
-	ThinkingBudgets  ThinkingBudgets            `json:"thinking_budgets,omitempty"`
-	Metadata         map[string]any             `json:"metadata,omitempty"`
+	RequestedThinkingLevel ThinkingLevel              `json:"requested_thinking_level,omitempty"`
+	SystemPrompt           string                     `json:"system_prompt,omitempty"`
+	Model                  ModelRef                   `json:"model,omitempty"`
+	ThinkingLevel          ThinkingLevel              `json:"thinking_level,omitempty"`
+	Tools                  []ToolDefinition           `json:"-"`
+	Messages               []Message                  `json:"messages,omitempty"`
+	IsStreaming            bool                       `json:"is_streaming"`
+	StreamMessage          *Message                   `json:"stream_message,omitempty"`
+	PendingToolCalls       map[string]PendingToolCall `json:"pending_tool_calls,omitempty"`
+	Error                  string                     `json:"error,omitempty"`
+	SessionID              string                     `json:"session_id,omitempty"`
+	Transport              Transport                  `json:"transport,omitempty"`
+	MaxRetryDelayMs        int                        `json:"max_retry_delay_ms,omitempty"`
+	ThinkingBudgets        ThinkingBudgets            `json:"thinking_budgets,omitempty"`
+	Metadata               map[string]any             `json:"metadata,omitempty"`
 }
 
 // AgentEvent is emitted to subscribers for lifecycle, message, and tool updates.
@@ -469,11 +473,11 @@ type AgentLoopTurnUpdate struct {
 	ThinkingLevel *ThinkingLevel `json:"thinking_level,omitempty"`
 }
 
-// ShouldStopAfterTurnHook can stop the run at a completed turn boundary.
+// ShouldStopAfterTurnHook can stop the run at a completed turn boundary before next-turn preparation or queue reads.
 type ShouldStopAfterTurnHook func(context.Context, ShouldStopAfterTurnContext) (bool, error)
 
 // PrepareNextTurnHook can replace context, model, or thinking state for the
-// next turn in the same run.
+// next turn in the same run. It runs only when another turn will start, after the stop decision and before EventTurnStart.
 type PrepareNextTurnHook func(context.Context, PrepareNextTurnContext) (*AgentLoopTurnUpdate, error)
 
 // TransformContext allows pruning or enriching messages before model conversion.

@@ -346,3 +346,70 @@
   integration; the version bump adds no further provider request.
 - Integrate locally into master; remote publication and release tagging are
   outside this merge and version-bump step.
+
+## 2026-09-11 - pi upstream and CommandCode v0.6.4 follow-up
+
+- Follow the applicable AI/agent changes from [pi-mono f3c672245](https://github.com/badlogic/pi-mono/commit/f3c672245d25ef2283ffc0d9cdec8a5482651103)
+  and [pi-commandcode-provider v0.6.4](https://github.com/patlux/pi-commandcode-provider/releases/tag/v0.6.4).
+- Run next-turn preparation only after the stop decision and confirmation that
+  another turn will run. Persist requested and effective thinking separately;
+  model switches and runtime setters resolve them atomically, including restore
+  and resume. Custom backends can supply a pure thinking resolver.
+- Add explicit Responses cache-mode/output-limit controls, capability-aware
+  Codex Off normalization, and linear accumulation of reasoning details without
+  rewriting earlier event snapshots. Clone the activated compatibility switches.
+- Update native/Codex catalogs with Astra and current DeepSeek Flash semantics,
+  including user/tool images and top-level reasoning effort. Remove retired
+  Codex GPT-5.4/mini and native deepseek-v4-flash entries; CLI/examples default to
+  GPT-5.5. Add OpenCode Go session headers and current Mistral effort routing.
+- Port CommandCode v0.6.4 metadata/pricing and native Provider API preference.
+  Only a complete 403 upgrade_required response selects generate; route caching
+  is bounded and isolated by endpoint and credential. Preserve HTTP evidence,
+  one logical Observer lifecycle, and actual response protocol provenance for
+  multi-turn reasoning/tool replay. Fix generate failure/abort handling,
+  interrupted-tool history, image serialization, session headers and ZDR input.
+- Final integration exposed a pre-existing Responses/Codex completion race:
+  results could be returned before transport cleanup. A blocking-close regression
+  failed on the original 38c3a4e HEAD in all four direct/simple SSE cases. Move
+  successful stream finalization to the provider after body close/WebSocket
+  release; the focused race regressions then passed ten consecutive runs.
+- Final validation passed root and examples module `go test ./... -count=1`,
+  `go test -race ./... -count=1`, and `go vet ./...`, all with GOWORK=off.
+  Formatting/diff checks passed. Built `bin/pigo.exe` with the checked-in script
+  and verified the compiled Codex/DeepSeek model listings. Live model tests
+  stayed disabled; no dependencies, package version, commits, pushes or releases
+  were changed. Removed the temporary baseline worktree after reproduction.
+## 2026-09-11 - Follow-up review fixes
+
+- Fix all four confirmed review findings without broadening the provider or
+  agent surface. Add regressions that fail before each fix and pass afterward.
+- Preserve dequeued steering/follow-up input when next-turn preparation fails
+  or is canceled. Save it once in the durable transcript and invocation events;
+  Run, Continue and tool-resume tests cover order, retry and temporary context.
+- Keep inherited model defaults out of the snapshot's explicit model selection.
+  Resolve the effective model and thinking per turn; test dynamic definitions,
+  restore, clearing/setting an explicit model and temporary turn overrides.
+- Preserve CommandCode Off support in its effort map. Catalog regressions and
+  eight local HTTP agent cases cover default/explicit Off on Claude/OpenAI native
+  requests and the upgrade-required generate fallback.
+- Report uncached DeepSeek input separately from cache hits, and calculate the
+  request cost from token usage instead of returning per-million-token rates.
+  Local SSE tests cover Pro/Flash, direct/simple streams, Done/Result, omitted
+  cache-miss counts, uncached/fully-cached input and reported zero usage.
+- Independent review found no further issue in these fixes. Root and examples
+  modules passed full tests, full race suites and vet with GOWORK=off; formatting
+  and diff checks passed. Rebuilt bin/pigo.exe and checked its DeepSeek listing.
+  Validation used local fixtures; live model tests remained disabled.
+
+## 2026-09-11 - pi-go v0.11.0 module version
+
+- Advance the package version and nested examples dependency to v0.11.0 for
+  the upstream AI/agent follow-up, CommandCode v0.6.4 transport and catalog, and
+  reviewed runtime/accounting fixes recorded above.
+- Prepare the user-authorized master commit and annotated v0.11.0 module tag
+  so JZBeacon and AI-Relay can pin a downloadable version.
+- After the version bump, root and examples full tests, vet, tidy-diff and module
+  verification passed with GOWORK=off. Normalize local checksum line endings
+  for tidy-diff; checksum contents and external dependency versions are unchanged.
+  Rebuilt the Windows CLI and verified its displayed version is 0.11.0.
+  The preceding full race validation covers the unchanged implementation.

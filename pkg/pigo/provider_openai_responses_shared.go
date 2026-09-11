@@ -16,26 +16,32 @@ import (
 // ============================================================================
 
 type openAIResponsesRequest struct {
-	Model                string                           `json:"model"`
-	Store                bool                             `json:"store"`
-	Stream               bool                             `json:"stream"`
-	Instructions         string                           `json:"instructions,omitempty"`
-	Input                []map[string]any                 `json:"input,omitempty"`
-	Tools                []map[string]any                 `json:"tools,omitempty"`
-	ToolChoice           string                           `json:"tool_choice,omitempty"`
-	ParallelToolCalls    *bool                            `json:"parallel_tool_calls,omitempty"`
-	Temperature          *float64                         `json:"temperature,omitempty"`
-	TopP                 *float64                         `json:"top_p,omitempty"`
-	Reasoning            *openAIResponsesReasoningOptions `json:"reasoning,omitempty"`
-	ServiceTier          string                           `json:"service_tier,omitempty"`
-	Text                 *openAIResponsesTextOptions      `json:"text,omitempty"`
-	Include              []string                         `json:"include,omitempty"`
-	PromptCacheKey       string                           `json:"prompt_cache_key,omitempty"`
-	PromptCacheRetention string                           `json:"prompt_cache_retention,omitempty"`
-	MaxOutputTokens      int                              `json:"max_output_tokens,omitempty"`
-	Metadata             map[string]any                   `json:"metadata,omitempty"`
-	PreviousResponseID   string                           `json:"previous_response_id,omitempty"`
-	Truncation           string                           `json:"truncation,omitempty"`
+	Model                string                             `json:"model"`
+	Store                bool                               `json:"store"`
+	Stream               bool                               `json:"stream"`
+	Instructions         string                             `json:"instructions,omitempty"`
+	Input                []map[string]any                   `json:"input,omitempty"`
+	Tools                []map[string]any                   `json:"tools,omitempty"`
+	ToolChoice           string                             `json:"tool_choice,omitempty"`
+	ParallelToolCalls    *bool                              `json:"parallel_tool_calls,omitempty"`
+	Temperature          *float64                           `json:"temperature,omitempty"`
+	TopP                 *float64                           `json:"top_p,omitempty"`
+	Reasoning            *openAIResponsesReasoningOptions   `json:"reasoning,omitempty"`
+	ServiceTier          string                             `json:"service_tier,omitempty"`
+	Text                 *openAIResponsesTextOptions        `json:"text,omitempty"`
+	Include              []string                           `json:"include,omitempty"`
+	PromptCacheKey       string                             `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention string                             `json:"prompt_cache_retention,omitempty"`
+	PromptCacheOptions   *openAIResponsesPromptCacheOptions `json:"prompt_cache_options,omitempty"`
+	MaxOutputTokens      int                                `json:"max_output_tokens,omitempty"`
+	Metadata             map[string]any                     `json:"metadata,omitempty"`
+	PreviousResponseID   string                             `json:"previous_response_id,omitempty"`
+	Truncation           string                             `json:"truncation,omitempty"`
+}
+
+type openAIResponsesPromptCacheOptions struct {
+	Mode string `json:"mode,omitempty"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type openAIResponsesReasoningOptions struct {
@@ -518,12 +524,6 @@ func processOpenAIResponsesStreamEventWithProvider(
 		}
 		emitOpenAIResponsesTerminalOutputIfNeeded(response, stream, state, terminal)
 		applyOpenAIResponsesTerminal(model, response, terminal, requestServiceTier)
-		stream.push(AssistantMessageEvent{
-			Type:    AssistantMessageEventDone,
-			Reason:  response.StopReason,
-			Message: *response,
-		})
-		stream.finish(*response)
 		return true, nil
 	case "response.failed":
 		responseMap, ok := event["response"].(map[string]any)

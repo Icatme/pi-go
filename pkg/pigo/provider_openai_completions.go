@@ -156,6 +156,12 @@ type openAICompletionsToolCallState struct {
 	Started      bool
 }
 
+type openAICompletionsReasoningDetailState struct {
+	Fields map[string]json.RawMessage
+	Kind   string
+	Text   strings.Builder
+}
+
 type openAICompletionsStreamState struct {
 	TextIndex         int
 	TextStarted       bool
@@ -164,7 +170,7 @@ type openAICompletionsStreamState struct {
 	ThinkingStarted   bool
 	Thinking          strings.Builder
 	ThinkingSignature string
-	ReasoningDetails  []json.RawMessage
+	ReasoningDetails  []*openAICompletionsReasoningDetailState
 	ToolCalls         map[int]*openAICompletionsToolCallState
 	FinishSeen        bool
 	DoneSeen          bool
@@ -278,6 +284,7 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 			err = errOpenAICompletionsStreamMissingTerminal
 		}
 		if err != nil {
+			applyOpenAICompletionsReasoningDetails(&response, state)
 			applyRequestError(&response, err)
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
@@ -771,11 +778,36 @@ func appendOpenAICompletionsReasoningDetails(response *AssistantMessage, stream 
 	if len(raw) == 0 || json.Unmarshal(raw, &details) != nil {
 		return
 	}
-	for _, detail := range details {
-		if !isOpenAICompletionsReasoningDetail(detail) {
+	for _, rawDetail := range details {
+		fields := parseOpenAICompletionsReasoningDetail(rawDetail)
+		if fields == nil {
 			continue
 		}
-		state.ReasoningDetails = append(state.ReasoningDetails, detail)
+		kind, _ := requiredOpenAICompletionsStringField(fields, "type")
+		textField := ""
+		switch kind {
+		case "reasoning.text":
+			textField = "text"
+		case "reasoning.summary":
+			textField = "summary"
+		}
+		text, _ := requiredOpenAICompletionsStringField(fields, textField)
+		if count := len(state.ReasoningDetails); count > 0 && textField != "" && state.ReasoningDetails[count-1].Kind == kind {
+			last := state.ReasoningDetails[count-1]
+			last.Text.WriteString(text)
+			for _, name := range []string{"id", "format", "index", "signature"} {
+				previous := strings.TrimSpace(string(last.Fields[name]))
+				if previous == "" || previous == "null" || ((name == "format" || name == "signature") && previous == `""`) {
+					if next, exists := fields[name]; exists {
+						last.Fields[name] = next
+					}
+				}
+			}
+		} else {
+			detail := &openAICompletionsReasoningDetailState{Fields: fields, Kind: kind}
+			detail.Text.WriteString(text)
+			state.ReasoningDetails = append(state.ReasoningDetails, detail)
+		}
 	}
 	if len(state.ReasoningDetails) == 0 {
 		return
@@ -786,11 +818,27 @@ func appendOpenAICompletionsReasoningDetails(response *AssistantMessage, stream 
 		response.Content = append(response.Content, ThinkingContent{})
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingStart, ContentIndex: state.ThinkingIndex, Partial: *response})
 	}
-	signature, err := json.Marshal(state.ReasoningDetails)
-	if err != nil {
+}
+
+func applyOpenAICompletionsReasoningDetails(response *AssistantMessage, state *openAICompletionsStreamState) {
+	if len(state.ReasoningDetails) == 0 {
 		return
 	}
+	// Replay metadata is serialized only at completion or failure. Delta snapshots
+	// keep their original signatures and never copy the growing detail sequence.
+	details := make([]map[string]json.RawMessage, 0, len(state.ReasoningDetails))
+	for _, detail := range state.ReasoningDetails {
+		switch detail.Kind {
+		case "reasoning.text":
+			detail.Fields["text"], _ = json.Marshal(detail.Text.String())
+		case "reasoning.summary":
+			detail.Fields["summary"], _ = json.Marshal(detail.Text.String())
+		}
+		details = append(details, detail.Fields)
+	}
+	signature, _ := json.Marshal(details)
 	state.ThinkingSignature = string(signature)
+	state.ReasoningDetails = nil
 	response.Content[state.ThinkingIndex] = ThinkingContent{
 		Thinking:          state.Thinking.String(),
 		ThinkingSignature: state.ThinkingSignature,
@@ -814,32 +862,36 @@ func parseOpenAICompletionsReasoningDetails(signature string) []json.RawMessage 
 }
 
 func isOpenAICompletionsReasoningDetail(raw json.RawMessage) bool {
+	return parseOpenAICompletionsReasoningDetail(raw) != nil
+}
+
+func parseOpenAICompletionsReasoningDetail(raw json.RawMessage) map[string]json.RawMessage {
 	var detail map[string]json.RawMessage
 	if json.Unmarshal(raw, &detail) != nil || detail == nil ||
 		!hasOptionalOpenAICompletionsStringField(detail, "id", true) ||
 		!hasOptionalOpenAICompletionsStringField(detail, "format", false) ||
 		!hasOptionalOpenAICompletionsNumberField(detail, "index") {
-		return false
+		return nil
 	}
 	typeName, ok := requiredOpenAICompletionsStringField(detail, "type")
 	if !ok {
-		return false
+		return nil
 	}
 	switch typeName {
 	case "reasoning.summary":
 		_, ok = requiredOpenAICompletionsStringField(detail, "summary")
-		return ok
 	case "reasoning.encrypted":
 		_, ok = requiredOpenAICompletionsStringField(detail, "data")
-		return ok
 	case "reasoning.text":
-		if _, ok = requiredOpenAICompletionsStringField(detail, "text"); !ok {
-			return false
-		}
-		return hasOptionalOpenAICompletionsStringField(detail, "signature", true)
+		_, ok = requiredOpenAICompletionsStringField(detail, "text")
+		ok = ok && hasOptionalOpenAICompletionsStringField(detail, "signature", true)
 	default:
-		return false
+		return nil
 	}
+	if !ok {
+		return nil
+	}
+	return detail
 }
 
 func requiredOpenAICompletionsStringField(detail map[string]json.RawMessage, name string) (string, bool) {
@@ -924,6 +976,7 @@ func openAICompletionsToolCallFromState(state *openAICompletionsToolCallState) T
 }
 
 func finalizeOpenAICompletionsResponse(response *AssistantMessage, stream *AssistantMessageEventStream, state *openAICompletionsStreamState) {
+	applyOpenAICompletionsReasoningDetails(response, state)
 	if state.ThinkingStarted {
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingEnd, ContentIndex: state.ThinkingIndex, Content: state.Thinking.String(), Partial: *response})
 	}

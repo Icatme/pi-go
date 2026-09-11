@@ -60,7 +60,7 @@ func (c AppConfig) Normalize() (AppConfig, error) {
 func defaultModelID(provider string) (string, error) {
 	switch provider {
 	case "openai-codex":
-		return "gpt-5.4", nil
+		return "gpt-5.5", nil
 	case "kimi-coding":
 		return "kimi-k2-thinking", nil
 	case "anthropic":

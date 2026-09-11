@@ -275,7 +275,7 @@ func TestStreamSimpleOpenAICodexEmitsThinkingAndToolCallLifecycle(t *testing.T) 
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -384,7 +384,7 @@ func TestStreamSimpleOpenAICodexEmitsTextLifecycleFromSSEDelta(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -464,7 +464,7 @@ func TestStreamSimpleOpenAICodexEmitsLifecycleFromTerminalOnlyOutput(t *testing.
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -546,7 +546,7 @@ func TestStreamSimpleOpenAICodexFailedEventPreservesResponseID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -626,7 +626,7 @@ func TestStreamSimpleOpenAICodexEmitsRefusalLifecycle(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -705,7 +705,7 @@ func TestStreamSimpleOpenAICodexFinalizesOpenMessageFromTerminalOutput(t *testin
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -801,7 +801,7 @@ func TestStreamSimpleOpenAICodexAppendsMissingTerminalItems(t *testing.T) {
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -869,7 +869,7 @@ func TestStreamSimpleOpenAICodexCombinesTerminalMessagePartsIntoSingleLifecycle(
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -927,7 +927,7 @@ func TestStreamSimpleOpenAICodexTopLevelErrorPreservesCreatedResponseID(t *testi
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -998,7 +998,7 @@ func TestStreamSimpleOpenAICodexPreservesReasoningDeltaWhenDoneHasNoSummary(t *t
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
@@ -1075,7 +1075,7 @@ func TestStreamSimpleOpenAICodexTerminalToolArgumentsOverridePartialJSON(t *test
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}

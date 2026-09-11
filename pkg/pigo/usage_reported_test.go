@@ -2,6 +2,7 @@ package pigo
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 )
 
@@ -191,13 +192,11 @@ func TestOpenAIResponsesTerminalUsagePresenceReachesDoneAndResult(t *testing.T) 
 				t.Fatal(err)
 			}
 
-			response := AssistantMessage{}
-			state := openAIResponsesStreamingState{CurrentTextIndex: -1, CurrentThinkingIndex: -1, CurrentToolIndex: -1}
-			stream := newAssistantMessageEventStream()
-			done, err := processOpenAIResponsesStreamEvent(string(payload), Model{}, &response, stream, &state, "")
-			if err != nil || !done {
-				t.Fatalf("process terminal event: done=%t err=%v", done, err)
-			}
+			client := &http.Client{Transport: observationRoundTripper(func(_ *http.Request) (*http.Response, error) {
+				return sseResponse("data: " + string(payload) + "\n\n"), nil
+			})}
+			model := Model{API: "openai-responses", Provider: "openai", ID: "fixture", BaseURL: "https://fixture.invalid", MaxTokens: 256}
+			stream := Stream(model, Context{}, ProviderStreamOptions{APIKey: "test", HTTPClient: client})
 
 			var doneMessage AssistantMessage
 			for event := range stream.Events() {
@@ -206,11 +205,14 @@ func TestOpenAIResponsesTerminalUsagePresenceReachesDoneAndResult(t *testing.T) 
 				}
 			}
 			result := stream.Result()
-			if response.UsageReported != test.wantReported || doneMessage.UsageReported != test.wantReported || result.UsageReported != test.wantReported {
-				t.Fatalf("usage presence mismatch: response=%t done=%t result=%t", response.UsageReported, doneMessage.UsageReported, result.UsageReported)
+			if result.StopReason != StopReasonStop {
+				t.Fatalf("terminal response failed: %+v", result)
 			}
-			if response.Usage != (Usage{}) || doneMessage.Usage != (Usage{}) || result.Usage != (Usage{}) {
-				t.Fatalf("zero usage changed during terminal delivery: response=%+v done=%+v result=%+v", response.Usage, doneMessage.Usage, result.Usage)
+			if doneMessage.UsageReported != test.wantReported || result.UsageReported != test.wantReported {
+				t.Fatalf("usage presence mismatch: done=%t result=%t", doneMessage.UsageReported, result.UsageReported)
+			}
+			if doneMessage.Usage != (Usage{}) || result.Usage != (Usage{}) {
+				t.Fatalf("zero usage changed during terminal delivery: done=%+v result=%+v", doneMessage.Usage, result.Usage)
 			}
 		})
 	}

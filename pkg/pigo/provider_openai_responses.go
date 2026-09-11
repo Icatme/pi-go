@@ -91,6 +91,8 @@ func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptio
 			stream.finish(response)
 			return
 		}
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventDone, Reason: response.StopReason, Message: response})
+		stream.finish(response)
 	}()
 
 	return stream
@@ -102,6 +104,7 @@ func streamSimpleOpenAIResponses(model Model, ctx Context, options SimpleStreamO
 
 func buildOpenAIResponsesRequest(model Model, ctx Context, options ProviderStreamOptions) openAIResponsesRequest {
 	resolvedOptions := resolveOpenAIResponsesProviderOptions(model, options)
+	compat := resolveOpenAIResponsesCompat(model)
 	parallelToolCalls := true
 	if resolvedOptions.ParallelToolCalls != nil {
 		parallelToolCalls = *resolvedOptions.ParallelToolCalls
@@ -124,20 +127,26 @@ func buildOpenAIResponsesRequest(model Model, ctx Context, options ProviderStrea
 	if resolvedOptions.TopP != nil {
 		requestBody.TopP = resolvedOptions.TopP
 	}
-	if resolvedOptions.SessionID != "" {
+	if resolvedOptions.SessionID != "" && resolvedOptions.CacheRetention != CacheRetentionNone {
 		requestBody.PromptCacheKey = resolvedOptions.SessionID
 	}
 	if strings.TrimSpace(resolvedOptions.ServiceTier) != "" {
 		requestBody.ServiceTier = resolvedOptions.ServiceTier
 	}
-	if resolvedOptions.MaxTokens > 0 {
+	if resolvedOptions.MaxTokens > 0 && compat.SupportsMaxOutputTokens {
 		requestBody.MaxOutputTokens = resolvedOptions.MaxTokens
 	}
 	if len(resolvedOptions.Metadata) > 0 {
 		requestBody.Metadata = cloneMap(resolvedOptions.Metadata)
 	}
-	if retention := resolveOpenAIResponsesCacheRetention(resolvedOptions.CacheRetention); retention != "" {
-		requestBody.PromptCacheRetention = retention
+	if compat.SupportsExplicitPromptCacheMode {
+		if resolvedOptions.CacheRetention == CacheRetentionNone {
+			requestBody.PromptCacheOptions = &openAIResponsesPromptCacheOptions{Mode: "explicit"}
+		} else if resolvedOptions.CacheRetention == CacheRetentionLong && compat.SupportsLongCacheRetention {
+			requestBody.PromptCacheOptions = &openAIResponsesPromptCacheOptions{TTL: "30m"}
+		}
+	} else if resolvedOptions.CacheRetention == CacheRetentionLong && compat.SupportsLongCacheRetention {
+		requestBody.PromptCacheRetention = "24h"
 	}
 	if strings.TrimSpace(resolvedOptions.PreviousResponseID) != "" {
 		requestBody.PreviousResponseID = resolvedOptions.PreviousResponseID
@@ -173,13 +182,36 @@ func resolveOpenAIResponsesToolChoice(toolChoice string) string {
 	return strings.TrimSpace(toolChoice)
 }
 
-func resolveOpenAIResponsesCacheRetention(retention CacheRetention) string {
-	switch retention {
-	case CacheRetentionLong:
-		return "24h"
-	default:
-		return ""
+type resolvedOpenAIResponsesCompat struct {
+	SendSessionIDHeader             bool
+	SupportsLongCacheRetention      bool
+	SupportsExplicitPromptCacheMode bool
+	SupportsMaxOutputTokens         bool
+}
+
+func resolveOpenAIResponsesCompat(model Model) resolvedOpenAIResponsesCompat {
+	resolved := resolvedOpenAIResponsesCompat{
+		SendSessionIDHeader:        true,
+		SupportsLongCacheRetention: true,
+		SupportsMaxOutputTokens:    true,
 	}
+	compat, ok := model.Compat.(*OpenAIResponsesCompat)
+	if !ok || compat == nil {
+		return resolved
+	}
+	if compat.SendSessionIdHeader != nil {
+		resolved.SendSessionIDHeader = *compat.SendSessionIdHeader
+	}
+	if compat.SupportsLongCacheRetention != nil {
+		resolved.SupportsLongCacheRetention = *compat.SupportsLongCacheRetention
+	}
+	if compat.SupportsExplicitPromptCacheMode != nil {
+		resolved.SupportsExplicitPromptCacheMode = *compat.SupportsExplicitPromptCacheMode
+	}
+	if compat.SupportsMaxOutputTokens != nil {
+		resolved.SupportsMaxOutputTokens = *compat.SupportsMaxOutputTokens
+	}
+	return resolved
 }
 
 func resolveOpenAIResponsesURL(baseURL string) string {
@@ -226,11 +258,11 @@ func streamOpenAIResponsesSSE(
 	requestOptions := []openaioption.RequestOption{
 		openaioption.WithHeader("accept", "text/event-stream"),
 	}
-	if options.SessionID != "" {
-		requestOptions = append(requestOptions,
-			openaioption.WithHeader("session_id", options.SessionID),
-			openaioption.WithHeader("x-client-request-id", options.SessionID),
-		)
+	if options.SessionID != "" && options.CacheRetention != CacheRetentionNone {
+		if resolveOpenAIResponsesCompat(model).SendSessionIDHeader {
+			requestOptions = append(requestOptions, openaioption.WithHeader("session_id", options.SessionID))
+		}
+		requestOptions = append(requestOptions, openaioption.WithHeader("x-client-request-id", options.SessionID))
 	}
 	for key, value := range options.Headers {
 		requestOptions = append(requestOptions, openaioption.WithHeader(key, value))

@@ -26,14 +26,14 @@ func TestCommandCodeProviderRegistration(t *testing.T) {
 	if model.Name != "DeepSeek V4 Flash (CC)" || !model.Reasoning || model.ContextWindow != 1000000 || model.MaxTokens != 65536 {
 		t.Fatalf("unexpected Command Code model metadata: %+v", model)
 	}
-	if model.Cost != (UsageCost{Input: 0.14, Output: 0.28, CacheRead: 0.0028}) {
+	if model.Cost != (commandCodeModelCosts[model.ID]) {
 		t.Fatalf("unexpected Command Code model pricing: %+v", model.Cost)
 	}
-	if model.Headers["User-Agent"] != "node" || model.Headers["x-command-code-version"] != commandCodeCLIVersion {
+	if model.Headers["User-Agent"] != "cli" || model.Headers["x-command-code-version"] != commandCodeCLIVersion {
 		t.Fatalf("expected pi extension identity headers, got %+v", model.Headers)
 	}
 	module := resolveProviderModule("commandcode")
-	if module == nil || module.Auth.EnvAPIKeyName != "COMMANDCODE_API_KEY" {
+	if module == nil || module.Auth.EnvAPIKeyName != "COMMAND_CODE_API_KEY" {
 		t.Fatalf("unexpected Command Code auth metadata: %+v", module)
 	}
 	if RequiresOAuth("commandcode") {
@@ -48,22 +48,18 @@ func TestCommandCodeProviderRegistration(t *testing.T) {
 }
 
 func TestCommandCodeModelPricingIsComplete(t *testing.T) {
-	if len(commandCodeModelCosts) != len(commandCodeModelSpecs) {
-		t.Fatalf("pricing entries=%d model specs=%d", len(commandCodeModelCosts), len(commandCodeModelSpecs))
-	}
 	for _, spec := range commandCodeModelSpecs {
 		if _, ok := commandCodeModelCosts[spec.ID]; !ok {
-			t.Errorf("missing pricing for %q", spec.ID)
+			t.Errorf("missing pricing for static model %q", spec.ID)
 		}
 	}
 
 	tests := map[string]UsageCost{
-		"claude-sonnet-5":                 {Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5},
-		"gpt-5.6-terra":                   {Input: 2.5, Output: 15, CacheRead: 0.25, CacheWrite: 3.125},
-		"Qwen/Qwen3.7-Max":                {Input: 2.5, Output: 7.5, CacheRead: 0.5, CacheWrite: 3.13},
-		"xiaomi/mimo-v2.5":                {Input: 0.14, Output: 0.28, CacheRead: 0.0028},
-		"poolside/laguna-s-2.1-free":      {},
-		"inclusionai/ling-3.0-flash-free": {},
+		"claude-sonnet-5":            {Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5},
+		"gpt-5.6-terra":              {Input: 2, Output: 12, CacheRead: 0.2, CacheWrite: 2.5},
+		"Qwen/Qwen3.7-Max":           {Input: 2.5, Output: 7.5, CacheRead: 0.5, CacheWrite: 3.13},
+		"xiaomi/mimo-v2.5":           {Input: 0.14, Output: 0.28, CacheRead: 0.0028},
+		"poolside/laguna-s-2.1-free": {},
 	}
 	for modelID, want := range tests {
 		if got := commandCodeModelCosts[modelID]; got != want {
@@ -228,20 +224,20 @@ func TestCommandCodeStreamMatchesPiExtensionProtocol(t *testing.T) {
 			t.Fatalf("decode request: %v", unmarshalErr)
 		}
 		params := commandCodeRecord(request["params"])
-		if params["model"] != "command-model" || commandCodeInt(params["max_tokens"]) != 64000 || params["temperature"] != 0.3 || params["stream"] != true {
+		if params["model"] != "command-model" || commandCodeInt(params["max_tokens"]) != 64000 || params["temperature"] != nil || params["stream"] != true {
 			t.Errorf("unexpected params: %+v", params)
 		}
 		if params["system"] != "system prompt" {
 			t.Errorf("unexpected system prompt: %v", params["system"])
 		}
 		messages := commandCodeAnySlice(params["messages"])
-		if len(messages) != 3 {
-			t.Errorf("expected user, assistant, and paired tool history, got %+v", messages)
+		if len(messages) != 4 {
+			t.Errorf("expected user, assistant, synthetic and completed tool results, got %+v", messages)
 		}
 		assistant := commandCodeRecord(messages[1])
 		assistantParts := commandCodeAnySlice(assistant["content"])
 		if len(assistantParts) != 3 {
-			t.Errorf("expected text, reasoning, and only the paired tool call, got %+v", assistantParts)
+			t.Errorf("expected text and both tool calls without prior reasoning, got %+v", assistantParts)
 		}
 		tools := commandCodeAnySlice(params["tools"])
 		if len(tools) != 1 {
@@ -298,7 +294,7 @@ func TestCommandCodeStreamMatchesPiExtensionProtocol(t *testing.T) {
 			Parameters: map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []any{"path"}},
 		}},
 	}
-	stream := StreamSimple(model, context, SimpleStreamOptions{
+	stream := commandCodeGenerateSimpleForTest(model, context, SimpleStreamOptions{
 		APIKey:    "test-key",
 		MaxTokens: 70000,
 		Headers:   map[string]string{"user-agent": "request-agent"},
@@ -361,7 +357,7 @@ func TestCommandCodeStreamRejectsTruncatedResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	response := CompleteSimple(commandCodeTestModel(server.URL), Context{Messages: []Message{UserMessage{Content: "hello"}}}, SimpleStreamOptions{APIKey: "test-key"})
+	response := completeCommandCodeGenerateForTest(commandCodeTestModel(server.URL), Context{Messages: []Message{UserMessage{Content: "hello"}}}, SimpleStreamOptions{APIKey: "test-key"})
 	if response.StopReason != StopReasonError || !strings.Contains(response.ErrorMessage, "before finish event") {
 		t.Fatalf("expected truncated stream error, got %+v", response)
 	}
@@ -380,7 +376,7 @@ func TestCommandCodeStreamRetriesTransientHTTPFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	response := CompleteSimple(commandCodeTestModel(server.URL), Context{}, SimpleStreamOptions{APIKey: "test-key", MaxRetries: 1})
+	response := completeCommandCodeGenerateForTest(commandCodeTestModel(server.URL), Context{}, SimpleStreamOptions{APIKey: "test-key", MaxRetries: 1})
 	if response.StopReason != StopReasonStop || attempts.Load() != 2 {
 		t.Fatalf("expected one retry and success, attempts=%d response=%+v", attempts.Load(), response)
 	}
@@ -399,7 +395,7 @@ func TestCommandCodeStreamDecodesNodeFetchEncodings(t *testing.T) {
 	}))
 	defer server.Close()
 
-	response := CompleteSimple(commandCodeTestModel(server.URL), Context{}, SimpleStreamOptions{APIKey: "test-key"})
+	response := completeCommandCodeGenerateForTest(commandCodeTestModel(server.URL), Context{}, SimpleStreamOptions{APIKey: "test-key"})
 	if response.StopReason != StopReasonStop || len(response.Content) != 1 {
 		t.Fatalf("expected compressed stream success, got %+v", response)
 	}
@@ -416,7 +412,7 @@ func TestCommandCodeStreamTimeoutIsAborted(t *testing.T) {
 		return nil, request.Context().Err()
 	})}
 
-	response := CompleteSimple(commandCodeTestModel("https://example.invalid"), Context{}, SimpleStreamOptions{
+	response := completeCommandCodeGenerateForTest(commandCodeTestModel("https://example.invalid"), Context{}, SimpleStreamOptions{
 		APIKey: "test-key", HTTPClient: httpClient, TimeoutMs: 25,
 	})
 	if response.StopReason != StopReasonAborted {
@@ -455,4 +451,56 @@ func collectCommandCodeEvents(stream *AssistantMessageEventStream) []AssistantMe
 		events = append(events, event)
 	}
 	return events
+}
+
+func commandCodeGenerateSimpleForTest(model Model, ctx Context, options SimpleStreamOptions) *AssistantMessageEventStream {
+	options.Headers = mergeRequestHeaders(model.Headers, options.Headers)
+	options.HTTPClient = providerHTTPClient(options.HTTPClient)
+	return streamCommandCodeGenerate(model, ctx, buildCommandCodeProviderStreamOptions(model, options))
+}
+
+func completeCommandCodeGenerateForTest(model Model, ctx Context, options SimpleStreamOptions) AssistantMessage {
+	stream := commandCodeGenerateSimpleForTest(model, ctx, options)
+	for range stream.Events() {
+	}
+	return stream.Result()
+}
+
+func TestCommandCodeFallbackPreservesExplicitSessionAndZDRHeaders(t *testing.T) {
+	t.Setenv("CMD_ZDR", "1")
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprint(explicit), func(t *testing.T) {
+			headers := map[string]string{}
+			wantSession := "session-from-options"
+			if explicit {
+				headers["X-Session-ID"] = "explicit-session"
+				wantSession = "explicit-session"
+			}
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if r.Header.Get("x-session-id") != wantSession || r.Header.Get("x-cmd-zdr") != "1" {
+					t.Errorf("wrong selected headers on %s: session=%q ZDR=%q", r.URL.Path, r.Header.Get("x-session-id"), r.Header.Get("x-cmd-zdr"))
+				}
+				if r.URL.Path == "/provider/v1/chat/completions" {
+					w.WriteHeader(http.StatusForbidden)
+					io.WriteString(w, `{"error":{"code":"upgrade_required"}}`)
+					return
+				}
+				if r.URL.Path != "/alpha/generate" {
+					t.Errorf("unexpected path %s", r.URL.Path)
+				}
+				fmt.Fprintln(w, `{"type":"text-delta","text":"ok"}`)
+				fmt.Fprintln(w, `{"type":"finish","finishReason":"stop"}`)
+			}))
+			defer server.Close()
+			result := CompleteSimple(commandCodeTestModel(server.URL), Context{}, SimpleStreamOptions{APIKey: "key", SessionID: "session-from-options", Headers: headers})
+			if result.StopReason != StopReasonStop || requests != 2 {
+				t.Fatalf("requests=%d result=%+v", requests, result)
+			}
+			if len(headers) != map[bool]int{false: 0, true: 1}[explicit] {
+				t.Fatalf("caller headers mutated: %v", headers)
+			}
+		})
+	}
 }

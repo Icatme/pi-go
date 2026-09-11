@@ -356,7 +356,7 @@ func TestOpenAIStreamsDoNotRetryAfterReportedZeroUsage(t *testing.T) {
 				},
 			}),
 			model: func(t *testing.T, baseURL string) Model {
-				model := GetModel("openai-codex", "gpt-5.4")
+				model := GetModel("openai-codex", "gpt-5.5")
 				if model == nil {
 					t.Fatal("expected OpenAI Codex model")
 				}
@@ -496,7 +496,7 @@ func TestOpenAICodexRetriesRequestBufferFailureFromSSEBeforeOutput(t *testing.T)
 	}))
 	defer server.Close()
 
-	model := GetModel("openai-codex", "gpt-5.4")
+	model := GetModel("openai-codex", "gpt-5.5")
 	if model == nil {
 		t.Fatal("expected codex model")
 	}
