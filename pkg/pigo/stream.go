@@ -93,11 +93,17 @@ func StreamSimple(model Model, ctx Context, options SimpleStreamOptions) *Assist
 }
 
 func Complete(model Model, ctx Context, options ProviderStreamOptions) AssistantMessage {
-	return Stream(model, ctx, options).Result()
+	stream := Stream(model, ctx, options)
+	for range stream.Events() {
+	}
+	return stream.Result()
 }
 
 func CompleteSimple(model Model, ctx Context, options SimpleStreamOptions) AssistantMessage {
-	return StreamSimple(model, ctx, options).Result()
+	stream := StreamSimple(model, ctx, options)
+	for range stream.Events() {
+	}
+	return stream.Result()
 }
 
 func streamAPIUnavailable(model Model, message string) *AssistantMessageEventStream {

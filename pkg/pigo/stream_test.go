@@ -51,6 +51,13 @@ func TestAssistantMessageEventStreamResultDoesNotDependOnEventConsumption(t *tes
 	if text.Text != "ok" {
 		t.Fatalf("expected final content to survive backpressure, got %+v", result)
 	}
+	var lastEvent AssistantMessageEvent
+	for event := range stream.Events() {
+		lastEvent = event
+	}
+	if lastEvent.Type != AssistantMessageEventDone {
+		t.Fatalf("expected events to remain available after Result, got last event %+v", lastEvent)
+	}
 }
 
 func TestAssistantMessageEventStreamReportsDroppedDeltaEvents(t *testing.T) {
