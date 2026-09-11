@@ -308,3 +308,15 @@
   clients or transports must pass their client explicitly to retain that setup.
 - The source release includes the reviewed PR #10 and #11 commits; root and
   examples modules passed tests, full race tests and vet without skipped tests.
+
+## 2026-09-11 - Non-streaming completion memory leak hotfix
+
+- Drain completion events before returning from Complete and CompleteSimple so
+  blocked dispatchers cannot retain response snapshots after a request finishes.
+- Backport the identical master fix to the deployed 1ed9651 provider baseline
+  as v0.9.1, preserving DeepSeek and CommandCode wire/capability contracts.
+- Regression coverage exercises more than 1024 events, success, provider errors,
+  cancellation, blocked finish observers, and explicit Result event delivery.
+- Validation: full root tests and vet, focused race, and independent examples
+  tests/vet passed. The original offline 10-request reproduction retained zero
+  dispatchers and one goroutine; post-GC heap grew only about 15 KiB.
