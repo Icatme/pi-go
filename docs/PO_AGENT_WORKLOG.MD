@@ -423,3 +423,9 @@
   completions with more than 1024 events; full root tests, focused race, and vet pass.
 - Apply the same fix to the deployed 1ed9651 provider baseline as v0.9.1 for
   JZBeacon, whose immutable route snapshots are incompatible with newer catalogs.
+
+## 2026-09-12 — Native Token Harbor provider
+
+- Register Token Harbor as an independent built-in provider with its own API-key environment variable and Chat Completions endpoint. Move the existing Relay extension's three exact model definitions without changing their capability snapshots; Relay continues to own its Responses contract projections and reasoning conversion.
+- Standalone tests exercise provider discovery, the exact catalog and API-key resolution through the Chat transport without importing ai-relay.
+- Validation: full root tests, focused Token Harbor race tests, vet, build and formatting pass. All nine Relay model/contract snapshots match the original extension. After account email verification, host live checks succeeded for the native Token Harbor GPT-5.6 Luna route and the connection probe; the probe also completed a custom qwen3.8-flash model request. Single-attempt connection probes also returned HTTP 200 and complete nonempty text for deepseek-v4-flash (9715 ms) and glm-5.3-flash (1109 ms), using the bounded 2048-token / 30-second probe; the three named models were confirmed in the authenticated catalog. Publish only the codex/tokenharbor-native source branch; keep version constants and release tags unchanged.

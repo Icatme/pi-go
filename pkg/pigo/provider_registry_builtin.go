@@ -30,6 +30,7 @@ func registerBuiltInProviderModules() {
 	RegisterLazyProviderModule("opencode-go", newOpenCodeGoProviderModule)
 	RegisterLazyProviderModule("openai", newOpenAIResponsesProviderModule)
 	RegisterLazyProviderModule("kimi-coding", newKimiCodingProviderModule)
+	RegisterLazyProviderModule("tokenharbor", newTokenHarborProviderModule)
 }
 
 func newAnthropicMessagesAPIModule() APIModule {
