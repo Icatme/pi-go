@@ -423,3 +423,9 @@
   completions with more than 1024 events; full root tests, focused race, and vet pass.
 - Apply the same fix to the deployed 1ed9651 provider baseline as v0.9.1 for
   JZBeacon, whose immutable route snapshots are incompatible with newer catalogs.
+## 2026-09-12 - Stream cancellation and bounded event buffering
+
+- Complete the stream lifecycle repair with cancellable dispatch, an idempotent Close method, release of queued snapshots and context callbacks, and preservation of the provider's final result after cancellation.
+- Bound pending events by total count and estimated payload, evict deltas first, and report a terminal error when lifecycle events exceed the budget. PrintStream now cancels its own run when its writer fails.
+- Reproduce cancellation against mainline v0.11.1 and the PR using the same test over the actual package: the old implementation retains a dispatcher after provider completion; the repaired implementation releases it in all three repeated runs.
+- Validation on f7b1c5b passed focused regressions repeated three times, full root tests, pkg/pigo race tests and go vet. This integration supports the authorized downstream AI-Relay and JZBeacon dependency updates; no production deployment is included.
