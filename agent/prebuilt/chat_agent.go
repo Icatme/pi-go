@@ -85,7 +85,9 @@ func (c *ChatAgent) Chat(ctx context.Context, message string) (string, error) {
 
 // PrintStream streams the response chunks to a writer-like callback.
 func (c *ChatAgent) PrintStream(ctx context.Context, message string, write func(string) error) error {
-	chunks, err := c.AsyncChat(ctx, message)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	chunks, err := c.AsyncChat(runCtx, message)
 	if err != nil {
 		return err
 	}

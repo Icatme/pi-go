@@ -12,6 +12,7 @@ const assistantMessageEventDeltaBuffer = 1024
 type queuedAssistantMessageEvent struct {
 	event     AssistantMessageEvent
 	droppable bool
+	bytes     int
 }
 
 type AssistantMessageEventStream struct {
@@ -25,6 +26,15 @@ type AssistantMessageEventStream struct {
 	pendingDelta int
 	droppedDelta int
 	closing      bool
+	pendingBytes int
+	bufferErr    error
+	deliveryErr  error
+
+	deliveryDone   chan struct{}
+	dispatcherDone chan struct{}
+	deliveryClosed bool
+	cancelRequest  context.CancelFunc
+	stopContext    func() bool
 
 	observer   Observer
 	model      Model
@@ -55,8 +65,11 @@ func (s *AssistantMessageEventStream) startRequest(ctx context.Context, payload 
 
 func newAssistantMessageEventStream() *AssistantMessageEventStream {
 	stream := &AssistantMessageEventStream{
-		events: make(chan AssistantMessageEvent, 1024),
-		result: make(chan AssistantMessage, 1),
+		// Keep the public channel small; the accounted pending queue owns buffering.
+		events:         make(chan AssistantMessageEvent, 1),
+		result:         make(chan AssistantMessage, 1),
+		deliveryDone:   make(chan struct{}),
+		dispatcherDone: make(chan struct{}),
 	}
 	stream.queueCond = sync.NewCond(&stream.queueMu)
 	go stream.dispatchEvents()
@@ -74,7 +87,10 @@ func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantM
 	}
 	options.HTTPClient = providerHTTPClient(options.HTTPClient)
 	if apiModule != nil && apiModule.Stream != nil {
-		return apiModule.Stream(model, ctx, options)
+		return managedAssistantStream(options.RequestContext, func(requestCtx context.Context) *AssistantMessageEventStream {
+			options.RequestContext = requestCtx
+			return apiModule.Stream(model, ctx, options)
+		})
 	}
 	return streamAPIUnavailable(model, "api not implemented")
 }
@@ -87,7 +103,10 @@ func StreamSimple(model Model, ctx Context, options SimpleStreamOptions) *Assist
 	options.HTTPClient = providerHTTPClient(options.HTTPClient)
 	apiModule := resolveAPIModule(model.API)
 	if apiModule != nil && apiModule.StreamSimple != nil {
-		return apiModule.StreamSimple(model, ctx, options)
+		return managedAssistantStream(options.RequestContext, func(requestCtx context.Context) *AssistantMessageEventStream {
+			options.RequestContext = requestCtx
+			return apiModule.StreamSimple(model, ctx, options)
+		})
 	}
 	return streamAPIUnavailable(model, "api not implemented")
 }
@@ -124,10 +143,14 @@ func streamAPIUnavailable(model Model, message string) *AssistantMessageEventStr
 	return stream
 }
 
+// Events exposes the event channel. Consumers that stop early must Close the
+// stream or cancel the RequestContext supplied to Stream/StreamSimple.
 func (s *AssistantMessageEventStream) Events() <-chan AssistantMessageEvent {
 	return s.events
 }
 
+// Result does not consume events. Events remain readable afterwards unless the
+// stream was closed or its caller context was cancelled.
 func (s *AssistantMessageEventStream) Result() AssistantMessage {
 	result, ok := <-s.result
 	if !ok {
@@ -140,39 +163,39 @@ func (s *AssistantMessageEventStream) Result() AssistantMessage {
 }
 
 func (s *AssistantMessageEventStream) push(event AssistantMessageEvent) {
-	queued := queuedAssistantMessageEvent{
-		event:     cloneAssistantMessageEvent(event),
-		droppable: isDroppableAssistantMessageEvent(event.Type),
-	}
-
 	s.queueMu.Lock()
 	if s.closing {
 		s.queueMu.Unlock()
 		return
 	}
-	if queued.droppable && s.pendingDelta >= assistantMessageEventDeltaBuffer {
-		s.dropOldestPendingDeltaLocked()
-	}
-	if queued.droppable {
-		s.pendingDelta++
-	}
-	s.pending = append(s.pending, queued)
 	s.eventCount++
-	s.queueCond.Signal()
+	var cancel context.CancelFunc
+	if !s.deliveryClosed && s.bufferErr == nil {
+		cancel = s.enqueueLocked(event)
+	}
 	s.queueMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 
+	// Delivery cancellation must not suppress the provider's observer accounting.
 	if s.observer != nil {
-		s.observer.OnStreamEvent(s.requestCtx, s.model, cloneAssistantMessageEvent(queued.event))
+		s.observer.OnStreamEvent(s.requestCtx, s.model, cloneAssistantMessageEvent(event))
 	}
 }
 
 func (s *AssistantMessageEventStream) finish(result AssistantMessage) {
 	s.finalizeOnce.Do(func() {
+		s.queueMu.Lock()
+		if s.bufferErr != nil {
+			// Keep final provider content, response ID and usage, but never report
+			// success after a lifecycle event was lost to a hard buffer limit.
+			result.StopReason = StopReasonError
+			result.ErrorMessage = s.bufferErr.Error()
+		}
 		cloned := cloneAssistantMessage(result)
 		s.result <- cloned
 		close(s.result)
-
-		s.queueMu.Lock()
 		s.closing = true
 		s.queueCond.Broadcast()
 		dropped := s.droppedDelta
@@ -223,19 +246,27 @@ func isDroppableAssistantMessageEvent(eventType AssistantMessageEventType) bool 
 }
 
 func (s *AssistantMessageEventStream) dispatchEvents() {
+	terminalSent := false
+	defer close(s.dispatcherDone)
+	defer func() { s.closeEventChannel(terminalSent) }()
+	defer s.releaseDelivery()
 	for {
 		s.queueMu.Lock()
-		for len(s.pending) == 0 && !s.closing {
+		for len(s.pending) == 0 && !s.closing && !s.deliveryClosed {
 			s.queueCond.Wait()
 		}
-		if len(s.pending) == 0 && s.closing {
-			close(s.events)
+		if s.deliveryClosed || len(s.pending) == 0 && s.closing {
 			s.queueMu.Unlock()
 			return
 		}
 
 		queued := s.pending[0]
+		s.pending[0] = queuedAssistantMessageEvent{}
 		s.pending = s.pending[1:]
+		if len(s.pending) == 0 {
+			s.pending = nil
+		}
+		s.pendingBytes -= queued.bytes
 		if queued.droppable {
 			s.pendingDelta--
 		}
@@ -245,18 +276,29 @@ func (s *AssistantMessageEventStream) dispatchEvents() {
 		}
 		s.queueMu.Unlock()
 
-		s.events <- queued.event
+		select {
+		case s.events <- queued.event:
+			if queued.event.Type == AssistantMessageEventDone || queued.event.Type == AssistantMessageEventError {
+				terminalSent = true
+			}
+		case <-s.deliveryDone:
+			return
+		}
 	}
 }
 
-func (s *AssistantMessageEventStream) dropOldestPendingDeltaLocked() {
+func (s *AssistantMessageEventStream) dropOldestPendingDeltaLocked() bool {
 	for index, queued := range s.pending {
 		if !queued.droppable {
 			continue
 		}
-		s.pending = append(s.pending[:index], s.pending[index+1:]...)
+		copy(s.pending[index:], s.pending[index+1:])
+		s.pending[len(s.pending)-1] = queuedAssistantMessageEvent{}
+		s.pending = s.pending[:len(s.pending)-1]
+		s.pendingBytes -= queued.bytes
 		s.pendingDelta--
 		s.droppedDelta++
-		return
+		return true
 	}
+	return false
 }
