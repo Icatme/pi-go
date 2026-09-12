@@ -429,3 +429,9 @@
 - Bound pending events by total count and estimated payload, evict deltas first, and report a terminal error when lifecycle events exceed the budget. PrintStream now cancels its own run when its writer fails.
 - Reproduce cancellation against mainline v0.11.1 and the PR using the same test over the actual package: the old implementation retains a dispatcher after provider completion; the repaired implementation releases it in all three repeated runs.
 - Validation on f7b1c5b passed focused regressions repeated three times, full root tests, pkg/pigo race tests and go vet. This integration supports the authorized downstream AI-Relay and JZBeacon dependency updates; no production deployment is included.
+
+## 2026-09-12 - pi-go v0.11.2 GitHub release
+
+- Advance the package version and nested examples dependency to v0.11.2 for the merged stream cancellation, bounded event buffering, and writer-failure cancellation repairs.
+- Validate root and examples with GOWORK=off: full tests, full race suites, vet, module verification, and tidy-diff all pass. Normalize checkout-only checksum line endings; checksum contents and third-party dependency versions are unchanged. Live provider tests remain disabled.
+- Prepare the authorized annotated tag and GitHub Release from this mainline candidate. Build the Windows amd64, Linux amd64/arm64, and macOS amd64/arm64 CLI archives from the resulting clean commit, with SHA256 checksums and remote download verification.
