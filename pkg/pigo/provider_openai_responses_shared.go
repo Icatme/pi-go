@@ -1150,7 +1150,7 @@ func shouldRetryOpenAIResponsesRequest(status int, message string) bool {
 	if isOpenAINonRetryableLimitError("", "", message) {
 		return false
 	}
-	if status == 429 || status == 500 || status == 502 || status == 503 || status == 504 {
+	if status == 429 || status == 500 || status == 502 || status == 503 || status == 504 || status == 520 {
 		return true
 	}
 
@@ -1158,6 +1158,7 @@ func shouldRetryOpenAIResponsesRequest(status int, message string) bool {
 	return strings.Contains(lower, "rate limit") ||
 		strings.Contains(lower, "ratelimit") ||
 		strings.Contains(lower, "overloaded") ||
+		strings.Contains(lower, "currently experiencing high demand") ||
 		strings.Contains(lower, "service unavailable") ||
 		strings.Contains(lower, "upstream connect") ||
 		strings.Contains(lower, "connection refused") ||

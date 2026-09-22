@@ -12,9 +12,11 @@ import (
 )
 
 type googleRequest struct {
-	Model    string          `json:"model"`
-	Contents []googleContent `json:"contents"`
-	Config   *googleConfig   `json:"config,omitempty"`
+	Contents          []googleContent         `json:"contents"`
+	SystemInstruction *googleContent          `json:"systemInstruction,omitempty"`
+	Tools             []googleTool            `json:"tools,omitempty"`
+	ToolConfig        *googleToolConfig       `json:"toolConfig,omitempty"`
+	GenerationConfig  *googleGenerationConfig `json:"generationConfig,omitempty"`
 }
 
 type googleContent struct {
@@ -47,13 +49,10 @@ type googleFunctionResponse struct {
 	Response map[string]any `json:"response"`
 }
 
-type googleConfig struct {
-	SystemInstruction *googleContent        `json:"systemInstruction,omitempty"`
-	Tools             []googleTool          `json:"tools,omitempty"`
-	ToolConfig        *googleToolConfig     `json:"toolConfig,omitempty"`
-	ThinkingConfig    *googleThinkingConfig `json:"thinkingConfig,omitempty"`
-	Temperature       *float64              `json:"temperature,omitempty"`
-	MaxOutputTokens   int                   `json:"maxOutputTokens,omitempty"`
+type googleGenerationConfig struct {
+	ThinkingConfig  *googleThinkingConfig `json:"thinkingConfig,omitempty"`
+	Temperature     *float64              `json:"temperature,omitempty"`
+	MaxOutputTokens int                   `json:"maxOutputTokens,omitempty"`
 }
 
 type googleTool struct {
@@ -76,7 +75,7 @@ type googleFunctionCallingConfig struct {
 
 type googleThinkingConfig struct {
 	IncludeThoughts bool   `json:"includeThoughts,omitempty"`
-	ThinkingBudget  int    `json:"thinkingBudget,omitempty"`
+	ThinkingBudget  *int   `json:"thinkingBudget,omitempty"`
 	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
 }
 
@@ -112,7 +111,7 @@ type googleStreamState struct {
 }
 
 func streamGoogle(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
-	options = resolveGoogleProviderOptions(model, options).toProviderStreamOptions(model)
+	options = normalizeGoogleProviderStreamOptions(model, options)
 	stream := newAssistantMessageEventStream()
 	stream.setObserver(options.Observer, model)
 
@@ -125,7 +124,14 @@ func streamGoogle(model Model, ctx Context, options ProviderStreamOptions) *Assi
 	}
 
 	go func() {
-		payload := any(buildGoogleRequest(model, ctx, options))
+		requestBody, err := buildGoogleRequest(model, ctx, options)
+		if err != nil {
+			applyRequestError(&response, err)
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
+			stream.finish(response)
+			return
+		}
+		payload := any(requestBody)
 		if options.OnPayload != nil {
 			if next := options.OnPayload(payload, model); next != nil {
 				payload = next
@@ -180,30 +186,32 @@ func streamSimpleGoogle(model Model, ctx Context, options SimpleStreamOptions) *
 	return streamGoogle(model, ctx, BuildProviderStreamOptions(model, options))
 }
 
-func buildGoogleRequest(model Model, ctx Context, options ProviderStreamOptions) googleRequest {
-	resolvedOptions := resolveGoogleProviderOptions(model, options)
+func buildGoogleRequest(model Model, ctx Context, options ProviderStreamOptions) (googleRequest, error) {
+	resolvedOptions, err := resolveGoogleProviderOptions(model, options)
+	if err != nil {
+		return googleRequest{}, err
+	}
 	request := googleRequest{
-		Model:    model.ID,
 		Contents: convertGoogleMessages(model, ctx),
 	}
 
-	config := &googleConfig{}
 	if strings.TrimSpace(ctx.SystemPrompt) != "" {
-		config.SystemInstruction = &googleContent{
+		request.SystemInstruction = &googleContent{
 			Role:  "user",
 			Parts: []googlePart{{Text: strings.TrimSpace(ctx.SystemPrompt)}},
 		}
 	}
 	if len(ctx.Tools) > 0 {
-		config.Tools = convertGoogleTools(ctx.Tools)
+		request.Tools = convertGoogleTools(ctx.Tools)
 	}
 	if resolvedOptions.ToolChoice != "" {
-		config.ToolConfig = &googleToolConfig{
+		request.ToolConfig = &googleToolConfig{
 			FunctionCallingConfig: googleFunctionCallingConfig{
 				Mode: mapGoogleToolChoice(resolvedOptions.ToolChoice),
 			},
 		}
 	}
+	config := &googleGenerationConfig{}
 	if resolvedOptions.Temperature != nil {
 		config.Temperature = resolvedOptions.Temperature
 	}
@@ -211,42 +219,28 @@ func buildGoogleRequest(model Model, ctx Context, options ProviderStreamOptions)
 		config.MaxOutputTokens = resolvedOptions.MaxTokens
 	}
 	if thinking := resolvedOptions.Thinking; thinking != nil {
-		config.ThinkingConfig = buildGoogleThinkingConfig(model, thinking)
+		config.ThinkingConfig = buildGoogleThinkingConfig(thinking)
 	}
 
-	if config.SystemInstruction != nil || len(config.Tools) > 0 || config.ToolConfig != nil ||
-		config.ThinkingConfig != nil || config.Temperature != nil || config.MaxOutputTokens > 0 {
-		request.Config = config
+	if config.ThinkingConfig != nil || config.Temperature != nil || config.MaxOutputTokens > 0 {
+		request.GenerationConfig = config
 	}
 
-	return request
+	return request, nil
 }
 
-func buildGoogleThinkingConfig(model Model, thinking *GoogleThinkingConfig) *googleThinkingConfig {
+func buildGoogleThinkingConfig(thinking *GoogleThinkingConfig) *googleThinkingConfig {
 	if thinking == nil {
 		return nil
 	}
-	if !thinking.Enabled {
-		return buildGoogleDisabledThinkingConfig(model)
-	}
-	config := &googleThinkingConfig{IncludeThoughts: true}
+	config := &googleThinkingConfig{IncludeThoughts: thinking.Enabled}
 	if thinking.Level != "" {
 		config.ThinkingLevel = thinking.Level
-	} else if thinking.BudgetTokens != 0 || !usesGoogleThinkingLevel(model) {
-		config.ThinkingBudget = thinking.BudgetTokens
+	} else {
+		// An explicit zero disables thinking; omitting it leaves the provider default active.
+		config.ThinkingBudget = &thinking.BudgetTokens
 	}
 	return config
-}
-
-func buildGoogleDisabledThinkingConfig(model Model) *googleThinkingConfig {
-	if usesGoogleThinkingLevel(model) {
-		level := "LOW"
-		if isGemini3FlashModel(model.ID) || isGemma4Model(model.ID) {
-			level = "MINIMAL"
-		}
-		return &googleThinkingConfig{IncludeThoughts: false, ThinkingLevel: level}
-	}
-	return &googleThinkingConfig{IncludeThoughts: false, ThinkingBudget: 0}
 }
 
 func mapGoogleToolChoice(choice string) string {

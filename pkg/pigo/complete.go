@@ -124,6 +124,7 @@ type ProviderStreamOptions struct {
 	ReasoningSummary     string
 	TextVerbosity        string
 	ThinkingBudgetTokens int
+	ThinkingBudgets      ThinkingBudgets
 	ToolChoice           string
 	PreviousResponseID   string
 	Truncation           string

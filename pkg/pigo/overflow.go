@@ -3,7 +3,7 @@ package pigo
 import "regexp"
 
 var overflowPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)prompt is too long`),
+	regexp.MustCompile(`(?i)prompt (?:is )?too long`),
 	regexp.MustCompile(`(?i)request_too_large`),
 	regexp.MustCompile(`(?i)input is too long for requested model`),
 	regexp.MustCompile(`(?i)exceeds the context window`),
@@ -22,6 +22,11 @@ var overflowPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)context[_ ]length[_ ]exceeded`),
 	regexp.MustCompile(`(?i)too many tokens`),
 	regexp.MustCompile(`(?i)token limit exceeded`),
+}
+
+var cerebrasBodylessOverflowPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^4(?:00|13)\s*(?:status code)?\s*\(no body\)`),
+	regexp.MustCompile(`(?i)^openai completions upstream returned 4(?:00|13)\b[^:\r\n]*: empty error response$`),
 }
 
 var nonOverflowPatterns = []*regexp.Regexp{
@@ -50,8 +55,12 @@ func IsContextOverflow(message AssistantMessage, contextWindow int) bool {
 				return true
 			}
 		}
-		if regexp.MustCompile(`(?i)^413\s*(status code)?\s*\(no body\)`).MatchString(message.ErrorMessage) {
-			return true
+		if message.Provider == "cerebras" {
+			for _, pattern := range cerebrasBodylessOverflowPatterns {
+				if pattern.MatchString(message.ErrorMessage) {
+					return true
+				}
+			}
 		}
 	}
 	if contextWindow > 0 && message.StopReason == StopReasonStop {

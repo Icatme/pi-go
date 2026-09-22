@@ -1,6 +1,9 @@
 package pigo
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -39,17 +42,67 @@ func TestIsContextOverflowDetectsAnthropicPromptTooLong(t *testing.T) {
 	}
 }
 
-func TestIsContextOverflowDetects413WithoutBody(t *testing.T) {
-	message := createErrorMessage("413 status code (no body)")
-	if !IsContextOverflow(message, 32768) {
-		t.Fatal("expected 413 without body to be treated as overflow")
+func TestIsContextOverflowScopesBodylessErrorsToCerebras(t *testing.T) {
+	for _, provider := range []Provider{"cerebras", "openai", "ollama", ""} {
+		for _, text := range []string{"400 status code (no body)", "413 status code (no body)", "413 (no body)"} {
+			t.Run(string(provider)+"/"+text, func(t *testing.T) {
+				message := createErrorMessage(text)
+				message.Provider = provider
+				want := provider == "cerebras"
+				if got := IsContextOverflow(message, 32768); got != want {
+					t.Fatalf("IsContextOverflow = %v, want %v", got, want)
+				}
+			})
+		}
 	}
 }
 
-func TestIsContextOverflowIgnores400WithoutBody(t *testing.T) {
-	message := createErrorMessage("400 status code (no body)")
-	if IsContextOverflow(message, 32768) {
-		t.Fatal("expected 400 without body to not be treated as overflow")
+func TestIsContextOverflowCerebrasHTTPResponses(t *testing.T) {
+	for _, provider := range []Provider{"cerebras", "openai", "ollama"} {
+		for _, test := range []struct {
+			name     string
+			status   int
+			body     string
+			overflow bool
+		}{
+			{name: "bodyless 400", status: http.StatusBadRequest, overflow: true},
+			{name: "bodyless 413", status: http.StatusRequestEntityTooLarge, overflow: true},
+			{name: "bodyless 401", status: http.StatusUnauthorized},
+			{name: "bodyless 429", status: http.StatusTooManyRequests},
+			{name: "bodyless 500", status: http.StatusInternalServerError},
+			{name: "invalid request", status: http.StatusBadRequest, body: `{"error":{"message":"invalid request"}}`},
+			{name: "nonempty 413", status: http.StatusRequestEntityTooLarge, body: `{"error":{"message":"attachment rejected"}}`},
+			{name: "bodyless marker in error detail", status: http.StatusBadRequest, body: `{"error":{"message":"empty error response: invalid request"}}`},
+		} {
+			t.Run(string(provider)+"/"+test.name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(test.status)
+					fmt.Fprint(w, test.body)
+				}))
+				defer server.Close()
+				model := Model{ID: "fixture", API: "openai-completions", Provider: provider, BaseURL: server.URL, MaxTokens: 256}
+				result := CompleteSimple(model, Context{Messages: []Message{UserMessage{Content: "hello"}}}, SimpleStreamOptions{APIKey: "fixture"})
+				if result.StopReason != StopReasonError {
+					t.Fatalf("expected HTTP error, got %+v", result)
+				}
+				want := provider == "cerebras" && test.overflow
+				if got := IsContextOverflow(result, 32768); got != want {
+					t.Fatalf("IsContextOverflow = %v, want %v; provider=%s error=%q", got, want, result.Provider, result.ErrorMessage)
+				}
+			})
+		}
+	}
+}
+
+func TestIsContextOverflowDetectsZAIPromptTooLong(t *testing.T) {
+	message := createErrorMessage(`{"error":{"code":"1261","message":"Prompt too long"}}`)
+	message.Provider = "zai"
+	if !IsContextOverflow(message, 128000) {
+		t.Fatal("expected z.ai prompt-too-long error to be detected")
+	}
+	message.ErrorMessage = "Rate limit exceeded: Prompt too long"
+	if IsContextOverflow(message, 128000) {
+		t.Fatal("rate-limit exclusion must take precedence over overflow text")
 	}
 }
 

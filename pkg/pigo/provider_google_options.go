@@ -1,6 +1,10 @@
 package pigo
 
-import "strings"
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
 
 // GoogleProviderOptions captures provider-specific options for the Google
 // Generative AI (Gemini) provider.
@@ -18,72 +22,66 @@ type GoogleThinkingConfig struct {
 }
 
 func buildGoogleProviderStreamOptions(model Model, options SimpleStreamOptions) ProviderStreamOptions {
-	return buildGoogleProviderOptions(model, options).toProviderStreamOptions(model)
+	return streamOptionsFromSimple(model, options).providerStreamOptions(model)
 }
 
 func normalizeGoogleProviderStreamOptions(model Model, options ProviderStreamOptions) ProviderStreamOptions {
-	return resolveGoogleProviderOptions(model, options).toProviderStreamOptions(model)
+	return streamOptionsFromProvider(model, options).providerStreamOptions(model)
 }
 
-func buildGoogleProviderOptions(model Model, options SimpleStreamOptions) GoogleProviderOptions {
-	streamOptions := streamOptionsFromSimple(model, options)
-	streamOptions = streamOptions.withCommonSnapshot(model)
-	return GoogleProviderOptions{
-		StreamOptions: streamOptions,
-		ToolChoice:    streamOptions.ToolChoice,
-		Thinking:      buildGoogleThinkingFromSimple(model, streamOptions),
-	}
-}
-
-func resolveGoogleProviderOptions(model Model, options ProviderStreamOptions) GoogleProviderOptions {
+func resolveGoogleProviderOptions(model Model, options ProviderStreamOptions) (GoogleProviderOptions, error) {
 	streamOptions := streamOptionsFromProvider(model, options)
-	streamOptions = streamOptions.withCommonSnapshot(model)
+	thinking, err := buildGoogleThinkingFromSimple(model, streamOptions)
+	if err != nil {
+		return GoogleProviderOptions{}, err
+	}
 	return GoogleProviderOptions{
 		StreamOptions: streamOptions,
 		ToolChoice:    streamOptions.ToolChoice,
-		Thinking:      buildGoogleThinkingFromSimple(model, streamOptions),
-	}
+		Thinking:      thinking,
+	}, nil
 }
 
-func (options GoogleProviderOptions) toProviderStreamOptions(model Model) ProviderStreamOptions {
-	return options.StreamOptions.providerStreamOptions(model)
-}
-
-func buildGoogleThinkingFromSimple(model Model, options StreamOptions) *GoogleThinkingConfig {
+func buildGoogleThinkingFromSimple(model Model, options StreamOptions) (*GoogleThinkingConfig, error) {
 	if !model.Reasoning {
-		return nil
+		return nil, nil
 	}
 
-	level := options.Reasoning
-	if level == "" || level == ThinkingLevelXHigh || level == ThinkingLevelMax {
-		level = ThinkingLevelHigh
+	requested := ModelThinkingLevel(options.Reasoning)
+	includeThoughts := requested != "" && requested != ModelThinkingLevelOff
+	if !includeThoughts {
+		requested = ModelThinkingLevelOff
 	}
 
-	if string(level) == "off" {
-		return &GoogleThinkingConfig{Enabled: false}
+	level := ClampThinkingLevel(model, requested)
+	if level == ModelThinkingLevelOff {
+		return &GoogleThinkingConfig{Enabled: false}, nil
+	}
+	resolvedLevel, err := resolveGoogleThinkingLevel(model, level)
+	if err != nil {
+		return nil, err
 	}
 
 	if usesGoogleThinkingLevel(model) {
 		return &GoogleThinkingConfig{
-			Enabled: true,
-			Level:   mapGoogleThinkingLevel(level),
-		}
+			Enabled: includeThoughts,
+			Level:   strings.ToUpper(string(resolvedLevel)),
+		}, nil
 	}
 
-	budgets := options.ThinkingBudgets
-	if budgets.IsEmpty() {
-		budgets = defaultGoogleThinkingBudgets(model)
+	budget := options.ThinkingBudgets.ForLevel(resolvedLevel)
+	if budget == 0 {
+		budget = defaultGoogleThinkingBudgets(model).ForLevel(resolvedLevel)
 	}
 
-	budget := budgets.ForLevel(level)
 	if budget < 0 {
 		budget = -1
 	}
 
 	return &GoogleThinkingConfig{
-		Enabled:      true,
+		Enabled:      includeThoughts,
 		BudgetTokens: budget,
-	}
+	}, nil
 }
 
 func (b ThinkingBudgets) IsEmpty() bool {
@@ -115,40 +113,28 @@ func defaultGoogleThinkingBudgets(model Model) ThinkingBudgets {
 	case strings.Contains(id, "2.5-flash"):
 		return ThinkingBudgets{Minimal: 128, Low: 2048, Medium: 8192, High: 24576}
 	default:
-		return ThinkingBudgets{}
+		return ThinkingBudgets{Minimal: -1, Low: -1, Medium: -1, High: -1}
 	}
 }
 
+var googleThinkingLevelModelPattern = regexp.MustCompile(`gemini-3(?:\.\d+)?-(?:pro|flash)|gemma-?4`)
+
+// Model names select the wire format; supported levels come from model metadata.
 func usesGoogleThinkingLevel(model Model) bool {
 	id := strings.ToLower(model.ID)
-	return strings.Contains(id, "gemini-3") ||
-		strings.Contains(id, "gemini-3.1") ||
-		strings.Contains(id, "gemma-4")
+	return googleThinkingLevelModelPattern.MatchString(id) ||
+		id == "gemini-flash-latest" || id == "gemini-flash-lite-latest"
 }
 
-func mapGoogleThinkingLevel(level ThinkingLevel) string {
-	switch level {
-	case ThinkingLevelMinimal:
-		return "MINIMAL"
-	case ThinkingLevelLow:
-		return "LOW"
-	case ThinkingLevelMedium:
-		return "MEDIUM"
-	case ThinkingLevelHigh, ThinkingLevelXHigh, ThinkingLevelMax:
-		return "HIGH"
-	default:
-		return "LOW"
+func resolveGoogleThinkingLevel(model Model, level ModelThinkingLevel) (ThinkingLevel, error) {
+	resolved := string(level)
+	if mapped, ok := model.ThinkingLevelMap[level]; ok {
+		resolved = strings.ToLower(mapped)
 	}
-}
-
-func isGemini3ProModel(id string) bool {
-	return strings.Contains(strings.ToLower(id), "gemini-3") && strings.Contains(strings.ToLower(id), "-pro")
-}
-
-func isGemini3FlashModel(id string) bool {
-	return strings.Contains(strings.ToLower(id), "gemini-3") && strings.Contains(strings.ToLower(id), "-flash")
-}
-
-func isGemma4Model(id string) bool {
-	return strings.Contains(strings.ToLower(id), "gemma-4")
+	switch ThinkingLevel(resolved) {
+	case ThinkingLevelMinimal, ThinkingLevelLow, ThinkingLevelMedium, ThinkingLevelHigh:
+		return ThinkingLevel(resolved), nil
+	default:
+		return "", fmt.Errorf("unsupported Google thinking level mapping for %s/%s: %s -> %s", model.Provider, model.ID, level, resolved)
+	}
 }

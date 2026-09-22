@@ -5,6 +5,8 @@ type ProviderCompat interface {
 	compatAPI() string
 }
 
+// ThinkingBudgets overrides individual reasoning budgets. Zero-valued fields
+// leave the provider's default budget unchanged.
 type ThinkingBudgets struct {
 	Minimal int
 	Low     int

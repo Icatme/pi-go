@@ -1,12 +1,119 @@
 package pigo
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestOpenAITransientHTTPRetryBounds(t *testing.T) {
+	for _, api := range []API{"openai-responses", "openai-completions"} {
+		for _, test := range []struct {
+			name         string
+			status       int
+			body         string
+			maxRetries   int
+			keepFailing  bool
+			wantAttempts int32
+			wantStop     StopReason
+		}{
+			{name: "Cloudflare recovers", status: 520, maxRetries: 1, wantAttempts: 2, wantStop: StopReasonStop},
+			{name: "Azure capacity recovers", status: 400, body: `{"error":{"message":"The system is currently experiencing high demand"}}`,
+				maxRetries: 1, wantAttempts: 2, wantStop: StopReasonStop},
+			{name: "zero retries", status: 520, maxRetries: 0, wantAttempts: 1, wantStop: StopReasonError},
+			{name: "bounded attempts", status: 520, maxRetries: 2, keepFailing: true, wantAttempts: 3, wantStop: StopReasonError},
+			{name: "quota remains terminal", status: 520, body: `{"error":{"code":"insufficient_quota","message":"The system is currently experiencing high demand"}}`,
+				maxRetries: 2, wantAttempts: 1, wantStop: StopReasonError},
+		} {
+			t.Run(string(api)+"/"+test.name, func(t *testing.T) {
+				var attempts atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					if attempts.Add(1) == 1 || test.keepFailing {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(test.status)
+						fmt.Fprint(w, test.body)
+						return
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					if api == "openai-completions" {
+						fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+					} else {
+						fmt.Fprint(w, buildOpenAICodexSSE(map[string]any{
+							"type": "response.completed", "response": map[string]any{"id": "resp_retried", "status": "completed"},
+						}))
+					}
+				}))
+				defer server.Close()
+				model := Model{ID: "fixture", API: api, Provider: "openai", BaseURL: server.URL, MaxTokens: 256}
+				result := CompleteSimple(model, Context{Messages: []Message{UserMessage{Content: "hello"}}}, SimpleStreamOptions{
+					APIKey: "fixture", MaxRetries: test.maxRetries, MaxRetryDelay: 1,
+				})
+				if attempts.Load() != test.wantAttempts || result.StopReason != test.wantStop {
+					t.Fatalf("attempts=%d stop=%s error=%q; want attempts=%d stop=%s", attempts.Load(), result.StopReason, result.ErrorMessage, test.wantAttempts, test.wantStop)
+				}
+			})
+		}
+	}
+}
+
+func TestOpenAIHighDemandStreamRetryBoundary(t *testing.T) {
+	const message = "The system is currently experiencing high demand"
+	for _, output := range []bool{false, true} {
+		t.Run(fmt.Sprintf("output=%v", output), func(t *testing.T) {
+			var attempts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				if attempts.Add(1) > 1 {
+					fmt.Fprint(w, buildOpenAICodexSSE(map[string]any{
+						"type": "response.completed", "response": map[string]any{"id": "resp_retried", "status": "completed"},
+					}))
+					return
+				}
+				if output {
+					fmt.Fprint(w, buildOpenAICodexSSE(map[string]any{
+						"type": "response.output_item.done", "item": map[string]any{
+							"type": "message", "id": "msg_partial", "content": []map[string]any{{"type": "output_text", "text": "partial"}},
+						},
+					}))
+				}
+				fmt.Fprint(w, buildOpenAICodexSSE(map[string]any{
+					"type": "response.failed", "response": map[string]any{
+						"id": "resp_failed", "status": "failed", "error": map[string]any{"message": message},
+					},
+				}))
+			}))
+			defer server.Close()
+			model := Model{ID: "fixture", API: "openai-responses", Provider: "openai", BaseURL: server.URL, MaxTokens: 256}
+			stream := StreamSimple(model, Context{}, SimpleStreamOptions{APIKey: "fixture", MaxRetries: 1, MaxRetryDelay: 1})
+			var starts, errors int
+			for event := range stream.Events() {
+				if event.Type == AssistantMessageEventStart {
+					starts++
+				}
+				if event.Type == AssistantMessageEventError {
+					errors++
+				}
+			}
+			result := stream.Result()
+			if starts != 1 {
+				t.Fatalf("start events = %d, want 1", starts)
+			}
+			if output {
+				if attempts.Load() != 1 || errors != 1 || result.StopReason != StopReasonError || result.ErrorMessage != message {
+					t.Fatalf("failure after output retried or lost: attempts=%d errors=%d result=%+v", attempts.Load(), errors, result)
+				}
+				if len(result.Content) != 1 || result.Content[0].(TextContent).Text != "partial" {
+					t.Fatalf("partial output lost: %+v", result.Content)
+				}
+			} else if attempts.Load() != 2 || errors != 0 || result.StopReason != StopReasonStop {
+				t.Fatalf("failure before output did not recover: attempts=%d errors=%d result=%+v", attempts.Load(), errors, result)
+			}
+		})
+	}
+}
 
 func TestShouldRetryOpenAIResponsesRequestBufferLimit(t *testing.T) {
 	tests := []struct {
@@ -48,6 +155,28 @@ func TestOpenAIProviderRetryClassification(t *testing.T) {
 		message   string
 		wantRetry bool
 	}{
+		{
+			name:      "Cloudflare 520",
+			status:    520,
+			message:   "520 status code (no body)",
+			wantRetry: true,
+		},
+		{
+			name:      "Azure peak-load capacity",
+			status:    http.StatusBadRequest,
+			body:      `{"error":{"message":"The system is currently experiencing high demand and cannot process your request. Your request exceeds the maximum usage size allowed during peak load."}}`,
+			wantRetry: true,
+		},
+		{
+			name:      "streamed high demand",
+			message:   "The system is CURRENTLY EXPERIENCING HIGH DEMAND",
+			wantRetry: true,
+		},
+		{
+			name:   "quota remains terminal during high demand",
+			status: 520,
+			body:   `{"error":{"code":"insufficient_quota","message":"The system is currently experiencing high demand"}}`,
+		},
 		{
 			name:      "transient rate limit",
 			status:    http.StatusTooManyRequests,
