@@ -332,7 +332,7 @@ func TestSameDefinitionThroughAgent(t *testing.T) {
 func TestNumericArgumentsRemainExactOnWire(t *testing.T) {
 	s := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "1"}, nil)
 	var calls atomic.Int32
-	add(s, "number", func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(&mcp.Tool{Name: "number", InputSchema: map[string]any{"type": "object", "required": []any{"id", "nested"}, "properties": map[string]any{"id": map[string]any{"type": "integer"}, "nested": map[string]any{"type": "array", "items": map[string]any{"type": "number"}}}}}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		calls.Add(1)
 		var args map[string]any
 		decoder := json.NewDecoder(bytes.NewReader(req.Params.Arguments))
@@ -415,5 +415,96 @@ func TestUnsafeSDKResultIsPostExecutionFailure(t *testing.T) {
 func TestUnsafeSDKSchemaRejected(t *testing.T) {
 	if _, _, err := schema(map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"const": float64(1 << 53)}}}, 1024, true); err == nil {
 		t.Fatal("rounded schema accepted")
+	}
+}
+
+func TestExactValidationProjectionDomains(t *testing.T) {
+	for _, test := range []struct {
+		raw  string
+		want any
+	}{{"9007199254740993", int64(9007199254740993)}, {"18446744073709551615", uint64(18446744073709551615)}, {"-9223372036854775808", int64(-9223372036854775808)}, {"0.125", float64(0.125)}, {"0.1", float64(0.1)}, {"19.99", float64(19.99)}, {"1e3", int64(1000)}} {
+		got, err := validationProjection(json.Number(test.raw))
+		if err != nil || got != test.want {
+			t.Fatalf("%s got=%v(%T) err=%v", test.raw, got, got, err)
+		}
+	}
+	for _, raw := range []string{"18446744073709551616", "-9223372036854775809", "0.10000000000000001", "1e99999999"} {
+		if _, err := validationProjection(json.Number(raw)); err == nil {
+			t.Fatalf("unsupported numeric domain accepted: %s", raw)
+		}
+	}
+	_, validator, err := schema(map[string]any{"type": "number", "minimum": float64(0), "maximum": float64(2), "multipleOf": float64(0.125)}, 1024, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{"0.125", "1.5"} {
+		v, err := validationProjection(json.Number(raw))
+		if err != nil || validator.Validate(v) != nil {
+			t.Fatalf("exact number rejected: %s %v", raw, err)
+		}
+	}
+	bad, _ := validationProjection(json.Number("2.125"))
+	if validator.Validate(bad) == nil {
+		t.Fatal("maximum ignored")
+	}
+}
+
+func TestDecimalConstraintsAndWireValues(t *testing.T) {
+	for _, test := range []struct {
+		name, raw  string
+		constraint map[string]any
+		wantError  bool
+	}{
+		{"enum", "19.99", map[string]any{"enum": []any{19.99}}, false},
+		{"const", "0.1", map[string]any{"const": 0.1}, false},
+		{"minimum", "19.99", map[string]any{"minimum": 19.99}, false},
+		{"maximum", "19.99", map[string]any{"maximum": 19.99}, false},
+		{"multiple", "0.1", map[string]any{"multipleOf": 0.1}, false},
+		{"wrong-const", "0.2", map[string]any{"const": 0.1}, true},
+		{"wrong-maximum", "20", map[string]any{"maximum": 19.99}, true},
+		{"library-price-multiple-limit", "19.99", map[string]any{"multipleOf": 0.01}, true},
+		{"library-tenths-multiple-limit", "0.3", map[string]any{"multipleOf": 0.1}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "1"}, nil)
+			var calls atomic.Int32
+			property := map[string]any{"type": "number"}
+			for key, value := range test.constraint {
+				property[key] = value
+			}
+			s.AddTool(&mcp.Tool{Name: "price", InputSchema: map[string]any{"type": "object", "required": []any{"value"}, "properties": map[string]any{"value": property}}}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				calls.Add(1)
+				var args map[string]any
+				d := json.NewDecoder(bytes.NewReader(req.Params.Arguments))
+				d.UseNumber()
+				if err := d.Decode(&args); err != nil {
+					return nil, err
+				}
+				if args["value"] != json.Number(test.raw) {
+					t.Errorf("wire value changed: %s", req.Params.Arguments)
+				}
+				return &mcp.CallToolResult{}, nil
+			})
+			cs := session(t, s, false, "2025-11-25")
+			tools, err := Discover(t.Context(), cs, Options{Names: []string{"price"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = tools[0].Execute(t.Context(), "direct", map[string]any{"value": json.Number(test.raw)}, nil)
+			if (err != nil) != test.wantError {
+				t.Fatalf("direct err=%v", err)
+			}
+			out := agent.RunToolCall(t.Context(), agent.ToolCall{Name: "price", Arguments: json.RawMessage(`{"value":` + test.raw + `}`)}, agent.RunToolCallOptions{Tools: tools})
+			if out.IsError != test.wantError {
+				t.Fatalf("RunToolCall outcome=%+v", out)
+			}
+			want := int32(2)
+			if test.wantError {
+				want = 0
+			}
+			if calls.Load() != want {
+				t.Fatalf("calls=%d want=%d", calls.Load(), want)
+			}
+		})
 	}
 }

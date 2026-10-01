@@ -56,7 +56,17 @@ fetched or executed. An error response need not match the successful output
 schema. Metadata and annotations are not treated as policy or instructions.
 
 The adapter preserves exact outbound JSON numbers (including nested int64 values)
-using `json.Number`. SDK 1.8 decodes interface-valued schema/result numbers as
+using `json.Number`. Validation uses a separate native int64/uint64 or float64 projection because
+jsonschema-go's type classifier treats json.Number as a string. Integers are
+projected exactly; decimals must round-trip through float64 back to the same JSON
+numeric value. Ordinary values such as 0.1 and 19.99 are supported. Integers outside
+the native ranges or decimals requiring more precision fail explicitly before
+invocation. Original wire values remain untouched. Validation follows
+jsonschema-go v0.4.3 numeric semantics, not arbitrary-precision JSON Schema: its
+float64 multipleOf division rejects some valid decimal multiples, including 19.99
+with 0.01 and 0.3 with 0.1. Those calls fail before execution; schemas requiring
+exact decimal arithmetic need a different caller validation boundary. The adapter
+does not silently remove constraints or implement a second schema engine. SDK 1.8 decodes interface-valued schema/result numbers as
 float64 before this adapter receives them. Numeric magnitudes at or above 2^53
 are rejected conservatively, including genuinely representable values, because
 an adjacent integer may already have rounded to that value. Such result rejection

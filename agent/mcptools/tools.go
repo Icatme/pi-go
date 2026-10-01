@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"reflect"
+	"strconv"
 
 	"github.com/Icatme/pi-go/agent"
 	"github.com/google/jsonschema-go/jsonschema"
@@ -107,6 +109,34 @@ func Discover(ctx context.Context, session *mcp.ClientSession, options Options) 
 		outputSnapshot, _ := json.Marshal(output)
 		definitions = append(definitions, agent.ToolDefinition{
 			Name: name, Description: tool.Description, Parameters: input, OutputSchema: output,
+			ParseArguments: func(call agent.ToolCall) (any, error) {
+				var data []byte
+				var err error
+				if call.ParsedArgs != nil {
+					data, err = json.Marshal(call.ParsedArgs)
+				} else {
+					data = call.Arguments
+				}
+				if len(data) == 0 {
+					data = []byte(`{}`)
+				}
+				if err != nil || len(data) > o.MaxArgumentBytes || !json.Valid(data) {
+					return nil, fmt.Errorf("mcptools: invalid or oversized arguments")
+				}
+				var args map[string]any
+				d := json.NewDecoder(bytes.NewReader(data))
+				d.UseNumber()
+				if err := d.Decode(&args); err != nil {
+					return nil, err
+				}
+				if args == nil {
+					args = map[string]any{}
+				}
+				if _, err := validationProjection(args); err != nil {
+					return nil, err
+				}
+				return args, nil
+			},
 			Execute: func(callCtx context.Context, _ string, args any, _ agent.ToolUpdateFunc) (agent.ToolResult, error) {
 				if err := callCtx.Err(); err != nil {
 					return agent.ToolResult{}, err
@@ -126,7 +156,11 @@ func Discover(ctx context.Context, session *mcp.ClientSession, options Options) 
 				if arguments == nil {
 					arguments = map[string]any{}
 				}
-				if err := inputValidator.Validate(arguments); err != nil {
+				instance, err := validationProjection(arguments)
+				if err != nil {
+					return agent.ToolResult{}, err
+				}
+				if err := inputValidator.Validate(instance); err != nil {
 					return agent.ToolResult{}, fmt.Errorf("mcptools: arguments do not match schema: %w", err)
 				}
 				current, err := list(callCtx, session, o)
@@ -271,11 +305,73 @@ func convertResult(result *mcp.CallToolResult, output *jsonschema.Resolved, limi
 		if result.StructuredContent == nil {
 			return converted, fmt.Errorf("mcptools: missing structured output")
 		}
-		if err := output.Validate(result.StructuredContent); err != nil {
+		instance, err := validationProjection(result.StructuredContent)
+		if err != nil {
+			return converted, err
+		}
+		if err := output.Validate(instance); err != nil {
 			return converted, fmt.Errorf("mcptools: output does not match schema: %w", err)
 		}
 	}
 	return converted, nil
+}
+
+// jsonschema-go's type classifier does not classify json.Number as a number.
+// Project integers exactly and decimals with an unchanged JSON decimal roundtrip, leaving
+// the original JSON numbers untouched for transport. Unsupported numeric domains
+// fail before invocation instead of rounding an identifier or constraint check.
+func validationProjection(value any) (any, error) {
+	switch v := value.(type) {
+	case json.Number:
+		if _, err := strconv.ParseFloat(string(v), 64); err != nil {
+			return nil, fmt.Errorf("mcptools: unsupported numeric domain")
+		}
+		r, ok := new(big.Rat).SetString(string(v))
+		if !ok {
+			return nil, fmt.Errorf("mcptools: invalid JSON number")
+		}
+		if r.IsInt() {
+			if r.Num().IsInt64() {
+				return r.Num().Int64(), nil
+			}
+			if r.Num().IsUint64() {
+				return r.Num().Uint64(), nil
+			}
+			return nil, fmt.Errorf("mcptools: unsupported numeric domain outside int64/uint64")
+		}
+		f, _ := r.Float64()
+		encoded, err := json.Marshal(f)
+		if err != nil {
+			return nil, fmt.Errorf("mcptools: unsupported numeric domain")
+		}
+		roundtrip, ok := new(big.Rat).SetString(string(encoded))
+		if !ok || roundtrip.Cmp(r) != 0 {
+			return nil, fmt.Errorf("mcptools: unsupported numeric precision for validation")
+		}
+		return f, nil
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, child := range v {
+			projected, err := validationProjection(child)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = projected
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(v))
+		for i, child := range v {
+			projected, err := validationProjection(child)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = projected
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
 }
 
 // SDK interface-valued numbers have already passed through float64. At and
