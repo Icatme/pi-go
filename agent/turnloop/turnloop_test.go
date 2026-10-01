@@ -395,8 +395,8 @@ func TestSteeringPriorityAndShouldStopHandoff(t *testing.T) {
 			Definition: agent.AgentDefinition{
 				Name:  "should-stop",
 				Model: model,
-				ShouldStopAfterTurn: func(context.Context, agent.ShouldStopAfterTurnContext) (bool, error) {
-					return true, nil
+				FinishTurn: func(context.Context, agent.AgentTurnContext) (agent.AgentTurnDecision, error) {
+					return agent.AgentTurnDecision{Action: agent.TurnActionEnd}, nil
 				},
 			},
 			QueueCapacity: 4,
@@ -491,8 +491,15 @@ func TestMaxTurnsPreservesQueuedInputs(t *testing.T) {
 		if views := model.views(); len(views) != 1 {
 			t.Fatalf("model calls = %d, want 1", len(views))
 		}
-		if len(result.Snapshot.Messages) != 3 || result.Snapshot.Messages[2].Role != agent.RoleTool {
+		if len(result.Snapshot.Messages) != 4 || result.Snapshot.Messages[3].Role != agent.RoleTool {
 			t.Fatalf("snapshot messages = %+v", result.Snapshot.Messages)
+		}
+		messages := result.Snapshot.Messages
+		if messages[0].Role != agent.RoleSystem || messages[0].System == nil || messages[0].System.Content != "" || len(messages[0].System.ToolsAdded) != 1 || messages[0].System.ToolsAdded[0].Name != "echo" {
+			t.Fatalf("expected one leading echo tool declaration, got %+v", messages[0])
+		}
+		if messages[1].Role != agent.RoleUser || messages[1].Parts[0].Text != "start" || messages[2].Role != agent.RoleAssistant || len(messages[2].ToolCalls) != 1 || messages[3].ToolResult == nil || messages[3].ToolResult.IsError || messages[3].ToolResult.Content[0].Text != "ok" {
+			t.Fatalf("required tool continuation lifecycle changed: %+v", messages)
 		}
 	})
 }

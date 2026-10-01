@@ -107,24 +107,38 @@ func TestReflectionAgentRevisesThenAcceptsWithCompleteRequest(t *testing.T) {
 	}
 
 	for i, criticRequest := range critic.requests {
-		if len(criticRequest.Messages) != len(request)+2 {
-			t.Fatalf("evaluation %d received %d messages, want complete request plus draft and instruction", i+1, len(criticRequest.Messages))
+		if len(criticRequest.Messages) != len(request)+3 {
+			t.Fatalf("evaluation %d received %d messages, want system head plus complete request, draft, and instruction", i+1, len(criticRequest.Messages))
 		}
-		assertRequestPrefix(t, criticRequest.Messages, request)
-		if got := criticRequest.Messages[0].Parts[1]; got.Type != core.PartTypeImage || got.Data != "image-data" || got.MIMEType != "image/png" {
+		assertPrebuiltSystemHead(t, criticRequest.Messages, defaultReflectionEvaluatorSystemPrompt())
+		if criticRequest.SystemPrompt != defaultReflectionEvaluatorSystemPrompt() {
+			t.Fatalf("evaluation %d aggregate prompt differs from its leading system message: %q", i+1, criticRequest.SystemPrompt)
+		}
+		assertRequestPrefix(t, criticRequest.Messages[1:], request)
+		if got := criticRequest.Messages[1].Parts[1]; got.Type != core.PartTypeImage || got.Data != "image-data" || got.MIMEType != "image/png" {
 			t.Fatalf("evaluation %d lost image input: %+v", i+1, got)
+		}
+		if got := reflectionMessageText(criticRequest.Messages[1+len(request)]); got != reflectionMessageText(result.Steps[i].Draft) {
+			t.Fatalf("evaluation %d lost its own draft: %q", i+1, got)
+		}
+		if got := reflectionMessageText(criticRequest.Messages[2+len(request)]); got != reflectionEvaluationInstruction(i+1) {
+			t.Fatalf("evaluation %d received incorrect evaluation instruction: %q", i+1, got)
 		}
 	}
 
 	secondGeneration := generator.requests[1].Messages
-	if len(secondGeneration) != len(request)+2 {
-		t.Fatalf("second generation received %d messages, want original request plus prior draft and revision instruction", len(secondGeneration))
+	if len(secondGeneration) != len(request)+3 {
+		t.Fatalf("second generation received %d messages, want system head plus original request, prior draft, and revision instruction", len(secondGeneration))
 	}
-	assertRequestPrefix(t, secondGeneration, request)
-	if got := reflectionMessageText(secondGeneration[len(request)]); got != "Draft one" {
+	assertPrebuiltSystemHead(t, secondGeneration, agent.generatorDefinition.SystemPrompt)
+	if generator.requests[1].SystemPrompt != agent.generatorDefinition.SystemPrompt {
+		t.Fatalf("generator aggregate prompt differs from its leading system message: %q", generator.requests[1].SystemPrompt)
+	}
+	assertRequestPrefix(t, secondGeneration[1:], request)
+	if got := reflectionMessageText(secondGeneration[1+len(request)]); got != "Draft one" {
 		t.Fatalf("second generation did not receive prior draft: %q", got)
 	}
-	revision := reflectionMessageText(secondGeneration[len(request)+1])
+	revision := reflectionMessageText(secondGeneration[2+len(request)])
 	if !strings.Contains(revision, "Discuss the supplied image.") {
 		t.Fatalf("second generation did not receive structured revision instruction: %q", revision)
 	}

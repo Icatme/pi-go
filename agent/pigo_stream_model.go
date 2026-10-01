@@ -106,11 +106,32 @@ func (s *pigoAssistantStream) Close() error {
 }
 
 func buildPigoContext(systemPrompt string, messages []Message, tools []ToolDefinition) pigo.Context {
+	if GetCurrentSystemMessage(messages) != nil {
+		messages = cloneMessages(messages)
+		changes := toolStateChanges(messages, tools)
+		if len(changes.ToolsAdded) > 0 || len(changes.ToolsRemoved) > 0 {
+			messages = append(messages, NewSystemMessage(changes))
+		}
+		return pigo.Context{Messages: convertMessagesToPigo(messages)}
+	}
 	return pigo.Context{
 		SystemPrompt: systemPrompt,
 		Messages:     convertMessagesToPigo(messages),
 		Tools:        convertToolsToPigo(tools),
 	}
+}
+
+func convertSystemMessageToPigo(message Message) pigo.SystemMessage {
+	payload := cloneSystemPayload(message.System)
+	tools := make([]pigo.Tool, len(payload.ToolsAdded))
+	for i, tool := range payload.ToolsAdded {
+		tools[i] = pigo.Tool{Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters, OutputSchema: tool.OutputSchema}
+	}
+	removed := make([]pigo.ToolReference, len(payload.ToolsRemoved))
+	for i, tool := range payload.ToolsRemoved {
+		removed[i] = pigo.ToolReference{Name: tool.Name}
+	}
+	return pigo.SystemMessage{Content: payload.Content, Sections: payload.Sections, ToolsAdded: tools, ToolsRemoved: removed, Timestamp: message.Timestamp}
 }
 
 func buildPigoStreamOptions(ctx context.Context, request ModelRequest, provider pigo.Provider) pigo.SimpleStreamOptions {
@@ -127,16 +148,26 @@ func buildPigoStreamOptions(ctx context.Context, request ModelRequest, provider 
 		// DeepSeek treats an omitted effort as its default max, so off must be explicit.
 		reasoning = pigo.ThinkingLevel(ThinkingOff)
 	}
+	var onProviderStreamEvent func(json.RawMessage, pigo.Model) error
+	if request.OnProviderStreamEvent != nil {
+		onProviderStreamEvent = func(data json.RawMessage, model pigo.Model) error {
+			ref := cloneModelRef(request.Model)
+			ref.Provider = string(model.Provider)
+			ref.Model = model.ID
+			return request.OnProviderStreamEvent(data, ref)
+		}
+	}
 	return pigo.SimpleStreamOptions{
-		APIKey:          apiKey,
-		Auth:            toPigoAuthConfigs(provider, request.Model.ProviderConfig.Auth),
-		Headers:         cloneStringMap(request.Model.ProviderConfig.Headers),
-		Transport:       toPigoTransport(request.Transport),
-		SessionID:       request.SessionID,
-		MaxRetryDelay:   request.MaxRetryDelayMs,
-		RequestContext:  ctx,
-		Reasoning:       reasoning,
-		ThinkingBudgets: toPigoThinkingBudgets(request.ThinkingBudgets),
+		APIKey:                apiKey,
+		OnProviderStreamEvent: onProviderStreamEvent,
+		Auth:                  toPigoAuthConfigs(provider, request.Model.ProviderConfig.Auth),
+		Headers:               cloneStringMap(request.Model.ProviderConfig.Headers),
+		Transport:             toPigoTransport(request.Transport),
+		SessionID:             request.SessionID,
+		MaxRetryDelay:         request.MaxRetryDelayMs,
+		RequestContext:        ctx,
+		Reasoning:             reasoning,
+		ThinkingBudgets:       toPigoThinkingBudgets(request.ThinkingBudgets),
 	}
 }
 
@@ -148,6 +179,10 @@ func convertMessagesToPigo(messages []Message) []pigo.Message {
 	converted := make([]pigo.Message, 0, len(messages))
 	for _, message := range messages {
 		switch message.Role {
+		case RoleSystem:
+			if message.System != nil {
+				converted = append(converted, convertSystemMessageToPigo(message))
+			}
 		case RoleUser:
 			if user, ok := convertUserMessageToPigo(message); ok {
 				converted = append(converted, user)
@@ -202,14 +237,15 @@ func convertAssistantMessageToPigo(message Message) pigo.Message {
 	}
 
 	return pigo.AssistantMessage{
-		Content:      content,
-		API:          pigo.API(message.API),
-		Provider:     pigo.Provider(message.Provider),
-		Model:        message.Model,
-		ResponseID:   message.ResponseID,
-		StopReason:   toPigoStopReason(message.StopReason),
-		ErrorMessage: message.ErrorMessage,
-		Timestamp:    message.Timestamp,
+		Content:       content,
+		API:           pigo.API(message.API),
+		Provider:      pigo.Provider(message.Provider),
+		Model:         message.Model,
+		ResponseID:    message.ResponseID,
+		ThinkingLevel: pigo.ModelThinkingLevel(message.ThinkingLevel),
+		StopReason:    toPigoStopReason(message.StopReason),
+		ErrorMessage:  message.ErrorMessage,
+		Timestamp:     message.Timestamp,
 	}
 }
 
@@ -282,9 +318,10 @@ func convertToolsToPigo(tools []ToolDefinition) []pigo.Tool {
 	converted := make([]pigo.Tool, 0, len(tools))
 	for _, tool := range tools {
 		converted = append(converted, pigo.Tool{
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  cloneStringAnyMap(tool.Parameters),
+			Name:         tool.Name,
+			Description:  tool.Description,
+			Parameters:   cloneStringAnyMap(tool.Parameters),
+			OutputSchema: cloneStringAnyMap(tool.OutputSchema),
 		})
 	}
 	return converted
@@ -339,16 +376,17 @@ func convertPigoAssistantMessage(message pigo.AssistantMessage) Message {
 	}
 
 	return Message{
-		Role:         RoleAssistant,
-		Parts:        parts,
-		ToolCalls:    toolCalls,
-		Timestamp:    message.Timestamp,
-		API:          string(message.API),
-		Provider:     string(message.Provider),
-		Model:        message.Model,
-		ResponseID:   message.ResponseID,
-		StopReason:   fromPigoStopReason(message.StopReason),
-		ErrorMessage: message.ErrorMessage,
+		Role:          RoleAssistant,
+		Parts:         parts,
+		ToolCalls:     toolCalls,
+		Timestamp:     message.Timestamp,
+		API:           string(message.API),
+		Provider:      string(message.Provider),
+		Model:         message.Model,
+		ResponseID:    message.ResponseID,
+		ThinkingLevel: ThinkingLevel(message.ThinkingLevel),
+		StopReason:    fromPigoStopReason(message.StopReason),
+		ErrorMessage:  message.ErrorMessage,
 	}
 }
 

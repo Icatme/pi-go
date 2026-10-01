@@ -19,8 +19,8 @@ type openCodeGoModelSpec struct {
 	Compat           ProviderCompat
 }
 
-// This is the 2026-08-20 intersection of OpenCode Go's documented current
-// model list and models.dev's active, non-deprecated tool-calling catalog.
+// Snapshot of pi-mono 8ce69e9d2 and models.dev active tool-calling metadata
+// (2026-10-01). OpenCode Go reports tokens without estimated API costs.
 var openCodeGoModelSpecs = []openCodeGoModelSpec{
 	{
 		ID:        "deepseek-v4-flash",
@@ -57,6 +57,17 @@ var openCodeGoModelSpecs = []openCodeGoModelSpec{
 		ContextWindow: 1_000_000,
 		MaxTokens:     384_000,
 		Compat:        newOpenCodeGoDeepSeekV4Compat(),
+	},
+	{
+		ID:               "deepseek-v4.1-flash",
+		Name:             "DeepSeek V4.1 Flash",
+		API:              "openai-completions",
+		Reasoning:        true,
+		ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: "", ModelThinkingLevelMinimal: "", ModelThinkingLevelLow: "low", ModelThinkingLevelMedium: "", ModelThinkingLevelHigh: "high", ModelThinkingLevelXHigh: "", ModelThinkingLevelMax: "max"},
+		ImageInput:       true,
+		ContextWindow:    1000000,
+		MaxTokens:        384000,
+		Compat:           newOpenCodeGoCompletionsCompat("openai", true, true),
 	},
 	{
 		ID:            "glm-5.1",
@@ -104,6 +115,17 @@ var openCodeGoModelSpecs = []openCodeGoModelSpec{
 		Compat:        newOpenCodeGoCompletionsCompat("openai", true, true),
 	},
 	{
+		ID:               "glm-5.3-flash",
+		Name:             "GLM-5.3-Flash",
+		API:              "openai-completions",
+		Reasoning:        true,
+		ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: "", ModelThinkingLevelMinimal: "", ModelThinkingLevelLow: "low", ModelThinkingLevelMedium: "", ModelThinkingLevelHigh: "high", ModelThinkingLevelXHigh: "", ModelThinkingLevelMax: "max"},
+		ImageInput:       true,
+		ContextWindow:    1000000,
+		MaxTokens:        131072,
+		Compat:           newOpenCodeGoCompletionsCompat("openai", true, true),
+	},
+	{
 		ID:         "gpt-5.6-luna",
 		Name:       "GPT-5.6 Luna",
 		API:        "openai-responses",
@@ -120,27 +142,38 @@ var openCodeGoModelSpecs = []openCodeGoModelSpec{
 		},
 		ContextWindow: 1_050_000,
 		MaxTokens:     128_000,
-		Compat: &OpenAIResponsesCompat{
-			SupportsJSONOutput: true,
-			SupportsJSONSchema: true,
-		},
+		Compat:        newOpenCodeGoLunaCompat(),
 	},
 	{
-		ID:         "grok-4.5",
-		Name:       "Grok 4.5",
-		API:        "openai-responses",
-		Reasoning:  true,
-		ImageInput: true,
-		ThinkingLevelMap: ThinkingLevelMap{
-			ModelThinkingLevelOff:     "",
-			ModelThinkingLevelMinimal: "",
-			ModelThinkingLevelLow:     "low",
-			ModelThinkingLevelMedium:  "medium",
-			ModelThinkingLevelHigh:    "high",
-			ModelThinkingLevelXHigh:   "",
-		},
-		ContextWindow: 500_000,
-		MaxTokens:     500_000,
+		ID:               "gpt-6-luna",
+		Name:             "GPT-6 Luna",
+		API:              "openai-responses",
+		Reasoning:        true,
+		ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: "none", ModelThinkingLevelMinimal: "", ModelThinkingLevelLow: "low", ModelThinkingLevelMedium: "medium", ModelThinkingLevelHigh: "high", ModelThinkingLevelXHigh: "xhigh", ModelThinkingLevelMax: "max"},
+		ImageInput:       true,
+		ContextWindow:    1050000,
+		MaxTokens:        128000,
+		Compat:           newOpenCodeGoLunaCompat(),
+	},
+	{
+		ID:               "grok-4.6",
+		Name:             "Grok 4.6",
+		API:              "openai-responses",
+		Reasoning:        true,
+		ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: "", ModelThinkingLevelMinimal: "", ModelThinkingLevelLow: "low", ModelThinkingLevelMedium: "medium", ModelThinkingLevelHigh: "high", ModelThinkingLevelXHigh: "xhigh", ModelThinkingLevelMax: ""},
+		ImageInput:       true,
+		ContextWindow:    500000,
+		MaxTokens:        500000,
+	},
+	{
+		ID:               "grok-4.7",
+		Name:             "Grok 4.7",
+		API:              "openai-responses",
+		Reasoning:        true,
+		ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: "", ModelThinkingLevelMinimal: "", ModelThinkingLevelLow: "low", ModelThinkingLevelMedium: "medium", ModelThinkingLevelHigh: "high", ModelThinkingLevelXHigh: "xhigh", ModelThinkingLevelMax: ""},
+		ImageInput:       true,
+		ContextWindow:    500000,
+		MaxTokens:        500000,
 	},
 	{
 		ID:        "hy3",
@@ -156,25 +189,8 @@ var openCodeGoModelSpecs = []openCodeGoModelSpec{
 			ModelThinkingLevelXHigh:   "",
 		},
 		ContextWindow: 256_000,
-		MaxTokens:     64_000,
+		MaxTokens:     128_000,
 		Compat:        newOpenCodeGoCompletionsCompat("openai", true, true),
-	},
-	{
-		ID:         "kimi-k2.6",
-		Name:       "Kimi K2.6",
-		API:        "openai-completions",
-		Reasoning:  true,
-		ImageInput: true,
-		ThinkingLevelMap: ThinkingLevelMap{
-			ModelThinkingLevelMinimal: "",
-			ModelThinkingLevelLow:     "",
-			ModelThinkingLevelMedium:  "",
-			ModelThinkingLevelHigh:    "high",
-			ModelThinkingLevelXHigh:   "",
-		},
-		ContextWindow: 262_144,
-		MaxTokens:     65_536,
-		Compat:        newOpenCodeGoCompletionsCompat("deepseek", false, false),
 	},
 	{
 		ID:            "kimi-k2.7-code",
@@ -203,6 +219,15 @@ var openCodeGoModelSpecs = []openCodeGoModelSpec{
 		},
 		ContextWindow: 1_048_576,
 		MaxTokens:     131_072,
+		Compat:        newOpenCodeGoKimiK3Compat(),
+	},
+	{
+		ID:            "longcat-2.0",
+		Name:          "LongCat-2.0",
+		API:           "openai-completions",
+		Reasoning:     true,
+		ContextWindow: 1000000,
+		MaxTokens:     131072,
 		Compat:        newOpenCodeGoCompletionsCompat("openai", true, true),
 	},
 	{
@@ -225,12 +250,33 @@ var openCodeGoModelSpecs = []openCodeGoModelSpec{
 		Compat:        newOpenCodeGoCompletionsCompat("openai", true, true),
 	},
 	{
+		ID:            "mimo-v2.6-flash",
+		Name:          "MiMo-V2.6-Flash",
+		API:           "openai-completions",
+		Reasoning:     true,
+		ImageInput:    true,
+		ContextWindow: 1048576,
+		MaxTokens:     131072,
+		Compat:        newOpenCodeGoCompletionsCompat("openai", true, true),
+	},
+	{
+		ID:            "mimo-v2.6-pro",
+		Name:          "MiMo-V2.6-Pro",
+		API:           "openai-completions",
+		Reasoning:     true,
+		ImageInput:    true,
+		ContextWindow: 1048576,
+		MaxTokens:     131072,
+		Compat:        newOpenCodeGoCompletionsCompat("openai", true, true),
+	},
+	{
 		ID:            "minimax-m2.7",
 		Name:          "MiniMax-M2.7",
-		API:           "anthropic-messages",
+		API:           "openai-completions",
 		Reasoning:     true,
 		ContextWindow: 204_800,
 		MaxTokens:     131_072,
+		Compat:        newOpenCodeGoCompletionsCompat("openai", true, true),
 	},
 	{
 		ID:            "minimax-m3",
@@ -259,39 +305,45 @@ var openCodeGoModelSpecs = []openCodeGoModelSpec{
 		MaxTokens:     131_072,
 	},
 	{
-		ID:            "qwen3.6-plus",
-		Name:          "Qwen3.6 Plus",
-		API:           "anthropic-messages",
-		Reasoning:     true,
-		ImageInput:    true,
-		ContextWindow: 1_000_000,
-		MaxTokens:     65_536,
-	},
-	{
-		ID:            "qwen3.7-max",
-		Name:          "Qwen3.7 Max",
-		API:           "anthropic-messages",
-		Reasoning:     true,
-		ContextWindow: 1_000_000,
-		MaxTokens:     65_536,
+		ID:               "muse-spark-1.3-contributor",
+		Name:             "Muse Spark 1.3 Contributor",
+		API:              "openai-responses",
+		Reasoning:        true,
+		ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: "", ModelThinkingLevelMinimal: "minimal", ModelThinkingLevelLow: "low", ModelThinkingLevelMedium: "medium", ModelThinkingLevelHigh: "high", ModelThinkingLevelXHigh: "xhigh", ModelThinkingLevelMax: ""},
+		ImageInput:       true,
+		ContextWindow:    1048576,
+		MaxTokens:        131072,
 	},
 	{
 		ID:            "qwen3.7-plus",
 		Name:          "Qwen3.7 Plus",
-		API:           "anthropic-messages",
+		API:           "openai-completions",
 		Reasoning:     true,
 		ImageInput:    true,
 		ContextWindow: 1_000_000,
+		Compat:        newOpenCodeGoCompletionsCompat("openai", true, true),
 		MaxTokens:     65_536,
 	},
 	{
-		ID:            "qwen3.8-max",
-		Name:          "Qwen3.8 Max",
+		ID:            "qwen3.8-flash",
+		Name:          "Qwen3.8 Flash",
 		API:           "anthropic-messages",
 		Reasoning:     true,
 		ImageInput:    true,
-		ContextWindow: 1_000_000,
-		MaxTokens:     131_072,
+		ContextWindow: 1000000,
+		MaxTokens:     131072,
+		Compat:        newOpenCodeGoQwenFlashCompat(),
+	},
+	{
+		ID:               "qwen3.8-max",
+		Name:             "Qwen3.8 Max",
+		API:              "openai-completions",
+		Reasoning:        true,
+		ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: "", ModelThinkingLevelMinimal: "", ModelThinkingLevelLow: "low", ModelThinkingLevelMedium: "medium", ModelThinkingLevelHigh: "", ModelThinkingLevelXHigh: "xhigh", ModelThinkingLevelMax: ""},
+		ImageInput:       true,
+		ContextWindow:    1_000_000,
+		Compat:           newOpenCodeGoCompletionsCompat("openai", true, true),
+		MaxTokens:        131_072,
 	},
 }
 
@@ -399,5 +451,26 @@ func newOpenCodeGoDeepSeekV4Compat() *OpenAICompletionsCompat {
 	requiresReasoningContent := true
 	compat := newOpenCodeGoCompletionsCompat("deepseek", true, true)
 	compat.RequiresReasoningContentOnAssistantMessages = &requiresReasoningContent
+	return compat
+}
+
+func newOpenCodeGoQwenFlashCompat() *AnthropicMessagesCompat {
+	allowEmptySignature := true
+	return &AnthropicMessagesCompat{AllowEmptySignature: &allowEmptySignature}
+}
+
+func newOpenCodeGoLunaCompat() *OpenAIResponsesCompat {
+	supportsMidConvoSystemMessages := true
+	return &OpenAIResponsesCompat{
+		SupportsJSONOutput:             true,
+		SupportsJSONSchema:             true,
+		SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages,
+	}
+}
+
+func newOpenCodeGoKimiK3Compat() *OpenAICompletionsCompat {
+	supportsMidConvoSystemMessages := true
+	compat := newOpenCodeGoCompletionsCompat("openai", true, true)
+	compat.SupportsMidConvoSystemMessages = &supportsMidConvoSystemMessages
 	return compat
 }

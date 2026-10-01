@@ -29,6 +29,7 @@ type AssistantMessage struct {
 	Model                string
 	ResponseModel        string
 	ResponseID           string
+	ThinkingLevel        ModelThinkingLevel
 	Usage                Usage
 	UsageReported        bool
 	StopReason           StopReason
@@ -48,6 +49,7 @@ func (m AssistantMessage) clone() Message {
 		Model:                m.Model,
 		ResponseModel:        m.ResponseModel,
 		ResponseID:           m.ResponseID,
+		ThinkingLevel:        m.ThinkingLevel,
 		Usage:                m.Usage,
 		UsageReported:        m.UsageReported,
 		StopReason:           m.StopReason,

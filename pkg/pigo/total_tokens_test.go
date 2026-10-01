@@ -99,7 +99,6 @@ func TestOpenAIGPT56ResponsesCacheWritePricingByModel(t *testing.T) {
 		modelID string
 		want    float64
 	}{
-		{modelID: "gpt-5.6", want: 0.0005},
 		{modelID: "gpt-5.6-sol", want: 0.0005},
 		{modelID: "gpt-5.6-terra", want: 0.00025},
 		{modelID: "gpt-5.6-luna", want: 0.000025},

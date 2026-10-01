@@ -6,9 +6,11 @@ This document defines the stable runtime contract for `pi-go/agent`.
 
 The canonical runtime envelope is [`Message`](../types.go).
 
+- `RoleSystem` messages use `System` to append instructions, patch named sections,
+  and add/remove model-facing tool declarations.
 - `RoleUser` messages use `Parts`.
 - `RoleAssistant` messages use `Parts`, `ToolCalls`, and provider metadata fields:
-  `Provider`, `API`, `Model`, `ResponseID`.
+  `Provider`, `API`, `Model`, `ResponseID`, `ThinkingLevel`.
 - `RoleTool` messages use `ToolResult`.
 - `RoleCustom` is allowed in runtime state, but must be mapped by `ConvertToLLM`
   before model execution if the selected model cannot consume it directly.
@@ -119,28 +121,92 @@ and is executed by the runtime engine in [`engine.go`](../engine.go).
 
 ## Turn Boundary Hooks
 
-For every non-error assistant turn, the runtime order is:
+For every finalized assistant turn, the runtime order is:
 
 1. finalize all tool results
-2. emit `EventTurnEnd`
-3. call `ShouldStopAfterTurn` with the completed-turn context
-4. poll steering and follow-up queues only if the stop hook returns false
+2. call `FinishTurn` with the completed `AgentTurnContext`
+3. emit `EventTurnEnd`
+4. stop immediately for `TurnActionEnd`; otherwise inspect continuation and queues
 5. when another turn will run and the turn limit permits it, call `PrepareNextTurn`
 6. recheck cancellation and pick up steering queued during preparation if no input is already pending
-7. emit `EventTurnStart` and make the next model request
+7. emit `EventTurnStart`, accept inputs, resolve tools and their transcript declarations
+8. call `PrepareRequest` immediately before the model request
 
-`PrepareNextTurnContext.NewMessages` contains only messages added by the current
-`Run` or `Continue` invocation. A returned `AgentLoopTurnUpdate` may replace the
-next turn's provider context, model, model reference, or thinking level. Context
-replacement does not rewrite the invocation's append-only transcript. Returning
-true from `ShouldStopAfterTurn` ends the invocation before queues are polled.
-Preparation is not called after a final turn or once the turn budget is exhausted.
-A preparation failure leaves the previous turn complete and opens no new turn.
-Already-dequeued inputs still emit their message events and enter the durable
-transcript and invocation message window in queue order; they are not discarded
-or requeued. Inputs not yet dequeued remain queued.
-Only one queue read supplies a turn in one-at-a-time mode, including after a
-long-running preparation callback.
+The zero decision preserves normal scheduling. `TurnActionContinue` guarantees
+one more request, including after an assistant-only turn. Tool, steering or
+follow-up continuation satisfies that same request. Only when no natural
+continuation is available does it request again without new input.
+`TurnActionEnd` leaves unread queues intact.
+`FinishTurn` also observes error/aborted assistant messages and canceled tool
+batches whose results committed; its decision cannot restart those hard exits.
+Unknown actions fail the invocation. Suspension has no completed turn to finish.
+
+Both turn contexts expose the invocation-local `NewMessages`, including system
+declaration changes. `AgentLoopTurnUpdate` can replace context, model, model
+reference, or requested thinking for the invocation. Context replacement does
+not rewrite the append-only durable transcript. Preparation errors retain
+accepted inputs and do not open a second turn. Already-dequeued inputs emit
+message events and persist once; unread inputs remain queued.
+
+`PrepareRequest` runs once per actual model request after input events and tool
+resolution, and before transformation/conversion and provider I/O. Returned tools
+are validated before the request without rerunning the resolver. The callback's
+context, model and thinking are detached copies. `PeekQueuedMessages` returns a
+copy of the next steering batch, or follow-up batch when steering is empty,
+using the configured queue mode without dequeuing anything.
+
+### System transcript
+
+Initial prompt/tools seed one leading system message. Named section updates
+replace or remove a section; content appends, separated by two newlines. Go
+renders section names in sorted order. Before each request, executable tool
+changes become declaration-only additions/removals; no executor, parser or hook
+is persisted. Request-only context replacements use their own declaration
+context and do not duplicate changes in durable history.
+
+`SystemPrompt` in state/snapshots is the rendered transcript view. Update it with
+`AppendMessage(NewSystemMessage(...))`; the former `SetSystemPrompt` API is
+removed. `ReplaceMessages` replaces the prompt history as well. Use named
+sections for replaceable instructions. Session compaction folds current system
+state ahead of the retained dialogue so prompt sections and tool changes survive.
+`Reset` similarly retains one resolved system baseline, including named sections
+and current tool declarations. `Continue` rejects histories containing only system
+messages. Existing system history is replayed wherever it begins, rather than
+reseeding its rendered prompt as another initial message.
+During a running invocation, use `Steer(NewSystemMessage(...))` to admit a system
+update before the next request.
+
+Preparation's explicit request prompt replacement is folded before
+`TransformContext` and conversion. The resulting messages determine the request's
+system prompt; removing all system messages leaves it empty. Transformations do
+not rewrite durable history, and the provider adapter never restores an older
+prompt over transformed messages.
+
+The provider authoring `Context` remains available. `NormalizeContext` folds its
+prompt/tools into system messages. Unsupported protocols collapse updates into
+current leading state. OpenAI Responses/Completions can preserve system messages
+in place when `SupportsMidConvoSystemMessages` is declared; current tools are sent
+at the request root. Dynamic provider tool anchoring is not implemented.
+
+### Structured tool results and raw events
+
+`ToolResult.StructuredContent` is independent JSON for programmatic consumers;
+`Content` remains model-facing. `IsError` can report failure without returning a
+Go error and survives hooks/events/transcripts. Replacing content in an after
+hook clears old structured content unless new structured content is supplied.
+Invalid structured JSON becomes an error result. `OutputSchema` is declaration
+metadata; it does not automatically validate executor output.
+
+`RunToolCall` shares argument validation, before/after hooks and execution with
+model-issued calls, including explicit error and structured results. It emits
+no agent message events and appends no history; `OnUpdate` receives detached
+progress results. Durable tool approval is still an outer runtime concern.
+
+`OnProviderStreamEvent` receives copied `json.RawMessage` and model identity
+before provider normalization. Unknown fields and exact JSON numbers survive.
+A callback error ends the request, preserving the cause and preventing provider
+retry or transport fallback. The callback is forwarded by the default pi-go
+adapter; custom `StreamModel` implementations must honor the request callback.
 
 ## Runtime mutation safety
 
@@ -296,7 +362,7 @@ implementations that ignore context cancellation.
 - If any call returns `suspend`, no call in the batch executes, including calls
   that otherwise would have produced immediate validation or block results. No
   tool lifecycle, result message, `EventTurnEnd`, `PrepareNextTurn`, or
-  `ShouldStopAfterTurn` occurs.
+  `FinishTurn` occurs.
 - Suspension returns `ToolCallsSuspendedError`, keeps the assistant tail and all
   `PendingToolCalls`, stores a canonical argument view for suspended calls, and
   leaves `AgentSnapshot.Error` empty.
@@ -312,8 +378,7 @@ a changed tail, binding, or incomplete assistant output before emitting any
 event. Ordinary Run/Continue calls reject snapshots with pending tool state. A
 pre-execution resume error leaves the old turn open and the exact pending state
 retryable without emitting `EventTurnEnd`. A successful resume does not append
-the assistant again: it executes the old batch, emits its `EventTurnEnd`, runs
-`ShouldStopAfterTurn`, and if continuation is needed, `PrepareNextTurn` before another model
+the assistant again: it executes the old batch, runs `FinishTurn`, emits its `EventTurnEnd`, and if continuation is needed, `PrepareNextTurn` before another model
 turn. Re-suspension keeps the same open turn and does not reset `MaxTurns`.
 
 ## Targeted Checkpoint Approval Contract
@@ -341,7 +406,7 @@ The `agent/checkpoint` child package stores a strict, versioned
 - terminal `AgentEnd` is not released until the terminal checkpoint CAS succeeds
 
 Checkpoint runners require a non-empty `DefinitionVersion`, a fixed tool set,
-and no `PrepareNextTurn`. `ToolResolver` and invocation-local next-turn
+and no `PrepareNextTurn` or `PrepareRequest`. `ToolResolver` and invocation-local next-turn
 overrides are rejected because their executable/model values are not durable.
 Custom parsers and `BeforeToolCall` hooks may run again on resume and must be
 pure and deterministic.

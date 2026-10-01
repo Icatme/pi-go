@@ -2,6 +2,7 @@ package pigo
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 )
 
@@ -11,35 +12,38 @@ type StreamOptions struct {
 	Common CommonProviderOptions
 
 	// Legacy flat common fields remain the direct access path for callers.
-	APIKey               string
-	Auth                 map[Provider]AuthConfig
-	HTTPClient           *http.Client
-	Headers              map[string]string
-	MaxTokens            int
-	Temperature          *float64
-	TopP                 *float64
-	ParallelToolCalls    *bool
-	Transport            Transport
-	CacheRetention       CacheRetention
-	SessionID            string
-	OnPayload            func(payload any, model Model) any
-	OnResponse           func(response ProviderResponse, model Model)
-	ServiceTier          string
-	TimeoutMs            int
-	MaxRetries           int
-	MaxRetryDelay        int
-	Metadata             map[string]any
-	RequestContext       context.Context
-	Reasoning            ThinkingLevel
-	ReasoningSummary     string
-	TextVerbosity        string
-	ThinkingBudgetTokens int
-	ToolChoice           string
-	PreviousResponseID   string
-	Truncation           string
-	ThinkingBudgets      ThinkingBudgets
-	Observer             Observer
-	ResponseFormat       *ResponseFormat
+	APIKey            string
+	Auth              map[Provider]AuthConfig
+	HTTPClient        *http.Client
+	Headers           map[string]string
+	MaxTokens         int
+	Temperature       *float64
+	TopP              *float64
+	ParallelToolCalls *bool
+	Transport         Transport
+	CacheRetention    CacheRetention
+	SessionID         string
+	OnPayload         func(payload any, model Model) any
+	OnResponse        func(response ProviderResponse, model Model)
+	// OnProviderStreamEvent observes valid provider JSON events before normalization.
+	// The data is an isolated copy; returning an error stops the request without retry.
+	OnProviderStreamEvent func(data json.RawMessage, model Model) error
+	ServiceTier           string
+	TimeoutMs             int
+	MaxRetries            int
+	MaxRetryDelay         int
+	Metadata              map[string]any
+	RequestContext        context.Context
+	Reasoning             ThinkingLevel
+	ReasoningSummary      string
+	TextVerbosity         string
+	ThinkingBudgetTokens  int
+	ToolChoice            string
+	PreviousResponseID    string
+	Truncation            string
+	ThinkingBudgets       ThinkingBudgets
+	Observer              Observer
+	ResponseFormat        *ResponseFormat
 }
 
 // Option mutates StreamOptions when constructing new option sets.
@@ -101,62 +105,64 @@ func WithResponseFormat(format ResponseFormat) Option {
 
 // Deprecated: use StreamOptions with StreamOptions.providerStreamOptions instead.
 type ProviderStreamOptions struct {
-	APIKey               string
-	Auth                 map[Provider]AuthConfig
-	HTTPClient           *http.Client
-	Headers              map[string]string
-	MaxTokens            int
-	Temperature          *float64
-	TopP                 *float64
-	ParallelToolCalls    *bool
-	Transport            Transport
-	CacheRetention       CacheRetention
-	SessionID            string
-	OnPayload            func(payload any, model Model) any
-	OnResponse           func(response ProviderResponse, model Model)
-	ServiceTier          string
-	TimeoutMs            int
-	MaxRetries           int
-	MaxRetryDelay        int
-	Metadata             map[string]any
-	RequestContext       context.Context
-	Reasoning            ThinkingLevel
-	ReasoningSummary     string
-	TextVerbosity        string
-	ThinkingBudgetTokens int
-	ThinkingBudgets      ThinkingBudgets
-	ToolChoice           string
-	PreviousResponseID   string
-	Truncation           string
-	Observer             Observer
-	ResponseFormat       *ResponseFormat
+	APIKey                string
+	Auth                  map[Provider]AuthConfig
+	HTTPClient            *http.Client
+	Headers               map[string]string
+	MaxTokens             int
+	Temperature           *float64
+	TopP                  *float64
+	ParallelToolCalls     *bool
+	Transport             Transport
+	CacheRetention        CacheRetention
+	SessionID             string
+	OnPayload             func(payload any, model Model) any
+	OnResponse            func(response ProviderResponse, model Model)
+	OnProviderStreamEvent func(data json.RawMessage, model Model) error
+	ServiceTier           string
+	TimeoutMs             int
+	MaxRetries            int
+	MaxRetryDelay         int
+	Metadata              map[string]any
+	RequestContext        context.Context
+	Reasoning             ThinkingLevel
+	ReasoningSummary      string
+	TextVerbosity         string
+	ThinkingBudgetTokens  int
+	ThinkingBudgets       ThinkingBudgets
+	ToolChoice            string
+	PreviousResponseID    string
+	Truncation            string
+	Observer              Observer
+	ResponseFormat        *ResponseFormat
 }
 
 // Deprecated: use StreamOptions with streamOptionsFromSimple or NewStreamOptions instead.
 type SimpleStreamOptions struct {
-	APIKey             string
-	Auth               map[Provider]AuthConfig
-	HTTPClient         *http.Client
-	Headers            map[string]string
-	MaxTokens          int
-	Temperature        *float64
-	TopP               *float64
-	ParallelToolCalls  *bool
-	Transport          Transport
-	CacheRetention     CacheRetention
-	SessionID          string
-	OnPayload          func(payload any, model Model) any
-	OnResponse         func(response ProviderResponse, model Model)
-	ServiceTier        string
-	TimeoutMs          int
-	MaxRetries         int
-	MaxRetryDelay      int
-	Metadata           map[string]any
-	RequestContext     context.Context
-	Reasoning          ThinkingLevel
-	ThinkingBudgets    ThinkingBudgets
-	PreviousResponseID string
-	Truncation         string
-	Observer           Observer
-	ResponseFormat     *ResponseFormat
+	APIKey                string
+	Auth                  map[Provider]AuthConfig
+	HTTPClient            *http.Client
+	Headers               map[string]string
+	MaxTokens             int
+	Temperature           *float64
+	TopP                  *float64
+	ParallelToolCalls     *bool
+	Transport             Transport
+	CacheRetention        CacheRetention
+	SessionID             string
+	OnPayload             func(payload any, model Model) any
+	OnResponse            func(response ProviderResponse, model Model)
+	OnProviderStreamEvent func(data json.RawMessage, model Model) error
+	ServiceTier           string
+	TimeoutMs             int
+	MaxRetries            int
+	MaxRetryDelay         int
+	Metadata              map[string]any
+	RequestContext        context.Context
+	Reasoning             ThinkingLevel
+	ThinkingBudgets       ThinkingBudgets
+	PreviousResponseID    string
+	Truncation            string
+	Observer              Observer
+	ResponseFormat        *ResponseFormat
 }

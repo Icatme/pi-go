@@ -10,6 +10,7 @@ import (
 )
 
 func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	ctx = resolveProviderContext(model, ctx)
 	options = NormalizeProviderStreamOptions(model, options)
 	anthropicOptions := resolveAnthropicMessagesProviderOptions(model, options)
 	if model.Provider == "kimi-coding" {
@@ -151,6 +152,9 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 		terminalSeen := false
 		states := map[int]*anthropicStreamingBlockState{}
 		if err := readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
+			if err := observeProviderStreamEvent(data, model, options); err != nil {
+				return false, err
+			}
 			done, err := processAnthropicStreamEvent(data, model, &response, stream, states, isOAuth, ctx.Tools, nil, true)
 			if done {
 				terminalSeen = true

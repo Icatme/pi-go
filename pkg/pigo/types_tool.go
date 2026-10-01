@@ -15,10 +15,15 @@ type HostedToolExecution struct {
 }
 
 type Tool struct {
-	Name        string
-	Description string
-	Parameters  any
-	Validator   ToolArgumentsValidator
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	Parameters   any                    `json:"parameters,omitempty"`
+	OutputSchema any                    `json:"outputSchema,omitempty"`
+	Validator    ToolArgumentsValidator `json:"-"`
+}
+
+type ToolReference struct {
+	Name string `json:"name"`
 }
 
 type Context struct {

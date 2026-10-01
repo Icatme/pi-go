@@ -123,8 +123,14 @@ func TestPiAgentMessageDuplication(t *testing.T) {
 	}
 
 	state := agent.State()
-	if len(state.Messages) != 4 {
-		t.Fatalf("expected 4 messages after one tool round-trip, got %d", len(state.Messages))
+	if len(state.Messages) != 5 {
+		t.Fatalf("expected system head plus 4 messages after one tool round-trip, got %d", len(state.Messages))
+	}
+	assertPrebuiltSystemHead(t, state.Messages, definition.SystemPrompt, "calculator")
+	for index, role := range []core.MessageRole{core.RoleSystem, core.RoleUser, core.RoleAssistant, core.RoleTool, core.RoleAssistant} {
+		if state.Messages[index].Role != role {
+			t.Fatalf("message %d role=%q, want %q", index, state.Messages[index].Role, role)
+		}
 	}
 }
 
@@ -149,13 +155,38 @@ func TestNewPiAgentExposesNativeAgent(t *testing.T) {
 	}
 
 	state := agent.State()
-	if got := len(state.Messages); got != 2 {
-		t.Fatalf("expected native agent state with 2 messages, got %d", got)
+	if got := len(state.Messages); got != 3 {
+		t.Fatalf("expected native agent state with system head plus 2 messages, got %d", got)
 	}
+	assertPrebuiltSystemHead(t, state.Messages, "system")
 	if state.SystemPrompt != "system" {
 		t.Fatalf("expected system prompt to be applied, got %q", state.SystemPrompt)
 	}
-	if state.Messages[1].Parts[0].Text != "done" {
-		t.Fatalf("expected assistant text %q, got %+v", "done", state.Messages[1].Parts)
+	if state.Messages[1].Role != core.RoleUser || state.Messages[1].Parts[0].Text != "hello" {
+		t.Fatalf("expected unchanged user prompt after system head, got %+v", state.Messages[1])
+	}
+	if state.Messages[2].Role != core.RoleAssistant || state.Messages[2].Parts[0].Text != "done" {
+		t.Fatalf("expected assistant text %q, got %+v", "done", state.Messages[2])
+	}
+}
+
+func assertPrebuiltSystemHead(t *testing.T, messages []core.Message, prompt string, toolNames ...string) {
+	t.Helper()
+	if len(messages) == 0 || messages[0].Role != core.RoleSystem || messages[0].System == nil {
+		t.Fatalf("expected leading system message, got %+v", messages)
+	}
+	head := messages[0].System
+	if head.Content != prompt || len(head.ToolsAdded) != len(toolNames) {
+		t.Fatalf("unexpected leading prompt or tool declarations: %+v", head)
+	}
+	for index, name := range toolNames {
+		if head.ToolsAdded[index].Name != name {
+			t.Fatalf("leading tool %d=%q, want %q", index, head.ToolsAdded[index].Name, name)
+		}
+	}
+	for index, message := range messages[1:] {
+		if message.Role == core.RoleSystem {
+			t.Fatalf("static request duplicated system prompt or tool declarations at message %d", index+1)
+		}
 	}
 }

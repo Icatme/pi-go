@@ -300,6 +300,28 @@ func cloneMessages(messages []agent.Message) []agent.Message {
 
 func cloneMessage(message agent.Message) agent.Message {
 	cloned := message
+	if message.System != nil {
+		system := *message.System
+		if system.Sections != nil {
+			system.Sections = make(map[string]*string, len(message.System.Sections))
+			for name, value := range message.System.Sections {
+				if value == nil {
+					system.Sections[name] = nil
+				} else {
+					copied := *value
+					system.Sections[name] = &copied
+				}
+			}
+		}
+		system.ToolsAdded = make([]agent.ToolDeclaration, len(message.System.ToolsAdded))
+		for index, tool := range message.System.ToolsAdded {
+			system.ToolsAdded[index] = tool
+			system.ToolsAdded[index].Parameters = cloneStringAnyMap(tool.Parameters)
+			system.ToolsAdded[index].OutputSchema = cloneStringAnyMap(tool.OutputSchema)
+		}
+		system.ToolsRemoved = append([]agent.ToolReference(nil), message.System.ToolsRemoved...)
+		cloned.System = &system
+	}
 	cloned.Parts = append([]agent.Part(nil), message.Parts...)
 	cloned.ToolCalls = make([]agent.ToolCall, len(message.ToolCalls))
 	for index, call := range message.ToolCalls {
@@ -312,6 +334,7 @@ func cloneMessage(message agent.Message) agent.Message {
 		result := *message.ToolResult
 		result.Content = append([]agent.Part(nil), message.ToolResult.Content...)
 		result.Details = cloneJSONValue(message.ToolResult.Details)
+		result.StructuredContent = cloneRawMessage(message.ToolResult.StructuredContent)
 		cloned.ToolResult = &result
 	}
 	cloned.Metadata = cloneStringAnyMap(message.Metadata)

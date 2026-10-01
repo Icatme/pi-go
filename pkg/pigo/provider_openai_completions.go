@@ -255,6 +255,9 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 			Headers: headers,
 			Body:    bodyBytes,
 			OnEvent: func(_ string, data string) (bool, error) {
+				if err := observeProviderStreamEvent(data, model, options); err != nil {
+					return false, err
+				}
 				return processOpenAICompletionsStreamEvent(data, model, &response, stream, state)
 			},
 			OnResponse: func(httpResponse *http.Response) {
@@ -308,7 +311,7 @@ func buildOpenAICompletionsRequest(model Model, ctx Context, options ProviderStr
 		Model:    model.ID,
 		Messages: convertOpenAICompletionsMessages(model, ctx, compat),
 		Stream:   true,
-		Tools:    convertOpenAICompletionsTools(ctx.Tools),
+		Tools:    convertOpenAICompletionsTools(currentContextTools(ctx)),
 	}
 	if compat.SupportsUsageInStreaming {
 		request.StreamOptions = &openAICompletionsStreamOptions{IncludeUsage: true}
@@ -462,17 +465,11 @@ func buildOpenAICompletionsResponseFormat(format *ResponseFormat) any {
 }
 
 func convertOpenAICompletionsMessages(model Model, ctx Context, compat resolvedOpenAICompletionsCompat) []openAICompletionsMessage {
-	transformed := TransformMessages(ctx.Messages, model, func(id string, _ Model, _ AssistantMessage) string {
+	transcript := ResolveTranscript(NormalizeContext(ctx), supportsTranscriptSystemMessages(model))
+	transformed := TransformMessages(transcript.Messages, model, func(id string, _ Model, _ AssistantMessage) string {
 		return NormalizeSimpleToolCallID(id)
 	})
 	messages := make([]openAICompletionsMessage, 0, len(transformed)+1)
-	if strings.TrimSpace(ctx.SystemPrompt) != "" {
-		role := "system"
-		if model.Reasoning && compat.SupportsDeveloperRole {
-			role = "developer"
-		}
-		messages = append(messages, openAICompletionsMessage{Role: role, Content: ctx.SystemPrompt})
-	}
 
 	lastRole := ""
 	for messageIndex := 0; messageIndex < len(transformed); messageIndex++ {
@@ -483,6 +480,19 @@ func convertOpenAICompletionsMessages(model Model, ctx Context, compat resolvedO
 			}
 		}
 		switch typed := message.(type) {
+		case SystemMessage:
+			text := RenderSystemMessageUpdate(typed)
+			if messageIndex == 0 {
+				text = GetSystemMessageText(typed)
+			}
+			if text != "" {
+				role := "system"
+				if model.Reasoning && compat.SupportsDeveloperRole {
+					role = "developer"
+				}
+				messages = append(messages, openAICompletionsMessage{Role: role, Content: text})
+				lastRole = role
+			}
 		case UserMessage:
 			if content := openAICompletionsUserContent(typed.Content); content != nil {
 				messages = append(messages, openAICompletionsMessage{Role: "user", Content: content})

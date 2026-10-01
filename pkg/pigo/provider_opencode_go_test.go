@@ -22,8 +22,8 @@ func TestOpenCodeGoProviderCatalogAndProtocolRouting(t *testing.T) {
 	if got := GetEnvAPIKey("opencode-go"); got != "opencode-go-env-key" {
 		t.Fatalf("expected OPENCODE_API_KEY, got %q", got)
 	}
-	if len(module.Models) != 20 {
-		t.Fatalf("expected 20 documented active OpenCode Go models, got %d", len(module.Models))
+	if len(module.Models) != 26 {
+		t.Fatalf("expected 26 documented active OpenCode Go models, got %d", len(module.Models))
 	}
 	if !module.Capabilities.SupportsStreaming || !module.Capabilities.SupportsToolChoice || !module.Capabilities.SupportsSession {
 		t.Fatalf("expected capabilities shared by every OpenCode Go route, got %+v", module.Capabilities)
@@ -36,25 +36,32 @@ func TestOpenCodeGoProviderCatalogAndProtocolRouting(t *testing.T) {
 	expectedAPIs := map[string]API{
 		"deepseek-v4-flash":          "openai-completions",
 		"deepseek-v4-pro":            "openai-completions",
+		"deepseek-v4.1-flash":        "openai-completions",
 		"glm-5.1":                    "openai-completions",
 		"glm-5.2":                    "openai-completions",
 		"glm-5.3":                    "openai-completions",
+		"glm-5.3-flash":              "openai-completions",
 		"gpt-5.6-luna":               "openai-responses",
-		"grok-4.5":                   "openai-responses",
+		"gpt-6-luna":                 "openai-responses",
+		"grok-4.6":                   "openai-responses",
+		"grok-4.7":                   "openai-responses",
 		"hy3":                        "openai-completions",
-		"kimi-k2.6":                  "openai-completions",
 		"kimi-k2.7-code":             "openai-completions",
 		"kimi-k3":                    "openai-completions",
+		"longcat-2.0":                "openai-completions",
 		"mimo-v2.5":                  "openai-completions",
 		"mimo-v2.5-pro":              "openai-completions",
-		"minimax-m2.7":               "anthropic-messages",
+		"mimo-v2.6-flash":            "openai-completions",
+		"mimo-v2.6-pro":              "openai-completions",
+		"minimax-m2.7":               "openai-completions",
 		"minimax-m3":                 "anthropic-messages",
 		"muse-spark-1.2-contributor": "openai-responses",
-		"qwen3.6-plus":               "anthropic-messages",
-		"qwen3.7-max":                "anthropic-messages",
-		"qwen3.7-plus":               "anthropic-messages",
-		"qwen3.8-max":                "anthropic-messages",
+		"muse-spark-1.3-contributor": "openai-responses",
+		"qwen3.7-plus":               "openai-completions",
+		"qwen3.8-flash":              "anthropic-messages",
+		"qwen3.8-max":                "openai-completions",
 	}
+
 	for id, api := range expectedAPIs {
 		t.Run(id, func(t *testing.T) {
 			model := GetModel("opencode-go", id)
@@ -77,6 +84,10 @@ func TestOpenCodeGoProviderCatalogAndProtocolRouting(t *testing.T) {
 		"glm-5",
 		"hy3-preview",
 		"kimi-k2.5",
+		"kimi-k2.6",
+		"grok-4.5",
+		"qwen3.6-plus",
+		"qwen3.7-max",
 		"mimo-v2-omni",
 		"mimo-v2-pro",
 		"minimax-m2.5",
@@ -115,13 +126,6 @@ func TestOpenCodeGoProviderCatalogAndProtocolRouting(t *testing.T) {
 	}
 	if got := GetSupportedThinkingLevels(*deepseekPro); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelHigh, ModelThinkingLevelMax}) {
 		t.Fatalf("expected DeepSeek V4 Pro high/max levels, got %v", got)
-	}
-	kimi := GetModel("opencode-go", "kimi-k2.6")
-	if kimi == nil {
-		t.Fatal("expected Kimi K2.6 model")
-	}
-	if got := GetSupportedThinkingLevels(*kimi); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelHigh}) {
-		t.Fatalf("expected Kimi K2.6 on/off levels, got %v", got)
 	}
 	kimi3 := GetModel("opencode-go", "kimi-k3")
 	if kimi3 == nil {
@@ -273,25 +277,6 @@ func TestOpenCodeGoChatCompletionsStreamsReasoningToolsAndUsage(t *testing.T) {
 }
 
 func TestOpenCodeGoChatCompletionsThinkingFormats(t *testing.T) {
-	kimi := GetModel("opencode-go", "kimi-k2.6")
-	if kimi == nil {
-		t.Fatal("expected Kimi K2.6 model")
-	}
-	kimiEnabled := buildOpenAICompletionsRequest(*kimi, Context{}, BuildProviderStreamOptions(*kimi, SimpleStreamOptions{Reasoning: ThinkingLevelLow}))
-	if kimiEnabled.Thinking == nil || kimiEnabled.Thinking.Type != "enabled" || kimiEnabled.ReasoningEffort != "" {
-		t.Fatalf("Kimi K2.6 must use thinking toggle without reasoning_effort: %+v", kimiEnabled)
-	}
-	kimiDisabled := buildOpenAICompletionsRequest(*kimi, Context{}, BuildProviderStreamOptions(*kimi, SimpleStreamOptions{}))
-	if kimiDisabled.Thinking == nil || kimiDisabled.Thinking.Type != "disabled" {
-		t.Fatalf("Kimi K2.6 must explicitly disable thinking: %+v", kimiDisabled)
-	}
-	kimiLongCache := buildOpenAICompletionsRequest(*kimi, Context{}, BuildProviderStreamOptions(*kimi, SimpleStreamOptions{
-		CacheRetention: CacheRetentionLong,
-		SessionID:      "session-unsupported",
-	}))
-	if kimiLongCache.PromptCacheKey != "" || kimiLongCache.PromptCacheRetention != "" {
-		t.Fatalf("Kimi K2.6 must omit unsupported long-cache fields: %+v", kimiLongCache)
-	}
 	deepseek := GetModel("opencode-go", "deepseek-v4-flash")
 	if deepseek == nil {
 		t.Fatal("expected DeepSeek V4 Flash model")
@@ -362,9 +347,9 @@ func TestOpenCodeGoChatCompletionsReplaysReasoningContent(t *testing.T) {
 }
 
 func TestOpenCodeGoChatCompletionsKeepsParallelToolResultsBeforeImages(t *testing.T) {
-	model := GetModel("opencode-go", "kimi-k2.6")
+	model := GetModel("opencode-go", "kimi-k2.7-code")
 	if model == nil {
-		t.Fatal("expected Kimi K2.6 model")
+		t.Fatal("expected Kimi K2.7 Code model")
 	}
 	request := buildOpenAICompletionsRequest(*model, Context{Messages: []Message{
 		AssistantMessage{
@@ -401,6 +386,53 @@ func TestOpenCodeGoChatCompletionsKeepsParallelToolResultsBeforeImages(t *testin
 	parts, ok := request.Messages[3].Content.([]any)
 	if !ok || len(parts) != 2 || parts[1].(map[string]any)["type"] != "image_url" {
 		t.Fatalf("expected grouped tool image attachment, got %#v", request.Messages[3])
+	}
+}
+
+func TestOpenCodeGoMiniMaxUsesBearerCompletionsRoute(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer go-key" || r.Header.Get("x-api-key") != "" {
+			t.Fatalf("unexpected MiniMax route: path=%s headers=%v", r.URL.Path, r.Header)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"minimax_1\",\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+	model := *GetModel("opencode-go", "minimax-m2.7")
+	model.BaseURL = server.URL
+	response := CompleteSimple(model, Context{Messages: []Message{UserMessage{Content: "hello"}}}, SimpleStreamOptions{APIKey: "go-key"})
+	if response.StopReason != StopReasonStop || len(response.Content) != 1 || response.Content[0].(TextContent).Text != "OK" {
+		t.Fatalf("unexpected MiniMax response: %+v", response)
+	}
+}
+
+func TestOctoberOpenCodeGoReasoningMaps(t *testing.T) {
+	for _, test := range []struct {
+		id     string
+		levels []ModelThinkingLevel
+	}{
+		{"deepseek-v4.1-flash", []ModelThinkingLevel{ModelThinkingLevelLow, ModelThinkingLevelHigh, ModelThinkingLevelMax}},
+		{"glm-5.3-flash", []ModelThinkingLevel{ModelThinkingLevelLow, ModelThinkingLevelHigh, ModelThinkingLevelMax}},
+		{"gpt-6-luna", []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh, ModelThinkingLevelXHigh, ModelThinkingLevelMax}},
+		{"grok-4.6", []ModelThinkingLevel{ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh, ModelThinkingLevelXHigh}},
+		{"grok-4.7", []ModelThinkingLevel{ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh, ModelThinkingLevelXHigh}},
+		{"qwen3.8-max", []ModelThinkingLevel{ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelXHigh}},
+	} {
+		t.Run(test.id, func(t *testing.T) {
+			model := GetModel("opencode-go", test.id)
+			if model == nil || !slices.Equal(GetSupportedThinkingLevels(*model), test.levels) {
+				t.Fatalf("incorrect reasoning metadata: %+v", model)
+			}
+		})
+	}
+	flash := GetModel("opencode-go", "qwen3.8-flash")
+	compat := flash.Compat.(*AnthropicMessagesCompat)
+	if compat.AllowEmptySignature == nil || !*compat.AllowEmptySignature {
+		t.Fatal("Qwen 3.8 Flash must preserve its empty thinking signatures")
+	}
+	*compat.AllowEmptySignature = false
+	if !*GetModel("opencode-go", "qwen3.8-flash").Compat.(*AnthropicMessagesCompat).AllowEmptySignature {
+		t.Fatal("Qwen signature capability leaked through returned model")
 	}
 }
 
@@ -504,7 +536,7 @@ func TestOpenCodeGoRoutesAnthropicAndResponsesModels(t *testing.T) {
 		}))
 		defer server.Close()
 
-		model := GetModel("opencode-go", "qwen3.8-max")
+		model := GetModel("opencode-go", "qwen3.8-flash")
 		model.Cost = UsageCost{Input: 1, Output: 1}
 		model.BaseURL = server.URL
 		response := CompleteSimple(*model, Context{Messages: []Message{UserMessage{Content: "ping"}}}, SimpleStreamOptions{APIKey: "go-key"})

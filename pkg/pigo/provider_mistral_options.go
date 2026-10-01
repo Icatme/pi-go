@@ -22,25 +22,8 @@ func buildMistralProviderOptions(model Model, options SimpleStreamOptions) Mistr
 	streamOptions := streamOptionsFromSimple(model, options)
 	streamOptions = streamOptions.withCommonSnapshot(model)
 
-	reasoning := streamOptions.Reasoning
-	if reasoning == "" {
-		return MistralProviderOptions{StreamOptions: streamOptions}
-	}
-
-	clamped := ClampThinkingLevel(model, ModelThinkingLevel(reasoning))
-	if clamped == ModelThinkingLevelOff {
-		return MistralProviderOptions{StreamOptions: streamOptions}
-	}
-
 	result := MistralProviderOptions{StreamOptions: streamOptions}
-	if model.Reasoning {
-		if usesPromptModeReasoning(model) {
-			result.PromptMode = "reasoning"
-		}
-		if usesReasoningEffort(model) {
-			result.ReasoningEffort = mapMistralReasoningEffort(model, ThinkingLevel(clamped))
-		}
-	}
+	result.applyReasoning(model)
 	return result
 }
 
@@ -52,24 +35,7 @@ func resolveMistralProviderOptions(model Model, options ProviderStreamOptions) M
 		ToolChoice:    streamOptions.ToolChoice,
 	}
 
-	reasoning := streamOptions.Reasoning
-	if reasoning == "" {
-		return result
-	}
-
-	clamped := ClampThinkingLevel(model, ModelThinkingLevel(reasoning))
-	if clamped == ModelThinkingLevelOff {
-		return result
-	}
-
-	if model.Reasoning {
-		if usesPromptModeReasoning(model) {
-			result.PromptMode = "reasoning"
-		}
-		if usesReasoningEffort(model) {
-			result.ReasoningEffort = mapMistralReasoningEffort(model, ThinkingLevel(clamped))
-		}
-	}
+	result.applyReasoning(model)
 	return result
 }
 
@@ -77,22 +43,23 @@ func (options MistralProviderOptions) toProviderStreamOptions(model Model) Provi
 	return options.StreamOptions.providerStreamOptions(model)
 }
 
-func usesReasoningEffort(model Model) bool {
-	switch model.ID {
-	case "mistral-small-2603", "mistral-small-latest", "zai-glm-5-2":
-		return true
+func (options *MistralProviderOptions) applyReasoning(model Model) {
+	if !model.Reasoning {
+		return
 	}
-	return strings.HasPrefix(model.ID, "mistral-medium-")
-}
-
-func usesPromptModeReasoning(model Model) bool {
-	return model.Reasoning && !usesReasoningEffort(model)
-}
-
-func mapMistralReasoningEffort(model Model, level ThinkingLevel) string {
-	mapped := strings.TrimSpace(model.ThinkingLevelMap[ModelThinkingLevel(level)])
-	if mapped != "" {
-		return mapped
+	level := ModelThinkingLevelOff
+	if options.Reasoning != "" {
+		level = ClampThinkingLevel(model, ModelThinkingLevel(options.Reasoning))
 	}
-	return "high"
+	if len(model.ThinkingLevelMap) > 0 {
+		if level == ModelThinkingLevelOff {
+			options.ReasoningEffort = strings.TrimSpace(model.ThinkingLevelMap[ModelThinkingLevelOff])
+		} else if mapped, ok := model.ThinkingLevelMap[level]; ok {
+			options.ReasoningEffort = strings.TrimSpace(mapped)
+		} else {
+			options.ReasoningEffort = "high"
+		}
+	} else if level != ModelThinkingLevelOff {
+		options.PromptMode = "reasoning"
+	}
 }

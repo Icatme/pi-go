@@ -13,6 +13,8 @@ import (
 type MessageRole string
 
 const (
+	// RoleSystem carries replayable prompt and tool declaration changes.
+	RoleSystem MessageRole = "system"
 	// RoleUser is a user-authored message.
 	RoleUser MessageRole = "user"
 	// RoleAssistant is an assistant-authored message.
@@ -206,38 +208,44 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 
 // ToolResult is the normalized output of a tool execution.
 type ToolResult struct {
-	Content   []Part `json:"content,omitempty"`
-	Details   any    `json:"details,omitempty"`
-	Terminate bool   `json:"terminate,omitempty"`
+	Content []Part `json:"content,omitempty"`
+	Details any    `json:"details,omitempty"`
+	// StructuredContent is machine-readable JSON, independent of model-facing Content.
+	StructuredContent json.RawMessage `json:"structured_content,omitempty"`
+	IsError           bool            `json:"is_error,omitempty"`
+	Terminate         bool            `json:"terminate,omitempty"`
 }
 
 // ToolResultPayload stores tool-result specific message data.
 type ToolResultPayload struct {
-	ToolCallID         string `json:"tool_call_id"`
-	OriginalToolCallID string `json:"original_tool_call_id,omitempty"`
-	ToolName           string `json:"tool_name"`
-	Content            []Part `json:"content,omitempty"`
-	Details            any    `json:"details,omitempty"`
-	IsError            bool   `json:"is_error"`
+	ToolCallID         string          `json:"tool_call_id"`
+	OriginalToolCallID string          `json:"original_tool_call_id,omitempty"`
+	ToolName           string          `json:"tool_name"`
+	Content            []Part          `json:"content,omitempty"`
+	Details            any             `json:"details,omitempty"`
+	StructuredContent  json.RawMessage `json:"structured_content,omitempty"`
+	IsError            bool            `json:"is_error"`
 }
 
 // Message is the canonical runtime message envelope.
 type Message struct {
-	ID           string             `json:"id,omitempty"`
-	Role         MessageRole        `json:"role"`
-	Kind         string             `json:"kind,omitempty"`
-	Parts        []Part             `json:"parts,omitempty"`
-	ToolCalls    []ToolCall         `json:"tool_calls,omitempty"`
-	ToolResult   *ToolResultPayload `json:"tool_result,omitempty"`
-	Timestamp    time.Time          `json:"timestamp"`
-	API          string             `json:"api,omitempty"`
-	Provider     string             `json:"provider,omitempty"`
-	Model        string             `json:"model,omitempty"`
-	ResponseID   string             `json:"response_id,omitempty"`
-	Metadata     map[string]any     `json:"metadata,omitempty"`
-	Payload      map[string]any     `json:"payload,omitempty"`
-	StopReason   StopReason         `json:"stop_reason,omitempty"`
-	ErrorMessage string             `json:"error_message,omitempty"`
+	ID            string                `json:"id,omitempty"`
+	Role          MessageRole           `json:"role"`
+	System        *SystemMessagePayload `json:"system,omitempty"`
+	Kind          string                `json:"kind,omitempty"`
+	Parts         []Part                `json:"parts,omitempty"`
+	ToolCalls     []ToolCall            `json:"tool_calls,omitempty"`
+	ToolResult    *ToolResultPayload    `json:"tool_result,omitempty"`
+	Timestamp     time.Time             `json:"timestamp"`
+	API           string                `json:"api,omitempty"`
+	Provider      string                `json:"provider,omitempty"`
+	Model         string                `json:"model,omitempty"`
+	ResponseID    string                `json:"response_id,omitempty"`
+	ThinkingLevel ThinkingLevel         `json:"thinking_level,omitempty"`
+	Metadata      map[string]any        `json:"metadata,omitempty"`
+	Payload       map[string]any        `json:"payload,omitempty"`
+	StopReason    StopReason            `json:"stop_reason,omitempty"`
+	ErrorMessage  string                `json:"error_message,omitempty"`
 }
 
 // PendingToolCall tracks outstanding tool calls that are suspended before
@@ -377,6 +385,7 @@ type ToolDefinition struct {
 	Label          string                      `json:"label,omitempty"`
 	Description    string                      `json:"description,omitempty"`
 	Parameters     map[string]any              `json:"parameters,omitempty"`
+	OutputSchema   map[string]any              `json:"output_schema,omitempty"`
 	ExecutionMode  ToolExecutionMode           `json:"execution_mode,omitempty"`
 	ParseArguments func(ToolCall) (any, error) `json:"-"`
 	Execute        ToolExecutorFunc            `json:"-"`
@@ -451,9 +460,9 @@ type AfterToolCallResult struct {
 // AfterToolCallHook runs after a tool body completes.
 type AfterToolCallHook func(context.Context, AfterToolCallContext) (AfterToolCallResult, error)
 
-// ShouldStopAfterTurnContext describes a completed turn after its tool results
+// AgentTurnContext describes a completed turn after its tool results
 // have been appended to the snapshot.
-type ShouldStopAfterTurnContext struct {
+type AgentTurnContext struct {
 	Message     Message      `json:"message"`
 	ToolResults []Message    `json:"tool_results,omitempty"`
 	Context     AgentContext `json:"context"`
@@ -462,7 +471,7 @@ type ShouldStopAfterTurnContext struct {
 
 // PrepareNextTurnContext describes the state available before another model
 // request is started.
-type PrepareNextTurnContext = ShouldStopAfterTurnContext
+type PrepareNextTurnContext = AgentTurnContext
 
 // AgentLoopTurnUpdate replaces selected state used by the next turn. A nil
 // field preserves the current value.
@@ -473,8 +482,36 @@ type AgentLoopTurnUpdate struct {
 	ThinkingLevel *ThinkingLevel `json:"thinking_level,omitempty"`
 }
 
-// ShouldStopAfterTurnHook can stop the run at a completed turn boundary before next-turn preparation or queue reads.
-type ShouldStopAfterTurnHook func(context.Context, ShouldStopAfterTurnContext) (bool, error)
+// AgentTurnAction controls scheduling after a completed turn.
+type AgentTurnAction string
+
+const (
+	TurnActionEnd      AgentTurnAction = "end"
+	TurnActionContinue AgentTurnAction = "continue"
+)
+
+// AgentTurnDecision leaves normal scheduling intact when Action is empty.
+type AgentTurnDecision struct {
+	Action AgentTurnAction `json:"action,omitempty"`
+}
+
+// FinishTurnHook runs after assistant and tool results are finalized, before
+// EventTurnEnd. End preserves queues and skips preparation. Continue guarantees
+// one next request, which natural tool/queue scheduling can satisfy. Error and
+// aborted assistant responses always exit regardless of the decision.
+type FinishTurnHook func(context.Context, AgentTurnContext) (AgentTurnDecision, error)
+
+// PrepareRequestContext is the state immediately before a provider request.
+// Already-selected input has been appended and emitted; this hook never polls queues.
+type PrepareRequestContext struct {
+	Context       AgentContext  `json:"context"`
+	Model         ModelRef      `json:"model"`
+	ThinkingLevel ThinkingLevel `json:"thinking_level"`
+}
+
+// PrepareRequestHook can replace request context, model, and thinking state for
+// this and later requests in the invocation, including the first request.
+type PrepareRequestHook func(context.Context, PrepareRequestContext) (*AgentLoopTurnUpdate, error)
 
 // PrepareNextTurnHook can replace context, model, or thinking state for the
 // next turn in the same run. It runs only when another turn will start, after the stop decision and before EventTurnStart.
@@ -488,17 +525,22 @@ type ConvertToLLM func(context.Context, []Message) ([]Message, error)
 
 // ModelRequest is the normalized request given to a model adapter.
 type ModelRequest struct {
-	Model           ModelRef         `json:"model"`
-	SystemPrompt    string           `json:"system_prompt,omitempty"`
-	Messages        []Message        `json:"messages,omitempty"`
-	Tools           []ToolDefinition `json:"tools,omitempty"`
-	ThinkingLevel   ThinkingLevel    `json:"thinking_level,omitempty"`
-	SessionID       string           `json:"session_id,omitempty"`
-	APIKey          string           `json:"api_key,omitempty"`
-	Transport       Transport        `json:"transport,omitempty"`
-	MaxRetryDelayMs int              `json:"max_retry_delay_ms,omitempty"`
-	ThinkingBudgets ThinkingBudgets  `json:"thinking_budgets,omitempty"`
+	Model                 ModelRef                `json:"model"`
+	SystemPrompt          string                  `json:"system_prompt,omitempty"`
+	Messages              []Message               `json:"messages,omitempty"`
+	Tools                 []ToolDefinition        `json:"tools,omitempty"`
+	ThinkingLevel         ThinkingLevel           `json:"thinking_level,omitempty"`
+	SessionID             string                  `json:"session_id,omitempty"`
+	APIKey                string                  `json:"api_key,omitempty"`
+	Transport             Transport               `json:"transport,omitempty"`
+	MaxRetryDelayMs       int                     `json:"max_retry_delay_ms,omitempty"`
+	ThinkingBudgets       ThinkingBudgets         `json:"thinking_budgets,omitempty"`
+	OnProviderStreamEvent ProviderStreamEventHook `json:"-"`
 }
+
+// ProviderStreamEventHook observes a copied provider JSON event before normalization.
+// An error stops the request without retrying it.
+type ProviderStreamEventHook func(json.RawMessage, ModelRef) error
 
 // AssistantEvent is a single low-level event from a model stream.
 type AssistantEvent struct {
@@ -560,7 +602,8 @@ func NewToolResultMessage(call ToolCall, result ToolResult, isError bool) Messag
 			ToolName:           call.Name,
 			Content:            cloneParts(result.Content),
 			Details:            cloneAny(result.Details),
-			IsError:            isError,
+			StructuredContent:  append(json.RawMessage(nil), result.StructuredContent...),
+			IsError:            isError || result.IsError,
 		},
 		Timestamp: time.Now().UTC(),
 	}

@@ -333,7 +333,7 @@ $env:OPENCODE_API_KEY = "your-opencode-go-key"
 .\bin\pigo.exe quota --json commandcode
 .\bin\pigo.exe models opencode-go
 .\bin\pigo.exe ask --provider kimi-coding "hello"
-.\bin\pigo.exe ask --provider opencode-go --model kimi-k2.6 "hello"
+.\bin\pigo.exe ask --provider opencode-go --model kimi-k3 "hello"
 .\bin\pigo.exe ask --provider commandcode --model poolside/laguna-s-2.1-free "hello"
 .\bin\pigo.exe ask --provider openai-codex --model gpt-5.5 "hello"
 ```

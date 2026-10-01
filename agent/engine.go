@@ -96,6 +96,7 @@ func (e *Engine) RunWithHooks(ctx context.Context, definition AgentDefinition, s
 
 	next := cloneSnapshotPtr(snapshot)
 	definition = initializeThinkingState(definition, next)
+	initializeSystemTranscript(definition, next)
 	runtimeState := &loopRuntimeState{}
 	var newMessages []Message
 	started := false
@@ -151,10 +152,11 @@ func (e *Engine) ContinueWithHooks(ctx context.Context, definition AgentDefiniti
 
 	next := cloneSnapshotPtr(snapshot)
 	definition = initializeThinkingState(definition, next)
+	initializeSystemTranscript(definition, next)
 	if hasPendingToolState(next) {
 		return nil, ErrPendingToolCallsRequireResume
 	}
-	if len(next.Messages) == 0 {
+	if !hasNonSystemMessages(next.Messages) {
 		return nil, ErrNoMessagesToContinue
 	}
 	if tail := next.Messages[len(next.Messages)-1]; tail.Role == RoleAssistant {
@@ -209,6 +211,7 @@ func (e *Engine) ResumePendingToolCallsWithHooks(ctx context.Context, definition
 
 	next := cloneSnapshotPtr(snapshot)
 	definition = initializeThinkingState(definition, next)
+	initializeSystemTranscript(definition, next)
 	assistant, err := validatePendingToolBatch(*next)
 	if err != nil {
 		return nil, err
@@ -275,21 +278,10 @@ func (e *Engine) ResumePendingToolCallsWithHooks(ctx context.Context, definition
 		return next, err
 	}
 	pendingBatchCommitted = true
-	emitEvent(emit, AgentEvent{
-		Type:         EventTurnEnd,
-		Message:      &assistant,
-		ToolMessages: cloneMessages(toolBatch.messages),
-	})
-	runtimeState.turnEnded = true
-	if batchErr != nil {
-		clearPendingToolControlState(next)
-		next.Error = batchErr.Error()
-		err = wrapEngineRunError(batchErr, newMessages, true)
-		return next, err
-	}
+
 	clearPendingToolControlState(next)
 
-	turnContext := ShouldStopAfterTurnContext{
+	turnContext := AgentTurnContext{
 		Message:     cloneMessage(assistant),
 		ToolResults: cloneMessages(toolBatch.messages),
 		Context:     buildAgentContext(resolvedDefinition, *next, tools),
@@ -303,21 +295,14 @@ func (e *Engine) ResumePendingToolCallsWithHooks(ctx context.Context, definition
 		thinkingLevel:          next.ThinkingLevel,
 	}
 
-	if resolvedDefinition.ShouldStopAfterTurn != nil {
-		stop, stopErr := resolvedDefinition.ShouldStopAfterTurn(ctx, turnContext)
-		if stopErr != nil {
-			restoreLoopDurable(next, durable)
-			next.Error = stopErr.Error()
-			err = wrapEngineRunError(stopErr, newMessages, true)
-			return next, err
-		}
-		if stop {
-			restoreLoopDurable(next, durable)
-			next.Error = ""
-			return next, nil
-		}
+	decision, finishErr := finishAgentTurn(ctx, resolvedDefinition, turnContext, emit, runtimeState)
+	if batchErr != nil || finishErr != nil {
+		finishErr = errors.Join(batchErr, finishErr)
+		restoreLoopDurable(next, durable)
+		next.Error = finishErr.Error()
+		return next, wrapEngineRunError(finishErr, newMessages, true)
 	}
-	if toolBatch.terminate {
+	if decision.Action == TurnActionEnd || (toolBatch.terminate && decision.Action != TurnActionContinue) {
 		restoreLoopDurable(next, durable)
 		next.Error = ""
 		return next, nil
@@ -347,6 +332,15 @@ func (e *Engine) ResumePendingToolCallsWithHooks(ctx context.Context, definition
 
 func hasPendingToolState(snapshot *AgentSnapshot) bool {
 	return snapshot != nil && (len(snapshot.PendingToolCalls) > 0 || snapshot.PendingToolControl != nil)
+}
+
+func hasNonSystemMessages(messages []Message) bool {
+	for _, message := range messages {
+		if message.Role != RoleSystem {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidatePendingToolState verifies that snapshot contains one intact,
@@ -546,6 +540,7 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 	}
 	var overrides turnOverrides
 	lastCompletedTurn := executionState.completedTurn
+	explicitContinuation := false
 	prepareNextTurn := executionState.prepareNextTurn
 	newMessages = cloneMessages(initialNewMessages)
 	transcript := cloneMessages(snapshot.Messages)
@@ -569,6 +564,9 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 		transcript = append(transcript, cloneMessages(appended)...)
 		snapshot.Messages = transcript
 		snapshot.SystemPrompt = originalSystemPrompt
+		if GetCurrentSystemMessage(transcript) != nil {
+			snapshot.SystemPrompt = GetCurrentSystemPrompt(transcript)
+		}
 		snapshot.Model = originalModel
 		snapshot.RequestedThinkingLevel = originalRequestedThinking
 		snapshot.ThinkingLevel = originalThinking
@@ -611,6 +609,7 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 					}
 				}
 			}
+			explicitContinuation = false
 			if !firstTurn {
 				emitEvent(emit, AgentEvent{Type: EventTurnStart})
 			}
@@ -635,8 +634,49 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 			}
 			resolvedDefinition = overrides.apply(resolvedDefinition, snapshot)
 			updateThinkingState(resolvedDefinition, snapshot)
+			requestTools, prepareErr := resolvedDefinition.ResolveTools(ctx, *snapshot)
+			if prepareErr != nil {
+				snapshot.Error = prepareErr.Error()
+				return snapshot, newMessages, prepareErr
+			}
+			toolChanges := toolStateChanges(transcript, requestTools)
+			if overrides.context == nil && (len(toolChanges.ToolsAdded) > 0 || len(toolChanges.ToolsRemoved) > 0) {
+				declared := appendMessagesWithEvents(snapshot, []Message{NewSystemMessage(toolChanges)}, emit)
+				newMessages = append(newMessages, declared...)
+				transcript = append(transcript, cloneMessages(declared)...)
+			}
+			if overrides.context == nil && GetCurrentSystemMessage(snapshot.Messages) != nil {
+				snapshot.SystemPrompt = GetCurrentSystemPrompt(snapshot.Messages)
+			}
+			if resolvedDefinition.PrepareRequest != nil {
+				update, prepareErr := resolvedDefinition.PrepareRequest(ctx, PrepareRequestContext{
+					Context:       buildAgentContext(resolvedDefinition, *snapshot, requestTools),
+					Model:         effectiveModelRef(*snapshot, resolvedDefinition),
+					ThinkingLevel: snapshot.ThinkingLevel,
+				})
+				if prepareErr != nil {
+					snapshot.Error = prepareErr.Error()
+					return snapshot, newMessages, prepareErr
+				}
+				if update != nil {
+					overrides.merge(update, snapshot)
+					resolvedDefinition = overrides.apply(resolvedDefinition, snapshot)
+					updateThinkingState(resolvedDefinition, snapshot)
+					if update.Context != nil {
+						requestTools = cloneTools(update.Context.Tools)
+					}
+				}
+				if prepareErr = ctx.Err(); prepareErr != nil {
+					snapshot.Error = prepareErr.Error()
+					return snapshot, newMessages, prepareErr
+				}
+			}
+			if prepareErr = validateToolDefinitions(requestTools); prepareErr != nil {
+				snapshot.Error = prepareErr.Error()
+				return snapshot, newMessages, prepareErr
+			}
 
-			assistantMessage, tools, err := e.generateAssistant(ctx, resolvedDefinition, snapshot, emit)
+			assistantMessage, tools, err := e.generateAssistant(ctx, resolvedDefinition, snapshot, requestTools, emit)
 			if err != nil {
 				snapshot.Error = err.Error()
 				return snapshot, newMessages, err
@@ -652,13 +692,15 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 				toolBatch := e.failUnexecutedToolCalls(snapshot, assistantMessage.ToolCalls, reason, emit)
 				newMessages = append(newMessages, cloneMessages(toolBatch.messages)...)
 				transcript = append(transcript, cloneMessages(toolBatch.messages)...)
-				emitEvent(emit, AgentEvent{
-					Type:         EventTurnEnd,
-					Message:      &assistantMessage,
-					ToolMessages: cloneMessages(toolBatch.messages),
-				})
-				runtimeState.turnEnded = true
+				_, finishErr := finishAgentTurn(ctx, resolvedDefinition, AgentTurnContext{
+					Message: cloneMessage(assistantMessage), ToolResults: cloneMessages(toolBatch.messages),
+					Context: buildAgentContext(resolvedDefinition, *snapshot, tools), NewMessages: cloneMessages(newMessages),
+				}, emit, runtimeState)
 				snapshot.Error = assistantMessage.ErrorMessage
+				if finishErr != nil {
+					snapshot.Error = finishErr.Error()
+					return snapshot, newMessages, finishErr
+				}
 				return snapshot, newMessages, nil
 			}
 
@@ -675,42 +717,32 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 				snapshot.Error = ""
 				return snapshot, newMessages, err
 			}
-			emitEvent(emit, AgentEvent{
-				Type:         EventTurnEnd,
-				Message:      &assistantMessage,
-				ToolMessages: cloneMessages(toolBatch.messages),
-			})
-			runtimeState.turnEnded = true
-			if err != nil {
+			turnContext := AgentTurnContext{
+				Message: cloneMessage(assistantMessage), ToolResults: cloneMessages(toolBatch.messages),
+				Context: buildAgentContext(resolvedDefinition, *snapshot, tools), NewMessages: cloneMessages(newMessages),
+			}
+			decision, finishErr := finishAgentTurn(ctx, resolvedDefinition, turnContext, emit, runtimeState)
+			if err != nil || finishErr != nil {
+				err = errors.Join(err, finishErr)
 				snapshot.Error = err.Error()
 				return snapshot, newMessages, err
 			}
-			turnContext := ShouldStopAfterTurnContext{
-				Message:     cloneMessage(assistantMessage),
-				ToolResults: cloneMessages(toolBatch.messages),
-				Context:     buildAgentContext(resolvedDefinition, *snapshot, tools),
-				NewMessages: cloneMessages(newMessages),
-			}
 			lastCompletedTurn = &turnContext
 			prepareNextTurn = resolvedDefinition.PrepareNextTurn
-
-			if resolvedDefinition.ShouldStopAfterTurn != nil {
-				stop, stopErr := resolvedDefinition.ShouldStopAfterTurn(ctx, turnContext)
-				if stopErr != nil {
-					snapshot.Error = stopErr.Error()
-					return snapshot, newMessages, stopErr
-				}
-				if stop {
-					snapshot.Error = ""
-					return snapshot, newMessages, nil
-				}
+			if decision.Action == TurnActionEnd {
+				snapshot.Error = ""
+				return snapshot, newMessages, nil
 			}
+			explicitContinuation = decision.Action == TurnActionContinue
 
 			hasMoreToolCalls = len(assistantMessage.ToolCalls) > 0 && !toolBatch.terminate
 			pendingMessages, err = dequeueHookMessages(ctx, hooks.GetSteeringMessages)
 			if err != nil {
 				snapshot.Error = err.Error()
 				return snapshot, newMessages, err
+			}
+			if hasMoreToolCalls || len(pendingMessages) > 0 {
+				explicitContinuation = false
 			}
 			turn++
 		}
@@ -721,7 +753,12 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 			return snapshot, newMessages, err
 		}
 		if len(followUpMessages) > 0 {
+			explicitContinuation = false
 			pendingMessages = followUpMessages
+			continue
+		}
+		if explicitContinuation {
+			explicitContinuation = false
 			continue
 		}
 
@@ -730,8 +767,27 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 	}
 }
 
-func (e *Engine) generateAssistant(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink) (Message, []ToolDefinition, error) {
-	modelMessages, err := definition.TransformContext(ctx, snapshot.Messages)
+func (e *Engine) generateAssistant(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, tools []ToolDefinition, emit EventSink) (Message, []ToolDefinition, error) {
+	modelMessages := cloneMessages(snapshot.Messages)
+	hasSystemTranscript := GetCurrentSystemMessage(modelMessages) != nil
+	systemPrompt := snapshot.SystemPrompt
+	if !hasSystemTranscript && systemPrompt == "" {
+		systemPrompt = definition.SystemPrompt
+	}
+	// A preparation callback may replace the request's authoring prompt. Fold
+	// that explicit replacement before transformation; afterward the transformed
+	// transcript is authoritative, including removal of all system messages.
+	if hasSystemTranscript && systemPrompt != GetCurrentSystemPrompt(modelMessages) {
+		head := NewSystemMessage(SystemMessagePayload{Content: systemPrompt, ToolsAdded: GetCurrentTools(modelMessages)})
+		messages := []Message{head}
+		for _, message := range modelMessages {
+			if message.Role != RoleSystem {
+				messages = append(messages, message)
+			}
+		}
+		modelMessages = messages
+	}
+	modelMessages, err := definition.TransformContext(ctx, modelMessages)
 	if err != nil {
 		return Message{}, nil, err
 	}
@@ -744,26 +800,22 @@ func (e *Engine) generateAssistant(ctx context.Context, definition AgentDefiniti
 	if err != nil {
 		return Message{}, nil, err
 	}
-	tools, err := definition.ResolveTools(ctx, *snapshot)
-	if err != nil {
-		return Message{}, nil, err
-	}
 
-	systemPrompt := snapshot.SystemPrompt
-	if systemPrompt == "" {
-		systemPrompt = definition.SystemPrompt
+	if hasSystemTranscript || GetCurrentSystemMessage(modelMessages) != nil {
+		systemPrompt = GetCurrentSystemPrompt(modelMessages)
 	}
 
 	stream, err := model.Stream(ctx, ModelRequest{
-		Model:           modelRef,
-		SystemPrompt:    systemPrompt,
-		Messages:        modelMessages,
-		Tools:           tools,
-		ThinkingLevel:   snapshot.ThinkingLevel,
-		SessionID:       snapshot.SessionID,
-		Transport:       definition.Transport,
-		MaxRetryDelayMs: definition.MaxRetryDelayMs,
-		ThinkingBudgets: cloneThinkingBudgets(definition.ThinkingBudgets),
+		Model:                 modelRef,
+		SystemPrompt:          systemPrompt,
+		Messages:              modelMessages,
+		Tools:                 tools,
+		ThinkingLevel:         snapshot.ThinkingLevel,
+		SessionID:             snapshot.SessionID,
+		Transport:             definition.Transport,
+		MaxRetryDelayMs:       definition.MaxRetryDelayMs,
+		ThinkingBudgets:       cloneThinkingBudgets(definition.ThinkingBudgets),
+		OnProviderStreamEvent: definition.OnProviderStreamEvent,
 	})
 	if err != nil {
 		return Message{}, nil, err
@@ -788,6 +840,7 @@ eventLoop:
 		}
 
 		partial := cloneMessage(event.Message)
+		partial.ThinkingLevel = snapshot.ThinkingLevel
 		if partial.Role == "" {
 			partial.Role = RoleAssistant
 		}
@@ -842,6 +895,7 @@ eventLoop:
 		}
 	}
 	finalMessage = cloneMessage(finalMessage)
+	finalMessage.ThinkingLevel = snapshot.ThinkingLevel
 	if finalMessage.Role == "" {
 		finalMessage.Role = RoleAssistant
 	}
@@ -1446,6 +1500,11 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 		outcome.isError = true
 	} else {
 		outcome.result = cloneToolResult(result)
+		outcome.isError = result.IsError
+		if len(result.StructuredContent) > 0 && !json.Valid(result.StructuredContent) {
+			outcome.result = errorToolResult("tool returned invalid structured content JSON")
+			outcome.isError = true
+		}
 	}
 
 	if definition.AfterToolCall != nil {
@@ -1463,6 +1522,7 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 		} else {
 			if override.Result != nil {
 				outcome.result = mergeToolResult(outcome.result, *override.Result)
+				outcome.isError = outcome.isError || override.Result.IsError
 			}
 			if override.IsError != nil {
 				outcome.isError = *override.IsError
@@ -1473,6 +1533,11 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 		}
 	}
 
+	if len(outcome.result.StructuredContent) > 0 && !json.Valid(outcome.result.StructuredContent) {
+		outcome.result = errorToolResult("after-tool hook returned invalid structured content JSON")
+		outcome.isError = true
+	}
+	outcome.result.IsError = outcome.isError
 	emitEvent(emit, AgentEvent{
 		Type:               EventToolExecutionEnd,
 		ToolCall:           &outcome.call,
@@ -1532,6 +1597,7 @@ func cloneAgentEvent(event AgentEvent) AgentEvent {
 
 func errorToolResult(message string) ToolResult {
 	return ToolResult{
+		IsError: true,
 		Content: []Part{{Type: PartTypeText, Text: message}},
 	}
 }
@@ -1581,21 +1647,23 @@ func cloneMessages(messages []Message) []Message {
 
 func cloneMessage(message Message) Message {
 	return Message{
-		ID:           message.ID,
-		Role:         message.Role,
-		Kind:         message.Kind,
-		Parts:        cloneParts(message.Parts),
-		ToolCalls:    cloneToolCalls(message.ToolCalls),
-		ToolResult:   cloneToolResultPayload(message.ToolResult),
-		Timestamp:    message.Timestamp,
-		API:          message.API,
-		Provider:     message.Provider,
-		Model:        message.Model,
-		ResponseID:   message.ResponseID,
-		Metadata:     cloneStringAnyMap(message.Metadata),
-		Payload:      cloneStringAnyMap(message.Payload),
-		StopReason:   message.StopReason,
-		ErrorMessage: message.ErrorMessage,
+		ID:            message.ID,
+		Role:          message.Role,
+		System:        cloneSystemPayload(message.System),
+		Kind:          message.Kind,
+		Parts:         cloneParts(message.Parts),
+		ToolCalls:     cloneToolCalls(message.ToolCalls),
+		ToolResult:    cloneToolResultPayload(message.ToolResult),
+		Timestamp:     message.Timestamp,
+		API:           message.API,
+		Provider:      message.Provider,
+		Model:         message.Model,
+		ResponseID:    message.ResponseID,
+		ThinkingLevel: message.ThinkingLevel,
+		Metadata:      cloneStringAnyMap(message.Metadata),
+		Payload:       cloneStringAnyMap(message.Payload),
+		StopReason:    message.StopReason,
+		ErrorMessage:  message.ErrorMessage,
 	}
 }
 
@@ -1638,9 +1706,10 @@ func cloneToolCallPtr(call *ToolCall) *ToolCall {
 
 func cloneToolResult(result ToolResult) ToolResult {
 	return ToolResult{
-		Content:   cloneParts(result.Content),
-		Details:   cloneAny(result.Details),
-		Terminate: result.Terminate,
+		Content:           cloneParts(result.Content),
+		Details:           cloneAny(result.Details),
+		StructuredContent: append(json.RawMessage(nil), result.StructuredContent...),
+		IsError:           result.IsError, Terminate: result.Terminate,
 	}
 }
 
@@ -1648,6 +1717,13 @@ func mergeToolResult(base ToolResult, override ToolResult) ToolResult {
 	merged := cloneToolResult(base)
 	if override.Content != nil {
 		merged.Content = cloneParts(override.Content)
+		merged.StructuredContent = nil
+	}
+	if override.StructuredContent != nil {
+		merged.StructuredContent = append(json.RawMessage(nil), override.StructuredContent...)
+	}
+	if override.IsError {
+		merged.IsError = true
 	}
 	if override.Details != nil {
 		merged.Details = cloneAny(override.Details)
@@ -1771,6 +1847,7 @@ func cloneToolResultPayload(payload *ToolResultPayload) *ToolResultPayload {
 	cloned := *payload
 	cloned.Content = cloneParts(payload.Content)
 	cloned.Details = cloneAny(payload.Details)
+	cloned.StructuredContent = append(json.RawMessage(nil), payload.StructuredContent...)
 	return &cloned
 }
 
@@ -1804,6 +1881,7 @@ func cloneTools(tools []ToolDefinition) []ToolDefinition {
 	for i, tool := range tools {
 		cloned[i] = tool
 		cloned[i].Parameters = cloneStringAnyMap(tool.Parameters)
+		cloned[i].OutputSchema = cloneStringAnyMap(tool.OutputSchema)
 	}
 	return cloned
 }
@@ -1908,12 +1986,8 @@ func appendMessagesWithEvents(snapshot *AgentSnapshot, messages []Message, emit 
 }
 
 func buildAgentContext(definition AgentDefinition, snapshot AgentSnapshot, tools []ToolDefinition) AgentContext {
-	systemPrompt := snapshot.SystemPrompt
-	if systemPrompt == "" {
-		systemPrompt = definition.SystemPrompt
-	}
 	return AgentContext{
-		SystemPrompt: systemPrompt,
+		SystemPrompt: effectiveSystemPrompt(snapshot, definition),
 		Messages:     cloneMessages(snapshot.Messages),
 		Tools:        cloneTools(tools),
 	}

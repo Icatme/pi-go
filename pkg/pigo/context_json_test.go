@@ -6,6 +6,55 @@ import (
 	"time"
 )
 
+func TestContextJSONRejectsNilMessagePointers(t *testing.T) {
+	for _, message := range []Message{(*SystemMessage)(nil), (*UserMessage)(nil), (*AssistantMessage)(nil), (*ToolResultMessage)(nil)} {
+		if _, err := SerializeContext(Context{Messages: []Message{message}}); err == nil {
+			t.Fatalf("expected an error for nil message %T", message)
+		}
+	}
+}
+
+func TestContextJSONRoundTripAcceptsConstructedSystemMessagePointer(t *testing.T) {
+	initial := CreateInitialSystemMessage("policy", []Tool{{
+		Name: "lookup", Description: "Look up an item",
+		Parameters:   map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}},
+		OutputSchema: map[string]any{"type": "string"},
+	}})
+	section := "section policy"
+	initial.Sections = map[string]*string{"policy": &section, "removed": nil}
+	initial.ToolsRemoved = []ToolReference{{Name: "retired"}}
+	ctx := Context{Messages: []Message{initial, &UserMessage{Content: "question"}}}
+	encoded, err := SerializeContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := DeserializeContext(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := GetInitialSystemMessage(restored.Messages)
+	if head == nil || head.Content != initial.Content || !head.Timestamp.Equal(initial.Timestamp) || *head.Sections["policy"] != section {
+		t.Fatalf("constructed system pointer lost its prompt or sections: %+v", head)
+	}
+	if value, present := head.Sections["removed"]; !present || value != nil || len(head.ToolsRemoved) != 1 || head.ToolsRemoved[0].Name != "retired" {
+		t.Fatalf("system removal declarations were lost: %+v", head)
+	}
+	tools := GetCurrentTools(restored.Messages)
+	if len(tools) != 1 || !DeclarationsEqual(tools[0], initial.ToolsAdded[0]) || restored.Messages[1].(UserMessage).Content != "question" {
+		t.Fatalf("pointer messages or tool schemas were lost: %+v", restored)
+	}
+	reencoded, err := SerializeContext(restored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != string(reencoded) {
+		t.Fatalf("pointer roundtrip changed JSON:\n%s\n%s", encoded, reencoded)
+	}
+	if *initial.Sections["policy"] != section || initial.ToolsAdded[0].Description != "Look up an item" {
+		t.Fatal("serialization mutated its source system message")
+	}
+}
+
 func TestContextJSONRoundTripPreservesMessagesAndTools(t *testing.T) {
 	now := time.Date(2026, 3, 29, 1, 2, 3, 0, time.UTC)
 	context := Context{

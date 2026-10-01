@@ -2,31 +2,33 @@ package pigo
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 )
 
 type CommonProviderOptions struct {
-	APIKey             string
-	Auth               map[Provider]AuthConfig
-	HTTPClient         *http.Client
-	Headers            map[string]string
-	MaxTokens          int
-	Temperature        *float64
-	Transport          Transport
-	CacheRetention     CacheRetention
-	SessionID          string
-	OnPayload          func(payload any, model Model) any
-	OnResponse         func(response ProviderResponse, model Model)
-	ServiceTier        string
-	TimeoutMs          int
-	MaxRetries         int
-	MaxRetryDelay      int
-	Metadata           map[string]any
-	RequestContext     context.Context
-	PreviousResponseID string
-	Truncation         string
-	Observer           Observer
-	ResponseFormat     *ResponseFormat
+	APIKey                string
+	Auth                  map[Provider]AuthConfig
+	HTTPClient            *http.Client
+	Headers               map[string]string
+	MaxTokens             int
+	Temperature           *float64
+	Transport             Transport
+	CacheRetention        CacheRetention
+	SessionID             string
+	OnPayload             func(payload any, model Model) any
+	OnResponse            func(response ProviderResponse, model Model)
+	OnProviderStreamEvent func(data json.RawMessage, model Model) error
+	ServiceTier           string
+	TimeoutMs             int
+	MaxRetries            int
+	MaxRetryDelay         int
+	Metadata              map[string]any
+	RequestContext        context.Context
+	PreviousResponseID    string
+	Truncation            string
+	Observer              Observer
+	ResponseFormat        *ResponseFormat
 }
 
 func buildCommonProviderOptions(model Model, options SimpleStreamOptions) CommonProviderOptions {
@@ -39,92 +41,95 @@ func commonProviderOptionsFromStream(options ProviderStreamOptions) CommonProvid
 
 func (options CommonProviderOptions) toProviderStreamOptions() ProviderStreamOptions {
 	return ProviderStreamOptions{
-		APIKey:             options.APIKey,
-		Auth:               options.Auth,
-		HTTPClient:         options.HTTPClient,
-		Headers:            cloneStringMap(options.Headers),
-		MaxTokens:          options.MaxTokens,
-		Temperature:        options.Temperature,
-		Transport:          options.Transport,
-		CacheRetention:     options.CacheRetention,
-		SessionID:          options.SessionID,
-		OnPayload:          options.OnPayload,
-		OnResponse:         options.OnResponse,
-		ServiceTier:        options.ServiceTier,
-		TimeoutMs:          options.TimeoutMs,
-		MaxRetries:         options.MaxRetries,
-		MaxRetryDelay:      options.MaxRetryDelay,
-		Metadata:           cloneMap(options.Metadata),
-		RequestContext:     options.RequestContext,
-		PreviousResponseID: options.PreviousResponseID,
-		Truncation:         options.Truncation,
-		Observer:           options.Observer,
-		ResponseFormat:     cloneResponseFormat(options.ResponseFormat),
+		APIKey:                options.APIKey,
+		Auth:                  options.Auth,
+		HTTPClient:            options.HTTPClient,
+		Headers:               cloneStringMap(options.Headers),
+		MaxTokens:             options.MaxTokens,
+		Temperature:           options.Temperature,
+		Transport:             options.Transport,
+		CacheRetention:        options.CacheRetention,
+		SessionID:             options.SessionID,
+		OnPayload:             options.OnPayload,
+		OnResponse:            options.OnResponse,
+		OnProviderStreamEvent: options.OnProviderStreamEvent,
+		ServiceTier:           options.ServiceTier,
+		TimeoutMs:             options.TimeoutMs,
+		MaxRetries:            options.MaxRetries,
+		MaxRetryDelay:         options.MaxRetryDelay,
+		Metadata:              cloneMap(options.Metadata),
+		RequestContext:        options.RequestContext,
+		PreviousResponseID:    options.PreviousResponseID,
+		Truncation:            options.Truncation,
+		Observer:              options.Observer,
+		ResponseFormat:        cloneResponseFormat(options.ResponseFormat),
 	}
 }
 
 func streamOptionsFromSimple(model Model, options SimpleStreamOptions) StreamOptions {
 	streamOptions := StreamOptions{
-		APIKey:             options.APIKey,
-		Auth:               options.Auth,
-		HTTPClient:         options.HTTPClient,
-		Headers:            cloneStringMap(options.Headers),
-		MaxTokens:          options.MaxTokens,
-		Temperature:        options.Temperature,
-		TopP:               options.TopP,
-		ParallelToolCalls:  options.ParallelToolCalls,
-		Transport:          options.Transport,
-		CacheRetention:     options.CacheRetention,
-		SessionID:          options.SessionID,
-		OnPayload:          options.OnPayload,
-		OnResponse:         options.OnResponse,
-		ServiceTier:        options.ServiceTier,
-		TimeoutMs:          options.TimeoutMs,
-		MaxRetries:         options.MaxRetries,
-		MaxRetryDelay:      options.MaxRetryDelay,
-		Metadata:           cloneMap(options.Metadata),
-		RequestContext:     options.RequestContext,
-		Reasoning:          options.Reasoning,
-		PreviousResponseID: options.PreviousResponseID,
-		Truncation:         options.Truncation,
-		ThinkingBudgets:    options.ThinkingBudgets,
-		Observer:           options.Observer,
-		ResponseFormat:     cloneResponseFormat(options.ResponseFormat),
+		APIKey:                options.APIKey,
+		Auth:                  options.Auth,
+		HTTPClient:            options.HTTPClient,
+		Headers:               cloneStringMap(options.Headers),
+		MaxTokens:             options.MaxTokens,
+		Temperature:           options.Temperature,
+		TopP:                  options.TopP,
+		ParallelToolCalls:     options.ParallelToolCalls,
+		Transport:             options.Transport,
+		CacheRetention:        options.CacheRetention,
+		SessionID:             options.SessionID,
+		OnPayload:             options.OnPayload,
+		OnResponse:            options.OnResponse,
+		OnProviderStreamEvent: options.OnProviderStreamEvent,
+		ServiceTier:           options.ServiceTier,
+		TimeoutMs:             options.TimeoutMs,
+		MaxRetries:            options.MaxRetries,
+		MaxRetryDelay:         options.MaxRetryDelay,
+		Metadata:              cloneMap(options.Metadata),
+		RequestContext:        options.RequestContext,
+		Reasoning:             options.Reasoning,
+		PreviousResponseID:    options.PreviousResponseID,
+		Truncation:            options.Truncation,
+		ThinkingBudgets:       options.ThinkingBudgets,
+		Observer:              options.Observer,
+		ResponseFormat:        cloneResponseFormat(options.ResponseFormat),
 	}
 	return streamOptions.withCommonSnapshot(model)
 }
 
 func streamOptionsFromProvider(model Model, options ProviderStreamOptions) StreamOptions {
 	streamOptions := StreamOptions{
-		APIKey:               options.APIKey,
-		Auth:                 options.Auth,
-		HTTPClient:           options.HTTPClient,
-		Headers:              cloneStringMap(options.Headers),
-		MaxTokens:            options.MaxTokens,
-		Temperature:          options.Temperature,
-		TopP:                 options.TopP,
-		ParallelToolCalls:    options.ParallelToolCalls,
-		Transport:            options.Transport,
-		CacheRetention:       options.CacheRetention,
-		SessionID:            options.SessionID,
-		OnPayload:            options.OnPayload,
-		OnResponse:           options.OnResponse,
-		ServiceTier:          options.ServiceTier,
-		TimeoutMs:            options.TimeoutMs,
-		MaxRetries:           options.MaxRetries,
-		MaxRetryDelay:        options.MaxRetryDelay,
-		Metadata:             cloneMap(options.Metadata),
-		RequestContext:       options.RequestContext,
-		Reasoning:            options.Reasoning,
-		ReasoningSummary:     options.ReasoningSummary,
-		TextVerbosity:        options.TextVerbosity,
-		ThinkingBudgetTokens: options.ThinkingBudgetTokens,
-		ThinkingBudgets:      options.ThinkingBudgets,
-		ToolChoice:           options.ToolChoice,
-		PreviousResponseID:   options.PreviousResponseID,
-		Truncation:           options.Truncation,
-		Observer:             options.Observer,
-		ResponseFormat:       cloneResponseFormat(options.ResponseFormat),
+		APIKey:                options.APIKey,
+		Auth:                  options.Auth,
+		HTTPClient:            options.HTTPClient,
+		Headers:               cloneStringMap(options.Headers),
+		MaxTokens:             options.MaxTokens,
+		Temperature:           options.Temperature,
+		TopP:                  options.TopP,
+		ParallelToolCalls:     options.ParallelToolCalls,
+		Transport:             options.Transport,
+		CacheRetention:        options.CacheRetention,
+		SessionID:             options.SessionID,
+		OnPayload:             options.OnPayload,
+		OnResponse:            options.OnResponse,
+		OnProviderStreamEvent: options.OnProviderStreamEvent,
+		ServiceTier:           options.ServiceTier,
+		TimeoutMs:             options.TimeoutMs,
+		MaxRetries:            options.MaxRetries,
+		MaxRetryDelay:         options.MaxRetryDelay,
+		Metadata:              cloneMap(options.Metadata),
+		RequestContext:        options.RequestContext,
+		Reasoning:             options.Reasoning,
+		ReasoningSummary:      options.ReasoningSummary,
+		TextVerbosity:         options.TextVerbosity,
+		ThinkingBudgetTokens:  options.ThinkingBudgetTokens,
+		ThinkingBudgets:       options.ThinkingBudgets,
+		ToolChoice:            options.ToolChoice,
+		PreviousResponseID:    options.PreviousResponseID,
+		Truncation:            options.Truncation,
+		Observer:              options.Observer,
+		ResponseFormat:        cloneResponseFormat(options.ResponseFormat),
 	}
 	return streamOptions.withCommonSnapshot(model)
 }
@@ -175,6 +180,9 @@ func (options StreamOptions) normalizeLegacyCommonFallback() StreamOptions {
 	if options.OnResponse == nil {
 		options.OnResponse = options.Common.OnResponse
 	}
+	if options.OnProviderStreamEvent == nil {
+		options.OnProviderStreamEvent = options.Common.OnProviderStreamEvent
+	}
 	if options.ServiceTier == "" {
 		options.ServiceTier = options.Common.ServiceTier
 	}
@@ -214,27 +222,28 @@ func (options StreamOptions) normalizeLegacyCommonFallback() StreamOptions {
 
 func (options StreamOptions) commonSnapshot(model Model) CommonProviderOptions {
 	common := CommonProviderOptions{
-		APIKey:             options.APIKey,
-		Auth:               options.Auth,
-		HTTPClient:         options.HTTPClient,
-		Headers:            cloneStringMap(options.Headers),
-		MaxTokens:          options.MaxTokens,
-		Temperature:        options.Temperature,
-		Transport:          options.Transport,
-		CacheRetention:     options.CacheRetention,
-		SessionID:          options.SessionID,
-		OnPayload:          options.OnPayload,
-		OnResponse:         options.OnResponse,
-		ServiceTier:        options.ServiceTier,
-		TimeoutMs:          options.TimeoutMs,
-		MaxRetries:         options.MaxRetries,
-		MaxRetryDelay:      options.MaxRetryDelay,
-		Metadata:           cloneMap(options.Metadata),
-		RequestContext:     options.RequestContext,
-		PreviousResponseID: options.PreviousResponseID,
-		Truncation:         options.Truncation,
-		Observer:           options.Observer,
-		ResponseFormat:     cloneResponseFormat(options.ResponseFormat),
+		APIKey:                options.APIKey,
+		Auth:                  options.Auth,
+		HTTPClient:            options.HTTPClient,
+		Headers:               cloneStringMap(options.Headers),
+		MaxTokens:             options.MaxTokens,
+		Temperature:           options.Temperature,
+		Transport:             options.Transport,
+		CacheRetention:        options.CacheRetention,
+		SessionID:             options.SessionID,
+		OnPayload:             options.OnPayload,
+		OnResponse:            options.OnResponse,
+		OnProviderStreamEvent: options.OnProviderStreamEvent,
+		ServiceTier:           options.ServiceTier,
+		TimeoutMs:             options.TimeoutMs,
+		MaxRetries:            options.MaxRetries,
+		MaxRetryDelay:         options.MaxRetryDelay,
+		Metadata:              cloneMap(options.Metadata),
+		RequestContext:        options.RequestContext,
+		PreviousResponseID:    options.PreviousResponseID,
+		Truncation:            options.Truncation,
+		Observer:              options.Observer,
+		ResponseFormat:        cloneResponseFormat(options.ResponseFormat),
 	}
 	if common.MaxTokens <= 0 {
 		common.MaxTokens = minInt(model.MaxTokens, 32000)
@@ -250,34 +259,35 @@ func (options StreamOptions) commonProviderOptions(model Model) CommonProviderOp
 func (options StreamOptions) providerStreamOptions(model Model) ProviderStreamOptions {
 	common := options.commonProviderOptions(model)
 	return ProviderStreamOptions{
-		APIKey:               common.APIKey,
-		Auth:                 common.Auth,
-		HTTPClient:           common.HTTPClient,
-		Headers:              cloneStringMap(common.Headers),
-		MaxTokens:            common.MaxTokens,
-		Temperature:          common.Temperature,
-		TopP:                 options.TopP,
-		ParallelToolCalls:    options.ParallelToolCalls,
-		Transport:            common.Transport,
-		CacheRetention:       common.CacheRetention,
-		SessionID:            common.SessionID,
-		OnPayload:            common.OnPayload,
-		OnResponse:           common.OnResponse,
-		ServiceTier:          common.ServiceTier,
-		TimeoutMs:            common.TimeoutMs,
-		MaxRetries:           common.MaxRetries,
-		MaxRetryDelay:        common.MaxRetryDelay,
-		Metadata:             cloneMap(common.Metadata),
-		RequestContext:       common.RequestContext,
-		Reasoning:            options.Reasoning,
-		ReasoningSummary:     options.ReasoningSummary,
-		TextVerbosity:        options.TextVerbosity,
-		ThinkingBudgetTokens: options.ThinkingBudgetTokens,
-		ThinkingBudgets:      options.ThinkingBudgets,
-		ToolChoice:           options.ToolChoice,
-		PreviousResponseID:   common.PreviousResponseID,
-		Truncation:           common.Truncation,
-		Observer:             common.Observer,
-		ResponseFormat:       cloneResponseFormat(common.ResponseFormat),
+		APIKey:                common.APIKey,
+		Auth:                  common.Auth,
+		HTTPClient:            common.HTTPClient,
+		Headers:               cloneStringMap(common.Headers),
+		MaxTokens:             common.MaxTokens,
+		Temperature:           common.Temperature,
+		TopP:                  options.TopP,
+		ParallelToolCalls:     options.ParallelToolCalls,
+		Transport:             common.Transport,
+		CacheRetention:        common.CacheRetention,
+		SessionID:             common.SessionID,
+		OnPayload:             common.OnPayload,
+		OnResponse:            common.OnResponse,
+		OnProviderStreamEvent: common.OnProviderStreamEvent,
+		ServiceTier:           common.ServiceTier,
+		TimeoutMs:             common.TimeoutMs,
+		MaxRetries:            common.MaxRetries,
+		MaxRetryDelay:         common.MaxRetryDelay,
+		Metadata:              cloneMap(common.Metadata),
+		RequestContext:        common.RequestContext,
+		Reasoning:             options.Reasoning,
+		ReasoningSummary:      options.ReasoningSummary,
+		TextVerbosity:         options.TextVerbosity,
+		ThinkingBudgetTokens:  options.ThinkingBudgetTokens,
+		ThinkingBudgets:       options.ThinkingBudgets,
+		ToolChoice:            options.ToolChoice,
+		PreviousResponseID:    common.PreviousResponseID,
+		Truncation:            common.Truncation,
+		Observer:              common.Observer,
+		ResponseFormat:        cloneResponseFormat(common.ResponseFormat),
 	}
 }

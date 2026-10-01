@@ -29,7 +29,9 @@ type AgentOptions struct {
 	BeforeToolCall        BeforeToolCallHook      `json:"-"`
 	AfterToolCall         AfterToolCallHook       `json:"-"`
 	PrepareNextTurn       PrepareNextTurnHook     `json:"-"`
-	ShouldStopAfterTurn   ShouldStopAfterTurnHook `json:"-"`
+	PrepareRequest        PrepareRequestHook      `json:"-"`
+	OnProviderStreamEvent ProviderStreamEventHook `json:"-"`
+	FinishTurn            FinishTurnHook          `json:"-"`
 	MaxTurns              int                     `json:"max_turns,omitempty"`
 }
 
@@ -62,7 +64,9 @@ func (o AgentOptions) build() (AgentDefinition, AgentSnapshot) {
 		BeforeToolCall:        o.BeforeToolCall,
 		AfterToolCall:         o.AfterToolCall,
 		PrepareNextTurn:       o.PrepareNextTurn,
-		ShouldStopAfterTurn:   o.ShouldStopAfterTurn,
+		PrepareRequest:        o.PrepareRequest,
+		OnProviderStreamEvent: o.OnProviderStreamEvent,
+		FinishTurn:            o.FinishTurn,
 		ToolExecution:         o.ToolExecution,
 		SteeringMode:          o.SteeringMode,
 		FollowUpMode:          o.FollowUpMode,

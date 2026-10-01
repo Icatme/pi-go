@@ -22,6 +22,7 @@ type VercelGatewayRouting struct {
 }
 
 type OpenAICompletionsCompat struct {
+	SupportsMidConvoSystemMessages              *bool
 	SupportsStore                               *bool
 	SupportsDeveloperRole                       *bool
 	SupportsReasoningEffort                     *bool
@@ -44,6 +45,7 @@ type OpenAICompletionsCompat struct {
 func (c *OpenAICompletionsCompat) compatAPI() string { return "openai-completions" }
 
 type OpenAIResponsesCompat struct {
+	SupportsMidConvoSystemMessages  *bool
 	SendSessionIdHeader             *bool
 	SupportsLongCacheRetention      *bool
 	SupportsExplicitPromptCacheMode *bool
@@ -58,6 +60,7 @@ type AnthropicMessagesCompat struct {
 	SupportsEagerToolInputStreaming *bool
 	ForceAdaptiveThinking           *bool
 	SupportsLongCacheRetention      *bool
+	AllowEmptySignature             *bool
 }
 
 func (c *AnthropicMessagesCompat) compatAPI() string { return "anthropic-messages" }

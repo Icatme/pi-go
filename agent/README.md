@@ -239,7 +239,7 @@ and preserves the original error for the caller. Once execution has advanced to
 a different batch, failures remain conservative and may be indeterminate.
 
 Checkpoint runners require fixed `AgentDefinition.Tools`, an explicit
-`DefinitionVersion`, and no `PrepareNextTurn`: dynamic executable bindings and
+`DefinitionVersion`, and no `PrepareNextTurn` or `PrepareRequest`: dynamic executable bindings and
 invocation-local model/context overrides cannot be reconstructed safely after a
 durable boundary. Custom argument parsers and `BeforeToolCall` hooks may rerun
 during resume and therefore must be pure and deterministic. Argument drift
@@ -251,6 +251,21 @@ may contain API keys or OAuth tokens. A stored `running` checkpoint is reported
 as busy and is never replayed automatically. If a tool side effect succeeds but
 the terminal compare-and-swap fails, the returned outcome is
 `StatusIndeterminate` with `Persisted=false`; it is not an exactly-once claim.
+
+## Transcript and turn hooks
+
+`FinishTurn` replaces `ShouldStopAfterTurn`: return an `AgentTurnDecision` with
+`TurnActionEnd`, `TurnActionContinue`, or a zero action for normal scheduling.
+It runs before `EventTurnEnd` and observes error/aborted terminal messages too.
+`PrepareRequest` runs once before each actual model request, after accepted input
+and tool resolution. `PeekQueuedMessages` inspects the next batch without taking it.
+
+System instructions and tool declarations now persist as `RoleSystem` messages.
+Update named sections with `AppendMessage(NewSystemMessage(SystemMessagePayload{...}))`;
+`SetSystemPrompt` is removed. Assistant messages record effective `ThinkingLevel`.
+Tools may return `StructuredContent` and `IsError`; `RunToolCall` shares validation
+and hooks for programmatic calls. See [runtime contracts](docs/runtime-contracts.md)
+for the request callback, transcript replay and migration details.
 
 ## Agents As Task Tools
 

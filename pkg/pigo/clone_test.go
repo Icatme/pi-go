@@ -80,6 +80,16 @@ func TestCloneModelPreservesCompatConcreteTypes(t *testing.T) {
 	}
 }
 
+func TestCloneAnthropicCompatIsolatesEmptySignatureCapability(t *testing.T) {
+	allowed := true
+	original := &AnthropicMessagesCompat{AllowEmptySignature: &allowed}
+	cloned := cloneCompat(original).(*AnthropicMessagesCompat)
+	*cloned.AllowEmptySignature = false
+	if !*original.AllowEmptySignature {
+		t.Fatal("mutating copied model changed empty signature capability on original")
+	}
+}
+
 func TestCloneMessagesDeepCopiesNestedData(t *testing.T) {
 	messages := []Message{
 		UserMessage{Content: map[string]any{"items": []any{"a", map[string]any{"nested": "b"}}}},

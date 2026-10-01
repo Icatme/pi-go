@@ -115,7 +115,7 @@ func buildOpenAIResponsesRequest(model Model, ctx Context, options ProviderStrea
 		Store:             false,
 		Stream:            true,
 		Input:             convertOpenAIResponsesMessages(model, ctx, true),
-		Tools:             convertOpenAIResponsesTools(ctx.Tools),
+		Tools:             convertOpenAIResponsesTools(currentContextTools(ctx)),
 		ToolChoice:        resolveOpenAIResponsesToolChoice(resolvedOptions.ToolChoice),
 		ParallelToolCalls: &parallelToolCalls,
 		Include:           []string{"reasoning.encrypted_content"},
@@ -322,7 +322,6 @@ func streamOpenAIResponsesSSE(
 		state := openAIResponsesStreamingState{
 			CurrentTextIndex:     -1,
 			CurrentThinkingIndex: -1,
-			CurrentToolIndex:     -1,
 			FinalizedItemKeys:    map[string]bool{},
 		}
 		terminalSeen := false
@@ -331,6 +330,9 @@ func streamOpenAIResponsesSSE(
 			streamStarted = true
 		}
 		err = readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
+			if err := observeProviderStreamEvent(data, model, options); err != nil {
+				return false, err
+			}
 			done, eventErr := processOpenAIResponsesStreamEvent(data, model, response, stream, &state, options.ServiceTier)
 			if done {
 				terminalSeen = true
@@ -339,7 +341,8 @@ func streamOpenAIResponsesSSE(
 		})
 		_ = httpResponse.Body.Close()
 		if err != nil {
-			if len(response.Content) == 0 &&
+			if !isProviderStreamEventCallbackError(err) &&
+				len(response.Content) == 0 &&
 				len(response.HostedToolExecutions) == 0 &&
 				!response.UsageReported &&
 				shouldRetryOpenAIResponsesRequest(0, err.Error()) &&

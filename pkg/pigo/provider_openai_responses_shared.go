@@ -120,12 +120,19 @@ type openAIResponsesResponseError struct {
 type openAIResponsesStreamingState struct {
 	CurrentTextIndex       int
 	CurrentThinkingIndex   int
-	CurrentToolIndex       int
-	CurrentToolJSON        string
 	CurrentTextItemKey     string
 	CurrentThinkingItemKey string
-	CurrentToolItemKey     string
 	FinalizedItemKeys      map[string]bool
+	ToolCalls              map[string]*openAIResponsesToolCallState
+	ToolCallOutputKeys     map[int]string
+}
+
+type openAIResponsesToolCallState struct {
+	ContentIndex int
+	ItemID       string
+	CallID       string
+	JSON         string
+	Completed    bool
 }
 
 // ============================================================================
@@ -133,22 +140,27 @@ type openAIResponsesStreamingState struct {
 // ============================================================================
 
 func convertOpenAIResponsesMessages(model Model, ctx Context, includeSystemPrompt bool) []map[string]any {
-	transformed := TransformMessages(ctx.Messages, model, NormalizeOpenAIResponsesToolCallID)
+	transcript := ResolveTranscript(NormalizeContext(ctx), supportsTranscriptSystemMessages(model))
+	transformed := TransformMessages(transcript.Messages, model, NormalizeOpenAIResponsesToolCallID)
 	input := make([]map[string]any, 0, len(transformed)+1)
-
-	if includeSystemPrompt && strings.TrimSpace(ctx.SystemPrompt) != "" {
-		role := "system"
-		if model.Reasoning {
-			role = "developer"
-		}
-		input = append(input, map[string]any{
-			"role":    role,
-			"content": ctx.SystemPrompt,
-		})
-	}
 
 	for index, message := range transformed {
 		switch typed := message.(type) {
+		case SystemMessage:
+			if index == 0 && !includeSystemPrompt {
+				continue
+			}
+			text := RenderSystemMessageUpdate(typed)
+			if index == 0 {
+				text = GetSystemMessageText(typed)
+			}
+			if text != "" {
+				role := "system"
+				if model.Reasoning {
+					role = "developer"
+				}
+				input = append(input, map[string]any{"role": role, "content": text})
+			}
 		case UserMessage:
 			switch content := typed.Content.(type) {
 			case string:
@@ -375,6 +387,9 @@ func processOpenAIResponsesStreamEventWithProvider(
 	if err := json.Unmarshal([]byte(data), &event); err != nil {
 		return false, err
 	}
+	if state.FinalizedItemKeys == nil {
+		state.FinalizedItemKeys = map[string]bool{}
+	}
 
 	eventType, _ := event["type"].(string)
 	switch eventType {
@@ -398,6 +413,11 @@ func processOpenAIResponsesStreamEventWithProvider(
 			return false, err
 		}
 		startOpenAIResponsesStreamItem(response, stream, state, item)
+		if item.Type == "function_call" {
+			if err := registerOpenAIResponsesToolOutputIndex(state, event, item); err != nil {
+				return false, err
+			}
+		}
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		if state.CurrentThinkingIndex < 0 {
 			startOpenAIResponsesThinkingBlock(response, stream, state)
@@ -458,37 +478,45 @@ func processOpenAIResponsesStreamEventWithProvider(
 			})
 		}
 	case "response.function_call_arguments.delta":
-		if state.CurrentToolIndex < 0 {
+		call, err := resolveOpenAIResponsesToolCall(state, event)
+		if err != nil {
+			return false, err
+		}
+		if call == nil || call.Completed {
 			return false, nil
 		}
 		delta, _ := event["delta"].(string)
-		state.CurrentToolJSON += delta
-		block, _ := response.Content[state.CurrentToolIndex].(ToolCall)
-		block.Arguments = parseStreamingJSONObject(state.CurrentToolJSON)
-		response.Content[state.CurrentToolIndex] = block
+		call.JSON += delta
+		block, _ := response.Content[call.ContentIndex].(ToolCall)
+		block.Arguments = parseStreamingJSONObject(call.JSON)
+		response.Content[call.ContentIndex] = block
 		stream.push(AssistantMessageEvent{
 			Type:         AssistantMessageEventToolCallDelta,
-			ContentIndex: state.CurrentToolIndex,
+			ContentIndex: call.ContentIndex,
 			Delta:        delta,
 			Partial:      *response,
 		})
 	case "response.function_call_arguments.done":
-		if state.CurrentToolIndex < 0 {
+		call, err := resolveOpenAIResponsesToolCall(state, event)
+		if err != nil {
+			return false, err
+		}
+		if call == nil || call.Completed {
 			return false, nil
 		}
 		arguments, _ := event["arguments"].(string)
 		if arguments != "" {
-			previousJSON := state.CurrentToolJSON
-			state.CurrentToolJSON = arguments
-			block, _ := response.Content[state.CurrentToolIndex].(ToolCall)
-			block.Arguments = parseStreamingJSONObject(state.CurrentToolJSON)
-			response.Content[state.CurrentToolIndex] = block
+			previousJSON := call.JSON
+			call.JSON = arguments
+			block, _ := response.Content[call.ContentIndex].(ToolCall)
+			block.Arguments = parseStreamingJSONObject(call.JSON)
+			response.Content[call.ContentIndex] = block
 			if strings.HasPrefix(arguments, previousJSON) {
 				delta := arguments[len(previousJSON):]
 				if delta != "" {
 					stream.push(AssistantMessageEvent{
 						Type:         AssistantMessageEventToolCallDelta,
-						ContentIndex: state.CurrentToolIndex,
+						ContentIndex: call.ContentIndex,
 						Delta:        delta,
 						Partial:      *response,
 					})
@@ -508,7 +536,14 @@ func processOpenAIResponsesStreamEventWithProvider(
 		if err := json.Unmarshal(itemBytes, &item); err != nil {
 			return false, err
 		}
-		finalizeOpenAIResponsesStreamItem(response, stream, state, item)
+		if item.Type == "function_call" {
+			if err := registerOpenAIResponsesToolOutputIndex(state, event, item); err != nil {
+				return false, err
+			}
+		}
+		if err := finalizeOpenAIResponsesStreamItem(response, stream, state, item); err != nil {
+			return false, err
+		}
 	case "response.completed", "response.done", "response.incomplete":
 		responseMap, ok := event["response"].(map[string]any)
 		if !ok {
@@ -522,8 +557,19 @@ func processOpenAIResponsesStreamEventWithProvider(
 		if err := json.Unmarshal(responseBytes, &terminal); err != nil {
 			return false, err
 		}
-		emitOpenAIResponsesTerminalOutputIfNeeded(response, stream, state, terminal)
+		outputErr := emitOpenAIResponsesTerminalOutputIfNeeded(response, stream, state, terminal)
 		applyOpenAIResponsesTerminal(model, response, terminal, requestServiceTier)
+		if outputErr != nil {
+			return true, outputErr
+		}
+		if response.StopReason == StopReasonToolUse {
+			for _, call := range state.ToolCalls {
+				if !call.Completed {
+					block := response.Content[call.ContentIndex].(ToolCall)
+					return true, fmt.Errorf("OpenAI Responses stream completed with an unfinished tool call: %s (%s)", block.Name, block.ID)
+				}
+			}
+		}
 		return true, nil
 	case "response.failed":
 		responseMap, ok := event["response"].(map[string]any)
@@ -573,14 +619,82 @@ func processOpenAIResponsesStreamEventWithProvider(
 // Shared stream item lifecycle
 // ============================================================================
 
+func registerOpenAIResponsesToolOutputIndex(state *openAIResponsesStreamingState, event map[string]any, item openAIResponsesResponseItem) error {
+	index, ok := event["output_index"].(float64)
+	if !ok {
+		return nil
+	}
+	if index < 0 || index != math.Trunc(index) {
+		return fmt.Errorf("OpenAI Responses invalid tool output_index: %v", index)
+	}
+	key := openAIResponsesItemKey(item)
+	if previous, exists := state.ToolCallOutputKeys[int(index)]; exists && previous != key {
+		return fmt.Errorf("OpenAI Responses conflicting tool call identity at output_index %d", int(index))
+	}
+	if state.ToolCallOutputKeys == nil {
+		state.ToolCallOutputKeys = map[int]string{}
+	}
+	state.ToolCallOutputKeys[int(index)] = key
+	return nil
+}
+
+func resolveOpenAIResponsesToolCall(state *openAIResponsesStreamingState, event map[string]any) (*openAIResponsesToolCallState, error) {
+	itemID, _ := event["item_id"].(string)
+	callID, _ := event["call_id"].(string)
+	var call *openAIResponsesToolCallState
+	if itemID != "" || callID != "" {
+		for _, candidate := range state.ToolCalls {
+			if (itemID == "" || candidate.ItemID == itemID) && (callID == "" || candidate.CallID == callID) {
+				if call != nil {
+					return nil, fmt.Errorf("OpenAI Responses ambiguous tool call identity")
+				}
+				call = candidate
+			}
+		}
+		if call == nil {
+			return nil, fmt.Errorf("OpenAI Responses unknown tool call identity: item_id=%q call_id=%q", itemID, callID)
+		}
+	}
+	if index, ok := event["output_index"].(float64); ok {
+		if index < 0 || index != math.Trunc(index) {
+			return nil, fmt.Errorf("OpenAI Responses invalid tool output_index: %v", index)
+		}
+		indexedCall := state.ToolCalls[state.ToolCallOutputKeys[int(index)]]
+		if call != nil && indexedCall != nil && call != indexedCall {
+			return nil, fmt.Errorf("OpenAI Responses conflicting tool call identity at output_index %d", int(index))
+		}
+		if call != nil {
+			return call, nil
+		}
+		if indexedCall == nil {
+			return nil, fmt.Errorf("OpenAI Responses unknown tool output_index %d", int(index))
+		}
+		return indexedCall, nil
+	}
+	if call != nil {
+		return call, nil
+	}
+	// Identity-free events are safe only while exactly one call is open.
+	// Never associate an ambiguous delta with whichever item was added last.
+	for _, candidate := range state.ToolCalls {
+		if !candidate.Completed {
+			if call != nil {
+				return nil, fmt.Errorf("OpenAI Responses ambiguous tool call event without item_id, call_id, or output_index")
+			}
+			call = candidate
+		}
+	}
+	return call, nil
+}
+
 func emitOpenAIResponsesTerminalOutputIfNeeded(
 	response *AssistantMessage,
 	stream *AssistantMessageEventStream,
 	state *openAIResponsesStreamingState,
 	terminal openAIResponsesResponse,
-) {
+) error {
 	if len(terminal.Output) == 0 {
-		return
+		return nil
 	}
 
 	for _, item := range terminal.Output {
@@ -592,19 +706,23 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 		switch item.Type {
 		case "message":
 			if state != nil && state.CurrentTextIndex >= 0 && state.CurrentTextItemKey == itemKey {
-				finalizeOpenAIResponsesStreamItem(response, stream, state, item)
+				if err := finalizeOpenAIResponsesStreamItem(response, stream, state, item); err != nil {
+					return err
+				}
 				continue
 			}
 		case "reasoning":
 			if state != nil && state.CurrentThinkingIndex >= 0 && state.CurrentThinkingItemKey == itemKey {
-				finalizeOpenAIResponsesStreamItem(response, stream, state, item)
+				if err := finalizeOpenAIResponsesStreamItem(response, stream, state, item); err != nil {
+					return err
+				}
 				continue
 			}
 		case "function_call":
-			if state != nil && state.CurrentToolIndex >= 0 && state.CurrentToolItemKey == itemKey {
-				finalizeOpenAIResponsesStreamItem(response, stream, state, item)
-				continue
+			if err := finalizeOpenAIResponsesStreamItem(response, stream, state, item); err != nil {
+				return err
 			}
+			continue
 		}
 
 		emitOpenAIResponsesItemLifecycle(response, stream, item)
@@ -612,6 +730,7 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 			state.FinalizedItemKeys[itemKey] = true
 		}
 	}
+	return nil
 }
 
 func openAIResponsesItemKey(item openAIResponsesResponseItem) string {
@@ -721,15 +840,21 @@ func startOpenAIResponsesStreamItem(
 		startOpenAIResponsesThinkingBlock(response, stream, state)
 		state.CurrentThinkingItemKey = itemKey
 	case "function_call":
+		if state.ToolCalls == nil {
+			state.ToolCalls = map[string]*openAIResponsesToolCallState{}
+		}
+		if _, exists := state.ToolCalls[itemKey]; exists {
+			return
+		}
 		contentIndex := len(response.Content)
 		response.Content = append(response.Content, ToolCall{
 			ID:        combineOpenAIResponsesToolCallID(item.CallID, item.ID),
 			Name:      item.Name,
 			Arguments: parseStreamingJSONObject(item.Arguments),
 		})
-		state.CurrentToolIndex = contentIndex
-		state.CurrentToolJSON = item.Arguments
-		state.CurrentToolItemKey = itemKey
+		state.ToolCalls[itemKey] = &openAIResponsesToolCallState{
+			ContentIndex: contentIndex, ItemID: item.ID, CallID: item.CallID, JSON: item.Arguments,
+		}
 		stream.push(AssistantMessageEvent{
 			Type:         AssistantMessageEventToolCallStart,
 			ContentIndex: contentIndex,
@@ -774,7 +899,7 @@ func finalizeOpenAIResponsesStreamItem(
 	stream *AssistantMessageEventStream,
 	state *openAIResponsesStreamingState,
 	item openAIResponsesResponseItem,
-) {
+) error {
 	itemKey := openAIResponsesItemKey(item)
 	switch item.Type {
 	case "message":
@@ -783,7 +908,7 @@ func finalizeOpenAIResponsesStreamItem(
 			if itemKey != "" {
 				state.FinalizedItemKeys[itemKey] = true
 			}
-			return
+			return nil
 		}
 		block, _ := response.Content[state.CurrentTextIndex].(TextContent)
 		var parts []string
@@ -816,7 +941,7 @@ func finalizeOpenAIResponsesStreamItem(
 			if itemKey != "" {
 				state.FinalizedItemKeys[itemKey] = true
 			}
-			return
+			return nil
 		}
 		block, _ := response.Content[state.CurrentThinkingIndex].(ThinkingContent)
 		if text := openAIResponsesReasoningText(item); text != "" {
@@ -836,35 +961,64 @@ func finalizeOpenAIResponsesStreamItem(
 		state.CurrentThinkingIndex = -1
 		state.CurrentThinkingItemKey = ""
 	case "function_call":
-		if state.CurrentToolIndex < 0 {
-			emitOpenAIResponsesItemLifecycle(response, stream, item)
-			if itemKey != "" {
-				state.FinalizedItemKeys[itemKey] = true
-			}
-			return
+		call := state.ToolCalls[itemKey]
+		newCall := call == nil
+		if call == nil {
+			startOpenAIResponsesStreamItem(response, stream, state, item)
+			call = state.ToolCalls[itemKey]
 		}
-		block, _ := response.Content[state.CurrentToolIndex].(ToolCall)
-		if strings.TrimSpace(item.Arguments) != "" {
-			block.Arguments = parseStreamingJSONObject(item.Arguments)
-		} else {
-			block.Arguments = parseStreamingJSONObject(state.CurrentToolJSON)
+		if call.Completed {
+			return nil
 		}
+		if item.Status != "" && item.Status != "completed" {
+			return fmt.Errorf("OpenAI Responses unfinished tool call %s (%s): status %s", item.Name, item.CallID, item.Status)
+		}
+		argumentsJSON := item.Arguments
+		if strings.TrimSpace(argumentsJSON) == "" {
+			argumentsJSON = call.JSON
+		}
+		if strings.TrimSpace(argumentsJSON) == "" {
+			argumentsJSON = "{}"
+		}
+		var arguments map[string]any
+		if err := json.Unmarshal([]byte(argumentsJSON), &arguments); err != nil {
+			return fmt.Errorf("OpenAI Responses tool call %s (%s) has invalid arguments: %w", item.Name, item.CallID, err)
+		}
+		if arguments == nil {
+			return fmt.Errorf("OpenAI Responses tool call %s (%s) has invalid arguments: expected a JSON object", item.Name, item.CallID)
+		}
+		if strings.TrimSpace(item.CallID) == "" || strings.TrimSpace(item.Name) == "" {
+			return fmt.Errorf("OpenAI Responses tool call is missing call_id or name")
+		}
+		block, _ := response.Content[call.ContentIndex].(ToolCall)
+		block.Arguments = arguments
 		block.ID = combineOpenAIResponsesToolCallID(item.CallID, item.ID)
 		block.Name = item.Name
-		response.Content[state.CurrentToolIndex] = block
+		response.Content[call.ContentIndex] = block
+		call.Completed = true
+		call.JSON = ""
+		if newCall {
+			stream.push(AssistantMessageEvent{
+				Type:         AssistantMessageEventToolCallDelta,
+				ContentIndex: call.ContentIndex,
+				Delta:        argumentsJSON,
+				Partial:      *response,
+			})
+		}
 		stream.push(AssistantMessageEvent{
 			Type:         AssistantMessageEventToolCallEnd,
-			ContentIndex: state.CurrentToolIndex,
+			ContentIndex: call.ContentIndex,
 			ToolCall:     block,
 			Partial:      *response,
 		})
-		state.CurrentToolIndex = -1
-		state.CurrentToolJSON = ""
-		state.CurrentToolItemKey = ""
 	}
 	if itemKey != "" {
+		if state.FinalizedItemKeys == nil {
+			state.FinalizedItemKeys = map[string]bool{}
+		}
 		state.FinalizedItemKeys[itemKey] = true
 	}
+	return nil
 }
 
 func combineOpenAIResponsesToolCallID(callID string, itemID string) string {
@@ -906,7 +1060,7 @@ func applyOpenAIResponsesUsage(model Model, response *AssistantMessage, usage op
 	response.UsageReported = true
 	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
 	if model.Provider != "opencode-go" {
-		applyOpenAIResponsesServiceTierPricing(&response.Usage, resolveOpenAIResponsesServiceTier(responseServiceTier, requestServiceTier))
+		applyOpenAIResponsesServiceTierPricing(model, &response.Usage, resolveOpenAIResponsesServiceTier(responseServiceTier, requestServiceTier))
 	}
 }
 
@@ -1058,19 +1212,22 @@ func buildOpenAIResponsesFriendlyErrorMessage(err *openAIResponsesResponseError,
 // Shared service tier helpers
 // ============================================================================
 
-func getOpenAIResponsesServiceTierCostMultiplier(serviceTier string) float64 {
+func getOpenAIResponsesServiceTierCostMultiplier(model Model, serviceTier string) float64 {
 	switch serviceTier {
 	case "flex":
 		return 0.5
-	case "priority":
+	case "priority", "fast":
+		if model.ID == "gpt-5.5" {
+			return 2.5
+		}
 		return 2
 	default:
 		return 1
 	}
 }
 
-func applyOpenAIResponsesServiceTierPricing(usage *Usage, serviceTier string) {
-	multiplier := getOpenAIResponsesServiceTierCostMultiplier(serviceTier)
+func applyOpenAIResponsesServiceTierPricing(model Model, usage *Usage, serviceTier string) {
+	multiplier := getOpenAIResponsesServiceTierCostMultiplier(model, serviceTier)
 	if multiplier == 1 || usage == nil {
 		return
 	}

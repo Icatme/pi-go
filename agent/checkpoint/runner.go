@@ -46,6 +46,9 @@ func NewRunner(config RunnerConfig) (*Runner, error) {
 	if config.Definition.PrepareNextTurn != nil {
 		return nil, fmt.Errorf("checkpoint runner does not support PrepareNextTurn because runtime overrides are not durable")
 	}
+	if config.Definition.PrepareRequest != nil {
+		return nil, fmt.Errorf("checkpoint runner does not support PrepareRequest because runtime overrides are not durable")
+	}
 	runner, err := agent.NewRunner(config.Definition)
 	if err != nil {
 		return nil, err

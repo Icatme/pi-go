@@ -25,8 +25,13 @@ func TestNextTurnPreparationOnlyWhenContinuing(t *testing.T) {
 					prepared++
 					return nil, errors.New("unnecessary preparation")
 				},
-				ShouldStopAfterTurn: func(context.Context, ShouldStopAfterTurnContext) (bool, error) { return mode == "stop", nil },
-				MaxTurns:            1,
+				FinishTurn: func(context.Context, AgentTurnContext) (AgentTurnDecision, error) {
+					if mode == "stop" {
+						return AgentTurnDecision{Action: TurnActionEnd}, nil
+					}
+					return AgentTurnDecision{}, nil
+				},
+				MaxTurns: 1,
 			}
 			next, err := NewEngine().Run(context.Background(), definition, &AgentSnapshot{}, []Message{NewUserTextMessage("run")}, nil)
 			if mode == "max-turns" {
@@ -59,7 +64,7 @@ func TestNextTurnPreparationFailureKeepsCompletedTurnBoundary(t *testing.T) {
 		PrepareNextTurn: func(context.Context, PrepareNextTurnContext) (*AgentLoopTurnUpdate, error) { return nil, failure },
 	}
 	next, err := NewEngine().Run(context.Background(), definition, &AgentSnapshot{}, []Message{NewUserTextMessage("run")}, func(event AgentEvent) { events = append(events, event.Type) })
-	if !errors.Is(err, failure) || calls != 1 || len(next.Messages) != 3 {
+	if !errors.Is(err, failure) || calls != 1 || len(next.Messages) != 4 {
 		t.Fatalf("calls=%d snapshot=%+v error=%v", calls, next, err)
 	}
 	_, ended := engineRunErrorContext(err)
@@ -101,7 +106,12 @@ func TestNextTurnPreparationPicksUpSteeringWithoutDoubleDequeue(t *testing.T) {
 					}
 					return nil, nil
 				},
-				ShouldStopAfterTurn: func(context.Context, ShouldStopAfterTurnContext) (bool, error) { return len(requests) == 2, nil },
+				FinishTurn: func(context.Context, AgentTurnContext) (AgentTurnDecision, error) {
+					if len(requests) == 2 {
+						return AgentTurnDecision{Action: TurnActionEnd}, nil
+					}
+					return AgentTurnDecision{}, nil
+				},
 			}
 			_, err := NewEngine().RunWithHooks(context.Background(), definition, &AgentSnapshot{}, []Message{NewUserTextMessage("run")}, nil, LoopHooks{GetSteeringMessages: func(context.Context) ([]Message, error) { return dequeueByMode(&queue, QueueModeOneAtATime), nil }})
 			if err != nil {
@@ -143,9 +153,9 @@ func TestResumeNextTurnPreparationBoundary(t *testing.T) {
 					return newStaticAssistantStream(Message{Role: RoleAssistant, StopReason: StopReasonStop}, nil), nil
 				}),
 				Tools: []ToolDefinition{{Name: "echo", Execute: terminatingTool(false)}},
-				ShouldStopAfterTurn: func(context.Context, ShouldStopAfterTurnContext) (bool, error) {
+				FinishTurn: func(context.Context, AgentTurnContext) (AgentTurnDecision, error) {
 					order = append(order, "stop")
-					return false, nil
+					return AgentTurnDecision{}, nil
 				},
 				PrepareNextTurn: func(_ context.Context, input PrepareNextTurnContext) (*AgentLoopTurnUpdate, error) {
 					order = append(order, "prepare")
@@ -182,7 +192,7 @@ func TestResumeNextTurnPreparationBoundary(t *testing.T) {
 			if mode == "cancel" {
 				want = context.Canceled
 			}
-			if !errors.Is(err, want) || calls != 0 || len(next.Messages) != 3 || len(next.PendingToolCalls) != 0 {
+			if !errors.Is(err, want) || calls != 0 || len(next.Messages) != 4 || len(next.PendingToolCalls) != 0 {
 				t.Fatalf("bad failure settlement: calls=%d snapshot=%+v error=%v", calls, next, err)
 			}
 			for _, event := range events {
@@ -269,7 +279,12 @@ func TestNextTurnPreparationKeepsDequeuedInputs(t *testing.T) {
 							}
 							return &AgentLoopTurnUpdate{Context: &replacement}, nil
 						},
-						ShouldStopAfterTurn: func(context.Context, ShouldStopAfterTurnContext) (bool, error) { return completed, nil },
+						FinishTurn: func(context.Context, AgentTurnContext) (AgentTurnDecision, error) {
+							if completed {
+								return AgentTurnDecision{Action: TurnActionEnd}, nil
+							}
+							return AgentTurnDecision{}, nil
+						},
 					}
 					snapshot := AgentSnapshot{SystemPrompt: "durable", Messages: []Message{NewUserTextMessage("root")}}
 					hooks := LoopHooks{}

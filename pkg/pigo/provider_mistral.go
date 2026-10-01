@@ -115,6 +115,7 @@ type mistralStreamState struct {
 }
 
 func streamMistral(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	ctx = resolveProviderContext(model, ctx)
 	options = resolveMistralProviderOptions(model, options).toProviderStreamOptions(model)
 	stream := newAssistantMessageEventStream()
 	stream.setObserver(options.Observer, model)
@@ -184,6 +185,7 @@ func streamSimpleMistral(model Model, ctx Context, options SimpleStreamOptions) 
 }
 
 func buildMistralChatRequest(model Model, ctx Context, options ProviderStreamOptions) mistralChatRequest {
+	ctx = resolveProviderContext(model, ctx)
 	resolvedOptions := resolveMistralProviderOptions(model, options)
 	messages := convertMistralMessages(model, ctx)
 	if strings.TrimSpace(ctx.SystemPrompt) != "" {
@@ -459,6 +461,9 @@ func streamMistralSSE(model Model, ctx context.Context, client *http.Client, opt
 	state := &mistralStreamState{ToolCalls: map[int]*mistralToolCallState{}}
 	stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: *response})
 	if err := readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
+		if err := observeProviderStreamEvent(data, model, options); err != nil {
+			return false, err
+		}
 		return processMistralChatStreamEvent(data, model, response, stream, state)
 	}); err != nil {
 		return err

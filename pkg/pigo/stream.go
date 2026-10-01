@@ -77,6 +77,7 @@ func newAssistantMessageEventStream() *AssistantMessageEventStream {
 }
 
 func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	ctx = contextFromTranscript(NormalizeContext(ctx))
 	options.Headers = mergeRequestHeaders(model.Headers, options.Headers)
 	if err := ValidateResponseFormat(model, options.ResponseFormat); err != nil {
 		return streamAPIUnavailable(model, err.Error())
@@ -96,6 +97,7 @@ func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantM
 }
 
 func StreamSimple(model Model, ctx Context, options SimpleStreamOptions) *AssistantMessageEventStream {
+	ctx = contextFromTranscript(NormalizeContext(ctx))
 	options.Headers = mergeRequestHeaders(model.Headers, options.Headers)
 	if err := ValidateResponseFormat(model, options.ResponseFormat); err != nil {
 		return streamAPIUnavailable(model, err.Error())

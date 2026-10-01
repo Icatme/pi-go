@@ -1247,7 +1247,7 @@ func TestCompleteSimpleOpenAICodexUsesRequestedServiceTierWhenResponseEchoesDefa
 	if requestBody.ServiceTier != "priority" {
 		t.Fatalf("expected service_tier priority in request body, got %q", requestBody.ServiceTier)
 	}
-	if response.Usage.Cost.Input != 5 || response.Usage.Cost.Output != 30 || response.Usage.Cost.Total != 35 {
+	if response.Usage.Cost.Input != 6.25 || response.Usage.Cost.Output != 37.5 || response.Usage.Cost.Total != 43.75 {
 		t.Fatalf("expected priority pricing multiplier to apply, got %+v", response.Usage.Cost)
 	}
 }

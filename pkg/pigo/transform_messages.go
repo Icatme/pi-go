@@ -139,6 +139,8 @@ func normalizeToolCallIDs(ctx transformContext, messages []Message) []Message {
 
 	for _, message := range messages {
 		switch typed := message.(type) {
+		case SystemMessage:
+			result = append(result, typed.clone())
 		case UserMessage:
 			result = append(result, typed.clone())
 		case ToolResultMessage:
@@ -216,6 +218,8 @@ func fillMissingToolResults(_ transformContext, messages []Message) []Message {
 
 	for _, message := range messages {
 		switch typed := message.(type) {
+		case SystemMessage:
+			result = append(result, typed.clone())
 		case AssistantMessage:
 			if len(pendingToolCalls) > 0 {
 				flushPending()

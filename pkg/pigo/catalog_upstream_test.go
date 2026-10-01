@@ -2,9 +2,160 @@ package pigo
 
 import (
 	"encoding/json"
+	"math"
 	"slices"
 	"testing"
 )
+
+func TestOctoberCatalogTranscriptCapabilities(t *testing.T) {
+	for _, test := range []struct {
+		provider Provider
+		ids      []string
+	}{
+		{"openai", []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol"}},
+		{"openai-codex", []string{"gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol"}},
+		{"opencode-go", []string{"gpt-5.6-luna", "gpt-6-luna", "kimi-k3"}},
+	} {
+		for _, id := range test.ids {
+			model := GetModel(test.provider, id)
+			if model == nil || !supportsTranscriptSystemMessages(*model) {
+				t.Fatalf("%s/%s must preserve system changes in the transcript", test.provider, id)
+			}
+		}
+	}
+	for _, test := range []struct {
+		provider Provider
+		id       string
+	}{
+		{"openai", "gpt-5.1"},
+		{"openai-codex", "gpt-5.1"},
+		{"opencode-go", "kimi-k2.7-code"},
+		{"opencode-go", "deepseek-v4-pro"},
+		{"opencode-go", "grok-4.7"},
+	} {
+		model := GetModel(test.provider, test.id)
+		if model == nil || supportsTranscriptSystemMessages(*model) {
+			t.Fatalf("%s/%s has no verified native transcript support", test.provider, test.id)
+		}
+	}
+	if GetModel("openai", "gpt-5.6") != nil {
+		t.Fatal("unsupported GPT-5.6 alias must be absent from the native catalog")
+	}
+	for _, id := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		if model := GetModel("openai", id); model.ContextWindow != 272000 || model.MaxTokens != 128000 {
+			t.Fatalf("native %s must use the short context cap: %+v", id, model)
+		}
+		model := GetModel("openai-codex", id)
+		if model.ThinkingLevelMap[ModelThinkingLevelMinimal] != "low" {
+			t.Fatalf("Codex %s must map minimal thinking to low: %+v", id, model.ThinkingLevelMap)
+		}
+	}
+	if model := GetModel("openai-codex", "gpt-5.6-sol"); model.Cost != (UsageCost{Input: 4, Output: 20, CacheRead: 0.4, CacheWrite: 5}) || model.CostTiers[0].Rates != (UsageCost{Input: 8, Output: 30, CacheRead: 0.8, CacheWrite: 10}) {
+		t.Fatalf("Codex GPT-5.6 Sol price differs from upstream standard costs: %+v", model)
+	}
+}
+
+func TestOctoberOpenAIThinkingAndCostCatalog(t *testing.T) {
+	for _, provider := range []Provider{"openai", "openai-codex"} {
+		for _, test := range []struct {
+			id   string
+			cost UsageCost
+			long UsageCost
+			off  string
+		}{
+			{"gpt-6.1-sol", UsageCost{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5}, UsageCost{Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5}, ""},
+			{"gpt-6-sol", UsageCost{Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5}, UsageCost{Input: 4, Output: 15, CacheRead: 0.4, CacheWrite: 5}, "none"},
+			{"gpt-6-luna", UsageCost{Input: 0.1, Output: 0.5, CacheRead: 0.01, CacheWrite: 0.125}, UsageCost{Input: 0.2, Output: 0.75, CacheRead: 0.02, CacheWrite: 0.25}, "none"},
+		} {
+			t.Run(string(provider)+"/"+test.id, func(t *testing.T) {
+				model := GetModel(provider, test.id)
+				if model == nil || model.ContextWindow != 272000 || model.MaxTokens != 128000 || !slices.Contains(model.Input, InputImage) {
+					t.Fatalf("missing or incorrect model: %+v", model)
+				}
+				if model.ThinkingLevelMap[ModelThinkingLevelOff] != test.off || model.ThinkingLevelMap[ModelThinkingLevelMax] != "max" {
+					t.Fatalf("incorrect reasoning map: %+v", model.ThinkingLevelMap)
+				}
+				if model.Cost != test.cost || len(model.CostTiers) != 1 || model.CostTiers[0] != (ModelCostTier{InputTokensAbove: 272000, Rates: test.long}) {
+					t.Fatalf("incorrect cost metadata: %+v", model)
+				}
+				atThreshold := CalculateCost(*model, Usage{Input: 272000})
+				aboveThreshold := CalculateCost(*model, Usage{Input: 272000, CacheRead: 1})
+				if math.Abs(atThreshold.Input-test.cost.Input*0.272) > 1e-12 || math.Abs(aboveThreshold.Input-test.long.Input*0.272) > 1e-12 {
+					t.Fatalf("cost tier must include cached input in its threshold: at=%+v above=%+v", atThreshold, aboveThreshold)
+				}
+				options := BuildProviderStreamOptions(*model, SimpleStreamOptions{Reasoning: ThinkingLevelMax})
+				var request openAIResponsesRequest
+				if provider == "openai-codex" {
+					request = buildOpenAICodexRequest(*model, Context{}, options)
+				} else {
+					request = buildOpenAIResponsesRequest(*model, Context{}, options)
+					compat := model.Compat.(*OpenAIResponsesCompat)
+					if compat.SupportsExplicitPromptCacheMode == nil || !*compat.SupportsExplicitPromptCacheMode {
+						t.Fatal("missing explicit prompt cache capability")
+					}
+				}
+				if request.Reasoning == nil || request.Reasoning.Effort != "max" {
+					t.Fatalf("max thinking did not reach wire: %+v", request.Reasoning)
+				}
+			})
+		}
+	}
+}
+
+func TestClaude55AdaptiveCatalogAndWire(t *testing.T) {
+	for _, test := range []struct {
+		id           string
+		cost         UsageCost
+		defaultLevel ModelThinkingLevel
+	}{
+		{"claude-opus-5-5", UsageCost{Input: 4, Output: 20, CacheRead: 0.2, CacheWrite: 5}, ModelThinkingLevelMedium},
+		{"claude-sonnet-5-5", UsageCost{Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5}, ModelThinkingLevelHigh},
+	} {
+		t.Run(test.id, func(t *testing.T) {
+			model := GetModel("anthropic", test.id)
+			if model == nil || model.ContextWindow != 1000000 || model.MaxTokens != 128000 || model.Cost != test.cost || model.Capabilities.DefaultReasoningLevel != test.defaultLevel {
+				t.Fatalf("incorrect Claude 5.5 model: %+v", model)
+			}
+			wantLevels := []ModelThinkingLevel{ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh, ModelThinkingLevelXHigh, ModelThinkingLevelMax}
+			if got := GetSupportedThinkingLevels(*model); !slices.Equal(got, wantLevels) {
+				t.Fatalf("levels = %v, want %v", got, wantLevels)
+			}
+			temperature := 0.5
+			options := buildAnthropicMessagesProviderOptions(*model, SimpleStreamOptions{Reasoning: ThinkingLevelXHigh, Temperature: &temperature})
+			request := buildAnthropicRequest(*model, Context{}, options, false, true)
+			if request.Thinking.(map[string]any)["type"] != "adaptive" || request.OutputConfig == nil || request.OutputConfig.Effort != "xhigh" || request.Temperature != nil {
+				t.Fatalf("Claude 5.5 must use adaptive effort without temperature: %+v", request)
+			}
+		})
+	}
+}
+
+func TestMistralBuiltInCatalogReasoningEfforts(t *testing.T) {
+	for _, test := range []struct {
+		id     string
+		levels []ModelThinkingLevel
+	}{
+		{"mistral-small-latest", []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelHigh}},
+		{"mistral-medium-latest", []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelHigh}},
+		{"mistral-medium-3.5", []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelHigh}},
+		{"zai-glm-5-2", []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelHigh, ModelThinkingLevelMax}},
+		{"zai-glm-5-3", []ModelThinkingLevel{ModelThinkingLevelLow, ModelThinkingLevelHigh, ModelThinkingLevelMax}},
+	} {
+		t.Run(test.id, func(t *testing.T) {
+			model := GetModel("mistral", test.id)
+			if model == nil || !slices.Equal(GetSupportedThinkingLevels(*model), test.levels) {
+				t.Fatalf("incorrect Mistral thinking metadata: %+v", model)
+			}
+			for _, requested := range test.levels {
+				options := BuildProviderStreamOptions(*model, SimpleStreamOptions{Reasoning: ThinkingLevel(requested)})
+				request := buildMistralChatRequest(*model, Context{}, options)
+				if request.PromptMode != "" || request.ReasoningEffort != model.ThinkingLevelMap[requested] {
+					t.Fatalf("%s sent incorrect reasoning controls: %+v", requested, request)
+				}
+			}
+		})
+	}
+}
 
 func TestSeptemberUpstreamCatalog(t *testing.T) {
 	for _, provider := range []Provider{"openai", "openai-codex"} {
@@ -15,10 +166,14 @@ func TestSeptemberUpstreamCatalog(t *testing.T) {
 		if model.ContextWindow != 272000 || model.MaxTokens != 128000 || !slices.Contains(model.Input, InputImage) {
 			t.Fatalf("unexpected Astra catalog: %+v", model)
 		}
-		if got := GetSupportedThinkingLevels(*model); !slices.Equal(got, []ModelThinkingLevel{ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh, ModelThinkingLevelXHigh, ModelThinkingLevelMax}) {
+		wantLevels := []ModelThinkingLevel{ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh, ModelThinkingLevelXHigh, ModelThinkingLevelMax}
+		if provider == "openai-codex" {
+			wantLevels = append([]ModelThinkingLevel{ModelThinkingLevelMinimal}, wantLevels...)
+		}
+		if got := GetSupportedThinkingLevels(*model); !slices.Equal(got, wantLevels) {
 			t.Fatalf("Astra levels: %v", got)
 		}
-		if got := ClampThinkingLevel(*model, ModelThinkingLevelOff); got != ModelThinkingLevelLow {
+		if got := ClampThinkingLevel(*model, ModelThinkingLevelOff); got != wantLevels[0] {
 			t.Fatalf("Astra off clamp: %s", got)
 		}
 		if model.Cost.Input != 10 || model.Cost.Output != 50 || len(model.CostTiers) != 1 {

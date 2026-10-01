@@ -1,5 +1,7 @@
 package pigo
 
+import "encoding/json"
+
 func cloneModel(model Model) Model {
 	cloned := model
 	cloned.Capabilities = cloneModelCapabilities(model.Capabilities)
@@ -33,6 +35,7 @@ func cloneCompat(compat ProviderCompat) ProviderCompat {
 	switch typed := compat.(type) {
 	case *OpenAICompletionsCompat:
 		cloned := *typed
+		cloned.SupportsMidConvoSystemMessages = cloneBoolPointer(typed.SupportsMidConvoSystemMessages)
 		if typed.OpenRouterRouting != nil {
 			routing := *typed.OpenRouterRouting
 			routing.Order = cloneStringSlice(typed.OpenRouterRouting.Order)
@@ -53,6 +56,7 @@ func cloneCompat(compat ProviderCompat) ProviderCompat {
 		return &cloned
 	case *OpenAIResponsesCompat:
 		cloned := *typed
+		cloned.SupportsMidConvoSystemMessages = cloneBoolPointer(typed.SupportsMidConvoSystemMessages)
 		cloned.SendSessionIdHeader = cloneBoolPointer(typed.SendSessionIdHeader)
 		cloned.SupportsLongCacheRetention = cloneBoolPointer(typed.SupportsLongCacheRetention)
 		cloned.SupportsExplicitPromptCacheMode = cloneBoolPointer(typed.SupportsExplicitPromptCacheMode)
@@ -61,6 +65,7 @@ func cloneCompat(compat ProviderCompat) ProviderCompat {
 	case *AnthropicMessagesCompat:
 		cloned := *typed
 		cloned.ForceAdaptiveThinking = cloneBoolPointer(typed.ForceAdaptiveThinking)
+		cloned.AllowEmptySignature = cloneBoolPointer(typed.AllowEmptySignature)
 		return &cloned
 	default:
 		return typed
@@ -161,6 +166,12 @@ func cloneMap(values map[string]any) map[string]any {
 
 func cloneAny(value any) any {
 	switch typed := value.(type) {
+	case json.RawMessage:
+		return append(json.RawMessage(nil), typed...)
+	case []byte:
+		return append([]byte(nil), typed...)
+	case []string:
+		return append([]string(nil), typed...)
 	case map[string]any:
 		return cloneMap(typed)
 	case []any:

@@ -490,9 +490,12 @@ func TestAgentToolTerminalTrackingIsScopedToFinalTurn(t *testing.T) {
 					StopReason: core.StopReasonToolUse,
 				}), nil
 			}),
-			ShouldStopAfterTurn: func(context.Context, core.ShouldStopAfterTurnContext) (bool, error) {
+			FinishTurn: func(context.Context, core.AgentTurnContext) (core.AgentTurnDecision, error) {
 				completedTurns++
-				return completedTurns == 2, nil
+				if completedTurns == 2 {
+					return core.AgentTurnDecision{Action: core.TurnActionEnd}, nil
+				}
+				return core.AgentTurnDecision{}, nil
 			},
 		},
 		Description: "Reused tool-call ID child",
@@ -520,8 +523,9 @@ func TestAgentToolKeepsChildTerminateInsideChildRun(t *testing.T) {
 					}, nil
 				},
 			}},
-			Model: core.StreamFunc(func(context.Context, core.ModelRequest) (core.AssistantStream, error) {
+			Model: core.StreamFunc(func(_ context.Context, request core.ModelRequest) (core.AssistantStream, error) {
 				childCalls++
+				assertPrebuiltSystemHead(t, request.Messages, "", "finish")
 				return agentToolMessageStream(core.Message{
 					Role:       core.RoleAssistant,
 					ToolCalls:  []core.ToolCall{{ID: "finish-call", Name: "finish"}},
@@ -538,8 +542,9 @@ func TestAgentToolKeepsChildTerminateInsideChildRun(t *testing.T) {
 	parentCalls := 0
 	parent, err := core.NewRunner(core.AgentDefinition{
 		Tools: []core.ToolDefinition{child},
-		Model: core.StreamFunc(func(context.Context, core.ModelRequest) (core.AssistantStream, error) {
+		Model: core.StreamFunc(func(_ context.Context, request core.ModelRequest) (core.AssistantStream, error) {
 			parentCalls++
+			assertPrebuiltSystemHead(t, request.Messages, "", "terminating-child")
 			if parentCalls == 1 {
 				return agentToolMessageStream(core.Message{
 					Role:       core.RoleAssistant,
@@ -567,10 +572,14 @@ func TestAgentToolKeepsChildTerminateInsideChildRun(t *testing.T) {
 	if childCalls != 1 || parentCalls != 2 {
 		t.Fatalf("terminate crossed run boundary, child calls=%d parent calls=%d", childCalls, parentCalls)
 	}
-	if len(snapshot.Messages) != 4 || snapshot.Messages[2].Role != core.RoleTool || snapshot.Messages[2].ToolResult == nil {
+	if len(snapshot.Messages) != 5 || snapshot.Messages[3].Role != core.RoleTool || snapshot.Messages[3].ToolResult == nil {
 		t.Fatalf("unexpected parent snapshot: %+v", snapshot.Messages)
 	}
-	childResult := snapshot.Messages[2].ToolResult
+	assertPrebuiltSystemHead(t, snapshot.Messages, "", "terminating-child")
+	if snapshot.Messages[1].Role != core.RoleUser || snapshot.Messages[1].Parts[0].Text != "delegate" || snapshot.Messages[2].Role != core.RoleAssistant || len(snapshot.Messages[2].ToolCalls) != 1 || snapshot.Messages[4].Role != core.RoleAssistant || snapshot.Messages[4].Parts[0].Text != "parent continued" {
+		t.Fatalf("parent lifecycle changed around the system head: %+v", snapshot.Messages)
+	}
+	childResult := snapshot.Messages[3].ToolResult
 	if len(childResult.Content) != 1 || childResult.Content[0].Text != "terminal child output" {
 		t.Fatalf("terminal tool content was not selected: %+v", childResult.Content)
 	}

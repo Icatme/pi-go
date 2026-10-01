@@ -588,14 +588,14 @@ func TestEngineBeforeToolCallMutationIsRevalidatedBeforeExecution(t *testing.T) 
 	if !ok || afterParsed["value"] != 123 {
 		t.Fatalf("expected after-tool hook to see mutated args, got %#v", afterArgs)
 	}
-	if len(next.Messages) != 4 {
+	if len(next.Messages) != 5 {
 		t.Fatalf("expected user, assistant, tool-result, assistant messages, got %d", len(next.Messages))
 	}
-	if next.Messages[2].Role != RoleTool {
-		t.Fatalf("expected tool result message, got %+v", next.Messages[2])
+	if next.Messages[3].Role != RoleTool {
+		t.Fatalf("expected tool result message, got %+v", next.Messages[3])
 	}
-	if next.Messages[3].Role != RoleAssistant || next.Messages[3].Parts[0].Text != "done" {
-		t.Fatalf("expected final assistant response, got %+v", next.Messages[3])
+	if next.Messages[4].Role != RoleAssistant || next.Messages[4].Parts[0].Text != "done" {
+		t.Fatalf("expected final assistant response, got %+v", next.Messages[4])
 	}
 }
 
@@ -653,10 +653,10 @@ func TestEngineBeforeToolCallBlockProducesErrorToolResult(t *testing.T) {
 	if executeCalled {
 		t.Fatal("expected blocked tool call to skip execution")
 	}
-	if len(next.Messages) != 4 {
+	if len(next.Messages) != 5 {
 		t.Fatalf("expected user, assistant, blocked tool-result, assistant messages, got %d", len(next.Messages))
 	}
-	toolResult := next.Messages[2]
+	toolResult := next.Messages[3]
 	if toolResult.Role != RoleTool || toolResult.ToolResult == nil {
 		t.Fatalf("expected blocked tool result message, got %+v", toolResult)
 	}
@@ -703,11 +703,11 @@ func TestEngineBeforeToolCallErrorBecomesToolResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if len(next.Messages) != 4 || next.Messages[2].ToolResult == nil || !next.Messages[2].ToolResult.IsError {
+	if len(next.Messages) != 5 || next.Messages[3].ToolResult == nil || !next.Messages[3].ToolResult.IsError {
 		t.Fatalf("expected before-hook error tool result, got %+v", next.Messages)
 	}
-	if next.Messages[2].ToolResult.Content[0].Text != "before hook boom" {
-		t.Fatalf("unexpected before-hook tool result: %+v", next.Messages[2].ToolResult)
+	if next.Messages[3].ToolResult.Content[0].Text != "before hook boom" {
+		t.Fatalf("unexpected before-hook tool result: %+v", next.Messages[3].ToolResult)
 	}
 }
 
@@ -763,10 +763,10 @@ func TestEngineAfterToolCallOverridesResultAndErrorFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if len(next.Messages) != 4 {
+	if len(next.Messages) != 5 {
 		t.Fatalf("expected user, assistant, tool-result, assistant messages, got %d", len(next.Messages))
 	}
-	toolResult := next.Messages[2]
+	toolResult := next.Messages[3]
 	if toolResult.Role != RoleTool || toolResult.ToolResult == nil {
 		t.Fatalf("expected tool result message, got %+v", toolResult)
 	}
@@ -820,11 +820,11 @@ func TestEngineAfterToolCallErrorBecomesToolResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if len(next.Messages) != 4 || next.Messages[2].ToolResult == nil || !next.Messages[2].ToolResult.IsError {
+	if len(next.Messages) != 5 || next.Messages[3].ToolResult == nil || !next.Messages[3].ToolResult.IsError {
 		t.Fatalf("expected after-hook error tool result, got %+v", next.Messages)
 	}
-	if next.Messages[2].ToolResult.Content[0].Text != "after hook boom" {
-		t.Fatalf("unexpected after-hook tool result: %+v", next.Messages[2].ToolResult)
+	if next.Messages[3].ToolResult.Content[0].Text != "after hook boom" {
+		t.Fatalf("unexpected after-hook tool result: %+v", next.Messages[3].ToolResult)
 	}
 }
 

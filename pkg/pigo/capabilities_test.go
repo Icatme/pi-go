@@ -76,7 +76,7 @@ func TestLookupModelCapabilitiesDistinguishesWireAPIsAndExplicitReasoningLevels(
 		t.Fatal("expected OpenCode Go MiniMax capability snapshot")
 	}
 
-	if luna.WireAPI != "openai-responses" || deepSeek.WireAPI != "openai-completions" || miniMax.WireAPI != "anthropic-messages" {
+	if luna.WireAPI != "openai-responses" || deepSeek.WireAPI != "openai-completions" || miniMax.WireAPI != "openai-completions" {
 		t.Fatalf("unexpected wire APIs: luna=%q deepseek=%q minimax=%q", luna.WireAPI, deepSeek.WireAPI, miniMax.WireAPI)
 	}
 	if luna.ResponseFormats.JSONObject != CapabilitySupported || luna.ResponseFormats.JSONSchema != CapabilitySupported {
@@ -88,7 +88,7 @@ func TestLookupModelCapabilitiesDistinguishesWireAPIsAndExplicitReasoningLevels(
 		t.Fatalf("expected Completions response formats to fail closed: %+v", deepSeek.ResponseFormats)
 	}
 	if miniMax.Capabilities.Temperature != CapabilityUnknown {
-		t.Fatalf("expected conditional Anthropic temperature support to remain unknown, got %q", miniMax.Capabilities.Temperature)
+		t.Fatalf("expected conditional MiniMax temperature support to remain unknown, got %q", miniMax.Capabilities.Temperature)
 	}
 
 	wantLunaLevels := []ModelThinkingLevel{
@@ -136,7 +136,7 @@ func TestCapabilitySnapshotsIncludeExactDispatchEndpoints(t *testing.T) {
 	}
 }
 
-func TestOpenAIGPT56CatalogUsesExactOfficialCapabilityFacts(t *testing.T) {
+func TestOpenAIGPT56CatalogUsesUpstreamDefaultCapabilityFacts(t *testing.T) {
 	wantLevels := []ModelThinkingLevel{
 		ModelThinkingLevelOff,
 		ModelThinkingLevelLow,
@@ -145,7 +145,7 @@ func TestOpenAIGPT56CatalogUsesExactOfficialCapabilityFacts(t *testing.T) {
 		ModelThinkingLevelXHigh,
 		ModelThinkingLevelMax,
 	}
-	for _, modelID := range []string{"gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+	for _, modelID := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
 		t.Run(modelID, func(t *testing.T) {
 			snapshot, ok := LookupModelCapabilities("openai", modelID)
 			if !ok {
@@ -154,8 +154,9 @@ func TestOpenAIGPT56CatalogUsesExactOfficialCapabilityFacts(t *testing.T) {
 			if snapshot.Provider != "openai" || snapshot.ModelID != modelID || snapshot.WireAPI != "openai-responses" || snapshot.BaseURL != "https://api.openai.com" {
 				t.Fatalf("unexpected identity for %q: %+v", modelID, snapshot)
 			}
-			if snapshot.ContextWindow != 1_050_000 || snapshot.MaxOutputTokens != 128_000 || !slices.Equal(snapshot.Input, []InputType{InputText, InputImage}) {
-				t.Fatalf("unexpected official limits or input modes for %q: %+v", modelID, snapshot)
+			// Upstream caps default native models at the short-context price tier.
+			if snapshot.ContextWindow != 272_000 || snapshot.MaxOutputTokens != 128_000 || !slices.Equal(snapshot.Input, []InputType{InputText, InputImage}) {
+				t.Fatalf("unexpected default limits or input modes for %q: %+v", modelID, snapshot)
 			}
 			assertCapability(t, "streaming", snapshot.Capabilities.Streaming, CapabilitySupported)
 			assertCapability(t, "function calling", snapshot.Capabilities.Tools, CapabilitySupported)
@@ -250,7 +251,7 @@ func TestOpenAIGPT56ReasoningPayloadMatchesCapabilitySnapshot(t *testing.T) {
 		{requested: ModelThinkingLevelMax, wantEffort: "max", wantLevel: ModelThinkingLevelMax, advertised: true},
 	}
 
-	for _, modelID := range []string{"gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+	for _, modelID := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
 		t.Run(modelID, func(t *testing.T) {
 			model := GetModel("openai", modelID)
 			if model == nil {

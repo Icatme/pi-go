@@ -97,7 +97,7 @@ type TurnLoop struct {
 	steeringMode   agent.QueueMode
 	followUpMode   agent.QueueMode
 	maxTurns       int
-	originalStop   agent.ShouldStopAfterTurnHook
+	originalFinish agent.FinishTurnHook
 	onEvent        agent.EventSink
 	active         *invocationState
 	accepting      bool
@@ -140,20 +140,20 @@ func New(ctx context.Context, config Config) (*TurnLoop, error) {
 
 	runtimeCtx, runtimeCancel := context.WithCancelCause(ctx)
 	loop := &TurnLoop{
-		queueCapacity: config.QueueCapacity,
-		steeringMode:  definition.SteeringMode,
-		followUpMode:  definition.FollowUpMode,
-		maxTurns:      definition.MaxTurns,
-		originalStop:  definition.ShouldStopAfterTurn,
-		onEvent:       config.OnEvent,
-		accepting:     true,
-		runtimeCtx:    runtimeCtx,
-		runtimeCancel: runtimeCancel,
-		parentCtx:     ctx,
-		wake:          make(chan struct{}, 1),
-		done:          make(chan struct{}),
+		queueCapacity:  config.QueueCapacity,
+		steeringMode:   definition.SteeringMode,
+		followUpMode:   definition.FollowUpMode,
+		maxTurns:       definition.MaxTurns,
+		originalFinish: definition.FinishTurn,
+		onEvent:        config.OnEvent,
+		accepting:      true,
+		runtimeCtx:     runtimeCtx,
+		runtimeCancel:  runtimeCancel,
+		parentCtx:      ctx,
+		wake:           make(chan struct{}, 1),
+		done:           make(chan struct{}),
 	}
-	definition.ShouldStopAfterTurn = loop.shouldStopAfterTurn
+	definition.FinishTurn = loop.finishTurn
 	runner, err := agent.NewRunner(definition)
 	if err != nil {
 		runtimeCancel(nil)
@@ -400,7 +400,7 @@ func (l *TurnLoop) run(snapshot agent.AgentSnapshot) {
 	}
 }
 
-func (l *TurnLoop) shouldStopAfterTurn(ctx context.Context, input agent.ShouldStopAfterTurnContext) (bool, error) {
+func (l *TurnLoop) finishTurn(ctx context.Context, input agent.AgentTurnContext) (agent.AgentTurnDecision, error) {
 	l.mu.Lock()
 	state := l.active
 	if state != nil {
@@ -408,13 +408,10 @@ func (l *TurnLoop) shouldStopAfterTurn(ctx context.Context, input agent.ShouldSt
 	}
 	l.mu.Unlock()
 
-	if l.originalStop != nil {
-		stop, err := l.originalStop(ctx, input)
-		if err != nil || stop {
-			return stop, err
-		}
+	if l.originalFinish != nil {
+		return l.originalFinish(ctx, input)
 	}
-	return false, nil
+	return agent.AgentTurnDecision{}, nil
 }
 
 func (l *TurnLoop) getSteeringMessages(context.Context) ([]agent.Message, error) {

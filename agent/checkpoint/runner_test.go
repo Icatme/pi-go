@@ -113,6 +113,18 @@ func TestNewRunnerRejectsPrepareNextTurn(t *testing.T) {
 	}
 }
 
+func TestNewRunnerRejectsPrepareRequest(t *testing.T) {
+	_, err := NewRunner(RunnerConfig{
+		Definition: agent.AgentDefinition{Model: &scriptedModel{}, PrepareRequest: func(context.Context, agent.PrepareRequestContext) (*agent.AgentLoopTurnUpdate, error) {
+			return nil, nil
+		}},
+		DefinitionVersion: "v1", Store: NewMemoryStore(),
+	})
+	if err == nil {
+		t.Fatal("expected non-durable PrepareRequest override to be rejected")
+	}
+}
+
 func TestNewRunnerRejectsTypedNilStore(t *testing.T) {
 	var store *MemoryStore
 	_, err := NewRunner(RunnerConfig{

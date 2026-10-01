@@ -156,7 +156,7 @@ func TestCommandCodeUsagePresenceAcceptsEmptyObjectsOnly(t *testing.T) {
 
 func TestOpenAIResponsesFailedEventReportsExplicitZeroUsage(t *testing.T) {
 	response := AssistantMessage{}
-	state := openAIResponsesStreamingState{CurrentTextIndex: -1, CurrentThinkingIndex: -1, CurrentToolIndex: -1}
+	state := openAIResponsesStreamingState{CurrentTextIndex: -1, CurrentThinkingIndex: -1}
 	done, err := processOpenAIResponsesStreamEvent(`{
 		"type":"response.failed",
 		"response":{

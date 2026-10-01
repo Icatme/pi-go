@@ -119,7 +119,8 @@ func (c *HTTPStreamClient) postStream(ctx context.Context, url string, requestOp
 		err = readSSEStream(httpResponse.Body, requestOptions.OnEvent)
 		_ = httpResponse.Body.Close()
 		if err != nil {
-			if requestOptions.ShouldRetry != nil &&
+			if !isProviderStreamEventCallbackError(err) &&
+				requestOptions.ShouldRetry != nil &&
 				requestOptions.CanRetryStreamError != nil &&
 				requestOptions.CanRetryStreamError() &&
 				requestOptions.ShouldRetry(0, err.Error()) &&

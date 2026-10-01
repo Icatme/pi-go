@@ -61,7 +61,7 @@ func TestNewAgentWithOptionsUsesInitialState(t *testing.T) {
 	if len(state.Tools) != 1 || state.Tools[0].Name != "test" {
 		t.Fatalf("unexpected tools %+v", state.Tools)
 	}
-	if len(state.Messages) != 1 || state.Messages[0].Parts[0].Text != "hello" {
+	if len(state.Messages) != 2 || state.Messages[1].Parts[0].Text != "hello" {
 		t.Fatalf("unexpected initial messages %+v", state.Messages)
 	}
 	if state.SessionID != "session-1" {

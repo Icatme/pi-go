@@ -86,6 +86,7 @@ func newAgent(definition AgentDefinition, baseSnapshot AgentSnapshot, opts ...Ag
 		agent.engine = NewEngine()
 	}
 	agent.definition = initializeThinkingState(agent.definition, &agent.snapshot)
+	initializeSystemTranscript(agent.definition, &agent.snapshot)
 	agent.activeDefinition = agent.definition
 	agent.refreshStateLocked()
 	return agent, nil
@@ -140,7 +141,7 @@ func (a *Agent) Continue(ctx context.Context) error {
 		runErr error
 	)
 
-	if len(snapshot.Messages) == 0 {
+	if !hasNonSystemMessages(snapshot.Messages) {
 		runErr = ErrNoMessagesToContinue
 		a.finishRun(next, idle)
 		return runErr
@@ -217,6 +218,21 @@ func (a *Agent) HasQueuedMessages() bool {
 	return len(a.steeringQueue) > 0 || len(a.followUpQueue) > 0
 }
 
+// PeekQueuedMessages returns the next steering batch, or the next follow-up
+// batch when no steering is queued. The result is isolated and consumes nothing.
+func (a *Agent) PeekQueuedMessages() []Message {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	queue, mode := a.steeringQueue, a.activeDefinition.SteeringMode
+	if len(queue) == 0 {
+		queue, mode = a.followUpQueue, a.activeDefinition.FollowUpMode
+	}
+	if mode != QueueModeAll && len(queue) > 1 {
+		queue = queue[:1]
+	}
+	return cloneMessages(queue)
+}
+
 // Abort cancels the active run if one exists.
 func (a *Agent) Abort() {
 	a.mu.RLock()
@@ -279,6 +295,8 @@ func (a *Agent) ReplaceMessages(messages []Message) {
 	defer a.mu.Unlock()
 	normalized := normalizeMessages(messages)
 	a.snapshot.Messages = normalized
+	a.snapshot.SystemPrompt = GetCurrentSystemPrompt(normalized)
+	a.state.SystemPrompt = a.snapshot.SystemPrompt
 	a.state.Messages = cloneMessages(normalized)
 	a.state.StreamMessage = nil
 }
@@ -288,14 +306,6 @@ func (a *Agent) AppendMessage(message Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.appendMessageLocked(message)
-}
-
-// SetSystemPrompt updates the effective system prompt in state and snapshot.
-func (a *Agent) SetSystemPrompt(prompt string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.snapshot.SystemPrompt = prompt
-	a.state.SystemPrompt = prompt
 }
 
 // SetModel atomically updates the model and its effective thinking level. The requested preference is preserved.
@@ -414,13 +424,15 @@ func (a *Agent) ClearMessages() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.snapshot.Messages = nil
+	a.snapshot.SystemPrompt = ""
+	a.state.SystemPrompt = ""
 	a.state.Messages = nil
 	a.state.StreamMessage = nil
 	a.snapshot.Error = ""
 	a.state.Error = ""
 }
 
-// Reset clears runtime conversation state while preserving configuration.
+// Reset clears conversation state and queues while retaining the replayed system baseline.
 // It rejects an active run so the in-flight snapshot cannot overwrite the
 // reset state when that run finishes.
 func (a *Agent) Reset() error {
@@ -430,10 +442,16 @@ func (a *Agent) Reset() error {
 		return ErrAlreadyRunning
 	}
 
+	baseline := GetCurrentSystemMessage(a.snapshot.Messages)
 	a.snapshot.Messages = nil
+	if baseline != nil {
+		a.snapshot.Messages = []Message{*baseline}
+	}
+	a.snapshot.SystemPrompt = GetCurrentSystemPrompt(a.snapshot.Messages)
 	a.snapshot.PendingToolCalls = nil
 	a.snapshot.Error = ""
-	a.state.Messages = nil
+	a.state.Messages = cloneMessages(a.snapshot.Messages)
+	a.state.SystemPrompt = a.snapshot.SystemPrompt
 	a.state.StreamMessage = nil
 	a.state.PendingToolCalls = make(map[string]PendingToolCall)
 	a.state.Error = ""
@@ -517,11 +535,12 @@ func (a *Agent) handleRuntimeError(ctx context.Context, snapshot AgentSnapshot, 
 	}
 
 	errorMessage := Message{
-		Role:         RoleAssistant,
-		Parts:        []Part{{Type: PartTypeText, Text: ""}},
-		Timestamp:    time.Now().UTC(),
-		StopReason:   stopReason,
-		ErrorMessage: runErr.Error(),
+		Role:          RoleAssistant,
+		Parts:         []Part{{Type: PartTypeText, Text: ""}},
+		Timestamp:     time.Now().UTC(),
+		StopReason:    stopReason,
+		ErrorMessage:  runErr.Error(),
+		ThinkingLevel: snapshot.ThinkingLevel,
 	}
 
 	next := cloneSnapshotPtr(&snapshot)
@@ -635,6 +654,10 @@ func (a *Agent) appendMessageLocked(message Message) {
 	}
 	a.snapshot.Messages = append(a.snapshot.Messages, normalized[0])
 	a.state.Messages = append(a.state.Messages, cloneMessage(normalized[0]))
+	if normalized[0].Role == RoleSystem {
+		a.snapshot.SystemPrompt = GetCurrentSystemPrompt(a.snapshot.Messages)
+		a.state.SystemPrompt = a.snapshot.SystemPrompt
+	}
 }
 
 func (a *Agent) refreshThinkingLocked() {
@@ -778,6 +801,9 @@ func clonePendingToolCallMap(values map[string]PendingToolCall) map[string]Pendi
 }
 
 func effectiveSystemPrompt(snapshot AgentSnapshot, definition AgentDefinition) string {
+	if GetCurrentSystemMessage(snapshot.Messages) != nil {
+		return GetCurrentSystemPrompt(snapshot.Messages)
+	}
 	if snapshot.SystemPrompt != "" {
 		return snapshot.SystemPrompt
 	}

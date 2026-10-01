@@ -4,12 +4,132 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icatme/pi-go/pkg/pigo"
 )
+
+func TestDefaultPigoStreamModelUsesTransformedSystemMessages(t *testing.T) {
+	for _, mode := range []string{"replace", "remove", "prepared then replace"} {
+		t.Run(mode, func(t *testing.T) {
+			bodies := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				bodies <- string(body)
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(buildCodexSSE(map[string]any{
+					"type": "response.completed",
+					"response": map[string]any{
+						"id": "response", "status": "completed",
+						"output": []any{map[string]any{"type": "message", "id": "message", "content": []any{map[string]any{"type": "output_text", "text": "done"}}}},
+					},
+				})))
+			}))
+			defer server.Close()
+			expected := "TRANSFORMED-POLICY"
+			if mode == "remove" {
+				expected = ""
+			}
+			definition := AgentDefinition{
+				SystemPrompt: "BASE-POLICY",
+				DefaultModel: ModelRef{Provider: "openai", Model: "gpt-6.1-sol", ProviderConfig: ProviderConfig{APIKey: "local", BaseURL: server.URL}},
+				Model: StreamFunc(func(ctx context.Context, request ModelRequest) (AssistantStream, error) {
+					if request.SystemPrompt != expected {
+						t.Fatalf("request prompt did not follow transformed history: %q", request.SystemPrompt)
+					}
+					return defaultProviderStreamModel.Stream(ctx, request)
+				}),
+				TransformContext: func(_ context.Context, messages []Message) ([]Message, error) {
+					before := "BASE-POLICY"
+					if mode == "prepared then replace" {
+						before = "PREPARED-POLICY"
+					}
+					if got := GetCurrentSystemPrompt(messages); got != before {
+						t.Fatalf("transform did not receive the prepared prompt: %q", got)
+					}
+					if mode == "remove" {
+						return messages[1:], nil
+					}
+					messages[0].System.Content = expected
+					return messages, nil
+				},
+			}
+			if mode == "prepared then replace" {
+				definition.PrepareRequest = func(_ context.Context, input PrepareRequestContext) (*AgentLoopTurnUpdate, error) {
+					input.Context.SystemPrompt = "PREPARED-POLICY"
+					return &AgentLoopTurnUpdate{Context: &input.Context}, nil
+				}
+			}
+			next, err := NewEngine().Run(context.Background(), definition, &AgentSnapshot{}, []Message{NewUserTextMessage("run")}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if next.SystemPrompt != "BASE-POLICY" || GetCurrentSystemPrompt(next.Messages) != "BASE-POLICY" {
+				t.Fatalf("request-only transformation changed durable history: %+v", next)
+			}
+			select {
+			case body := <-bodies:
+				if strings.Contains(body, "BASE-POLICY") || strings.Contains(body, "PREPARED-POLICY") || (expected != "" && !strings.Contains(body, expected)) {
+					t.Fatalf("provider did not receive transformed instructions: %s", body)
+				}
+			default:
+				t.Fatal("provider request was not sent")
+			}
+		})
+	}
+}
+
+func TestAgentForwardsRawProviderEventsAndThinkingMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"opaque\":9007199254740993,\"response\":{\"id\":\"response\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}}\n\n"))
+	}))
+	defer server.Close()
+	observed := 0
+	definition := AgentDefinition{DefaultModel: ModelRef{Provider: "openai", Model: "gpt-6.1-sol", ProviderConfig: ProviderConfig{APIKey: "local", BaseURL: server.URL}}, ThinkingLevel: ThinkingHigh,
+		OnProviderStreamEvent: func(data json.RawMessage, model ModelRef) error {
+			observed++
+			if model.Provider != "openai" || model.Model != "gpt-6.1-sol" || !strings.Contains(string(data), "9007199254740993") {
+				t.Fatalf("model=%+v raw=%s", model, data)
+			}
+			return nil
+		},
+	}
+	next, err := NewEngine().Run(context.Background(), definition, &AgentSnapshot{}, []Message{NewUserTextMessage("run")}, nil)
+	if err != nil || observed != 1 || next.Messages[len(next.Messages)-1].ThinkingLevel != ThinkingHigh {
+		t.Fatalf("observed=%d snapshot=%+v err=%v", observed, next, err)
+	}
+	message := convertAssistantMessageToPigo(next.Messages[len(next.Messages)-1]).(pigo.AssistantMessage)
+	wire, err := pigo.SerializeContext(pigo.Context{Messages: []pigo.Message{message}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := pigo.DeserializeContext(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Messages[0].(pigo.AssistantMessage).ThinkingLevel != pigo.ModelThinkingLevelHigh {
+		t.Fatal(string(wire))
+	}
+	if convertPigoAssistantMessage(message).ThinkingLevel != ThinkingHigh {
+		t.Fatal(message)
+	}
+	failure := errors.New("stop raw hook")
+	options := buildPigoStreamOptions(context.Background(), ModelRequest{Model: definition.DefaultModel, OnProviderStreamEvent: func(json.RawMessage, ModelRef) error { return failure }}, "openai")
+	if got := options.OnProviderStreamEvent(json.RawMessage(`{"unknown":true}`), *pigo.GetModel("openai", "gpt-6.1-sol")); !errors.Is(got, failure) {
+		t.Fatal(got)
+	}
+}
 
 func TestDefaultPigoStreamModelReplaysRawIDsAndPreservesProviderFields(t *testing.T) {
 	var requestBody map[string]any

@@ -365,7 +365,7 @@ func defaultModelID(provider pigo.Provider) string {
 	case "kimi-coding":
 		return "kimi-k2-thinking"
 	case "opencode-go":
-		return "kimi-k2.6"
+		return "kimi-k3"
 	case "anthropic":
 		return "claude-sonnet-4-5"
 	}

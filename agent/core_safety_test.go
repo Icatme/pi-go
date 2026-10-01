@@ -111,10 +111,10 @@ func TestEngineDoesNotExecuteToolCallsFromLengthTruncatedMessage(t *testing.T) {
 	if modelCalls != 2 {
 		t.Fatalf("expected model to retry after truncated results, got %d calls", modelCalls)
 	}
-	if len(next.Messages) != 5 {
+	if len(next.Messages) != 6 {
 		t.Fatalf("expected user, truncated assistant, two errors, and recovery, got %d messages", len(next.Messages))
 	}
-	for _, message := range next.Messages[2:4] {
+	for _, message := range next.Messages[3:5] {
 		if message.ToolResult == nil || !message.ToolResult.IsError {
 			t.Fatalf("expected synthetic error tool result, got %+v", message)
 		}
@@ -159,7 +159,7 @@ func TestEngineDoesNotExecuteToolCallsFromFailedAssistantMessages(t *testing.T) 
 			if executed {
 				t.Fatal("residual tool call from failed assistant message executed")
 			}
-			if len(next.Messages) != 3 || next.Messages[1].StopReason != tt.reason || next.Messages[2].ToolResult == nil || !next.Messages[2].ToolResult.IsError {
+			if len(next.Messages) != 4 || next.Messages[2].StopReason != tt.reason || next.Messages[3].ToolResult == nil || !next.Messages[3].ToolResult.IsError {
 				t.Fatalf("unexpected failed transcript: %+v", next.Messages)
 			}
 		})
@@ -227,8 +227,8 @@ func TestEngineValidatesToolArgumentsAndHookMutations(t *testing.T) {
 			if executed {
 				t.Fatal("schema-invalid arguments reached the tool executor")
 			}
-			if next.Messages[2].ToolResult == nil || !next.Messages[2].ToolResult.IsError {
-				t.Fatalf("expected validation error tool result, got %+v", next.Messages[2])
+			if next.Messages[3].ToolResult == nil || !next.Messages[3].ToolResult.IsError {
+				t.Fatalf("expected validation error tool result, got %+v", next.Messages[3])
 			}
 		})
 	}
@@ -317,8 +317,8 @@ func TestEngineSchemaValidationKeepsCustomIntegerPrecision(t *testing.T) {
 	if executed {
 		t.Fatal("out-of-range custom integer reached executor")
 	}
-	if next.Messages[2].ToolResult == nil || !next.Messages[2].ToolResult.IsError {
-		t.Fatalf("expected precision-safe validation error, got %+v", next.Messages[2])
+	if next.Messages[3].ToolResult == nil || !next.Messages[3].ToolResult.IsError {
+		t.Fatalf("expected precision-safe validation error, got %+v", next.Messages[3])
 	}
 }
 
@@ -364,8 +364,8 @@ func TestEngineSchemaValidationKeepsRawIntegerPrecision(t *testing.T) {
 	if executed {
 		t.Fatal("out-of-range raw integer reached executor")
 	}
-	if next.Messages[2].ToolResult == nil || !next.Messages[2].ToolResult.IsError || actual <= maximum {
-		t.Fatalf("expected precision-safe raw validation error, got %+v", next.Messages[2])
+	if next.Messages[3].ToolResult == nil || !next.Messages[3].ToolResult.IsError || actual <= maximum {
+		t.Fatalf("expected precision-safe raw validation error, got %+v", next.Messages[3])
 	}
 }
 
@@ -557,7 +557,7 @@ func TestEngineToolResultDetailsAreIsolatedAcrossHooksEventsAndTranscript(t *tes
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	details := next.Messages[2].ToolResult.Details.(*resultDetails)
+	details := next.Messages[3].ToolResult.Details.(*resultDetails)
 	if len(details.Labels) != 1 || details.Labels["source"] != "tool" {
 		t.Fatalf("hook or listener mutation leaked into transcript: %+v", details.Labels)
 	}
@@ -717,7 +717,7 @@ func TestEngineParallelAbortAfterSecondPreflightStartsNoToolBodies(t *testing.T)
 	if len(preflight) != 2 {
 		t.Fatalf("expected cancellation during second preflight, got %v", preflight)
 	}
-	if len(next.Messages) != 4 || next.Messages[2].ToolResult == nil || next.Messages[3].ToolResult == nil {
+	if len(next.Messages) != 5 || next.Messages[3].ToolResult == nil || next.Messages[4].ToolResult == nil {
 		t.Fatalf("expected durable aborted results for prepared calls, got %+v", next.Messages)
 	}
 }
@@ -785,7 +785,7 @@ func TestEngineSequentialCancellationCannotBeHiddenByTerminate(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation despite terminate result, got %v", err)
 	}
-	if len(next.Messages) != 4 || next.Messages[2].ToolResult == nil || next.Messages[3].ToolResult == nil {
+	if len(next.Messages) != 5 || next.Messages[3].ToolResult == nil || next.Messages[4].ToolResult == nil {
 		t.Fatalf("expected source-order tool results to remain durable, got %+v", next.Messages)
 	}
 }
@@ -829,7 +829,7 @@ func TestAgentPostTurnCancellationKeepsBalancedLifecycleAndInvocationWindow(t *t
 		t.Fatalf("expected one model call, got %d", modelCalls)
 	}
 	snapshot := runtime.Snapshot()
-	if len(snapshot.Messages) != 4 || snapshot.Messages[3].StopReason != StopReasonAborted {
+	if len(snapshot.Messages) != 5 || snapshot.Messages[4].StopReason != StopReasonAborted {
 		t.Fatalf("unexpected cancellation transcript: %+v", snapshot.Messages)
 	}
 	if len(agentEnd) != 4 {
@@ -1178,7 +1178,7 @@ func TestEngineAfterHookContentOverridePreservesTerminate(t *testing.T) {
 	if modelCalls != 1 {
 		t.Fatalf("expected preserved terminate to stop continuation, got %d calls", modelCalls)
 	}
-	if next.Messages[2].ToolResult == nil || !finalResult.Terminate || len(finalResult.Content) != 1 || finalResult.Content[0].Text != "overridden" {
+	if next.Messages[3].ToolResult == nil || !finalResult.Terminate || len(finalResult.Content) != 1 || finalResult.Content[0].Text != "overridden" {
 		t.Fatalf("unexpected merged tool result: %+v", finalResult)
 	}
 }
@@ -1256,7 +1256,7 @@ func TestEngineToolHookErrorsRemainPerCallAndPreserveSiblings(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Run returned error: %v", err)
 			}
-			if len(next.Messages) != 5 || next.Messages[2].ToolResult == nil || !next.Messages[2].ToolResult.IsError || next.Messages[3].ToolResult == nil || next.Messages[3].ToolResult.IsError {
+			if len(next.Messages) != 6 || next.Messages[3].ToolResult == nil || !next.Messages[3].ToolResult.IsError || next.Messages[4].ToolResult == nil || next.Messages[4].ToolResult.IsError {
 				t.Fatalf("unexpected source-order tool results: %+v", next.Messages)
 			}
 			if fmt.Sprint(bodies) != fmt.Sprint(tt.wantBodies) {
@@ -1306,12 +1306,12 @@ func TestEnginePreparesNextTurnAfterStopDecision(t *testing.T) {
 				ThinkingLevel: &level,
 			}, nil
 		},
-		ShouldStopAfterTurn: func(_ context.Context, input ShouldStopAfterTurnContext) (bool, error) {
+		FinishTurn: func(_ context.Context, input AgentTurnContext) (AgentTurnDecision, error) {
 			order = append(order, "stop")
 			if len(order) == 1 && input.Context.SystemPrompt != "" {
 				t.Fatalf("stop hook did not observe completed-turn state: %+v", input)
 			}
-			return false, nil
+			return AgentTurnDecision{}, nil
 		},
 	}
 
@@ -1329,7 +1329,7 @@ func TestEnginePreparesNextTurnAfterStopDecision(t *testing.T) {
 	}
 }
 
-func TestEngineShouldStopAfterTurnPreventsAutomaticContinuation(t *testing.T) {
+func TestEngineFinishTurnPreventsAutomaticContinuation(t *testing.T) {
 	var (
 		modelCalls int
 		queuePolls int
@@ -1345,8 +1345,8 @@ func TestEngineShouldStopAfterTurnPreventsAutomaticContinuation(t *testing.T) {
 			}, nil), nil
 		}},
 		Tools: []ToolDefinition{{Name: "echo", Execute: terminatingTool(false)}},
-		ShouldStopAfterTurn: func(context.Context, ShouldStopAfterTurnContext) (bool, error) {
-			return true, nil
+		FinishTurn: func(context.Context, AgentTurnContext) (AgentTurnDecision, error) {
+			return AgentTurnDecision{Action: TurnActionEnd}, nil
 		},
 	}
 
@@ -1382,9 +1382,9 @@ func TestEngineTurnContextNewMessagesExcludesContinueHistory(t *testing.T) {
 		Model: staticModel{streamFn: func(_ context.Context, _ ModelRequest) (AssistantStream, error) {
 			return newStaticAssistantStream(Message{Role: RoleAssistant, StopReason: StopReasonStop, Timestamp: time.Now().UTC()}, nil), nil
 		}},
-		ShouldStopAfterTurn: func(_ context.Context, input ShouldStopAfterTurnContext) (bool, error) {
+		FinishTurn: func(_ context.Context, input AgentTurnContext) (AgentTurnDecision, error) {
 			observed = cloneMessages(input.NewMessages)
-			return true, nil
+			return AgentTurnDecision{Action: TurnActionEnd}, nil
 		},
 	}
 	if _, err := NewEngine().Continue(context.Background(), definition, &AgentSnapshot{Messages: existing}, nil); err != nil {
@@ -1434,7 +1434,7 @@ func TestEngineTurnUpdateCanPruneContextWithoutLosingInvocationMessages(t *testi
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if len(next.Messages) != 4 || next.Messages[0].Role != RoleUser || next.Messages[3].Role != RoleAssistant {
+	if len(next.Messages) != 5 || next.Messages[1].Role != RoleUser || next.Messages[4].Role != RoleAssistant {
 		t.Fatalf("expected durable transcript to remain complete, got %+v", next.Messages)
 	}
 	if len(agentEnd) != 4 {
@@ -1474,8 +1474,11 @@ func TestEngineContinueContextPruningPreservesHistoryAndNewMessageWindow(t *test
 			pruned.Messages = []Message{NewUserTextMessage("compressed")}
 			return &AgentLoopTurnUpdate{Context: &pruned}, nil
 		},
-		ShouldStopAfterTurn: func(context.Context, ShouldStopAfterTurnContext) (bool, error) {
-			return modelCalls == 2, nil
+		FinishTurn: func(context.Context, AgentTurnContext) (AgentTurnDecision, error) {
+			if modelCalls == 2 {
+				return AgentTurnDecision{Action: TurnActionEnd}, nil
+			}
+			return AgentTurnDecision{}, nil
 		},
 	}
 
@@ -1487,7 +1490,7 @@ func TestEngineContinueContextPruningPreservesHistoryAndNewMessageWindow(t *test
 	if err != nil {
 		t.Fatalf("Continue returned error: %v", err)
 	}
-	if prepareCalls != 1 || len(next.Messages) != 6 || next.Messages[0].Parts[0].Text != "old" || next.Messages[4].Role != RoleTool {
+	if prepareCalls != 1 || len(next.Messages) != 7 || next.Messages[1].Parts[0].Text != "old" || next.Messages[5].Role != RoleTool {
 		t.Fatalf("context pruning changed durable history: %+v", next.Messages)
 	}
 	if len(agentEnd) != 3 || agentEnd[0].Role != RoleAssistant || agentEnd[1].Role != RoleTool || agentEnd[2].Role != RoleAssistant {

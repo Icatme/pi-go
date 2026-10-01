@@ -66,7 +66,8 @@ func PrepareCompaction(branch []Entry, options CompactionOptions) (*CompactionPl
 	}
 
 	effective := contextFromBranch(normalizedBranch)
-	starts, err := completeTurnStarts(effective.Messages)
+	conversation := withoutSystemMessages(effective.Messages)
+	starts, err := completeTurnStarts(conversation)
 	if err != nil {
 		return nil, err
 	}
@@ -82,11 +83,11 @@ func PrepareCompaction(branch []Entry, options CompactionOptions) (*CompactionPl
 	retainedTokens := int64(0)
 	for turn := len(starts) - 1; turn >= 0; turn-- {
 		start := starts[turn]
-		end := len(effective.Messages)
+		end := len(conversation)
 		if turn+1 < len(starts) {
 			end = starts[turn+1]
 		}
-		turnTokens, estimateErr := estimateMessages(effective.Messages[start:end], estimator)
+		turnTokens, estimateErr := estimateMessages(conversation[start:end], estimator)
 		if estimateErr != nil {
 			return nil, estimateErr
 		}
@@ -105,8 +106,8 @@ func PrepareCompaction(branch []Entry, options CompactionOptions) (*CompactionPl
 
 	return &CompactionPlan{
 		PreviousSummary:     effective.Summary,
-		MessagesToSummarize: cloneMessages(effective.Messages[:firstKept]),
-		RetainedTail:        cloneMessages(effective.Messages[firstKept:]),
+		MessagesToSummarize: cloneMessages(conversation[:firstKept]),
+		RetainedTail:        retainedSystemContext(effective.Messages, conversation[firstKept:]),
 		TokensBefore:        tokensBefore,
 	}, nil
 }
@@ -132,6 +133,11 @@ func Compact(ctx context.Context, plan CompactionPlan, summarize Summarizer) (Co
 	if err := validateCompactionCut(plan.MessagesToSummarize, plan.RetainedTail); err != nil {
 		return CompactionData{}, err
 	}
+	combined := make([]agent.Message, 0, len(plan.MessagesToSummarize)+len(plan.RetainedTail))
+	combined = append(combined, plan.MessagesToSummarize...)
+	combined = append(combined, plan.RetainedTail...)
+	plan.MessagesToSummarize = withoutSystemMessages(plan.MessagesToSummarize)
+	plan.RetainedTail = retainedSystemContext(combined, plan.RetainedTail)
 	if err := ctx.Err(); err != nil {
 		return CompactionData{}, err
 	}
@@ -164,6 +170,11 @@ func Compact(ctx context.Context, plan CompactionPlan, summarize Summarizer) (Co
 // presented as provider billing usage; model-aware callers should replace it.
 func EstimateMessageTokens(message agent.Message) int64 {
 	characters := 0
+	if message.System != nil {
+		if payload, err := json.Marshal(message.System); err == nil {
+			characters += utf8.RuneCount(payload)
+		}
+	}
 	if message.ToolResult == nil {
 		for _, part := range message.Parts {
 			characters += estimatePartCharacters(part)
@@ -239,7 +250,11 @@ func completeTurnStarts(messages []agent.Message) ([]int, error) {
 	if pending.len() != 0 {
 		return nil, invalidCompaction("transcript ends with %d unmatched tool call(s)", pending.len())
 	}
-	if messages[0].Role != agent.RoleUser {
+	first := 0
+	for first < len(messages) && messages[first].Role == agent.RoleSystem {
+		first++
+	}
+	if first == len(messages) || messages[first].Role != agent.RoleUser {
 		return nil, nil
 	}
 	return starts, nil
@@ -254,12 +269,35 @@ func validateCompactionCut(prefix, tail []agent.Message) error {
 		return err
 	}
 	cut := len(prefix)
+	for cut < len(combined) && combined[cut].Role == agent.RoleSystem {
+		cut++
+	}
 	for _, start := range starts {
 		if start == cut && cut > 0 {
 			return nil
 		}
 	}
 	return invalidCompaction("plan cut at message %d is not a complete user turn boundary", cut)
+}
+
+func withoutSystemMessages(messages []agent.Message) []agent.Message {
+	conversation := make([]agent.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role != agent.RoleSystem {
+			conversation = append(conversation, cloneMessage(message))
+		}
+	}
+	return conversation
+}
+
+// System changes remain authoritative across compaction instead of becoming
+// prose in the summary. Retained turns start from the current declarations.
+func retainedSystemContext(transcript, tail []agent.Message) []agent.Message {
+	retained := withoutSystemMessages(tail)
+	if head := agent.GetCurrentSystemMessage(transcript); head != nil {
+		retained = append([]agent.Message{cloneMessage(*head)}, retained...)
+	}
+	return retained
 }
 
 type toolPairTracker struct {
@@ -341,7 +379,7 @@ func uniqueNonEmpty(values ...string) []string {
 }
 
 func estimateContextTokens(context Context, estimator MessageTokenEstimator) (int64, error) {
-	tokens, err := estimateMessages(context.Messages, estimator)
+	tokens, err := estimateMessages(retainedSystemContext(context.Messages, context.Messages), estimator)
 	if err != nil {
 		return 0, err
 	}

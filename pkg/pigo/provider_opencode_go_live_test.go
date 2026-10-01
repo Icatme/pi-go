@@ -16,7 +16,7 @@ func TestCompleteSimpleOpenCodeGoLive(t *testing.T) {
 	if apiKey == "" {
 		t.Skip("missing OPENCODE_API_KEY for live test")
 	}
-	model := GetModel("opencode-go", "kimi-k2.6")
+	model := GetModel("opencode-go", "kimi-k2.7-code")
 	if model == nil {
 		t.Fatal("expected OpenCode Go default model")
 	}

@@ -25,6 +25,8 @@ type App struct {
 	now         func() time.Time
 }
 
+const chatPresetSection = "switch-chat.preset"
+
 func NewApp(config AppConfig) (*App, error) {
 	if config.Provider == "" {
 		config.Provider = "openai-codex"
@@ -189,7 +191,7 @@ func (a *App) sendChat(ctx context.Context, preset PresetSpec, input string) err
 	if strings.TrimSpace(snapshot.SessionID) == "" {
 		snapshot.SessionID = newSessionID()
 	}
-	snapshot.SystemPrompt = preset.SystemPrompt
+	setChatPresetPrompt(snapshot, preset.SystemPrompt)
 	snapshot.Model = cloneModelRef(modelRef)
 
 	definition := core.AgentDefinition{
@@ -240,6 +242,32 @@ func (a *App) sendChat(ctx context.Context, preset PresetSpec, input string) err
 	session.UpdatedAt = a.now().UTC()
 	a.registry.Sessions[preset.Name] = session
 	return a.save()
+}
+
+func setChatPresetPrompt(snapshot *core.AgentSnapshot, prompt string) {
+	if len(snapshot.Messages) == 0 || snapshot.Messages[0].Role != core.RoleSystem || snapshot.Messages[0].System == nil {
+		head := core.NewSystemMessage(core.SystemMessagePayload{Sections: map[string]*string{chatPresetSection: &prompt}})
+		head.Timestamp = time.Time{}
+		snapshot.Messages = append([]core.Message{head}, snapshot.Messages...)
+	} else {
+		head := snapshot.Messages[0].System
+		if _, migrated := head.Sections[chatPresetSection]; !migrated {
+			// Before named preset sections, sendChat put only its initial preset
+			// prompt in the leading Content. Keep that historical value in its
+			// section while leaving later system changes at their original positions.
+			initialPrompt := head.Content
+			head.Content = ""
+			if head.Sections == nil {
+				head.Sections = make(map[string]*string)
+			}
+			head.Sections[chatPresetSection] = &initialPrompt
+		}
+	}
+	current := core.GetCurrentSystemMessage(snapshot.Messages).System.Sections[chatPresetSection]
+	if current == nil || *current != prompt {
+		snapshot.Messages = append(snapshot.Messages, core.NewSystemMessage(core.SystemMessagePayload{Sections: map[string]*string{chatPresetSection: &prompt}}))
+	}
+	snapshot.SystemPrompt = core.GetCurrentSystemPrompt(snapshot.Messages)
 }
 
 func (a *App) sendReflection(ctx context.Context, preset PresetSpec, input string) error {
@@ -455,6 +483,9 @@ func cloneMessages(messages []core.Message) []core.Message {
 
 func cloneMessage(message core.Message) core.Message {
 	cloned := message
+	if message.System != nil {
+		cloned.System = core.NewSystemMessage(*message.System).System
+	}
 	cloned.Parts = cloneParts(message.Parts)
 	cloned.ToolCalls = cloneToolCalls(message.ToolCalls)
 	cloned.ToolResult = cloneToolResultPayload(message.ToolResult)

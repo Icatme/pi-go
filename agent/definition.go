@@ -22,7 +22,9 @@ type AgentDefinition struct {
 	BeforeToolCall        BeforeToolCallHook      `json:"-"`
 	AfterToolCall         AfterToolCallHook       `json:"-"`
 	PrepareNextTurn       PrepareNextTurnHook     `json:"-"`
-	ShouldStopAfterTurn   ShouldStopAfterTurnHook `json:"-"`
+	PrepareRequest        PrepareRequestHook      `json:"-"`
+	OnProviderStreamEvent ProviderStreamEventHook `json:"-"`
+	FinishTurn            FinishTurnHook          `json:"-"`
 	ToolExecution         ToolExecutionMode       `json:"tool_execution,omitempty"`
 	SteeringMode          QueueMode               `json:"steering_mode,omitempty"`
 	FollowUpMode          QueueMode               `json:"follow_up_mode,omitempty"`
@@ -108,12 +110,12 @@ func DefaultTransformContext(_ context.Context, messages []Message) ([]Message, 
 	return cloneMessages(messages), nil
 }
 
-// DefaultConvertToLLM keeps user, assistant, and tool messages and drops custom messages.
+// DefaultConvertToLLM keeps system, user, assistant, and tool messages and drops custom messages.
 func DefaultConvertToLLM(_ context.Context, messages []Message) ([]Message, error) {
 	converted := make([]Message, 0, len(messages))
 	for _, message := range messages {
 		switch message.Role {
-		case RoleUser, RoleAssistant, RoleTool:
+		case RoleSystem, RoleUser, RoleAssistant, RoleTool:
 			converted = append(converted, cloneMessage(message))
 		}
 	}

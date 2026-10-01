@@ -76,10 +76,10 @@ func TestToolGateSuspendsWholeParallelBatchWithoutSideEffects(t *testing.T) {
 	}
 	suspended.Calls[0].Arguments[0] = 'x'
 	suspended.Calls[0].ToolCall.Arguments[0] = 'x'
-	if got := string(snapshot.Messages[1].ToolCalls[0].Arguments); got != `{"value":"raw"}` {
+	if got := string(snapshot.Messages[2].ToolCalls[0].Arguments); got != `{"value":"raw"}` {
 		t.Fatalf("suspension error mutation leaked into snapshot: %s", got)
 	}
-	if len(snapshot.Messages) != 2 || snapshot.Messages[1].Role != RoleAssistant {
+	if len(snapshot.Messages) != 3 || snapshot.Messages[2].Role != RoleAssistant {
 		t.Fatalf("suspension synthesized transcript messages: %+v", snapshot.Messages)
 	}
 	if snapshot.Error != "" {
@@ -213,7 +213,7 @@ func TestToolGateBlockBecomesErrorToolResult(t *testing.T) {
 	if executed.Load() {
 		t.Fatal("blocked tool body executed")
 	}
-	if len(next.Messages) != 4 || next.Messages[2].ToolResult == nil || !next.Messages[2].ToolResult.IsError || next.Messages[2].ToolResult.Content[0].Text != "operator rejected" {
+	if len(next.Messages) != 5 || next.Messages[3].ToolResult == nil || !next.Messages[3].ToolResult.IsError || next.Messages[3].ToolResult.Content[0].Text != "operator rejected" {
 		t.Fatalf("unexpected blocked tool result transcript: %+v", next.Messages)
 	}
 	var starts, ends int
@@ -355,7 +355,7 @@ func TestToolGateSiblingSuspensionDiscardsPreflightFailures(t *testing.T) {
 				if !errors.As(err, &suspended) {
 					t.Fatalf("expected suspension, got %v", err)
 				}
-				if executed.Load() != 0 || len(next.Messages) != 2 || len(next.PendingToolCalls) != 2 || next.Error != "" {
+				if executed.Load() != 0 || len(next.Messages) != 3 || len(next.PendingToolCalls) != 2 || next.Error != "" {
 					t.Fatalf("sibling suspension leaked preflight outcome: executed=%d snapshot=%+v", executed.Load(), next)
 				}
 				for _, event := range events {
@@ -620,8 +620,8 @@ func TestResumePendingToolCallsRetriesPreExecutionFailureAndEndsOldTurnOnce(t *t
 			executed.Add(1)
 			return ToolResult{}, nil
 		}}},
-		ShouldStopAfterTurn: func(context.Context, ShouldStopAfterTurnContext) (bool, error) {
-			return true, nil
+		FinishTurn: func(context.Context, AgentTurnContext) (AgentTurnDecision, error) {
+			return AgentTurnDecision{Action: TurnActionEnd}, nil
 		},
 	}
 	hooks := LoopHooks{
@@ -657,7 +657,7 @@ func TestResumePendingToolCallsRetriesPreExecutionFailureAndEndsOldTurnOnce(t *t
 	if executed.Load() != 1 || resolveCalls.Load() != 2 {
 		t.Fatalf("unexpected retry calls: resolver=%d tool=%d", resolveCalls.Load(), executed.Load())
 	}
-	if len(resumed.PendingToolCalls) != 0 || resumed.PendingToolControl != nil || resumed.Error != "" || len(resumed.Messages) != 3 {
+	if len(resumed.PendingToolCalls) != 0 || resumed.PendingToolControl != nil || resumed.Error != "" || len(resumed.Messages) != 4 {
 		t.Fatalf("retry did not commit the pending batch exactly once: %+v", resumed)
 	}
 	assertGateLifecycle(t, retryEvents, 0, 1)
@@ -701,7 +701,7 @@ func TestToolGateCancellationAfterSiblingSuspensionTakesPrecedence(t *testing.T)
 	if errors.As(err, &suspended) {
 		t.Fatalf("cancellation was persisted as suspension: %+v", suspended)
 	}
-	if executed.Load() != 0 || next.PendingToolControl != nil || len(next.PendingToolCalls) != 0 || len(next.Messages) != 2 {
+	if executed.Load() != 0 || next.PendingToolControl != nil || len(next.PendingToolCalls) != 0 || len(next.Messages) != 3 {
 		t.Fatalf("canceled preflight persisted/ran batch: executed=%d snapshot=%+v", executed.Load(), next)
 	}
 	for _, event := range events {
@@ -818,7 +818,7 @@ func TestResumePendingToolCallsAcceptsCanonicalRawArgumentsAfterJSONRoundTrip(t 
 	if executed.Load() != 1 || modelCalls.Load() != 2 {
 		t.Fatalf("unexpected resume calls: executed=%d model=%d", executed.Load(), modelCalls.Load())
 	}
-	if len(finalSnapshot.Messages) != 4 || finalSnapshot.PendingToolControl != nil || len(finalSnapshot.PendingToolCalls) != 0 {
+	if len(finalSnapshot.Messages) != 5 || finalSnapshot.PendingToolControl != nil || len(finalSnapshot.PendingToolCalls) != 0 {
 		t.Fatalf("unexpected resumed snapshot: %+v", finalSnapshot)
 	}
 }
@@ -890,7 +890,7 @@ func TestResumePendingToolCallsPreservesParsedArgumentNumbersAfterJSONRoundTrip(
 	if resumeErr != nil {
 		t.Fatalf("resume returned error: %v", resumeErr)
 	}
-	if executed.Load() != 1 || modelCalls.Load() != 2 || len(finalSnapshot.Messages) != 4 {
+	if executed.Load() != 1 || modelCalls.Load() != 2 || len(finalSnapshot.Messages) != 5 {
 		t.Fatalf("unexpected numeric resume result: executed=%d model=%d snapshot=%+v", executed.Load(), modelCalls.Load(), finalSnapshot)
 	}
 }
@@ -983,8 +983,8 @@ func TestPendingToolBindingNormalizesZeroLengthRawArgumentsAcrossJSONRoundTrip(t
 				return ToolResult{}, nil
 			},
 		}},
-		ShouldStopAfterTurn: func(context.Context, ShouldStopAfterTurnContext) (bool, error) {
-			return true, nil
+		FinishTurn: func(context.Context, AgentTurnContext) (AgentTurnDecision, error) {
+			return AgentTurnDecision{Action: TurnActionEnd}, nil
 		},
 	}
 	runner, err := NewRunner(definition)
@@ -1061,8 +1061,8 @@ func TestPendingToolBindingCanonicalizesTypedParsedArgsAcrossJSONRoundTrip(t *te
 				return ToolResult{}, nil
 			},
 		}},
-		ShouldStopAfterTurn: func(context.Context, ShouldStopAfterTurnContext) (bool, error) {
-			return true, nil
+		FinishTurn: func(context.Context, AgentTurnContext) (AgentTurnDecision, error) {
+			return AgentTurnDecision{Action: TurnActionEnd}, nil
 		},
 	}
 	runner, err := NewRunner(definition)
@@ -1167,7 +1167,7 @@ func TestResumePendingToolCallsStopsBeforePrepareWithResumeMessageWindow(t *test
 	}
 	setPendingToolControlState(&snapshot, 1, assistant)
 	var order []string
-	assertWindow := func(stage string, input ShouldStopAfterTurnContext) {
+	assertWindow := func(stage string, input AgentTurnContext) {
 		t.Helper()
 		if len(input.NewMessages) != 1 || input.NewMessages[0].Role != RoleTool {
 			t.Fatalf("%s saw old assistant in resume message window: %+v", stage, input.NewMessages)
@@ -1178,7 +1178,7 @@ func TestResumePendingToolCallsStopsBeforePrepareWithResumeMessageWindow(t *test
 	}
 	definition := AgentDefinition{
 		Model: StreamFunc(func(context.Context, ModelRequest) (AssistantStream, error) {
-			t.Fatal("ShouldStopAfterTurn should prevent another model call")
+			t.Fatal("FinishTurn should prevent another model call")
 			return nil, nil
 		}),
 		Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
@@ -1189,10 +1189,10 @@ func TestResumePendingToolCallsStopsBeforePrepareWithResumeMessageWindow(t *test
 			assertWindow("prepare", input)
 			return nil, nil
 		},
-		ShouldStopAfterTurn: func(_ context.Context, input ShouldStopAfterTurnContext) (bool, error) {
+		FinishTurn: func(_ context.Context, input AgentTurnContext) (AgentTurnDecision, error) {
 			order = append(order, "stop")
 			assertWindow("stop", input)
-			return true, nil
+			return AgentTurnDecision{Action: TurnActionEnd}, nil
 		},
 	}
 	var events []AgentEvent
@@ -1207,7 +1207,7 @@ func TestResumePendingToolCallsStopsBeforePrepareWithResumeMessageWindow(t *test
 	if fmt.Sprint(order) != fmt.Sprint([]string{"stop"}) {
 		t.Fatalf("unexpected post-tool hook order: %v", order)
 	}
-	if len(next.Messages) != 3 || next.Messages[1].Role != RoleAssistant || next.Messages[2].Role != RoleTool {
+	if len(next.Messages) != 4 || next.Messages[2].Role != RoleAssistant || next.Messages[3].Role != RoleTool {
 		t.Fatalf("resume duplicated source assistant: %+v", next.Messages)
 	}
 	if next.PendingToolControl != nil || len(next.PendingToolCalls) != 0 {
@@ -1303,7 +1303,7 @@ func TestRunnerResumeReSuspendsThenExecutesCurrentResolvedToolsWithoutDuplicateA
 	if !errors.As(partialErr, &partialSuspended) || len(partialSuspended.Calls) != 1 || partialSuspended.Calls[0].ToolCall.ID != "second" {
 		t.Fatalf("expected targeted re-suspension, got %v (%+v)", partialErr, partialSuspended)
 	}
-	if len(executed) != 0 || len(partialSnapshot.Messages) != 2 || len(partialSnapshot.PendingToolCalls) != 2 {
+	if len(executed) != 0 || len(partialSnapshot.Messages) != 3 || len(partialSnapshot.PendingToolCalls) != 2 {
 		t.Fatalf("partial decision executed or mutated batch: executed=%v snapshot=%+v", executed, partialSnapshot)
 	}
 	assertGateLifecycle(t, partialEvents, 0, 0)
@@ -1328,7 +1328,7 @@ func TestRunnerResumeReSuspendsThenExecutesCurrentResolvedToolsWithoutDuplicateA
 	if modelCalls.Load() != 2 || definitionCalls.Load() != 4 || toolResolutions.Load() != 4 {
 		t.Fatalf("unexpected dynamic resolution/model counts: model=%d definition=%d tools=%d", modelCalls.Load(), definitionCalls.Load(), toolResolutions.Load())
 	}
-	if len(finalSnapshot.Messages) != 5 {
+	if len(finalSnapshot.Messages) != 6 {
 		t.Fatalf("resume duplicated or lost transcript messages: %+v", finalSnapshot.Messages)
 	}
 	var assistantCount int
@@ -1337,7 +1337,7 @@ func TestRunnerResumeReSuspendsThenExecutesCurrentResolvedToolsWithoutDuplicateA
 			assistantCount++
 		}
 	}
-	if assistantCount != 2 || finalSnapshot.Messages[2].Role != RoleTool || finalSnapshot.Messages[3].Role != RoleTool || finalSnapshot.Messages[4].Role != RoleAssistant {
+	if assistantCount != 2 || finalSnapshot.Messages[3].Role != RoleTool || finalSnapshot.Messages[4].Role != RoleTool || finalSnapshot.Messages[5].Role != RoleAssistant {
 		t.Fatalf("unexpected resumed transcript roles: %+v", finalSnapshot.Messages)
 	}
 	if len(finalSnapshot.PendingToolCalls) != 0 || finalSnapshot.Error != "" {
@@ -1406,7 +1406,7 @@ func TestResumePendingToolCallsPreservesMaxTurnBudgetAcrossAttempts(t *testing.T
 	if modelCalls.Load() != 1 {
 		t.Fatalf("resume silently reset turn budget and called model %d times", modelCalls.Load())
 	}
-	if len(finalSnapshot.Messages) != 3 || finalSnapshot.Messages[2].Role != RoleTool || len(finalSnapshot.PendingToolCalls) != 0 {
+	if len(finalSnapshot.Messages) != 4 || finalSnapshot.Messages[3].Role != RoleTool || len(finalSnapshot.PendingToolCalls) != 0 {
 		t.Fatalf("resume did not complete the pending tool before enforcing turn budget: %+v", finalSnapshot)
 	}
 	assertGateLifecycle(t, events, 0, 1)

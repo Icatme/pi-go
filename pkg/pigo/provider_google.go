@@ -111,6 +111,7 @@ type googleStreamState struct {
 }
 
 func streamGoogle(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	ctx = resolveProviderContext(model, ctx)
 	options = normalizeGoogleProviderStreamOptions(model, options)
 	stream := newAssistantMessageEventStream()
 	stream.setObserver(options.Observer, model)
@@ -187,6 +188,7 @@ func streamSimpleGoogle(model Model, ctx Context, options SimpleStreamOptions) *
 }
 
 func buildGoogleRequest(model Model, ctx Context, options ProviderStreamOptions) (googleRequest, error) {
+	ctx = resolveProviderContext(model, ctx)
 	resolvedOptions, err := resolveGoogleProviderOptions(model, options)
 	if err != nil {
 		return googleRequest{}, err
@@ -471,6 +473,9 @@ func streamGoogleSSE(model Model, ctx context.Context, client *http.Client, opti
 	state := &googleStreamState{}
 	stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: *response})
 	if err := readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
+		if err := observeProviderStreamEvent(data, model, options); err != nil {
+			return false, err
+		}
 		return processGoogleStreamEvent(data, model, response, stream, state)
 	}); err != nil {
 		return err

@@ -116,6 +116,7 @@ func streamSimpleCommandCode(model Model, ctx Context, options SimpleStreamOptio
 }
 
 func streamCommandCodeGenerate(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	ctx = resolveProviderContext(model, ctx)
 	options = normalizeCommandCodeProviderStreamOptions(model, options)
 	stream := newAssistantMessageEventStream()
 	stream.setObserver(options.Observer, model)
@@ -196,6 +197,7 @@ func streamCommandCodeGenerate(model Model, ctx Context, options ProviderStreamO
 }
 
 func buildCommandCodeRequest(model Model, ctx Context, options ProviderStreamOptions) (commandCodeRequest, string, error) {
+	ctx = resolveProviderContext(model, ctx)
 	workingDir, err := os.Getwd()
 	if err != nil {
 		return commandCodeRequest{}, "", fmt.Errorf("resolve working directory: %w", err)
@@ -350,7 +352,7 @@ func executeCommandCodeRequest(
 		}
 
 		state := &commandCodeStreamState{textIndex: -1, thinkingIndex: -1}
-		streamErr := readCommandCodeStream(httpResponse.Body, model, response, stream, state)
+		streamErr := readCommandCodeStream(httpResponse.Body, model, options, response, stream, state)
 		_ = httpResponse.Body.Close()
 		attemptErr := attemptContext.Err()
 		cancel()
@@ -359,6 +361,9 @@ func executeCommandCodeRequest(
 		}
 		if streamErr == nil {
 			return state, nil
+		}
+		if isProviderStreamEventCallbackError(streamErr) {
+			return nil, streamErr
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -385,13 +390,18 @@ func executeCommandCodeRequest(
 	return nil, errors.New("Command Code request failed after retries")
 }
 
-func readCommandCodeStream(reader io.Reader, model Model, response *AssistantMessage, stream *AssistantMessageEventStream, state *commandCodeStreamState) error {
+func readCommandCodeStream(reader io.Reader, model Model, options ProviderStreamOptions, response *AssistantMessage, stream *AssistantMessageEventStream, state *commandCodeStreamState) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		value, ok := parseCommandCodeStreamLine(scanner.Text())
 		if !ok {
 			continue
+		}
+		// Keep the original JSON so unknown numeric fields retain their precision.
+		data := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(scanner.Text()), "data:"))
+		if err := observeProviderStreamEvent(data, model, options); err != nil {
+			return err
 		}
 		finished, err := processCommandCodeStreamEvent(value, model, response, stream, state)
 		if err != nil {

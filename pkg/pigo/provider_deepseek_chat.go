@@ -113,6 +113,7 @@ type deepSeekToolCallState struct {
 }
 
 func streamDeepSeekChatCompletions(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	ctx = resolveProviderContext(model, ctx)
 	options = resolveDeepSeekProviderOptions(model, options).toProviderStreamOptions(model)
 	stream := newAssistantMessageEventStream()
 	stream.setObserver(options.Observer, model)
@@ -181,6 +182,7 @@ func streamSimpleDeepSeekChatCompletions(model Model, ctx Context, options Simpl
 }
 
 func buildDeepSeekChatRequest(model Model, ctx Context, options ProviderStreamOptions) deepSeekChatRequest {
+	ctx = resolveProviderContext(model, ctx)
 	resolvedOptions := resolveDeepSeekProviderOptions(model, options)
 	requestBody := deepSeekChatRequest{
 		Model:    model.ID,
@@ -371,6 +373,9 @@ func streamDeepSeekChatSSE(model Model, ctx context.Context, client *http.Client
 		ToolCalls: map[int]*deepSeekToolCallState{},
 	}
 	if err := readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
+		if err := observeProviderStreamEvent(data, model, options); err != nil {
+			return false, err
+		}
 		return processDeepSeekChatStreamEvent(data, model, response, stream, state)
 	}); err != nil {
 		return err

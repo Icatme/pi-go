@@ -93,7 +93,11 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 	resolvedOptions := resolveOpenAICodexProviderOptions(model, options)
 	parallelToolCalls := true
 
-	instructions := ctx.SystemPrompt
+	transcript := ResolveTranscript(NormalizeContext(ctx), supportsTranscriptSystemMessages(model))
+	instructions := ""
+	if initial := GetInitialSystemMessage(transcript.Messages); initial != nil {
+		instructions = GetSystemMessageText(*initial)
+	}
 	if strings.TrimSpace(instructions) == "" {
 		instructions = "You are a helpful assistant."
 	}
@@ -104,7 +108,7 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 		Stream:            true,
 		Instructions:      instructions,
 		Input:             convertOpenAIResponsesMessages(model, ctx, false),
-		Tools:             convertOpenAIResponsesTools(ctx.Tools),
+		Tools:             convertOpenAIResponsesTools(currentContextTools(ctx)),
 		ToolChoice:        resolveOpenAICodexToolChoice(resolvedOptions.ToolChoice),
 		ParallelToolCalls: &parallelToolCalls,
 		Include:           []string{"reasoning.encrypted_content"},

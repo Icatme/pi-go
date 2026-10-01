@@ -115,6 +115,7 @@ func (o *commandCodeAttemptObserver) OnStreamFinish(context.Context, Model, Assi
 	}
 }
 func streamCommandCode(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	ctx = resolveProviderContext(model, ctx)
 	options = normalizeCommandCodeProviderStreamOptions(model, options)
 	apiKey := usableCommandCodeAPIKey(options.APIKey)
 	if apiKey == "" {
@@ -186,6 +187,11 @@ func streamCommandCode(model Model, ctx Context, options ProviderStreamOptions) 
 			}
 			logical.start(payload)
 			return payload
+		}
+		if options.OnProviderStreamEvent != nil {
+			nativeOptions.OnProviderStreamEvent = func(data json.RawMessage, _ Model) error {
+				return options.OnProviderStreamEvent(data, cloneModel(model))
+			}
 		}
 		nativeOptions.Headers = mergeRequestHeaders(map[string]string{"Authorization": "Bearer " + apiKey}, nativeOptions.Headers)
 		var source *AssistantMessageEventStream

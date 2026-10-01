@@ -60,6 +60,9 @@ func newToolArgumentValidator(tool ToolDefinition) (func(any) (any, error), erro
 
 func validateToolDefinitions(tools []ToolDefinition) error {
 	for _, tool := range tools {
+		if _, err := json.Marshal(tool.OutputSchema); err != nil {
+			return fmt.Errorf("agent: marshal output schema for tool %q: %w", tool.Name, err)
+		}
 		if _, err := newToolArgumentValidator(tool); err != nil {
 			return err
 		}

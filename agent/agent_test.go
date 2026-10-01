@@ -107,7 +107,7 @@ func TestAgentMutatorsUpdateState(t *testing.T) {
 		t.Fatalf("NewAgent returned error: %v", err)
 	}
 
-	agent.SetSystemPrompt("custom prompt")
+	agent.AppendMessage(NewSystemMessage(SystemMessagePayload{Content: "custom prompt"}))
 	agent.SetModel(ModelRef{Provider: "openai", Model: "gpt-4o-mini"})
 	agent.SetThinkingLevel(ThinkingHigh)
 	tools := []ToolDefinition{{Name: "test", Description: "test tool"}}
@@ -117,8 +117,8 @@ func TestAgentMutatorsUpdateState(t *testing.T) {
 	agent.ReplaceMessages(messages)
 	state := agent.State()
 
-	if state.SystemPrompt != "custom prompt" {
-		t.Fatalf("expected custom prompt, got %q", state.SystemPrompt)
+	if state.SystemPrompt != "" {
+		t.Fatalf("expected prompt cleared by transcript replacement, got %q", state.SystemPrompt)
 	}
 	if state.Model.Provider != "openai" || state.Model.Model != "gpt-4o-mini" {
 		t.Fatalf("unexpected model %+v", state.Model)
@@ -179,13 +179,13 @@ func TestAgentSubscribeAndUnsubscribe(t *testing.T) {
 		t.Fatalf("expected no initial event on subscribe, got %d", eventCount)
 	}
 
-	agent.SetSystemPrompt("test prompt")
+	agent.AppendMessage(NewSystemMessage(SystemMessagePayload{Content: "test prompt"}))
 	if eventCount != 0 {
 		t.Fatalf("expected mutators to not emit events, got %d", eventCount)
 	}
 
 	unsubscribe()
-	agent.SetSystemPrompt("another prompt")
+	agent.AppendMessage(NewSystemMessage(SystemMessagePayload{Content: "another prompt"}))
 	if eventCount != 0 {
 		t.Fatalf("expected no events after unsubscribe, got %d", eventCount)
 	}
@@ -298,14 +298,14 @@ func TestAgentPromptWithToolLoop(t *testing.T) {
 	}
 
 	snapshot := agent.Snapshot()
-	if got := len(snapshot.Messages); got != 4 {
+	if got := len(snapshot.Messages); got != 5 {
 		t.Fatalf("expected 4 messages, got %d", got)
 	}
-	if snapshot.Messages[2].Role != RoleTool {
-		t.Fatalf("expected tool message at index 2, got %s", snapshot.Messages[2].Role)
+	if snapshot.Messages[3].Role != RoleTool {
+		t.Fatalf("expected tool message at index 2, got %s", snapshot.Messages[3].Role)
 	}
-	if snapshot.Messages[3].Parts[0].Text != "The answer is 4." {
-		t.Fatalf("unexpected final assistant text %q", snapshot.Messages[3].Parts[0].Text)
+	if snapshot.Messages[4].Parts[0].Text != "The answer is 4." {
+		t.Fatalf("unexpected final assistant text %q", snapshot.Messages[4].Parts[0].Text)
 	}
 }
 
@@ -404,14 +404,14 @@ func TestAgentSteerDuringRun(t *testing.T) {
 	}
 
 	snapshot := agent.Snapshot()
-	if got := len(snapshot.Messages); got != 5 {
+	if got := len(snapshot.Messages); got != 6 {
 		t.Fatalf("expected 5 messages, got %d", got)
 	}
-	if snapshot.Messages[3].Role != RoleUser || snapshot.Messages[3].Parts[0].Text != "steer now" {
-		t.Fatalf("expected steering user message at index 3, got %+v", snapshot.Messages[3])
+	if snapshot.Messages[4].Role != RoleUser || snapshot.Messages[4].Parts[0].Text != "steer now" {
+		t.Fatalf("expected steering user message at index 3, got %+v", snapshot.Messages[4])
 	}
-	if snapshot.Messages[4].Parts[0].Text != "saw steering" {
-		t.Fatalf("unexpected final assistant text %q", snapshot.Messages[4].Parts[0].Text)
+	if snapshot.Messages[5].Parts[0].Text != "saw steering" {
+		t.Fatalf("unexpected final assistant text %q", snapshot.Messages[5].Parts[0].Text)
 	}
 }
 

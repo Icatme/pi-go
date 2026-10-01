@@ -72,7 +72,7 @@ func streamOpenAICodexWithTransport(
 		if requestContext.Err() != nil {
 			return requestContext.Err()
 		}
-		if transport == TransportWebSocket || websocketStarted {
+		if isProviderStreamEventCallbackError(err) || transport == TransportWebSocket || websocketStarted {
 			return err
 		}
 	}
@@ -100,7 +100,6 @@ func streamOpenAICodexSSE(
 	state := openAIResponsesStreamingState{
 		CurrentTextIndex:     -1,
 		CurrentThinkingIndex: -1,
-		CurrentToolIndex:     -1,
 		FinalizedItemKeys:    map[string]bool{},
 	}
 	baselineResponse := cloneAssistantMessage(*response)
@@ -134,12 +133,14 @@ func streamOpenAICodexSSE(
 			state = openAIResponsesStreamingState{
 				CurrentTextIndex:     -1,
 				CurrentThinkingIndex: -1,
-				CurrentToolIndex:     -1,
 				FinalizedItemKeys:    map[string]bool{},
 			}
 			terminalSeen = false
 		},
 		OnEvent: func(_ string, data string) (bool, error) {
+			if err := observeProviderStreamEvent(data, model, options); err != nil {
+				return false, err
+			}
 			done, err := processOpenAIResponsesStreamEventWithProvider(data, model, response, stream, &state, options.ServiceTier, "codex")
 			if done {
 				terminalSeen = true
@@ -264,7 +265,6 @@ func streamOpenAICodexWebSocket(
 	state := openAIResponsesStreamingState{
 		CurrentTextIndex:     -1,
 		CurrentThinkingIndex: -1,
-		CurrentToolIndex:     -1,
 		FinalizedItemKeys:    map[string]bool{},
 	}
 	for {
@@ -283,6 +283,10 @@ func streamOpenAICodexWebSocket(
 			return err
 		}
 
+		if err := observeProviderStreamEvent(string(message), model, options); err != nil {
+			keepConnection = false
+			return err
+		}
 		done, err := processOpenAIResponsesStreamEventWithProvider(string(message), model, response, stream, &state, options.ServiceTier, "codex")
 		if err != nil {
 			keepConnection = false

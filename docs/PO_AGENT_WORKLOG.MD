@@ -448,3 +448,109 @@
 - Recognize Cerebras bodyless HTTP 400/413 errors in the Go Completions transport's actual error format as well as the SDK format. Keep the rule provider-scoped and exclude other statuses and nonempty unrelated errors without changing transport error messages.
 - Add HTTP request/response regressions for partial budgets across all levels, mapped defaults, Pro omitted/Off minimums, dynamic/custom budgets on unknown models, and Cerebras positive/negative cases across providers. The new tests failed before the fixes and passed afterward. Follow-up validation passed focused Google/overflow tests, root `go test -race ./... -count=1`, root `go vet ./...`, examples `go test ./... -count=1`, formatting and diff checks with `GOWORK=off` and `PIGO_LIVE_TEST=0`; no live-provider calls were made.
 - Bump the package version and nested examples dependency to `v0.11.3`, including the provider correctness changes and all three review fixes in the local commit. Root and examples `go test ./... -count=1` passed again after the version bump with `GOWORK=off` and `PIGO_LIVE_TEST=0`; formatting and diff checks passed. This step does not create or push a tag or publish a GitHub Release.
+
+
+## 2026-10-01 - pi-mono AI and agent follow-up through v0.99.2
+
+- Follow the applicable changes from v0.87.0 through pi-mono origin/main
+  `8ce69e9d2b171d173fe4b6b2b6256f1f4411e69d` (v0.99.2 plus 17 commits),
+  read on 2026-10-01. Scope is provider correctness, catalog metadata and
+  single-agent lifecycle/transcript semantics. Codemode/MCP, classifiers,
+  image generation, new ChatGPT OAuth and experimental pi-durable are separate
+  work; dynamic provider tool anchoring is not implemented.
+- Track Responses function calls by item ID, call ID and output index rather
+  than one current slot. Reject unfinished, ambiguous or malformed tool-use
+  completion; preserve terminal reconstruction, partial error output and the
+  no-retry-after-output boundary. SSE, Codex SSE and WebSocket regressions
+  reproduce the old incomplete/interleaved call failures before repair.
+- Map Mistral reasoning through declared ThinkingLevelMap for direct/simple,
+  explicit Off and omitted preferences. Correct priority cost multipliers
+  (GPT-5.5 2.5x, other models 2x), preserve same-model empty Anthropic signatures
+  only with explicit capability, and recognize Z.AI CN prompt-length overflow.
+  Claude 5.5 adaptive reasoning and unsupported Off/temperature follow metadata.
+  New provider regressions failed before the corresponding repairs and passed
+  afterward; no retries or fallback paths were added to mask protocol failures.
+- Add current GPT-6 Sol/Luna/6.1 Sol, Claude Opus/Sonnet 5.5, Mistral and OpenCode
+  stable model metadata from the upstream generator, models.dev and official
+  provider docs. Remove confirmed deprecated OpenCode models; retain GLM-5.1
+  whose absence did not establish retirement. Correct MiniMax/Qwen compatibility,
+  native GPT-5.6 supported IDs/default context caps and Codex Sol costs. Set
+  native mid-conversation-system support only from the upstream exact allowlist.
+  Preserve the OpenCode token-only/zero-cost contract. The CLI default now uses
+  active Kimi K3 rather than retired Kimi K2.6.
+- Add OnProviderStreamEvent copied RawMessage/model callbacks across all current
+  SSE/WS/generate protocols and option conversions, including the default agent
+  adapter. Preserve unknown fields and exact JSON numbers before normalization;
+  propagate callback causes and prevent retry or Codex transport fallback after
+  callback failure. Existing Observer implementations need no new method.
+- Replace ShouldStopAfterTurn with FinishTurn and AgentTurnDecision. Run it
+  before TurnEnd for finalized assistant/tool turns, including error/aborted
+  output and canceled resumed batches whose tool results committed. End preserves
+  unread queues; Continue guarantees one more model request. PrepareRequest runs
+  after admitted input/tool resolution and validates final replacement tools
+  before I/O without rerunning the resolver. Add non-consuming PeekQueuedMessages
+  and persist effective assistant ThinkingLevel through snapshots/provider JSON.
+- Add declaration-only SystemMessage history: appended content, named section
+  replacement/removal, tool additions/removals, clone/JSON round trips, provider
+  normalization, native OpenAI system-position replay and collapse for other
+  protocols. Initial configuration seeds a leading system message; restore and
+  session compaction retain the resolved prompt/sections/current tools. Go sorts
+  section keys and uses string system content. Request-local context pruning
+  preserves durable history without duplicating declarations. Remove
+  SetSystemPrompt; use appended system messages (Steer while a run is active).
+- Add ToolResult.StructuredContent and explicit IsError, declaration OutputSchema,
+  and public RunToolCall sharing argument validation and before/after hooks.
+  Content replacement clears stale structured JSON; invalid structured JSON or
+  non-serializable output schema is rejected. OutputSchema is metadata, not
+  automatic output validation. Checkpoint runners reject PrepareRequest as they
+  reject non-durable PrepareNextTurn overrides. Update in-repo callers, examples,
+  tests and runtime migration docs without keeping old hook/setter aliases.
+- Independent review exposed two new-hook boundary holes: replacement tools
+  skipped schema validation, and canceled committed resume skipped FinishTurn.
+  Both are corrected with regression tests. A standalone RunToolCall initially
+  used gated preparation without a gate; reuse the ordinary preparation path.
+- Validation with GOWORK=off and PIGO_LIVE_TEST=0: root and examples full tests,
+  full race suites and vet pass. Final output-schema/error-reporting adjustments
+  also pass all agent race tests. Formatting and diff checks pass. All protocol
+  tests use local fixtures; live provider/account availability and UI acceptance
+  are not claimed. No new third-party dependency, version bump, commit, push,
+  tag or release is included; preserve the existing unpushed 0.11.3 commit.
+
+## 2026-10-01: Repair the seven upstream-follow-up review findings
+
+- Replay existing system history at any position without injecting its rendered
+  prompt again. Reset retains one resolved system baseline with named sections
+  and current tool declarations; both Agent and Engine reject system-only
+  continuation without calling the model or consuming queued input.
+- Fold an explicit prepared request prompt before transformation, then derive
+  the model request from the transformed/converted messages. The provider
+  adapter preserves that history, including removal of all system messages.
+  Detached transformation input keeps durable history unchanged. An explicitly
+  empty transcript remains empty in preparation rather than restoring config.
+- Follow-up input now satisfies FinishTurn Continue before considering a request
+  with no new input. Correct the earlier three-request test to require two,
+  including a MaxTurns=2 regression, matching the pinned upstream scheduling.
+- Public pigo transcript helpers accept value and pointer system messages.
+  Serialization normalizes valid message pointers and rejects nil pointers with
+  an error rather than panicking; section/tool metadata survives round trips.
+- switch-chat stores its replaceable preset prompt in a named system section.
+  Existing leading preset content is migrated when needed, preserving dialogue,
+  later system changes and other declarations. Updated presets take effect in
+  existing sessions without adding duplicate patches on reload.
+- Regression cases reproduced the review failures before repair. Root and
+  examples full tests, full race suites and vet pass with GOWORK=off and
+  PIGO_LIVE_TEST=0. Formatting and diff checks pass. Provider tests use local HTTP
+  fixtures; live provider availability and UI acceptance remain outside this
+  validation. No dependency/version changes, commit, push, tag or release.
+
+## 2026-10-01: Bump pi-go to v0.12.0 and prepare the master push
+
+- Bump pkg/pigo.Version and the examples module requirement from 0.11.3 to
+  0.12.0. Use a minor increment for new runtime/protocol capabilities and the
+  removal of ShouldStopAfterTurn/SetSystemPrompt in favor of the new APIs.
+- Include the validated upstream follow-up and seven review repairs in one
+  source commit. Preserve the existing 53e37ca v0.11.3 commit as an ancestor;
+  origin/master is unchanged after fetch and is one commit behind the old HEAD.
+- Root/examples full tests, race and vet passed in the repair pass. After the
+  version-only change, CLI tests and all examples tests pass; examples resolves
+  the local module as v0.12.0. A compiled native CLI prints pigo 0.12.0.

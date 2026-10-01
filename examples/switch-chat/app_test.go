@@ -3,11 +3,85 @@ package main
 import (
 	"bytes"
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
 	core "github.com/Icatme/pi-go/agent"
 )
+
+func TestChatPresetPromptUpdatesExistingSession(t *testing.T) {
+	var prompts []string
+	model := fakeStreamModel(func(request core.ModelRequest) string {
+		prompts = append(prompts, request.SystemPrompt)
+		return "answer"
+	})
+	config := AppConfig{DataDir: t.TempDir(), Provider: "openai-codex", Model: "gpt-5.5", ChatModel: model, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	app, err := NewApp(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preset := PresetSpec{Name: "chat", Mode: RuntimeModeChat, SystemPrompt: "old policy"}
+	if err := app.sendChat(context.Background(), preset, "first"); err != nil {
+		t.Fatal(err)
+	}
+	preset.SystemPrompt = "updated policy"
+	if err := app.sendChat(context.Background(), preset, "second"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(prompts, []string{"old policy", "updated policy"}) {
+		t.Fatalf("model saw stale preset prompt: %q", prompts)
+	}
+	before := app.registry.Sessions["chat"].ChatSnapshot
+	if len(before.Messages) != 6 || before.Messages[3].Role != core.RoleSystem || before.Messages[1].Parts[0].Text != "first" {
+		t.Fatalf("preset update did not preserve history with one section patch: %+v", before.Messages)
+	}
+	reloaded, err := NewApp(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reloaded.sendChat(context.Background(), preset, "third"); err != nil {
+		t.Fatal(err)
+	}
+	after := reloaded.registry.Sessions["chat"].ChatSnapshot
+	if len(after.Messages) != 8 || prompts[2] != "updated policy" {
+		t.Fatalf("unchanged preset created another patch or reverted after reload: messages=%+v prompts=%q", after.Messages, prompts)
+	}
+}
+
+func TestChatPresetPromptMigratesLeadingContentAndKeepsSystemChanges(t *testing.T) {
+	otherSection := "other section"
+	head := core.NewSystemMessage(core.SystemMessagePayload{
+		Content: "old policy", Sections: map[string]*string{"other": &otherSection},
+		ToolsAdded: []core.ToolDeclaration{{Name: "lookup", Parameters: map[string]any{"type": "object"}}},
+	})
+	source := &core.AgentSnapshot{SystemPrompt: "old policy", Messages: []core.Message{
+		head, core.NewUserTextMessage("first"), core.NewTextMessage(core.RoleAssistant, "answer"),
+		core.NewSystemMessage(core.SystemMessagePayload{Content: "extra instruction"}),
+	}}
+	snapshot := cloneSnapshotPtr(source)
+	setChatPresetPrompt(snapshot, "updated policy")
+	if source.Messages[0].System.Content != "old policy" || len(source.Messages[0].System.Sections) != 1 {
+		t.Fatal("preset migration mutated the stored source snapshot")
+	}
+	if len(snapshot.Messages) != 5 || snapshot.Messages[0].System.Content != "" || *snapshot.Messages[0].System.Sections[chatPresetSection] != "old policy" {
+		t.Fatalf("initial preset content was not migrated into its section: %+v", snapshot.Messages)
+	}
+	if got := core.GetCurrentSystemPrompt(snapshot.Messages); got != "extra instruction\n\nother section\n\nupdated policy" {
+		t.Fatalf("preset migration changed other instructions: %q", got)
+	}
+	if tools := core.GetCurrentTools(snapshot.Messages); len(tools) != 1 || tools[0].Name != "lookup" {
+		t.Fatalf("preset migration lost tool declarations: %+v", tools)
+	}
+	snapshot.Messages[0].System.ToolsAdded[0].Parameters["type"] = "changed"
+	if source.Messages[0].System.ToolsAdded[0].Parameters["type"] != "object" {
+		t.Fatal("migrated tool schema aliases the source snapshot")
+	}
+	setChatPresetPrompt(snapshot, "updated policy")
+	if len(snapshot.Messages) != 5 {
+		t.Fatal("unchanged migrated preset added another system message")
+	}
+}
 
 func TestChatSessionsPersistAcrossSwitchAndRestart(t *testing.T) {
 	dataDir := t.TempDir()
@@ -42,11 +116,16 @@ func TestChatSessionsPersistAcrossSwitchAndRestart(t *testing.T) {
 
 	chatSession := app.registry.Sessions["chat"]
 	coderSession := app.registry.Sessions["coder"]
-	if chatSession.ChatSnapshot == nil || len(chatSession.ChatSnapshot.Messages) != 2 {
+	if chatSession.ChatSnapshot == nil || len(chatSession.ChatSnapshot.Messages) != 3 {
 		t.Fatalf("expected chat snapshot to contain one turn, got %+v", chatSession.ChatSnapshot)
 	}
-	if coderSession.ChatSnapshot == nil || len(coderSession.ChatSnapshot.Messages) != 2 {
+	if coderSession.ChatSnapshot == nil || len(coderSession.ChatSnapshot.Messages) != 3 {
 		t.Fatalf("expected coder snapshot to contain one turn, got %+v", coderSession.ChatSnapshot)
+	}
+	for _, snapshot := range []*core.AgentSnapshot{chatSession.ChatSnapshot, coderSession.ChatSnapshot} {
+		if snapshot.Messages[0].Role != core.RoleSystem || snapshot.Messages[1].Role != core.RoleUser || snapshot.Messages[2].Role != core.RoleAssistant || core.GetCurrentSystemPrompt(snapshot.Messages) != snapshot.SystemPrompt {
+			t.Fatalf("expected one system head and a complete turn: %+v", snapshot.Messages)
+		}
 	}
 
 	reloaded, err := NewApp(AppConfig{
@@ -69,8 +148,13 @@ func TestChatSessionsPersistAcrossSwitchAndRestart(t *testing.T) {
 	if reloadedChat.ChatSnapshot == nil {
 		t.Fatal("expected reloaded chat snapshot")
 	}
-	if got := len(reloadedChat.ChatSnapshot.Messages); got != 4 {
+	if got := len(reloadedChat.ChatSnapshot.Messages); got != 5 {
 		t.Fatalf("expected reloaded chat session to continue from previous transcript, got %d messages", got)
+	}
+	for _, message := range reloadedChat.ChatSnapshot.Messages[1:] {
+		if message.Role == core.RoleSystem {
+			t.Fatal("restart duplicated the system head")
+		}
 	}
 }
 

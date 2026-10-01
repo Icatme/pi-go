@@ -434,7 +434,11 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 
 	states := map[int]*anthropicStreamingBlockState{}
 	terminalSeen := false
+	providerOptions := options.StreamOptions.providerStreamOptions(model)
 	if err := readSSEStream(httpResponse.Body, func(_ string, data string) (bool, error) {
+		if err := observeProviderStreamEvent(data, model, providerOptions); err != nil {
+			return false, err
+		}
 		done, err := processAnthropicStreamEvent(data, model, &response, stream, states, isOAuth, ctx.Tools, ctx.HostedTools, emitTerminal)
 		if done {
 			terminalSeen = true
@@ -453,6 +457,7 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 }
 
 func buildAnthropicRequest(model Model, ctx Context, options AnthropicMessagesProviderOptions, isOAuth bool, stream bool) anthropicRequest {
+	ctx = resolveProviderContext(model, ctx)
 	cacheControl := resolveAnthropicCacheControl(model.BaseURL, options.CacheRetention)
 	thinkingConfig := buildAnthropicThinkingConfig(model, options)
 	if len(ctx.HostedTools) > 0 && model.Provider == "kimi-coding" {
@@ -489,8 +494,11 @@ func buildAnthropicRequest(model Model, ctx Context, options AnthropicMessagesPr
 			CacheControl: cacheControl,
 		}}
 	}
-	if options.Temperature != nil && requestBody.Thinking == nil {
-		requestBody.Temperature = options.Temperature
+	if options.Temperature != nil && model.Capabilities.Temperature != CapabilityUnsupported {
+		thinking, _ := requestBody.Thinking.(map[string]any)
+		if requestBody.Thinking == nil || thinking["type"] == "disabled" {
+			requestBody.Temperature = options.Temperature
+		}
 	}
 	return requestBody
 }
@@ -794,7 +802,10 @@ func buildAnthropicThinkingConfig(model Model, options AnthropicMessagesProvider
 	if !model.Reasoning {
 		return anthropicThinkingConfig{}
 	}
-	if options.Reasoning == "" {
+	if options.Reasoning == "" || options.Reasoning == ThinkingLevel(ModelThinkingLevelOff) {
+		if off, declared := model.ThinkingLevelMap[ModelThinkingLevelOff]; declared && off == "" {
+			return anthropicThinkingConfig{}
+		}
 		return anthropicThinkingConfig{
 			Thinking: map[string]any{
 				"type": "disabled",
@@ -855,6 +866,10 @@ func convertAnthropicMessagesWithCache(messages []Message, model Model, cacheCon
 		return NormalizeSimpleToolCallID(id)
 	})
 	params := make([]anthropicMessage, 0, len(transformed))
+	allowEmptySignature := false
+	if compat, ok := model.Compat.(*AnthropicMessagesCompat); ok && compat != nil && compat.AllowEmptySignature != nil {
+		allowEmptySignature = *compat.AllowEmptySignature
+	}
 
 	for i := 0; i < len(transformed); i++ {
 		switch typed := transformed[i].(type) {
@@ -868,7 +883,7 @@ func convertAnthropicMessagesWithCache(messages []Message, model Model, cacheCon
 				Content: content,
 			})
 		case AssistantMessage:
-			content := convertAssistantContent(typed.Content, isOAuth, hostedTools)
+			content := convertAssistantContent(typed.Content, isOAuth, hostedTools, allowEmptySignature)
 			if len(content) == 0 {
 				continue
 			}
@@ -986,7 +1001,7 @@ func convertUserContent(value any, model Model) any {
 	}
 }
 
-func convertAssistantContent(blocks []ContentBlock, isOAuth bool, hostedTools []HostedTool) []any {
+func convertAssistantContent(blocks []ContentBlock, isOAuth bool, hostedTools []HostedTool, allowEmptySignature bool) []any {
 	result := make([]any, 0, len(blocks))
 	for _, block := range blocks {
 		switch typed := block.(type) {
@@ -1009,17 +1024,21 @@ func convertAssistantContent(blocks []ContentBlock, isOAuth bool, hostedTools []
 			if strings.TrimSpace(typed.Thinking) == "" {
 				continue
 			}
-			if strings.TrimSpace(typed.ThinkingSignature) == "" {
+			if strings.TrimSpace(typed.ThinkingSignature) == "" && !allowEmptySignature {
 				result = append(result, anthropicTextBlock{
 					Type: "text",
 					Text: typed.Thinking,
 				})
 				continue
 			}
+			signature := typed.ThinkingSignature
+			if strings.TrimSpace(signature) == "" {
+				signature = ""
+			}
 			result = append(result, anthropicThinkingBlock{
 				Type:      "thinking",
 				Thinking:  typed.Thinking,
-				Signature: typed.ThinkingSignature,
+				Signature: signature,
 			})
 		case ToolCall:
 			result = append(result, anthropicToolUseBlock{

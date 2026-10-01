@@ -145,6 +145,7 @@ func newOpenAIResponsesAPIModule() APIModule {
 }
 
 func newAnthropicProviderModule() ProviderModule {
+	forceAdaptiveThinking := true
 	return ProviderModule{
 		Provider: "anthropic",
 		Auth: ProviderAuth{
@@ -158,6 +159,34 @@ func newAnthropicProviderModule() ProviderModule {
 		},
 		BuildOptions: buildAnthropicMessagesProviderStreamOptions,
 		Models: map[string]Model{
+			"claude-opus-5-5": {
+				ID:               "claude-opus-5-5",
+				Name:             "Claude Opus 5.5",
+				API:              "anthropic-messages",
+				BaseURL:          "https://api.anthropic.com",
+				Reasoning:        true,
+				ThinkingLevelMap: claude55ThinkingLevelMap(),
+				Compat:           &AnthropicMessagesCompat{ForceAdaptiveThinking: &forceAdaptiveThinking},
+				Capabilities:     ModelCapabilities{DefaultReasoningLevel: ModelThinkingLevelMedium, Temperature: CapabilityUnsupported, TopP: CapabilityUnsupported},
+				Input:            []InputType{InputText, InputImage},
+				Cost:             UsageCost{Input: 4, Output: 20, CacheRead: 0.2, CacheWrite: 5},
+				ContextWindow:    1000000,
+				MaxTokens:        128000,
+			},
+			"claude-sonnet-5-5": {
+				ID:               "claude-sonnet-5-5",
+				Name:             "Claude Sonnet 5.5",
+				API:              "anthropic-messages",
+				BaseURL:          "https://api.anthropic.com",
+				Reasoning:        true,
+				ThinkingLevelMap: claude55ThinkingLevelMap(),
+				Compat:           &AnthropicMessagesCompat{ForceAdaptiveThinking: &forceAdaptiveThinking},
+				Capabilities:     ModelCapabilities{DefaultReasoningLevel: ModelThinkingLevelHigh, Temperature: CapabilityUnsupported, TopP: CapabilityUnsupported},
+				Input:            []InputType{InputText, InputImage},
+				Cost:             UsageCost{Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5},
+				ContextWindow:    1000000,
+				MaxTokens:        128000,
+			},
 			"claude-opus-4-6": {
 				ID:            "claude-opus-4-6",
 				Name:          "Claude Opus 4.6",
@@ -332,6 +361,54 @@ func newMistralProviderModule() ProviderModule {
 		BuildOptions:     buildMistralProviderStreamOptions,
 		NormalizeOptions: normalizeMistralProviderStreamOptions,
 		Models: map[string]Model{
+			"mistral-medium-latest": {
+				ID:               "mistral-medium-latest",
+				Name:             "Mistral Medium (latest)",
+				API:              "mistral-conversations",
+				BaseURL:          "https://api.mistral.ai",
+				Reasoning:        true,
+				ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: "none", ModelThinkingLevelMinimal: "", ModelThinkingLevelLow: "", ModelThinkingLevelMedium: "", ModelThinkingLevelHigh: "high", ModelThinkingLevelXHigh: "", ModelThinkingLevelMax: ""},
+				Input:            []InputType{InputText, InputImage},
+				Cost:             UsageCost{Input: 1.5, Output: 7.5, CacheRead: 0.15},
+				ContextWindow:    262144,
+				MaxTokens:        262144,
+			},
+			"mistral-medium-3.5": {
+				ID:               "mistral-medium-3.5",
+				Name:             "Mistral Medium 3.5",
+				API:              "mistral-conversations",
+				BaseURL:          "https://api.mistral.ai",
+				Reasoning:        true,
+				ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: "none", ModelThinkingLevelMinimal: "", ModelThinkingLevelLow: "", ModelThinkingLevelMedium: "", ModelThinkingLevelHigh: "high", ModelThinkingLevelXHigh: "", ModelThinkingLevelMax: ""},
+				Input:            []InputType{InputText, InputImage},
+				Cost:             UsageCost{Input: 1.5, Output: 7.5, CacheRead: 0},
+				ContextWindow:    262144,
+				MaxTokens:        262144,
+			},
+			"zai-glm-5-2": {
+				ID:               "zai-glm-5-2",
+				Name:             "GLM-5.2",
+				API:              "mistral-conversations",
+				BaseURL:          "https://api.mistral.ai",
+				Reasoning:        true,
+				ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: "none", ModelThinkingLevelMinimal: "", ModelThinkingLevelLow: "", ModelThinkingLevelMedium: "", ModelThinkingLevelHigh: "high", ModelThinkingLevelXHigh: "", ModelThinkingLevelMax: "max"},
+				Input:            []InputType{InputText},
+				Cost:             UsageCost{Input: 1.4, Output: 4.4, CacheRead: 0.14},
+				ContextWindow:    1000000,
+				MaxTokens:        131072,
+			},
+			"zai-glm-5-3": {
+				ID:               "zai-glm-5-3",
+				Name:             "GLM-5.3",
+				API:              "mistral-conversations",
+				BaseURL:          "https://api.mistral.ai",
+				Reasoning:        true,
+				ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: "", ModelThinkingLevelMinimal: "", ModelThinkingLevelLow: "low", ModelThinkingLevelMedium: "", ModelThinkingLevelHigh: "high", ModelThinkingLevelXHigh: "", ModelThinkingLevelMax: "max"},
+				Input:            []InputType{InputText},
+				Cost:             UsageCost{Input: 1.4, Output: 4.4, CacheRead: 0.14},
+				ContextWindow:    1000000,
+				MaxTokens:        131072,
+			},
 			"mistral-large-latest": {
 				ID:            "mistral-large-latest",
 				Name:          "Mistral Large",
@@ -344,15 +421,16 @@ func newMistralProviderModule() ProviderModule {
 				MaxTokens:     4096,
 			},
 			"mistral-small-latest": {
-				ID:            "mistral-small-latest",
-				Name:          "Mistral Small",
-				API:           "mistral-conversations",
-				BaseURL:       "https://api.mistral.ai",
-				Reasoning:     true,
-				Input:         []InputType{InputText},
-				Cost:          UsageCost{Input: 0.2, Output: 0.6},
-				ContextWindow: 32000,
-				MaxTokens:     4096,
+				ID:               "mistral-small-latest",
+				Name:             "Mistral Small (latest)",
+				API:              "mistral-conversations",
+				BaseURL:          "https://api.mistral.ai",
+				Reasoning:        true,
+				ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: "none", ModelThinkingLevelMinimal: "", ModelThinkingLevelLow: "", ModelThinkingLevelMedium: "", ModelThinkingLevelHigh: "high", ModelThinkingLevelXHigh: "", ModelThinkingLevelMax: ""},
+				Input:            []InputType{InputText, InputImage},
+				Cost:             UsageCost{Input: 0.15, Output: 0.6, CacheRead: 0.015},
+				ContextWindow:    256000,
+				MaxTokens:        256000,
 			},
 			"pixtral-large-latest": {
 				ID:            "pixtral-large-latest",
@@ -392,6 +470,7 @@ func newMistralProviderModule() ProviderModule {
 }
 
 func newOpenAICodexProviderModule() ProviderModule {
+	supportsMidConvoSystemMessages := true
 	return ProviderModule{
 		Provider: "openai-codex",
 		Auth: ProviderAuth{
@@ -409,6 +488,51 @@ func newOpenAICodexProviderModule() ProviderModule {
 		BuildOptions:     buildOpenAICodexProviderStreamOptions,
 		NormalizeOptions: normalizeOpenAICodexProviderStreamOptions,
 		Models: map[string]Model{
+			"gpt-6.1-sol": {
+				ID:               "gpt-6.1-sol",
+				Name:             "GPT-6.1 Sol",
+				API:              "openai-codex-responses",
+				BaseURL:          "https://chatgpt.com/backend-api",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT6ThinkingLevelMap("gpt-6.1-sol", true),
+				Capabilities:     ModelCapabilities{DefaultReasoningLevel: ModelThinkingLevelMedium, Temperature: CapabilityUnsupported, TopP: CapabilityUnsupported},
+				Input:            []InputType{InputText, InputImage},
+				ContextWindow:    272000,
+				MaxTokens:        128000,
+				Cost:             UsageCost{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5},
+				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5}}},
+				Compat:           &OpenAIResponsesCompat{SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
+			},
+			"gpt-6-sol": {
+				ID:               "gpt-6-sol",
+				Name:             "GPT-6 Sol",
+				API:              "openai-codex-responses",
+				BaseURL:          "https://chatgpt.com/backend-api",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT6ThinkingLevelMap("gpt-6-sol", true),
+				Capabilities:     openAIResponsesSamplingCapabilities("", []ModelThinkingLevel{ModelThinkingLevelOff}),
+				Input:            []InputType{InputText, InputImage},
+				ContextWindow:    272000,
+				MaxTokens:        128000,
+				Cost:             UsageCost{Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5},
+				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 4, Output: 15, CacheRead: 0.4, CacheWrite: 5}}},
+				Compat:           &OpenAIResponsesCompat{SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
+			},
+			"gpt-6-luna": {
+				ID:               "gpt-6-luna",
+				Name:             "GPT-6 Luna",
+				API:              "openai-codex-responses",
+				BaseURL:          "https://chatgpt.com/backend-api",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT6ThinkingLevelMap("gpt-6-luna", true),
+				Capabilities:     openAIResponsesSamplingCapabilities("", []ModelThinkingLevel{ModelThinkingLevelOff}),
+				Input:            []InputType{InputText, InputImage},
+				ContextWindow:    272000,
+				MaxTokens:        128000,
+				Cost:             UsageCost{Input: 0.1, Output: 0.5, CacheRead: 0.01, CacheWrite: 0.125},
+				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 0.2, Output: 0.75, CacheRead: 0.02, CacheWrite: 0.25}}},
+				Compat:           &OpenAIResponsesCompat{SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
+			},
 			"gpt-5.5": {
 				ID:               "gpt-5.5",
 				Name:             "GPT-5.5",
@@ -421,6 +545,7 @@ func newOpenAICodexProviderModule() ProviderModule {
 				MaxTokens:        128000,
 				Cost:             UsageCost{Input: 5, Output: 30, CacheRead: 0.5},
 				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 10, Output: 45, CacheRead: 1}}},
+				Compat:           &OpenAIResponsesCompat{SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
 			},
 			"gpt-5.6-sol": {
 				ID:               "gpt-5.6-sol",
@@ -428,12 +553,13 @@ func newOpenAICodexProviderModule() ProviderModule {
 				API:              "openai-codex-responses",
 				BaseURL:          "https://chatgpt.com/backend-api",
 				Reasoning:        true,
-				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
+				ThinkingLevelMap: openAICodexGPT56ThinkingLevelMap(),
 				Input:            []InputType{InputText, InputImage},
 				ContextWindow:    272000,
 				MaxTokens:        128000,
-				Cost:             UsageCost{Input: 5, Output: 30, CacheRead: 0.5, CacheWrite: 6.25},
-				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 10, Output: 45, CacheRead: 1, CacheWrite: 12.5}}},
+				Cost:             UsageCost{Input: 4, Output: 20, CacheRead: 0.4, CacheWrite: 5},
+				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 8, Output: 30, CacheRead: 0.8, CacheWrite: 10}}},
+				Compat:           &OpenAIResponsesCompat{SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
 			},
 			"gpt-5.6-terra": {
 				ID:               "gpt-5.6-terra",
@@ -441,12 +567,13 @@ func newOpenAICodexProviderModule() ProviderModule {
 				API:              "openai-codex-responses",
 				BaseURL:          "https://chatgpt.com/backend-api",
 				Reasoning:        true,
-				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
+				ThinkingLevelMap: openAICodexGPT56ThinkingLevelMap(),
 				Input:            []InputType{InputText, InputImage},
 				ContextWindow:    272000,
 				MaxTokens:        128000,
 				Cost:             UsageCost{Input: 2, Output: 12, CacheRead: 0.2, CacheWrite: 2.5},
 				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 4, Output: 18, CacheRead: 0.4, CacheWrite: 5}}},
+				Compat:           &OpenAIResponsesCompat{SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
 			},
 			"gpt-5.6-luna": {
 				ID:               "gpt-5.6-luna",
@@ -454,12 +581,13 @@ func newOpenAICodexProviderModule() ProviderModule {
 				API:              "openai-codex-responses",
 				BaseURL:          "https://chatgpt.com/backend-api",
 				Reasoning:        true,
-				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
+				ThinkingLevelMap: openAICodexGPT56ThinkingLevelMap(),
 				Input:            []InputType{InputText, InputImage},
 				ContextWindow:    272000,
 				MaxTokens:        128000,
 				Cost:             UsageCost{Input: 0.2, Output: 1.2, CacheRead: 0.02, CacheWrite: 0.25},
 				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 0.4, Output: 1.8, CacheRead: 0.04, CacheWrite: 0.5}}},
+				Compat:           &OpenAIResponsesCompat{SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
 			},
 			"gpt-6-astra": {
 				ID:               "gpt-6-astra",
@@ -467,12 +595,14 @@ func newOpenAICodexProviderModule() ProviderModule {
 				API:              "openai-codex-responses",
 				BaseURL:          "https://chatgpt.com/backend-api",
 				Reasoning:        true,
-				ThinkingLevelMap: openAIAstraThinkingLevelMap(),
+				ThinkingLevelMap: openAIGPT6ThinkingLevelMap("gpt-6-astra", true),
+				Capabilities:     ModelCapabilities{Temperature: CapabilityUnsupported, TopP: CapabilityUnsupported},
 				Input:            []InputType{InputText, InputImage},
 				ContextWindow:    272000,
 				MaxTokens:        128000,
 				Cost:             UsageCost{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5},
 				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25}}},
+				Compat:           &OpenAIResponsesCompat{SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
 			},
 			"gpt-5.1": {
 				ID:            "gpt-5.1",
@@ -556,6 +686,7 @@ func newOpenAICodexProviderModule() ProviderModule {
 }
 
 func newOpenAIResponsesProviderModule() ProviderModule {
+	supportsMidConvoSystemMessages := true
 	supportsExplicitPromptCacheMode := true
 	return ProviderModule{
 		Provider: "openai",
@@ -574,35 +705,67 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 		BuildOptions:     buildOpenAIResponsesProviderStreamOptions,
 		NormalizeOptions: normalizeOpenAIResponsesProviderStreamOptions,
 		Models: map[string]Model{
+			"gpt-6.1-sol": {
+				ID:               "gpt-6.1-sol",
+				Name:             "GPT-6.1 Sol",
+				API:              "openai-responses",
+				BaseURL:          "https://api.openai.com",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT6ThinkingLevelMap("gpt-6.1-sol", false),
+				Capabilities:     ModelCapabilities{DefaultReasoningLevel: ModelThinkingLevelMedium, Temperature: CapabilityUnsupported, TopP: CapabilityUnsupported},
+				Input:            []InputType{InputText, InputImage},
+				ContextWindow:    272000,
+				MaxTokens:        128000,
+				Cost:             UsageCost{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5},
+				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5}}},
+				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode, SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
+			},
+			"gpt-6-sol": {
+				ID:               "gpt-6-sol",
+				Name:             "GPT-6 Sol",
+				API:              "openai-responses",
+				BaseURL:          "https://api.openai.com",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT6ThinkingLevelMap("gpt-6-sol", false),
+				Capabilities:     openAIResponsesSamplingCapabilities("", []ModelThinkingLevel{ModelThinkingLevelOff}),
+				Input:            []InputType{InputText, InputImage},
+				ContextWindow:    272000,
+				MaxTokens:        128000,
+				Cost:             UsageCost{Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5},
+				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 4, Output: 15, CacheRead: 0.4, CacheWrite: 5}}},
+				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode, SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
+			},
+			"gpt-6-luna": {
+				ID:               "gpt-6-luna",
+				Name:             "GPT-6 Luna",
+				API:              "openai-responses",
+				BaseURL:          "https://api.openai.com",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT6ThinkingLevelMap("gpt-6-luna", false),
+				Capabilities:     openAIResponsesSamplingCapabilities("", []ModelThinkingLevel{ModelThinkingLevelOff}),
+				Input:            []InputType{InputText, InputImage},
+				ContextWindow:    272000,
+				MaxTokens:        128000,
+				Cost:             UsageCost{Input: 0.1, Output: 0.5, CacheRead: 0.01, CacheWrite: 0.125},
+				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 0.2, Output: 0.75, CacheRead: 0.02, CacheWrite: 0.25}}},
+				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode, SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
+			},
 			"gpt-6-astra": {
 				ID:               "gpt-6-astra",
 				Name:             "GPT-6 Astra",
 				API:              "openai-responses",
 				BaseURL:          "https://api.openai.com",
 				Reasoning:        true,
-				ThinkingLevelMap: openAIAstraThinkingLevelMap(),
+				ThinkingLevelMap: openAIGPT6ThinkingLevelMap("gpt-6-astra", false),
+				Capabilities:     ModelCapabilities{Temperature: CapabilityUnsupported, TopP: CapabilityUnsupported},
 				Input:            []InputType{InputText, InputImage},
 				ContextWindow:    272000,
 				MaxTokens:        128000,
 				Cost:             UsageCost{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5},
 				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25}}},
-				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode},
+				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode, SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
 			},
-			"gpt-5.6": {
-				ID:               "gpt-5.6",
-				Name:             "GPT-5.6",
-				API:              "openai-responses",
-				BaseURL:          "https://api.openai.com",
-				Reasoning:        true,
-				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
-				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode},
-				Capabilities:     openAIResponsesSamplingCapabilities(ModelThinkingLevelMedium, openAIGPT56ReasoningLevels()),
-				Input:            []InputType{InputText, InputImage},
-				Cost:             UsageCost{Input: 4, Output: 20, CacheRead: 0.4, CacheWrite: 5},
-				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 8, Output: 30, CacheRead: 0.8, CacheWrite: 10}}},
-				ContextWindow:    1050000,
-				MaxTokens:        128000,
-			},
+
 			"gpt-5.6-sol": {
 				ID:               "gpt-5.6-sol",
 				Name:             "GPT-5.6 Sol",
@@ -610,12 +773,12 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				BaseURL:          "https://api.openai.com",
 				Reasoning:        true,
 				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
-				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode},
+				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode, SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
 				Capabilities:     openAIResponsesSamplingCapabilities(ModelThinkingLevelMedium, openAIGPT56ReasoningLevels()),
 				Input:            []InputType{InputText, InputImage},
 				Cost:             UsageCost{Input: 4, Output: 20, CacheRead: 0.4, CacheWrite: 5},
 				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 8, Output: 30, CacheRead: 0.8, CacheWrite: 10}}},
-				ContextWindow:    1050000,
+				ContextWindow:    272000,
 				MaxTokens:        128000,
 			},
 			"gpt-5.6-terra": {
@@ -625,12 +788,12 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				BaseURL:          "https://api.openai.com",
 				Reasoning:        true,
 				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
-				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode},
+				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode, SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
 				Capabilities:     openAIResponsesSamplingCapabilities(ModelThinkingLevelMedium, openAIGPT56ReasoningLevels()),
 				Input:            []InputType{InputText, InputImage},
 				Cost:             UsageCost{Input: 2, Output: 12, CacheRead: 0.2, CacheWrite: 2.5},
 				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 4, Output: 18, CacheRead: 0.4, CacheWrite: 5}}},
-				ContextWindow:    1050000,
+				ContextWindow:    272000,
 				MaxTokens:        128000,
 			},
 			"gpt-5.6-luna": {
@@ -640,12 +803,12 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				BaseURL:          "https://api.openai.com",
 				Reasoning:        true,
 				ThinkingLevelMap: openAIGPT56ThinkingLevelMap(),
-				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode},
+				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode, SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
 				Capabilities:     openAIResponsesSamplingCapabilities(ModelThinkingLevelMedium, openAIGPT56ReasoningLevels()),
 				Input:            []InputType{InputText, InputImage},
 				Cost:             UsageCost{Input: 0.2, Output: 1.2, CacheRead: 0.02, CacheWrite: 0.25},
 				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 0.4, Output: 1.8, CacheRead: 0.04, CacheWrite: 0.5}}},
-				ContextWindow:    1050000,
+				ContextWindow:    272000,
 				MaxTokens:        128000,
 			},
 			"gpt-5.1": {
@@ -686,6 +849,7 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				Cost:             UsageCost{Input: 2.5, Output: 15, CacheRead: 0.25},
 				ContextWindow:    272000,
 				MaxTokens:        128000,
+				Compat:           &OpenAIResponsesCompat{SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
 			},
 			"gpt-5.4-mini": {
 				ID:            "gpt-5.4-mini",
@@ -697,6 +861,7 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				Cost:          UsageCost{Input: 0.75, Output: 4.5, CacheRead: 0.075},
 				ContextWindow: 272000,
 				MaxTokens:     128000,
+				Compat:        &OpenAIResponsesCompat{SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
 			},
 		},
 	}
@@ -712,6 +877,12 @@ func openAIGPT56ThinkingLevelMap() ThinkingLevelMap {
 		ModelThinkingLevelXHigh:   "xhigh",
 		ModelThinkingLevelMax:     "max",
 	}
+}
+
+func openAICodexGPT56ThinkingLevelMap() ThinkingLevelMap {
+	levels := openAIGPT56ThinkingLevelMap()
+	levels[ModelThinkingLevelMinimal] = "low"
+	return levels
 }
 
 func openAIGPT51ThinkingLevelMap() ThinkingLevelMap {
@@ -820,7 +991,19 @@ func newKimiCodingProviderModule() ProviderModule {
 	}
 }
 
-// Snapshot from pi-mono f3c672245 (2026-09-11); Astra does not support Off.
-func openAIAstraThinkingLevelMap() ThinkingLevelMap {
+// Snapshot from pi-mono 8ce69e9d2 (2026-10-01); Astra and 6.1 Sol reject Off.
+func openAIGPT6ThinkingLevelMap(id string, codex bool) ThinkingLevelMap {
+	levels := openAIGPT56ThinkingLevelMap()
+	if id == "gpt-6-astra" || id == "gpt-6.1-sol" {
+		levels[ModelThinkingLevelOff] = ""
+	}
+	if codex {
+		levels[ModelThinkingLevelMinimal] = "low"
+	}
+	return levels
+}
+
+// Snapshot from pi-mono 8ce69e9d2 (2026-10-01).
+func claude55ThinkingLevelMap() ThinkingLevelMap {
 	return ThinkingLevelMap{ModelThinkingLevelOff: "", ModelThinkingLevelMinimal: "", ModelThinkingLevelLow: "low", ModelThinkingLevelMedium: "medium", ModelThinkingLevelHigh: "high", ModelThinkingLevelXHigh: "xhigh", ModelThinkingLevelMax: "max"}
 }
