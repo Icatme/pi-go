@@ -554,3 +554,60 @@
 - Root/examples full tests, race and vet passed in the repair pass. After the
   version-only change, CLI tests and all examples tests pass; examples resolves
   the local module as v0.12.0. A compiled native CLI prints pigo 0.12.0.
+
+## 2026-10-02: Design MCP Codemode with wazero
+
+- Add docs/design-codemode-wazero.md as a draft based on Pi v1.0.0 and the
+  official MCP Go SDK v1.8.0 / protocol 2026-07-28. Separate WASM execution,
+  QuickJS scripting, MCP connectivity, exposure/search, nested tool lifecycle,
+  branch storage and the task-facing application boundary.
+- Verify dependency maintenance and Go-version requirements. Correct the Pi
+  1.0 exposure baseline to four modes; MCP codemode maps to generic deferred.
+  Specify hidden enforcement at discovery and execution, ordered pattern rules,
+  cancellation, stdio process-tree ownership and checkpoint limitations.
+- Re-run temporary compiled Windows probes outside the repository: QuickJS
+  async calls, heap and loop deadlines, SDK default modern protocol, and HTTP
+  JSON raw-number preservation under modern and legacy protocol versions.
+  Record prototype limits, including unfinished SSE/stdio/concurrent raw capture
+  and production trap mapping. These are feasibility evidence, not full parity.
+- Documentation only. No product source/dependency/version changes, root or
+  examples test runs, live provider checks, UI acceptance, commit or publication.
+- Consolidate the two design reviews against master 5907151 and the exact
+  unmerged PR14 head c10ba730dc2ca8063631433f2fda11dcaf52e045. Keep the selected
+  route; narrow the first delivery to its caller-owned MCP sessions and explicit
+  whitelist, with no additional task Runtime. PR14 tests were not rerun here.
+- Specify machine-readable errors/execution facts, nested Suspend rejection,
+  two-level scheduling, after-hook result projection, complete basic ledgers,
+  pre-clone event budgets and host permits retained until actual executor exit.
+  Separate raw/SDK cache/identity binding and atomic branch CAS into gated phases;
+  document independent OAuth/HTTP POST replay control and final permission checks.
+- Add a repository-external compiled Windows stack probe using the same pinned
+  WASM. At 64 KiB and 512 KiB it catches RangeError and continues with 1+2=3.
+  Correct the probe's initial InternalError expectation to the observed exception.
+  Update acceptance cases and evidence limits; only documentation changes in repo.
+
+## 2026-10-02: Review and merge PR13 and PR14
+
+- Review PR13 at 533105a and stacked PR14 at c10ba73 in an isolated managed
+  worktree. The optional MCP adapter does not implement the proposed Codemode
+  runtime; the later execution-contract gates remain required.
+- Reproduce examples tests failing before compilation with -mod=readonly:
+  the root MCP SDK graph selects x/sys v0.41.0 but examples still requires
+  v0.37.0. Synchronize only examples/go.mod and examples/go.sum in commit
+  49910c79cf6266d0a29e31a26dfde39bb1536a64; readonly examples validation then passes.
+- Confirm official SDK v1.8.0 was released on 2026-09-14 and upstream had a
+  2026-10-01 commit. Its Go 1.25 minimum is compatible with the local Go 1.26.4.
+- With GOWORK=off and both live-test flags disabled, focused Token Harbor/MCP
+  tests, all root and examples tests, root/examples vet and build, and both
+  module verifications pass. Race suites pass for pkg/pigo, agent and
+  agent/mcptools. Formatting/diff checks pass; no live provider or UI acceptance.
+- Mark both drafts ready and merge PR13 with its exact head, retaining ancestry
+  at 75f0258106c2e4bb26b848de4c3aab411943201a. Retarget PR14 to master, push the
+  integration fix, and merge its exact validated head at
+  4398f8565ab82c460ddafc5fcfc20a35ef1187db. Linux CI passes for PR13's merge
+  (run 36957879920) and PR14's final head (run 36957944107).
+- Verify both PRs are merged, both reviewed heads are ancestors of master, and
+  the final master tree equals the validated 49910c7 tree. Fast-forward the local
+  master to 4398f85 after verifying the pending worklog and design bytes remain
+  unchanged. Update the design's implementation baseline without committing the
+  pending design work; no version bump, tag or release.
