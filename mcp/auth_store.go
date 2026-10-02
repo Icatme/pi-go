@@ -27,6 +27,21 @@ var (
 	errOAuthStore              = errors.New("MCP OAuth credential storage failed")
 )
 
+// Keep host diagnostics reachable without putting a path, JSON or credential
+// in the public error string. Only the host may choose to inspect the cause.
+type authStoreFailure struct {
+	operation string
+	cause     error
+}
+
+func (*authStoreFailure) Error() string        { return errOAuthStore.Error() }
+func (e *authStoreFailure) Unwrap() error      { return e.cause }
+func (*authStoreFailure) Is(target error) bool { return target == errOAuthStore }
+
+func authStoreCause(operation string, cause error) error {
+	return &authStoreFailure{operation: operation, cause: cause}
+}
+
 // AuthKey isolates credentials by server configuration, host account, issuer and
 // OAuth client. NewOAuth canonicalizes URL and derives ClientID when omitted.
 type AuthKey struct {
@@ -115,9 +130,10 @@ func (s *MemoryCredentialStore) CompareAndSwap(ctx context.Context, key AuthKey,
 // (especially its ACL on Windows). Files use mode 0600 on systems honoring it;
 // this is storage, not an encrypted keychain.
 //
-// All readers and writers use a cross-process exclusive lock. A crashed process
-// may leave <path>.lock; it is deliberately not removed based on a stale-time
-// guess. After checking no writer is alive, the host can remove that lock.
+// All readers and writers use a cross-process exclusive directory lock. A
+// crashed process may leave <path>.lock; it is deliberately not removed based
+// on a stale-time guess. After checking no writer is alive, the host can remove
+// that empty directory. No open lock-file handle crosses acquisition/release.
 type FileCredentialStore struct {
 	path string
 }
@@ -129,7 +145,7 @@ func NewFileCredentialStore(path string) (*FileCredentialStore, error) {
 	path = filepath.Clean(path)
 	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
-		return nil, errOAuthStore
+		return nil, authStoreCause("resolve_parent", err)
 	}
 	path = filepath.Join(parent, filepath.Base(path))
 	if err := authCheckRegularFile(path); err != nil {
@@ -143,7 +159,7 @@ type authStoreDocument struct {
 	Entries map[string]CredentialSnapshot `json:"entries"`
 }
 
-func (s *FileCredentialStore) Load(ctx context.Context, key AuthKey) (CredentialSnapshot, error) {
+func (s *FileCredentialStore) Load(ctx context.Context, key AuthKey) (snapshot CredentialSnapshot, retErr error) {
 	if err := ctx.Err(); err != nil {
 		return CredentialSnapshot{}, err
 	}
@@ -154,7 +170,7 @@ func (s *FileCredentialStore) Load(ctx context.Context, key AuthKey) (Credential
 	if err != nil {
 		return CredentialSnapshot{}, err
 	}
-	defer unlock()
+	defer func() { retErr = errors.Join(retErr, unlock()) }()
 	doc, err := s.read()
 	if err != nil {
 		return CredentialSnapshot{}, err
@@ -165,7 +181,7 @@ func (s *FileCredentialStore) Load(ctx context.Context, key AuthKey) (Credential
 	return cloneCredentialSnapshot(doc.Entries[authKeyID(key)]), nil
 }
 
-func (s *FileCredentialStore) CompareAndSwap(ctx context.Context, key AuthKey, version uint64, credential *OAuthCredential) (uint64, error) {
+func (s *FileCredentialStore) CompareAndSwap(ctx context.Context, key AuthKey, version uint64, credential *OAuthCredential) (nextVersion uint64, retErr error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -176,7 +192,7 @@ func (s *FileCredentialStore) CompareAndSwap(ctx context.Context, key AuthKey, v
 	if err != nil {
 		return 0, err
 	}
-	defer unlock()
+	defer func() { retErr = errors.Join(retErr, unlock()) }()
 	doc, err := s.read()
 	if err != nil {
 		return 0, err
@@ -208,14 +224,20 @@ func (s *FileCredentialStore) read() (authStoreDocument, error) {
 		return doc, nil
 	}
 	if err != nil {
-		return doc, errOAuthStore
+		return doc, authStoreCause("open", err)
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, authMaxStoreBytes+1))
-	if err != nil || len(data) > authMaxStoreBytes {
+	if err != nil {
+		return doc, authStoreCause("read", err)
+	}
+	if len(data) > authMaxStoreBytes {
 		return doc, errOAuthStore
 	}
-	if err := json.Unmarshal(data, &doc); err != nil || doc.Format != 1 || doc.Entries == nil {
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return doc, authStoreCause("decode", err)
+	}
+	if doc.Format != 1 || doc.Entries == nil {
 		return doc, errOAuthStore
 	}
 	return doc, nil
@@ -224,35 +246,38 @@ func (s *FileCredentialStore) read() (authStoreDocument, error) {
 func (s *FileCredentialStore) publish(ctx context.Context, data []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(s.path), ".mcp-oauth-*")
 	if err != nil {
-		return errOAuthStore
+		return authStoreCause("create_temp", err)
 	}
 	name := f.Name()
 	defer os.Remove(name)
 	defer f.Close()
 	if err := f.Chmod(0600); err != nil {
-		return errOAuthStore
+		return authStoreCause("chmod", err)
 	}
 	if _, err := f.Write(data); err != nil {
-		return errOAuthStore
+		return authStoreCause("write", err)
 	}
 	if err := f.Sync(); err != nil {
-		return errOAuthStore
+		return authStoreCause("sync", err)
 	}
 	if err := f.Close(); err != nil {
-		return errOAuthStore
+		return authStoreCause("close", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := os.Rename(name, s.path); err != nil {
-		return errOAuthStore
+		return authStoreCause("rename", err)
 	}
 	return nil
 }
 
-func (s *FileCredentialStore) lock(ctx context.Context) (func(), error) {
+func (s *FileCredentialStore) lock(ctx context.Context) (func() error, error) {
 	// A fixed lock pathname makes the compare/read/write one transaction across
 	// independent store objects and processes, rather than just a Go mutex.
+	// Mkdir has no persistent file handle. A CREATE_NEW lock file can instead
+	// return ERROR_ACCESS_DENIED when another Windows process races its deletion
+	// with an open attempt; that is not a credential write failure or an ErrExist.
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 	lockPath := s.path + ".lock"
@@ -260,12 +285,17 @@ func (s *FileCredentialStore) lock(ctx context.Context) (func(), error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		err := os.Mkdir(lockPath, 0700)
 		if err == nil {
-			return func() { f.Close(); os.Remove(lockPath) }, nil
+			return func() error {
+				if err := os.Remove(lockPath); err != nil {
+					return authStoreCause("unlock", err)
+				}
+				return nil
+			}, nil
 		}
 		if !errors.Is(err, os.ErrExist) {
-			return nil, errOAuthStore
+			return nil, authStoreCause("lock", err)
 		}
 		timer := time.NewTimer(20 * time.Millisecond)
 		select {
@@ -285,7 +315,10 @@ func authCheckRegularFile(path string) error {
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil {
+		return authStoreCause("stat", err)
+	}
+	if !info.Mode().IsRegular() {
 		return errOAuthStore
 	}
 	return nil

@@ -758,6 +758,14 @@
 - Own explicit HTTP/stdio connection attempts, bounded cleanup and identity/policy
   retirement. Windows attaches a suspended hidden process to a kill-on-close Job;
   Unix uses process groups. Tests cover process-tree exit and repeated cleanup.
+- Fix a reproduced Windows cross-process CAS failure: CREATE_NEW could return
+  AccessDenied during lock-file deletion. Load already held the common lock;
+  replace its file-handle lifecycle with an atomic directory lock. Keep bounded
+  contention waiting and reject actual permission errors without retry. Retain
+  original storage/unlock causes behind safe error text. CAS pressure passes
+  500 iterations (2000 child processes); related race checks pass ten iterations,
+  and complete MCP ordinary/race tests pass. Explicit crash recovery still belongs
+  to the host. Native MCP race contracts join the managed PR's platform matrix.
 - Guard tool sends at physical handoff after host permission and token retrieval.
   Count accepted handoffs without claiming socket delivery, preserve trusted SDK
   terminal/input-required facts, and block duplicate sends including OAuth replay.

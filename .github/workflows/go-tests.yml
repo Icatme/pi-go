@@ -36,7 +36,7 @@ jobs:
           go vet -mod=readonly ./...
 
   codemode:
-    name: Codemode (${{ matrix.os }})
+    name: Codemode and MCP (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +57,7 @@ jobs:
             go.sum
             examples/go.sum
       - name: Sandbox and common execution contract
-        run: go test -mod=readonly -count=1 -race ./codemode/... ./agent ./agent/mcptools ./agent/codemodetool
+        run: go test -mod=readonly -count=1 -race ./codemode/... ./mcp ./agent ./agent/mcptools ./agent/codemodetool
       - name: Compile local MCP example
         working-directory: examples
         run: go build -mod=readonly -o mcp-codemode-example.exe ./mcp-codemode

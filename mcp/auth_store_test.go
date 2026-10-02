@@ -124,7 +124,7 @@ func TestOAuthFileStoreLockCancellationAndNoStaleBreak(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path+".lock", []byte("existing writer"), 0600); err != nil {
+	if err := os.Mkdir(path+".lock", 0700); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
@@ -137,6 +137,53 @@ func TestOAuthFileStoreLockCancellationAndNoStaleBreak(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("canceled CAS published credentials: %v", err)
+	}
+}
+
+func TestOAuthFileStoreLockDirectoryAndReleaseFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	store, err := NewFileCredentialStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := store.lock(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(path + ".lock")
+	if err != nil || !info.IsDir() {
+		t.Fatalf("lock retains a Windows file handle lifecycle: info=%v err=%v", info, err)
+	}
+	// A second independent object must respect the same directory ownership.
+	other, err := NewFileCredentialStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := other.Load(ctx, authStoreTestKey()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Load bypassed another object's lock: %v", err)
+	}
+	if err := unlock(); err != nil {
+		t.Fatal(err)
+	}
+	// Lost ownership is a host-visible storage failure with the original cause;
+	// it cannot be swallowed or presented as an ordinary successful release.
+	err = unlock()
+	if !errors.Is(err, errOAuthStore) || !errors.Is(err, os.ErrNotExist) || err.Error() != errOAuthStore.Error() {
+		t.Fatalf("release failure lost safe error/cause: %v", err)
+	}
+}
+
+func TestOAuthFileStoreErrorRetainsCauseWithoutPrivatePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private-account-path", "credentials.json")
+	_, err := NewFileCredentialStore(path)
+	if !errors.Is(err, errOAuthStore) || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), path) {
+		t.Fatalf("storage error lost cause or exposed caller path: %v", err)
+	}
+	var cause *os.PathError
+	if !errors.As(err, &cause) {
+		t.Fatal("storage error no longer exposes original Go OS cause to host")
 	}
 }
 
@@ -190,13 +237,33 @@ func TestOAuthFileStoreCASProcess(t *testing.T) {
 	}
 	store, err := NewFileCredentialStore(os.Getenv("PI_GO_OAUTH_STORE_PATH"))
 	if err != nil {
-		t.Fatal(err)
+		authStoreTestFatal(t, err)
 	}
 	if _, err := store.CompareAndSwap(t.Context(), authStoreTestKey(), 0, authStoreTestCredential()); err == nil {
 		fmt.Println("oauth-cas-winner")
 	} else if errors.Is(err, ErrOAuthCredentialConflict) {
 		fmt.Println("oauth-cas-conflict")
 	} else {
-		t.Fatal(err)
+		authStoreTestFatal(t, err)
 	}
+}
+
+func authStoreTestFatal(t *testing.T, err error) {
+	t.Helper()
+	var failure *authStoreFailure
+	var pathError *os.PathError
+	var linkError *os.LinkError
+	if errors.As(err, &failure) {
+		// OS errors describe the failed operation. Paths and JSON/token contents
+		// are deliberately absent from child-process diagnostics.
+		switch {
+		case errors.As(failure.cause, &pathError):
+			t.Fatalf("%v: operation=%s go_op=%s cause=%T: %v", err, failure.operation, pathError.Op, pathError.Err, pathError.Err)
+		case errors.As(failure.cause, &linkError):
+			t.Fatalf("%v: operation=%s go_op=%s cause=%T: %v", err, failure.operation, linkError.Op, linkError.Err, linkError.Err)
+		default:
+			t.Fatalf("%v: operation=%s cause_type=%T", err, failure.operation, failure.cause)
+		}
+	}
+	t.Fatal(err)
 }
