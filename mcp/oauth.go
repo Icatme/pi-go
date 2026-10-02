@@ -72,6 +72,10 @@ type OAuthOptions struct {
 	Store CredentialStore
 	// OnChange is called after publication with a secret-free snapshot and no
 	// internal lock held. The host can invalidate or rebuild its MCP session.
+	// A connection fences dispatch until the callback returns or the session is
+	// canceled. On cancellation, the callback may finish after the request so it
+	// can wait for that same session's teardown without deadlocking the SDK.
+	// A panicking connection callback retires the session and rejects dispatch.
 	OnChange func(OAuthState)
 }
 
@@ -148,6 +152,17 @@ func NewOAuth(ctx context.Context, key AuthKey, options OAuthOptions) (*OAuth, e
 			return nil, ErrOAuthConfiguration
 		}
 	}
+	snapshot = cloneCredentialSnapshot(snapshot)
+	if credential := snapshot.Credential; credential != nil && config.PreregisteredClient != nil && credential.ClientID == config.PreregisteredClient.ClientID {
+		// Persisted resolved clients pin identity and registration method, not
+		// obsolete host-managed secrets. Honor current preregistration for both
+		// code exchanges and refreshes without mutating the store on load. DCR
+		// secrets remain owned by the persisted registration.
+		credential.ClientSecret = ""
+		if secret := config.PreregisteredClient.ClientSecretAuth; secret != nil {
+			credential.ClientSecret = secret.ClientSecret
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -155,7 +170,7 @@ func NewOAuth(ctx context.Context, key AuthKey, options OAuthOptions) (*OAuth, e
 	return &OAuth{
 		key: key, config: config, client: &client, metadata: options.MetadataURL,
 		store: options.Store, onChange: options.OnChange, gate: make(chan struct{}, 1),
-		life: life, cancel: cancel, snapshot: cloneCredentialSnapshot(snapshot),
+		life: life, cancel: cancel, snapshot: snapshot,
 	}, nil
 }
 

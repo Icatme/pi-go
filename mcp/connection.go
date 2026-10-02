@@ -53,6 +53,7 @@ type Connection struct {
 	closeErr    error
 	authMu      sync.Mutex
 	authState   OAuthState
+	authPending atomic.Int64
 	revision    atomic.Uint64
 	refreshMu   sync.Mutex
 	mu          sync.RWMutex
@@ -116,6 +117,15 @@ func connect(ctx context.Context, s ServerConfig, scope Scope, generation uint64
 			c.oauth = o
 			c.authState = o.State()
 			o.onPublish = c.authChanged
+			if options.OnChange != nil {
+				o.onPublish = func(state OAuthState) {
+					// Fence before the OAuth gate exposes the published token,
+					// including concurrent requests already preparing dispatch.
+					c.authPending.Add(1)
+					c.authChanged(state)
+				}
+				o.onChange = func(state OAuthState) { c.notifyAuthChanged(options.OnChange, state) }
+			}
 			t.OAuthHandler = o.TokenOnlyHandler()
 		}
 		transport = t
@@ -195,7 +205,13 @@ func (c *Connection) available() error {
 	if c.closed.Load() {
 		return ErrClosed
 	}
-	return c.ctx.Err()
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
+	if c.authPending.Load() != 0 {
+		return ErrNotReady
+	}
+	return nil
 }
 
 func (c *Connection) invalidate() {
@@ -224,6 +240,36 @@ func (c *Connection) authChanged(state OAuthState) {
 		// A token callback can run inside an SDK request. Do not wait for that
 		// same request's teardown while holding its token-source call stack.
 		go func() { _ = c.Close() }()
+	}
+}
+
+func (c *Connection) notifyAuthChanged(notify func(OAuthState), state OAuthState) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer c.authPending.Add(-1)
+		returned := false
+		defer func() {
+			if !returned {
+				// The callback cannot propagate a panic across this handoff.
+				// Fail closed before releasing its dispatch fence instead of
+				// crashing the process or allowing incomplete host policy.
+				_ = recover()
+				c.stale.Store(true)
+				c.cancel()
+				go func() { _ = c.Close() }()
+			}
+		}()
+		notify(state)
+		returned = true
+	}()
+	// The SDK calls Token with its session mutex held. A host callback may
+	// cancel this connection and synchronously wait for Close/SetScope, which
+	// needs that mutex. Cancellation releases this token call while the dispatch
+	// fence still rejects the request; otherwise the callback finishes first.
+	select {
+	case <-done:
+	case <-c.ctx.Done():
 	}
 }
 
@@ -577,16 +623,15 @@ func (c *Connection) ReadResource(ctx context.Context, p *sdk.ReadResourceParams
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.raw(result); err != nil {
+	raw, err := c.raw(result)
+	if err != nil {
 		return nil, &ResponseError{NeedsInput: result.NeedsInput(), Err: err}
 	}
-	out := *result
-	out.Contents = append([]*sdk.ResourceContents(nil), result.Contents...)
-	for i, v := range out.Contents {
-		if v != nil {
-			x := *v
-			out.Contents[i] = &x
-		}
+	// Re-decode the observed response with the SDK's decoder so all mutable
+	// content, metadata and input requests are detached from its cached result.
+	var out sdk.ReadResourceResult
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, &ResponseError{NeedsInput: result.NeedsInput(), Err: err}
 	}
 	if err := c.available(); err != nil {
 		return nil, err

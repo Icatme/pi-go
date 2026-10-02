@@ -190,3 +190,60 @@ func TestAfterHookPanicKeepsCompletedWriteInCodemodeLedger(t *testing.T) {
 		}
 	}
 }
+
+func TestResultValidatorPanicKeepsCompletedWriteInCodemodeLedger(t *testing.T) {
+	for _, caught := range []bool{false, true} {
+		t.Run(map[bool]string{false: "uncaught", true: "caught"}[caught], func(t *testing.T) {
+			original := errors.New("SECRET_VALIDATOR_PANIC")
+			writes, validators := 0, 0
+			leaf := agent.ToolDefinition{Name: "write", Execute: func(context.Context, agent.ToolExecutionContext) (agent.ToolResult, error) {
+				writes++
+				return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: "SECRET_COMPLETED_OUTPUT"}},
+					Execution: &agent.ToolExecutionInfo{Remote: agent.ToolRemoteCompleteReported,
+						Attempts: []agent.ToolSendAttempt{{Number: 1, Remote: agent.ToolRemoteCompleteReported}}}}, nil
+			}, ValidateResult: func(agent.ToolResult) error {
+				validators++
+				panic(original)
+			}}
+			tool, err := New(newSandbox(t), []Binding{Native(leaf, "local")}, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			code := `await tools.write({});`
+			if caught {
+				code = `try { await tools.write({}); } catch(e) { text(e.code+":"+e.reasonCode+":"+e.execution.local+":"+e.execution.remote); } return "survived";`
+			}
+			result, events := runnerCall(t, tool, code, agent.AgentDefinition{}, nil)
+			if writes != 1 || validators != 1 || result.IsError == caught {
+				t.Fatalf("validator panic bypassed effective failure: writes=%d validators=%d result=%+v", writes, validators, result)
+			}
+			if caught && (!strings.Contains(contentText(result.Content), "result_rejected:result_validator_panic:returned:complete_reported") || !strings.Contains(contentText(result.Content), "survived")) {
+				t.Fatalf("validator panic was not catchable with accurate facts: %+v", result)
+			}
+			report := result.ChildCalls
+			if report == nil || len(report.Calls) != 1 || !report.Closed || report.Active != 0 {
+				t.Fatalf("validator panic lost closed ledger: %+v", report)
+			}
+			call := report.Calls[0]
+			if !call.Completed || call.Execution.Local != agent.ToolLocalReturned || call.Execution.Remote != agent.ToolRemoteCompleteReported || len(call.Execution.Attempts) != 1 || call.Execution.Attempts[0].Number != 1 || call.Execution.Attempts[0].Remote != agent.ToolRemoteCompleteReported || call.Failure == nil || call.Failure.Code != agent.ToolFailureResultRejected || call.Failure.Reason != "result_validator_panic" || !errors.Is(call.Err, original) {
+				t.Fatalf("validator panic changed completed write facts: %+v", call)
+			}
+			ends := 0
+			for _, event := range events {
+				if event.Type == agent.EventToolExecutionEnd && event.ParentToolCallID != "" {
+					ends++
+					if !event.IsError || event.Execution == nil || event.Execution.Local != agent.ToolLocalReturned || event.Execution.Remote != agent.ToolRemoteCompleteReported || event.Failure == nil || event.Failure.Code != agent.ToolFailureResultRejected || event.Failure.Reason != "result_validator_panic" {
+						t.Fatalf("validator panic skipped final child event facts: %+v", event)
+					}
+				}
+				raw, err := json.Marshal(event)
+				if err != nil || strings.Contains(string(raw), "SECRET_") {
+					t.Fatalf("validator panic leaked default event data: %s err=%v", raw, err)
+				}
+			}
+			if ends != 1 {
+				t.Fatalf("child end events=%d, want 1", ends)
+			}
+		})
+	}
+}
