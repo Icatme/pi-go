@@ -91,6 +91,8 @@ after hooks. An earlier caller deadline still wins. The Agent owns propagation
 through `ChildToolResolution.Deadline`, without knowing JavaScript or MCP.
 After valid source options have been parsed, directory, child-validation and
 final-permission failures use the same reserved diagnostic budget as VM errors.
+Rejected source options retain the conservative host/configured diagnostic
+budget, without starting directory resolution or a VM.
 Their original Go causes and rejection facts stay available to the host.
 
 `ToolResult.ChildCalls` is the runtime-owned Go recovery ledger, attached after

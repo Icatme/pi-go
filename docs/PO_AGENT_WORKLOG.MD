@@ -988,3 +988,27 @@
   OAuth and wire targeted race regressions also pass three iterations. Keep the
   existing five-platform CI matrix for native validation of the updated PRs.
   No dependency/WASM upgrade, UI/live-provider check, release, tag or merge.
+
+## 2026-10-02: Merge the MCP stack and prepare v0.12.0
+
+- The user explicitly authorized merging PR16, PR17 and PR18 and publishing a
+  version. Merge each exact reviewed head with a merge commit, retargeting the
+  next PR to master only after its parent is merged. PR16 merges as 72068cd,
+  PR17 as 3f08677 and PR18 as b2d12c7; all reviewed heads remain ancestors.
+- Verify the final master tree equals reviewed head 0b895d7. All 12/18/18 PR
+  checks succeeded, including the five native platforms and their duplicate
+  PR-triggered checks. PR17's macOS Intel codemodetool tests complete in 25.572s.
+  Root/examples ordinary and race tests, vet, builds and module checks from the
+  completed repair remain applicable to this unchanged implementation.
+- Use the already reserved source version 0.12.0, following the latest published
+  v0.11.2. The release includes the core transcript/provider updates and restored
+  Token Harbor support already on master, the optional MCP adapter, bounded
+  Codemode, managed MCP connections/OAuth and dynamic tool/resource projection.
+  Release notes must identify the Agent API migration and Go1.26.2 minimum.
+- Correct the source-rejection diagnostic and shared compilation-cache docs to
+  match the final implementation. These release-preparation changes are prose
+  only; no additional dependency or API change is introduced.
+- Package the clean release commit as Windows amd64, Linux amd64/arm64 and macOS
+  amd64/arm64 CLI archives with README.md and SHA256SUMS.txt. Verify embedded VCS
+  identity, executable archive modes, downloaded asset hashes, annotated tag and
+  published Go-module resolution before reporting publication complete.

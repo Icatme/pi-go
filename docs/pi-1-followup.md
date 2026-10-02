@@ -78,7 +78,10 @@ path; a separate OAuth framework or native JS runtime is unnecessary.
 
 Concurrent cold initialization reproduced wazero v1.12.0's unsynchronized version
 cache ([upstream issue](https://github.com/wazero/wazero/issues/2532),
-[merged upstream fix](https://github.com/wazero/wazero/pull/2536)). Serialize only
-our runtime constructors while retaining parallel compilation and execution.
-The fix is not in the pinned release, and no unpublished dependency is injected.
-A cold eight-workflow race regression covers the application entry path.
+[merged upstream fix](https://github.com/wazero/wazero/pull/2536)).
+The pinned QuickJS machine code is now cached for the process lifetime. Runtime
+construction and cold compilation are serialized; VM execution remains parallel
+with independent host imports, memory limits, state, cancellation and Close.
+The upstream constructor fix is not in the pinned release, and no unpublished
+dependency is injected. Concurrent-creation and runtime-isolation regressions
+cover the application entry path.
