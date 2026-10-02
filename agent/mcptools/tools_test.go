@@ -153,16 +153,16 @@ func TestSchemaDriftAndInputValidationBeforeCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tools[0].Execute(t.Context(), "id", map[string]any{}, nil); err == nil {
+	if _, err := tools[0].Execute(t.Context(), agent.ToolExecutionContext{ToolCall: agent.ToolCall{ID: "id"}, Args: map[string]any{}, OnUpdate: nil}); err == nil {
 		t.Fatal("missing argument accepted")
 	}
 	// Caller-visible schema edits must not alter the closure's validation snapshot.
 	tools[0].Parameters["required"] = nil
-	if _, err := tools[0].Execute(t.Context(), "id", map[string]any{}, nil); err == nil {
+	if _, err := tools[0].Execute(t.Context(), agent.ToolExecutionContext{ToolCall: agent.ToolCall{ID: "id"}, Args: map[string]any{}, OnUpdate: nil}); err == nil {
 		t.Fatal("mutated schema bypassed validator")
 	}
 	s.AddTool(&mcp.Tool{Name: "echo", InputSchema: objectSchema}, h)
-	if _, err := tools[0].Execute(t.Context(), "id", map[string]any{"value": "ok"}, nil); err == nil || !strings.Contains(err.Error(), "schema changed") {
+	if _, err := tools[0].Execute(t.Context(), agent.ToolExecutionContext{ToolCall: agent.ToolCall{ID: "id"}, Args: map[string]any{"value": "ok"}, OnUpdate: nil}); err == nil || !strings.Contains(err.Error(), "schema changed") {
 		t.Fatalf("drift err=%v", err)
 	}
 	if calls.Load() != 0 {
@@ -199,7 +199,7 @@ func TestResultFailuresRemainDistinctAndNoRetry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := tools[0].Execute(t.Context(), "id", map[string]any{}, nil)
+			result, err := tools[0].Execute(t.Context(), agent.ToolExecutionContext{ToolCall: agent.ToolCall{ID: "id"}, Args: map[string]any{}, OnUpdate: nil})
 			if err == nil || result.IsError || calls.Load() != 1 {
 				t.Fatalf("result=%+v err=%v calls=%d", result, err, calls.Load())
 			}
@@ -225,7 +225,10 @@ func TestCancellationDoesNotCloseSession(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { _, err := tools[0].Execute(ctx, "id", map[string]any{}, nil); done <- err }()
+	go func() {
+		_, err := tools[0].Execute(ctx, agent.ToolExecutionContext{ToolCall: agent.ToolCall{ID: "id"}, Args: map[string]any{}, OnUpdate: nil})
+		done <- err
+	}()
 	select {
 	case <-entered:
 	case <-time.After(2 * time.Second):
@@ -264,11 +267,11 @@ func TestCallerPolicyAlsoRequiredForDirectCalls(t *testing.T) {
 	}
 	invoke := tools[0].Execute
 	allowed := false
-	tools[0].Execute = func(ctx context.Context, id string, args any, update agent.ToolUpdateFunc) (agent.ToolResult, error) {
+	tools[0].Execute = func(ctx context.Context, execution agent.ToolExecutionContext) (agent.ToolResult, error) {
 		if !allowed {
 			return agent.ToolResult{}, errors.New("caller policy denied")
 		}
-		return invoke(ctx, id, args, update)
+		return invoke(ctx, execution)
 	}
 	call := agent.ToolCall{Name: "echo", Arguments: json.RawMessage(`{}`)}
 	if out := agent.RunToolCall(t.Context(), call, agent.RunToolCallOptions{Tools: tools}); !out.IsError || calls.Load() != 0 {
@@ -350,7 +353,7 @@ func TestNumericArgumentsRemainExactOnWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tools[0].Execute(t.Context(), "direct", map[string]any{"id": int64(9007199254740993), "nested": []any{int64(-9007199254740993)}}, nil); err != nil {
+	if _, err := tools[0].Execute(t.Context(), agent.ToolExecutionContext{ToolCall: agent.ToolCall{ID: "direct"}, Args: map[string]any{"id": int64(9007199254740993), "nested": []any{int64(-9007199254740993)}}, OnUpdate: nil}); err != nil {
 		t.Fatal(err)
 	}
 	call := agent.ToolCall{ID: "call", Name: "number", Arguments: json.RawMessage(`{"id":9007199254740993,"nested":[-9007199254740993]}`)}
@@ -390,9 +393,9 @@ func TestUnsafeSDKResultIsPostExecutionFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := tools[0].Execute(t.Context(), "id", map[string]any{}, nil)
+	result, err := tools[0].Execute(t.Context(), agent.ToolExecutionContext{ToolCall: agent.ToolCall{ID: "id"}, Args: map[string]any{}, OnUpdate: nil})
 	var mapping *ResultError
-	if !errors.As(err, &mapping) || !strings.Contains(err.Error(), "after remote tool execution") || !strings.Contains(err.Error(), "do not retry") || calls.Load() != 1 {
+	if !errors.As(err, &mapping) || !strings.Contains(err.Error(), "after remote response") || !strings.Contains(err.Error(), "do not retry") || calls.Load() != 1 {
 		t.Fatalf("err=%v calls=%d", err, calls.Load())
 	}
 	if len(result.StructuredContent) != 0 || len(mapping.Result.StructuredContent) != 0 || len(result.Content) != 1 || result.Content[0].Text != "exact id: 9007199254740993" {
@@ -490,7 +493,7 @@ func TestDecimalConstraintsAndWireValues(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = tools[0].Execute(t.Context(), "direct", map[string]any{"value": json.Number(test.raw)}, nil)
+			_, err = tools[0].Execute(t.Context(), agent.ToolExecutionContext{ToolCall: agent.ToolCall{ID: "direct"}, Args: map[string]any{"value": json.Number(test.raw)}, OnUpdate: nil})
 			if (err != nil) != test.wantError {
 				t.Fatalf("direct err=%v", err)
 			}

@@ -18,8 +18,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ResultError means a response was received after remote tool execution, but
-// could not be mapped safely. It is not evidence that the operation failed or
+// ResultError means a remote response could not be mapped safely. Its wrapped
+// ToolExecutionError distinguishes a terminal result from nonterminal input.
+// It is not evidence that the operation failed or
 // may be retried. Result retains supported content when available within bounds.
 type ResultError struct {
 	Result agent.ToolResult
@@ -27,7 +28,7 @@ type ResultError struct {
 }
 
 func (e *ResultError) Error() string {
-	return "mcptools: result rejected after remote tool execution; do not retry automatically: " + e.Err.Error()
+	return "mcptools: result rejected after remote response; do not retry automatically: " + e.Err.Error()
 }
 func (e *ResultError) Unwrap() error { return e.Err }
 
@@ -121,35 +122,35 @@ func Discover(ctx context.Context, session *mcp.ClientSession, options Options) 
 					data = []byte(`{}`)
 				}
 				if err != nil || len(data) > o.MaxArgumentBytes || !json.Valid(data) {
-					return nil, fmt.Errorf("mcptools: invalid or oversized arguments")
+					return nil, beforeCallError("argument_invalid", "arguments", fmt.Errorf("mcptools: invalid or oversized arguments"))
 				}
 				var args map[string]any
 				d := json.NewDecoder(bytes.NewReader(data))
 				d.UseNumber()
 				if err := d.Decode(&args); err != nil {
-					return nil, err
+					return nil, beforeCallError("argument_invalid", "arguments", err)
 				}
 				if args == nil {
 					args = map[string]any{}
 				}
 				if _, err := validationProjection(args); err != nil {
-					return nil, err
+					return nil, beforeCallError("argument_invalid", failureReason(err, "numeric_domain"), err)
 				}
 				return args, nil
 			},
-			Execute: func(callCtx context.Context, _ string, args any, _ agent.ToolUpdateFunc) (agent.ToolResult, error) {
+			Execute: func(callCtx context.Context, execution agent.ToolExecutionContext) (agent.ToolResult, error) {
 				if err := callCtx.Err(); err != nil {
-					return agent.ToolResult{}, err
+					return agent.ToolResult{}, beforeCallError("canceled", "context", err)
 				}
-				encoded, err := json.Marshal(args)
+				encoded, err := json.Marshal(execution.Args)
 				if err != nil || len(encoded) > o.MaxArgumentBytes {
-					return agent.ToolResult{}, fmt.Errorf("mcptools: invalid or oversized arguments")
+					return agent.ToolResult{}, beforeCallError("argument_invalid", "arguments", fmt.Errorf("mcptools: invalid or oversized arguments"))
 				}
 				var arguments map[string]any
 				decoder := json.NewDecoder(bytes.NewReader(encoded))
 				decoder.UseNumber()
 				if err := decoder.Decode(&arguments); err != nil {
-					return agent.ToolResult{}, fmt.Errorf("mcptools: arguments must be an object")
+					return agent.ToolResult{}, beforeCallError("argument_invalid", "arguments", fmt.Errorf("mcptools: arguments must be an object"))
 				}
 				// Agent cloning normalizes an empty argument map to nil; the SDK
 				// likewise sends an empty object for an argument-less call.
@@ -158,31 +159,44 @@ func Discover(ctx context.Context, session *mcp.ClientSession, options Options) 
 				}
 				instance, err := validationProjection(arguments)
 				if err != nil {
-					return agent.ToolResult{}, err
+					return agent.ToolResult{}, beforeCallError("argument_invalid", failureReason(err, "numeric_domain"), err)
 				}
 				if err := inputValidator.Validate(instance); err != nil {
-					return agent.ToolResult{}, fmt.Errorf("mcptools: arguments do not match schema: %w", err)
+					return agent.ToolResult{}, beforeCallError("argument_invalid", "input_schema", fmt.Errorf("mcptools: arguments do not match schema: %w", err))
 				}
 				current, err := list(callCtx, session, o)
 				if err != nil {
-					return agent.ToolResult{}, err
+					return agent.ToolResult{}, beforeCallError("protocol", "directory_unavailable", err)
 				}
 				fresh, ok := current[name]
 				if !ok {
-					return agent.ToolResult{}, fmt.Errorf("mcptools: selected tool disappeared")
+					return agent.ToolResult{}, beforeCallError("schema_changed", "tool_missing", fmt.Errorf("mcptools: selected tool disappeared"))
 				}
 				in, errIn := json.Marshal(fresh.InputSchema)
 				out, errOut := json.Marshal(fresh.OutputSchema)
 				if errIn != nil || errOut != nil || string(in) != string(inputSnapshot) || string(out) != string(outputSnapshot) {
-					return agent.ToolResult{}, fmt.Errorf("mcptools: tool schema changed; rediscover and reapprove")
+					return agent.ToolResult{}, beforeCallError("schema_changed", "schema_changed", fmt.Errorf("mcptools: tool schema changed; rediscover and reapprove"))
+				}
+				// Recheck cancellation and current permission after directory loading,
+				// immediately before crossing into the caller-owned SDK session.
+				if err := callCtx.Err(); err != nil {
+					return agent.ToolResult{}, beforeCallError("canceled", "context", err)
+				}
+				if execution.CheckPermission != nil {
+					if err := execution.CheckPermission(callCtx); err != nil {
+						return agent.ToolResult{}, beforeCallError("policy_denied", "permission_revoked", err)
+					}
 				}
 				result, err := session.CallTool(callCtx, &mcp.CallToolParams{Name: name, Arguments: arguments})
 				if err != nil {
-					return agent.ToolResult{}, fmt.Errorf("mcptools: call transport/protocol failure; execution may have occurred, do not retry automatically: %w", err)
+					return agent.ToolResult{}, callError(err)
+				}
+				if result == nil {
+					return agent.ToolResult{}, &agent.ToolExecutionError{Code: "protocol", Reason: "nil_result", Execution: agent.ToolExecutionInfo{Remote: "unknown"}, Err: fmt.Errorf("mcptools: nil call result")}
 				}
 				mapped, err := convertResult(result, outputValidator, o.MaxResultBytes)
 				if err != nil {
-					return mapped, &ResultError{Result: mapped, Err: err}
+					return mapped, resultError(mapped, err)
 				}
 				return mapped, nil
 			},
@@ -264,13 +278,13 @@ func convertResult(result *mcp.CallToolResult, output *jsonschema.Resolved, limi
 		return agent.ToolResult{}, fmt.Errorf("mcptools: nil call result")
 	}
 	if result.NeedsInput() {
-		return agent.ToolResult{}, fmt.Errorf("mcptools: interactive input is unsupported")
+		return agent.ToolResult{Execution: &agent.ToolExecutionInfo{Remote: "input_required"}}, mappingFailure("input_required", "mcptools: interactive input is unsupported")
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil || len(encoded) > limit {
-		return agent.ToolResult{}, fmt.Errorf("mcptools: invalid or oversized result")
+		return agent.ToolResult{Execution: &agent.ToolExecutionInfo{Remote: "complete_reported"}}, mappingFailure("result_limit", "mcptools: invalid or oversized result")
 	}
-	converted := agent.ToolResult{IsError: result.IsError}
+	converted := agent.ToolResult{IsError: result.IsError, Execution: &agent.ToolExecutionInfo{Remote: "complete_reported"}}
 	if result.StructuredContent != nil {
 		converted.StructuredContent, err = json.Marshal(result.StructuredContent)
 		if err != nil {
@@ -280,7 +294,7 @@ func convertResult(result *mcp.CallToolResult, output *jsonschema.Resolved, limi
 	var contentErr error
 	for _, content := range result.Content {
 		if content == nil || (reflect.ValueOf(content).Kind() == reflect.Pointer && reflect.ValueOf(content).IsNil()) {
-			return agent.ToolResult{}, fmt.Errorf("mcptools: nil content")
+			return converted, mappingFailure("unsupported_content", "mcptools: nil content")
 		}
 		switch c := content.(type) {
 		case *mcp.TextContent:
@@ -288,7 +302,7 @@ func convertResult(result *mcp.CallToolResult, output *jsonschema.Resolved, limi
 		case *mcp.ImageContent:
 			converted.Content = append(converted.Content, agent.Part{Type: agent.PartTypeImage, Data: base64.StdEncoding.EncodeToString(c.Data), MIMEType: c.MIMEType})
 		default:
-			contentErr = fmt.Errorf("mcptools: unsupported content type %T", content)
+			contentErr = mappingFailure("unsupported_content", fmt.Sprintf("mcptools: unsupported content type %T", content))
 		}
 	}
 	if err := rejectUnsafeNumbers(result.StructuredContent); err != nil {
@@ -303,14 +317,14 @@ func convertResult(result *mcp.CallToolResult, output *jsonschema.Resolved, limi
 	// Error results need not satisfy the successful output schema.
 	if output != nil && !result.IsError {
 		if result.StructuredContent == nil {
-			return converted, fmt.Errorf("mcptools: missing structured output")
+			return converted, mappingFailure("output_schema", "mcptools: missing structured output")
 		}
 		instance, err := validationProjection(result.StructuredContent)
 		if err != nil {
 			return converted, err
 		}
 		if err := output.Validate(instance); err != nil {
-			return converted, fmt.Errorf("mcptools: output does not match schema: %w", err)
+			return converted, &mappingError{reason: "output_schema", err: fmt.Errorf("mcptools: output does not match schema: %w", err)}
 		}
 	}
 	return converted, nil
@@ -323,12 +337,27 @@ func convertResult(result *mcp.CallToolResult, output *jsonschema.Resolved, limi
 func validationProjection(value any) (any, error) {
 	switch v := value.(type) {
 	case json.Number:
+		// Bound lexical work before math/big expands an exponent or mantissa.
+		// The transport copy retains the original value; only the validation
+		// projection has this explicit supported numeric domain.
+		if len(v) > 256 {
+			return nil, mappingFailure("unsafe_number", "mcptools: numeric lexeme limit exceeded")
+		}
+		for i, c := range string(v) {
+			if c == 'e' || c == 'E' {
+				exponent, err := strconv.ParseInt(string(v)[i+1:], 10, 32)
+				if err != nil || exponent < -308 || exponent > 308 {
+					return nil, mappingFailure("unsafe_number", "mcptools: numeric exponent outside supported validation domain")
+				}
+				break
+			}
+		}
 		if _, err := strconv.ParseFloat(string(v), 64); err != nil {
-			return nil, fmt.Errorf("mcptools: unsupported numeric domain")
+			return nil, mappingFailure("unsafe_number", "mcptools: unsupported numeric domain")
 		}
 		r, ok := new(big.Rat).SetString(string(v))
 		if !ok {
-			return nil, fmt.Errorf("mcptools: invalid JSON number")
+			return nil, mappingFailure("unsafe_number", "mcptools: invalid JSON number")
 		}
 		if r.IsInt() {
 			if r.Num().IsInt64() {
@@ -337,16 +366,16 @@ func validationProjection(value any) (any, error) {
 			if r.Num().IsUint64() {
 				return r.Num().Uint64(), nil
 			}
-			return nil, fmt.Errorf("mcptools: unsupported numeric domain outside int64/uint64")
+			return nil, mappingFailure("unsafe_number", "mcptools: unsupported numeric domain outside int64/uint64")
 		}
 		f, _ := r.Float64()
 		encoded, err := json.Marshal(f)
 		if err != nil {
-			return nil, fmt.Errorf("mcptools: unsupported numeric domain")
+			return nil, mappingFailure("unsafe_number", "mcptools: unsupported numeric domain")
 		}
 		roundtrip, ok := new(big.Rat).SetString(string(encoded))
 		if !ok || roundtrip.Cmp(r) != 0 {
-			return nil, fmt.Errorf("mcptools: unsupported numeric precision for validation")
+			return nil, mappingFailure("unsafe_number", "mcptools: unsupported numeric precision for validation")
 		}
 		return f, nil
 	case map[string]any:
@@ -380,8 +409,8 @@ func validationProjection(value any) (any, error) {
 func rejectUnsafeNumbers(value any) error {
 	switch v := value.(type) {
 	case float64:
-		if math.Abs(v) >= 1<<53 {
-			return fmt.Errorf("mcptools: unsafe SDK-decoded numeric precision")
+		if math.IsNaN(v) || math.IsInf(v, 0) || math.Abs(v) >= 1<<53 {
+			return mappingFailure("unsafe_number", "mcptools: unsafe SDK-decoded numeric precision")
 		}
 	case map[string]any:
 		for _, child := range v {

@@ -82,6 +82,7 @@ func (e *Engine) Run(ctx context.Context, definition AgentDefinition, snapshot *
 
 // RunWithHooks appends prompts and executes turns with runtime hooks.
 func (e *Engine) RunWithHooks(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, prompts []Message, emit EventSink, hooks LoopHooks) (out *AgentSnapshot, err error) {
+	ctx = newToolInvocationContext(ctx)
 	if hasPendingToolState(snapshot) {
 		return nil, ErrPendingToolCallsRequireResume
 	}
@@ -145,6 +146,7 @@ func (e *Engine) Continue(ctx context.Context, definition AgentDefinition, snaps
 
 // ContinueWithHooks executes turns from the existing snapshot with runtime hooks.
 func (e *Engine) ContinueWithHooks(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink, hooks LoopHooks) (out *AgentSnapshot, err error) {
+	ctx = newToolInvocationContext(ctx)
 	definition, err = definition.Validate()
 	if err != nil {
 		return nil, err
@@ -201,6 +203,7 @@ func (e *Engine) ContinueWithHooks(ctx context.Context, definition AgentDefiniti
 // snapshot without appending a duplicate assistant message. The batch is
 // resolved and preflighted again against the current definition and hooks.
 func (e *Engine) ResumePendingToolCallsWithHooks(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink, hooks LoopHooks) (out *AgentSnapshot, err error) {
+	ctx = newToolInvocationContext(ctx)
 	if hooks.ToolGate == nil {
 		return nil, ErrToolGateRequired
 	}
@@ -954,17 +957,13 @@ func (e *Engine) executeToolCallsOrdinary(ctx context.Context, definition AgentD
 	if ctx.Err() != nil && len(outcomes) < len(assistant.ToolCalls) {
 		for _, original := range assistant.ToolCalls[len(outcomes):] {
 			call := cloneToolCall(original)
-			outcomes = append(outcomes, toolOutcome{
-				call:    call,
-				result:  errorToolResult("operation aborted before tool execution"),
-				isError: true,
-			})
+			outcomes = append(outcomes, rejectedToolOutcome(call, ctx.Err(), ToolFailureCanceled))
 		}
 	}
 
 	toolMessages := make([]Message, 0, len(outcomes))
 	for _, outcome := range outcomes {
-		toolMessage := NewToolResultMessage(outcome.call, outcome.result, outcome.isError)
+		toolMessage := NewToolResultMessage(outcome.call, publicToolOutcome(outcome).Result, outcome.isError)
 		snapshot.Messages = append(snapshot.Messages, toolMessage)
 		toolMessages = append(toolMessages, toolMessage)
 		msg := cloneMessage(toolMessage)
@@ -1049,18 +1048,15 @@ func (e *Engine) executeToolCallsGated(ctx context.Context, definition AgentDefi
 	}
 	if ctx.Err() != nil && len(outcomes) < len(prepared) {
 		for _, item := range prepared[len(outcomes):] {
-			outcomes = append(outcomes, toolOutcome{
-				call:    cloneToolCall(item.call),
-				args:    cloneAny(item.args),
-				result:  errorToolResult("operation aborted before tool execution"),
-				isError: true,
-			})
+			outcome := rejectedToolOutcome(item.call, ctx.Err(), ToolFailureCanceled)
+			outcome.args = cloneAny(item.args)
+			outcomes = append(outcomes, outcome)
 		}
 	}
 
 	toolMessages := make([]Message, 0, len(outcomes))
 	for _, outcome := range outcomes {
-		toolMessage := NewToolResultMessage(outcome.call, outcome.result, outcome.isError)
+		toolMessage := NewToolResultMessage(outcome.call, publicToolOutcome(outcome).Result, outcome.isError)
 		snapshot.Messages = append(snapshot.Messages, toolMessage)
 		toolMessages = append(toolMessages, toolMessage)
 		msg := cloneMessage(toolMessage)
@@ -1090,120 +1086,14 @@ func pendingToolCallsForAssistant(assistant Message) []PendingToolCall {
 }
 
 func (e *Engine) prepareGatedToolCall(ctx context.Context, definition AgentDefinition, assistant Message, currentContext AgentContext, tools map[string]ToolDefinition, original ToolCall, gate ToolGateHook) (preparedToolCall, *SuspendedToolCall, error) {
-	call := cloneToolCall(original)
-	if ctx.Err() != nil {
-		return immediateToolCall(call, nil, errorToolResult("operation aborted"), true), nil, nil
-	}
-
-	tool, ok := tools[call.Name]
-	if !ok {
-		return immediateToolCall(call, nil, errorToolResult(fmt.Sprintf("tool %q not found", call.Name)), true), nil, nil
-	}
-	validator, err := newToolArgumentValidator(tool)
-	if err != nil {
-		return preparedToolCall{}, nil, err
-	}
-	args, err := parseToolArguments(tool, call)
-	if err == nil {
-		args, err = validator(args)
-	}
-	if err != nil {
-		return immediateToolCall(call, args, errorToolResult(err.Error()), true), nil, nil
-	}
-	if ctx.Err() != nil {
-		return immediateToolCall(call, args, errorToolResult("operation aborted"), true), nil, nil
-	}
-
-	executionArgs := cloneAny(args)
-	if definition.BeforeToolCall != nil {
-		beforeResult, beforeErr := definition.BeforeToolCall(ctx, BeforeToolCallContext{
-			AssistantMessage: cloneMessage(assistant),
-			ToolCall:         cloneToolCall(call),
-			Args:             executionArgs,
-			Context:          cloneAgentContext(currentContext),
-		})
-		if beforeErr != nil {
-			return immediateToolCall(call, executionArgs, errorToolResult(beforeErr.Error()), true), nil, nil
-		}
-		if ctx.Err() != nil {
-			return immediateToolCall(call, executionArgs, errorToolResult("operation aborted"), true), nil, nil
-		}
-		if beforeResult.Block {
-			reason := beforeResult.Reason
-			if reason == "" {
-				reason = "tool execution was blocked"
-			}
-			result := errorToolResult(reason)
-			result.Terminate = beforeResult.Terminate
-			return immediateToolCall(call, executionArgs, result, true), nil, nil
-		}
-		executionArgs, err = validator(executionArgs)
-		if err != nil {
-			return immediateToolCall(call, executionArgs, errorToolResult(err.Error()), true), nil, nil
-		}
-	}
-	if ctx.Err() != nil {
-		return immediateToolCall(call, executionArgs, errorToolResult("operation aborted"), true), nil, nil
-	}
-
-	gateResult, gateErr := gate(ctx, BeforeToolCallContext{
-		AssistantMessage: cloneMessage(assistant),
-		ToolCall:         cloneToolCall(call),
-		Args:             cloneAny(executionArgs),
-		Context:          cloneAgentContext(currentContext),
-	})
-	if gateErr != nil {
-		return preparedToolCall{}, nil, fmt.Errorf("agent: tool gate for %q failed: %w", call.Name, gateErr)
-	}
-	if ctx.Err() != nil {
-		return immediateToolCall(call, executionArgs, errorToolResult("operation aborted"), true), nil, nil
-	}
-	switch gateResult.Action {
-	case ToolGateActionAllow:
-		if gateResult.Terminate {
-			return preparedToolCall{}, nil, fmt.Errorf("agent: tool gate for %q cannot allow and terminate", call.Name)
-		}
-	case ToolGateActionBlock:
-		reason := gateResult.Reason
-		if reason == "" {
-			reason = "tool execution was blocked"
-		}
-		result := errorToolResult(reason)
-		result.Terminate = gateResult.Terminate
-		return immediateToolCall(call, executionArgs, result, true), nil, nil
-	case ToolGateActionSuspend:
-		if gateResult.Terminate {
-			return preparedToolCall{}, nil, fmt.Errorf("agent: tool gate for %q cannot suspend and terminate", call.Name)
-		}
-		canonicalArgs, marshalErr := json.Marshal(executionArgs)
-		if marshalErr != nil {
-			return preparedToolCall{}, nil, fmt.Errorf("agent: tool gate for %q cannot suspend non-JSON arguments: %w", call.Name, marshalErr)
-		}
-		return preparedToolCall{call: call, tool: tool, args: cloneAny(executionArgs), context: cloneAgentContext(currentContext)}, &SuspendedToolCall{
-			ToolCall:  cloneToolCall(call),
-			Arguments: canonicalArgs,
-			Reason:    gateResult.Reason,
-		}, nil
-	default:
-		return preparedToolCall{}, nil, fmt.Errorf("agent: tool gate for %q returned invalid action %q", call.Name, gateResult.Action)
-	}
-
-	if tool.Execute == nil {
-		return immediateToolCall(call, executionArgs, errorToolResult(fmt.Sprintf("tool %q has no executor", call.Name)), true), nil, nil
-	}
-	return preparedToolCall{
-		call:    call,
-		tool:    tool,
-		args:    cloneAny(executionArgs),
-		context: cloneAgentContext(currentContext),
-	}, nil, nil
+	return e.prepareToolInvocation(ctx, definition, assistant, currentContext, tools, original, gate, nil)
 }
 
 func (e *Engine) executePreparedToolCallsSequential(ctx context.Context, definition AgentDefinition, assistant Message, prepared []preparedToolCall, emit EventSink) ([]toolOutcome, error) {
 	outcomes := make([]toolOutcome, 0, len(prepared))
 	for _, item := range prepared {
 		if ctx.Err() != nil && !item.immediate {
-			item = immediateToolCall(item.call, item.args, errorToolResult("operation aborted"), true)
+			item = preparedFailure(item.call, item.args, ctx.Err(), ToolFailureCanceled)
 		}
 		emitToolExecutionStart(emit, item.call, item.args)
 		outcome, err := e.executePreparedTool(ctx, definition, assistant, item, emit)
@@ -1222,7 +1112,7 @@ func (e *Engine) executePreparedToolCallsParallel(ctx context.Context, definitio
 	if ctx.Err() != nil {
 		for i := range prepared {
 			if !prepared[i].immediate {
-				prepared[i] = immediateToolCall(prepared[i].call, prepared[i].args, errorToolResult("operation aborted"), true)
+				prepared[i] = preparedFailure(prepared[i].call, prepared[i].args, ctx.Err(), ToolFailureCanceled)
 			}
 		}
 	}
@@ -1302,12 +1192,7 @@ func (e *Engine) executeToolCallsParallel(ctx context.Context, definition AgentD
 			if prepared[i].immediate {
 				continue
 			}
-			prepared[i] = immediateToolCall(
-				prepared[i].call,
-				prepared[i].args,
-				errorToolResult("operation aborted"),
-				true,
-			)
+			prepared[i] = preparedFailure(prepared[i].call, prepared[i].args, ctx.Err(), ToolFailureCanceled)
 		}
 	}
 
@@ -1350,94 +1235,9 @@ func (e *Engine) executeToolCallsParallel(ctx context.Context, definition AgentD
 }
 
 func (e *Engine) prepareToolCall(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, assistant Message, currentContext AgentContext, tools map[string]ToolDefinition, original ToolCall, emit EventSink) (preparedToolCall, bool, error) {
-	call := cloneToolCall(original)
-	snapshot.PendingToolCalls = append(snapshot.PendingToolCalls, PendingToolCall{
-		ToolCallID:         call.ID,
-		OriginalToolCallID: call.OriginalID,
-		ToolName:           call.Name,
-	})
-	if ctx.Err() != nil {
-		emitToolExecutionStart(emit, call, nil)
-		return immediateToolCall(call, nil, errorToolResult("operation aborted"), true), true, nil
-	}
-
-	tool, ok := tools[call.Name]
-	if !ok {
-		emitToolExecutionStart(emit, call, nil)
-		return immediateToolCall(call, nil, errorToolResult(fmt.Sprintf("tool %q not found", call.Name)), true), false, nil
-	}
-
-	validator, err := newToolArgumentValidator(tool)
-	if err != nil {
-		return preparedToolCall{}, false, err
-	}
-	args, err := parseToolArguments(tool, call)
-	if err == nil {
-		args, err = validator(args)
-	}
-	emitToolExecutionStart(emit, call, args)
-	if err != nil {
-		return immediateToolCall(call, args, errorToolResult(err.Error()), true), false, nil
-	}
-	if ctx.Err() != nil {
-		return immediateToolCall(call, args, errorToolResult("operation aborted"), true), true, nil
-	}
-
-	executionArgs := cloneAny(args)
-	if definition.BeforeToolCall != nil {
-		beforeResult, err := definition.BeforeToolCall(ctx, BeforeToolCallContext{
-			AssistantMessage: cloneMessage(assistant),
-			ToolCall:         call,
-			Args:             executionArgs,
-			Context:          cloneAgentContext(currentContext),
-		})
-		if err != nil {
-			return immediateToolCall(call, executionArgs, errorToolResult(err.Error()), true), false, nil
-		}
-		if ctx.Err() != nil {
-			return immediateToolCall(call, executionArgs, errorToolResult("operation aborted"), true), true, nil
-		}
-		if beforeResult.Block {
-			reason := beforeResult.Reason
-			if reason == "" {
-				reason = "tool execution was blocked"
-			}
-			result := errorToolResult(reason)
-			result.Terminate = beforeResult.Terminate
-			return immediateToolCall(call, executionArgs, result, true), false, nil
-		}
-
-		executionArgs, err = validator(executionArgs)
-		if err != nil {
-			return immediateToolCall(call, executionArgs, errorToolResult(err.Error()), true), false, nil
-		}
-	}
-	if ctx.Err() != nil {
-		return immediateToolCall(call, executionArgs, errorToolResult("operation aborted"), true), true, nil
-	}
-	if tool.Execute == nil {
-		return immediateToolCall(call, executionArgs, errorToolResult(fmt.Sprintf("tool %q has no executor", call.Name)), true), false, nil
-	}
-
-	return preparedToolCall{
-		call:    call,
-		tool:    tool,
-		args:    cloneAny(executionArgs),
-		context: cloneAgentContext(currentContext),
-	}, false, nil
-}
-
-func immediateToolCall(call ToolCall, args any, result ToolResult, isError bool) preparedToolCall {
-	return preparedToolCall{
-		call: call,
-		outcome: toolOutcome{
-			call:    call,
-			args:    cloneAny(args),
-			result:  result,
-			isError: isError,
-		},
-		immediate: true,
-	}
+	snapshot.PendingToolCalls = append(snapshot.PendingToolCalls, PendingToolCall{ToolCallID: original.ID, OriginalToolCallID: original.OriginalID, ToolName: original.Name})
+	prepared, _, err := e.prepareToolInvocation(ctx, definition, assistant, currentContext, tools, original, nil, emit)
+	return prepared, ctx.Err() != nil, err
 }
 
 func emitToolExecutionStart(emit EventSink, call ToolCall, args any) {
@@ -1451,120 +1251,28 @@ func emitToolExecutionStart(emit EventSink, call ToolCall, args any) {
 	})
 }
 
-func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefinition, assistant Message, prepared preparedToolCall, emit EventSink) (toolOutcome, error) {
-	if prepared.immediate {
-		emitEvent(emit, AgentEvent{
-			Type:               EventToolExecutionEnd,
-			ToolCall:           &prepared.outcome.call,
-			ToolCallID:         prepared.outcome.call.ID,
-			OriginalToolCallID: prepared.outcome.call.OriginalID,
-			ToolName:           prepared.outcome.call.Name,
-			Args:               cloneAny(prepared.outcome.args),
-			ToolResult:         &prepared.outcome.result,
-			IsError:            prepared.outcome.isError,
-		})
-		return prepared.outcome, nil
-	}
-
-	var updateMu sync.Mutex
-	var inFlightUpdates sync.WaitGroup
-	acceptingUpdates := true
-	result, execErr := prepared.tool.Execute(ctx, prepared.call.ID, cloneAny(prepared.args), func(partial ToolResult) {
-		updateMu.Lock()
-		if !acceptingUpdates {
-			updateMu.Unlock()
-			return
-		}
-		inFlightUpdates.Add(1)
-		updateMu.Unlock()
-		defer inFlightUpdates.Done()
-		emitEvent(emit, AgentEvent{
-			Type:               EventToolExecutionUpdate,
-			ToolCall:           &prepared.call,
-			ToolCallID:         prepared.call.ID,
-			OriginalToolCallID: prepared.call.OriginalID,
-			ToolName:           prepared.call.Name,
-			Args:               cloneAny(prepared.args),
-			ToolResult:         &partial,
-			PartialToolResult:  &partial,
-		})
-	})
-	updateMu.Lock()
-	acceptingUpdates = false
-	updateMu.Unlock()
-	inFlightUpdates.Wait()
-
-	outcome := toolOutcome{call: prepared.call, args: cloneAny(prepared.args)}
-	if execErr != nil {
-		outcome.result = errorToolResult(execErr.Error())
-		outcome.isError = true
-	} else {
-		outcome.result = cloneToolResult(result)
-		outcome.isError = result.IsError
-		if len(result.StructuredContent) > 0 && !json.Valid(result.StructuredContent) {
-			outcome.result = errorToolResult("tool returned invalid structured content JSON")
-			outcome.isError = true
-		}
-	}
-
-	if definition.AfterToolCall != nil {
-		override, err := definition.AfterToolCall(ctx, AfterToolCallContext{
-			AssistantMessage: cloneMessage(assistant),
-			ToolCall:         cloneToolCall(prepared.call),
-			Args:             cloneAny(prepared.args),
-			Context:          cloneAgentContext(prepared.context),
-			Result:           cloneToolResult(outcome.result),
-			IsError:          outcome.isError,
-		})
-		if err != nil {
-			outcome.result = errorToolResult(err.Error())
-			outcome.isError = true
-		} else {
-			if override.Result != nil {
-				outcome.result = mergeToolResult(outcome.result, *override.Result)
-				outcome.isError = outcome.isError || override.Result.IsError
-			}
-			if override.IsError != nil {
-				outcome.isError = *override.IsError
-			}
-			if override.Terminate != nil {
-				outcome.result.Terminate = *override.Terminate
-			}
-		}
-	}
-
-	if len(outcome.result.StructuredContent) > 0 && !json.Valid(outcome.result.StructuredContent) {
-		outcome.result = errorToolResult("after-tool hook returned invalid structured content JSON")
-		outcome.isError = true
-	}
-	outcome.result.IsError = outcome.isError
-	emitEvent(emit, AgentEvent{
-		Type:               EventToolExecutionEnd,
-		ToolCall:           &outcome.call,
-		ToolCallID:         outcome.call.ID,
-		OriginalToolCallID: outcome.call.OriginalID,
-		ToolName:           outcome.call.Name,
-		Args:               cloneAny(outcome.args),
-		ToolResult:         &outcome.result,
-		IsError:            outcome.isError,
-	})
-	return outcome, nil
-}
-
 type preparedToolCall struct {
-	call      ToolCall
-	tool      ToolDefinition
-	args      any
-	context   AgentContext
-	outcome   toolOutcome
-	immediate bool
+	call        ToolCall
+	tool        ToolDefinition
+	args        any
+	context     AgentContext
+	outcome     toolOutcome
+	immediate   bool
+	gate        ToolGateHook
+	child       bool
+	parentID    string
+	onEntered   func()
+	resultLimit int
 }
 
 type toolOutcome struct {
-	call    ToolCall
-	args    any
-	result  ToolResult
-	isError bool
+	call      ToolCall
+	args      any
+	result    ToolResult
+	isError   bool
+	err       error
+	failure   *ToolFailure
+	execution ToolExecutionInfo
 }
 
 func emitEvent(emit EventSink, event AgentEvent) {
@@ -1592,6 +1300,8 @@ func cloneAgentEvent(event AgentEvent) AgentEvent {
 		cloned.PartialToolResult = &result
 	}
 	cloned.ToolMessages = cloneMessages(event.ToolMessages)
+	cloned.Execution = cloneToolExecutionInfo(event.Execution)
+	cloned.Failure = cloneToolFailure(event.Failure)
 	return cloned
 }
 
@@ -1710,6 +1420,8 @@ func cloneToolResult(result ToolResult) ToolResult {
 		Details:           cloneAny(result.Details),
 		StructuredContent: append(json.RawMessage(nil), result.StructuredContent...),
 		IsError:           result.IsError, Terminate: result.Terminate,
+		Execution: cloneToolExecutionInfo(result.Execution), Failure: cloneToolFailure(result.Failure),
+		ChildCalls: cloneChildCallReport(result.ChildCalls),
 	}
 }
 
@@ -1848,6 +1560,9 @@ func cloneToolResultPayload(payload *ToolResultPayload) *ToolResultPayload {
 	cloned.Content = cloneParts(payload.Content)
 	cloned.Details = cloneAny(payload.Details)
 	cloned.StructuredContent = append(json.RawMessage(nil), payload.StructuredContent...)
+	cloned.Execution = cloneToolExecutionInfo(payload.Execution)
+	cloned.Failure = cloneToolFailure(payload.Failure)
+	cloned.ChildCalls = cloneChildCallReport(payload.ChildCalls)
 	return &cloned
 }
 
@@ -1882,6 +1597,13 @@ func cloneTools(tools []ToolDefinition) []ToolDefinition {
 		cloned[i] = tool
 		cloned[i].Parameters = cloneStringAnyMap(tool.Parameters)
 		cloned[i].OutputSchema = cloneStringAnyMap(tool.OutputSchema)
+		if tool.ChildTools != nil {
+			cloned[i].ChildTools = append([]ToolDefinition{}, tool.ChildTools...)
+			for j, child := range tool.ChildTools {
+				cloned[i].ChildTools[j].Parameters = cloneStringAnyMap(child.Parameters)
+				cloned[i].ChildTools[j].OutputSchema = cloneStringAnyMap(child.OutputSchema)
+			}
+		}
 	}
 	return cloned
 }
@@ -2049,6 +1771,12 @@ type cloneVisit struct {
 func cloneReflectValue(value reflect.Value, visited map[cloneVisit]reflect.Value) reflect.Value {
 	if !value.IsValid() {
 		return reflect.Value{}
+	}
+	// Error identities and their chains are immutable execution facts. Reflect
+	// copying private error structs breaks errors.Is for sentinel causes retained
+	// in Go-only outcome/report fields.
+	if value.Type().Implements(reflect.TypeFor[error]()) {
+		return value
 	}
 
 	switch value.Kind() {

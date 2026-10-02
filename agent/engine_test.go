@@ -290,7 +290,8 @@ func TestEngineToolExecutionParallelPreservesSourceOrder(t *testing.T) {
 
 	tool := ToolDefinition{
 		Name: "echo",
-		Execute: func(_ context.Context, _ string, args any, _ ToolUpdateFunc) (ToolResult, error) {
+		Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+			args := execution.Args
 			parsed, ok := args.(map[string]any)
 			if !ok {
 				t.Fatalf("unexpected args type %T", args)
@@ -400,7 +401,8 @@ func TestEngineInjectsSteeringAfterAllToolCallsComplete(t *testing.T) {
 
 	tool := ToolDefinition{
 		Name: "echo",
-		Execute: func(_ context.Context, _ string, args any, _ ToolUpdateFunc) (ToolResult, error) {
+		Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+			args := execution.Args
 			parsed, ok := args.(map[string]any)
 			if !ok {
 				t.Fatalf("unexpected args type %T", args)
@@ -549,7 +551,8 @@ func TestEngineBeforeToolCallMutationIsRevalidatedBeforeExecution(t *testing.T) 
 		},
 		Tools: []ToolDefinition{{
 			Name: "echo",
-			Execute: func(_ context.Context, _ string, args any, _ ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+				args := execution.Args
 				parsed, ok := args.(map[string]any)
 				if !ok {
 					t.Fatalf("unexpected args type %T", args)
@@ -630,7 +633,7 @@ func TestEngineBeforeToolCallBlockProducesErrorToolResult(t *testing.T) {
 		},
 		Tools: []ToolDefinition{{
 			Name: "echo",
-			Execute: func(_ context.Context, _ string, _ any, _ ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 				executeCalled = true
 				return ToolResult{}, nil
 			},
@@ -739,7 +742,7 @@ func TestEngineAfterToolCallOverridesResultAndErrorFlag(t *testing.T) {
 		},
 		Tools: []ToolDefinition{{
 			Name: "echo",
-			Execute: func(_ context.Context, _ string, _ any, _ ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 				return ToolResult{
 					Content: []Part{{Type: PartTypeText, Text: "raw"}},
 				}, nil
@@ -802,7 +805,7 @@ func TestEngineAfterToolCallErrorBecomesToolResult(t *testing.T) {
 		},
 		Tools: []ToolDefinition{{
 			Name: "echo",
-			Execute: func(_ context.Context, _ string, _ any, _ ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 				return ToolResult{
 					Content: []Part{{Type: PartTypeText, Text: "raw"}},
 				}, nil
@@ -1090,7 +1093,8 @@ func TestEngineToolExecutionUpdateAndTurnEndToolMessages(t *testing.T) {
 		},
 		Tools: []ToolDefinition{{
 			Name: "echo",
-			Execute: func(_ context.Context, _ string, _ any, update ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+				update := execution.OnUpdate
 				update(ToolResult{
 					Content: []Part{{Type: PartTypeText, Text: "partial"}},
 					Details: "partial",

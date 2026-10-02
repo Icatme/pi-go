@@ -214,17 +214,27 @@ type ToolResult struct {
 	StructuredContent json.RawMessage `json:"structured_content,omitempty"`
 	IsError           bool            `json:"is_error,omitempty"`
 	Terminate         bool            `json:"terminate,omitempty"`
+	// Execution is supplied by trusted adapters. The runtime owns Local and keeps
+	// these facts independent from after-hook content overrides.
+	Execution *ToolExecutionInfo `json:"execution,omitempty"`
+	Failure   *ToolFailure       `json:"failure,omitempty"`
+	// ChildCalls is the host-owned bounded execution report. It survives content
+	// hook failures and is available only to Go observers, never model JSON.
+	ChildCalls *ChildCallReport `json:"-"`
 }
 
 // ToolResultPayload stores tool-result specific message data.
 type ToolResultPayload struct {
-	ToolCallID         string          `json:"tool_call_id"`
-	OriginalToolCallID string          `json:"original_tool_call_id,omitempty"`
-	ToolName           string          `json:"tool_name"`
-	Content            []Part          `json:"content,omitempty"`
-	Details            any             `json:"details,omitempty"`
-	StructuredContent  json.RawMessage `json:"structured_content,omitempty"`
-	IsError            bool            `json:"is_error"`
+	ToolCallID         string             `json:"tool_call_id"`
+	OriginalToolCallID string             `json:"original_tool_call_id,omitempty"`
+	ToolName           string             `json:"tool_name"`
+	Content            []Part             `json:"content,omitempty"`
+	Details            any                `json:"details,omitempty"`
+	StructuredContent  json.RawMessage    `json:"structured_content,omitempty"`
+	IsError            bool               `json:"is_error"`
+	Execution          *ToolExecutionInfo `json:"execution,omitempty"`
+	Failure            *ToolFailure       `json:"failure,omitempty"`
+	ChildCalls         *ChildCallReport   `json:"-"`
 }
 
 // Message is the canonical runtime message envelope.
@@ -362,12 +372,17 @@ type AgentEvent struct {
 	ToolCallID         string             `json:"tool_call_id,omitempty"`
 	OriginalToolCallID string             `json:"original_tool_call_id,omitempty"`
 	ToolName           string             `json:"tool_name,omitempty"`
+	ParentToolCallID   string             `json:"parent_tool_call_id,omitempty"`
+	Execution          *ToolExecutionInfo `json:"execution,omitempty"`
+	Failure            *ToolFailure       `json:"failure,omitempty"`
 	Args               any                `json:"args,omitempty"`
 	ToolResult         *ToolResult        `json:"tool_result,omitempty"`
 	PartialToolResult  *ToolResult        `json:"partial_tool_result,omitempty"`
 	ToolMessages       []Message          `json:"tool_messages,omitempty"`
 	IsError            bool               `json:"is_error,omitempty"`
 	Err                error              `json:"-"`
+	// ToolErr is a per-call failure; Err remains reserved for run/stream errors.
+	ToolErr error `json:"-"`
 }
 
 // EventSink receives runtime events from an engine.
@@ -377,18 +392,26 @@ type EventSink func(AgentEvent)
 type ToolUpdateFunc func(ToolResult)
 
 // ToolExecutorFunc executes a tool call with validated arguments.
-type ToolExecutorFunc func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error)
+type ToolExecutorFunc func(context.Context, ToolExecutionContext) (ToolResult, error)
 
 // ToolDefinition defines a tool available to the agent runtime.
 type ToolDefinition struct {
 	Name           string                      `json:"name"`
+	Revision       string                      `json:"revision,omitempty"`
 	Label          string                      `json:"label,omitempty"`
 	Description    string                      `json:"description,omitempty"`
 	Parameters     map[string]any              `json:"parameters,omitempty"`
 	OutputSchema   map[string]any              `json:"output_schema,omitempty"`
 	ExecutionMode  ToolExecutionMode           `json:"execution_mode,omitempty"`
 	ParseArguments func(ToolCall) (any, error) `json:"-"`
-	Execute        ToolExecutorFunc            `json:"-"`
+	// ValidateResult checks the effective, after-hook result before publication.
+	// It opts into stricter boundaries without changing ordinary OutputSchema semantics.
+	ValidateResult func(ToolResult) error `json:"-"`
+	Execute        ToolExecutorFunc       `json:"-"`
+	// ChildTools grants this container a fixed, invocation-local leaf allowlist.
+	// A child may not itself declare ChildTools.
+	ChildTools  []ToolDefinition `json:"-"`
+	ChildLimits ChildCallLimits  `json:"-"`
 }
 
 // BeforeToolCallContext is passed to a before-tool hook.
@@ -397,6 +420,7 @@ type BeforeToolCallContext struct {
 	ToolCall         ToolCall     `json:"tool_call"`
 	Args             any          `json:"args,omitempty"`
 	Context          AgentContext `json:"context"`
+	ParentToolCallID string       `json:"parent_tool_call_id,omitempty"`
 }
 
 // BeforeToolCallResult can block tool execution during preflight.
@@ -442,12 +466,16 @@ type SuspendedToolCall struct {
 
 // AfterToolCallContext is passed to an after-tool hook.
 type AfterToolCallContext struct {
-	AssistantMessage Message      `json:"assistant_message"`
-	ToolCall         ToolCall     `json:"tool_call"`
-	Args             any          `json:"args,omitempty"`
-	Context          AgentContext `json:"context"`
-	Result           ToolResult   `json:"result"`
-	IsError          bool         `json:"is_error"`
+	AssistantMessage Message           `json:"assistant_message"`
+	ToolCall         ToolCall          `json:"tool_call"`
+	Args             any               `json:"args,omitempty"`
+	Context          AgentContext      `json:"context"`
+	Result           ToolResult        `json:"result"`
+	IsError          bool              `json:"is_error"`
+	Err              error             `json:"-"`
+	Execution        ToolExecutionInfo `json:"execution"`
+	Failure          *ToolFailure      `json:"failure,omitempty"`
+	ParentToolCallID string            `json:"parent_tool_call_id,omitempty"`
 }
 
 // AfterToolCallResult can override a tool result before it is emitted.
@@ -604,6 +632,9 @@ func NewToolResultMessage(call ToolCall, result ToolResult, isError bool) Messag
 			Details:            cloneAny(result.Details),
 			StructuredContent:  append(json.RawMessage(nil), result.StructuredContent...),
 			IsError:            isError || result.IsError,
+			Execution:          cloneToolExecutionInfo(result.Execution),
+			Failure:            cloneToolFailure(result.Failure),
+			ChildCalls:         cloneChildCallReport(result.ChildCalls),
 		},
 		Timestamp: time.Now().UTC(),
 	}

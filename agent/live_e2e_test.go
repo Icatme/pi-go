@@ -104,7 +104,7 @@ func TestLiveAgentToolExecution(t *testing.T) {
 			agent := newLiveAgent(t, modelRef, "You do not know the project secret. You must call the read_secret tool before answering any question about the project secret.", []ToolDefinition{{
 				Name:        "read_secret",
 				Description: "Returns the current project secret string.",
-				Execute: func(_ context.Context, _ string, _ any, _ ToolUpdateFunc) (ToolResult, error) {
+				Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 					return ToolResult{
 						Content: []Part{{Type: PartTypeText, Text: "SECRET-56088"}},
 						Details: "SECRET-56088",

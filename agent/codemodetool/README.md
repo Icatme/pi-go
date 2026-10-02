@@ -1,0 +1,76 @@
+# Agent Codemode binding
+
+`codemodetool.New` creates one sequential Agent tool with a `code:string`
+parameter. The application selects an explicit leaf allowlist and chooses each
+leaf's JavaScript result projection. The package does not open MCP connections,
+own credentials, or create an alternative Agent runtime.
+
+```go
+codeTool, err := codemodetool.New(sandbox, []codemodetool.Binding{
+    codemodetool.MCP(discovered[0], "github"),
+    codemodetool.Native(localTool, "local"),
+}, codemodetool.Options{MaxOutputTokens: 2000})
+// Handle err, then add only codeTool to agent.AgentDefinition.Tools.
+```
+
+MCP names map to `mcp__server__tool`. Names longer than 64 bytes or requiring
+sanitization get a deterministic identity hash suffix; duplicate final names
+and conflicting native/MCP namespace identities fail construction. Applications
+can inspect `codeTool.ChildTools` for the frozen exported names. Leaf descriptions
+and schemas appear only through the sandbox discovery API. Omitted tools are
+absent from discovery and execution.
+
+Every call uses the current invocation's `ChildCaller`, including validation,
+before and after hooks, gate, cancellation, host-generated child IDs, and final
+permission checks. Calling `Execute` without this capability fails. Leaf tools
+cannot themselves declare a child allowlist. A nested gate `Suspend` rejects
+with `nested_suspend_unsupported`; the original script is never replayed.
+
+MCP results resolve to `{content,structuredContent?,isError}` built from the
+**after-hook effective result**. A tool-reported MCP business error resolves;
+permission, transport, protocol, schema, mapping and unsafe-number failures
+reject with a machine-readable `code`, optional `reasonCode`, `callId`, and
+`execution` facts. Precision rejection retains `reasonCode: "unsafe_number"`.
+Original
+Go error chains remain available through `errors.Is/As`. Native tools with an
+output schema return the validated structured value; other native tools return
+their joined text. Native business errors reject.
+
+All visible schemas and structured results pass the safe Number boundary.
+Arguments are checked both before the child lifecycle and after hooks immediately
+before the original executor. Exact large Go JSON IDs remain supported by the
+standalone MCP adapter; JavaScript cannot use unsafe integers as numeric IDs.
+Use explicit string IDs when the service schema permits them.
+
+Output and script options cannot widen sandbox limits. Any sequential leaf or
+effective sequential Agent policy preserves VM admission order even for
+`Promise.all`. The model sees bounded explicit output and one call-count summary.
+`ToolResult.Details` contains `Report{Sandbox,Children}`; `Children` holds the
+authoritative execution facts, and `Sandbox.Calls` describes bridge execution.
+Reports retain partial output and accepted calls on script failure. They do not
+contain leaf argument bodies, raw responses, or schemas.
+
+`store` and `load` use a private bounded store for successive code calls of this
+binding in one Agent invocation. A script stages its changes and commits only
+after successful completion; failed or canceled scripts discard them. A new
+Agent Run has a fresh store even when its session ID is the same. Concurrent
+revision conflicts return `store_conflict` without replaying earlier tool effects.
+This is in-memory invocation state; it provides no durable branch storage.
+
+`Options.Timeout == 0` uses the caller context and configured sandbox limit.
+No binding-specific deadline is introduced. Script header options may only
+shorten an effective host limit. `Report.Sandbox.Outputs` is omitted because
+the bounded output is already retained in `ToolResult.Content`.
+
+`ToolResult.ChildCalls` is the runtime-owned Go recovery ledger, attached after
+parent hooks. It survives a failing parent output hook even when all unprocessed
+content and `Details` are discarded. It is not serialized into default model
+responses. The convenience `Details` report follows normal hook replacement and
+redaction; applications use `ChildCalls` for execution facts after hook failures.
+
+The `ToolExecutorFunc` signature now receives `agent.ToolExecutionContext`.
+Application executors use `execution.Args`, `execution.ToolCall`, and
+`execution.OnUpdate` rather than the previous positional parameters. MCP adapters
+should use `execution.CheckPermission` immediately before sending requests.
+
+See [the runnable local example](../../examples/mcp-codemode/README.md).

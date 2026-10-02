@@ -12,6 +12,7 @@
 - Blocking and streaming completion APIs with normalized cross-provider message replay
 - SSE and WebSocket transports, tool calls, reasoning content, usage accounting, and observer hooks
 - A separate single-agent runtime with message, tool, steering, follow-up, and snapshot lifecycles
+- Optional MCP tools and bounded JavaScript orchestration using embedded QuickJS WASM and a pure Go wazero host
 - A small CLI for provider login, model discovery, account quota queries, and prompts
 
 ## Project Positioning
@@ -128,6 +129,8 @@ _ = final
 | --- | --- |
 | [`pkg/pigo`](pkg/pigo) | Exported model, provider, protocol, streaming, and tool library |
 | [`agent`](agent) | Exported single-agent runtime and `prebuilt` helpers |
+| [`codemode`](codemode) | Bounded QuickJS WASM sandbox, discovery, and invocation-local JSON store |
+| [`agent/codemodetool`](agent/codemodetool) | Optional script tool with an explicit native/MCP leaf allowlist |
 | [`examples`](examples) | Runnable examples in a dependency-isolated nested module |
 | [`cmd/pigo`](cmd/pigo) | CLI entrypoint |
 | [`internal/cli`](internal/cli) | CLI-only login and credential-store logic |
@@ -142,6 +145,13 @@ Core runtime pieces:
 - shared HTTP/SSE transport utilities for OpenAI Responses-style providers
 - optional WebSocket transport for `openai-codex`
 - observer hooks for request completion/error and stream-finish accounting
+
+The [local MCP Codemode example](examples/mcp-codemode/README.md) uses a
+caller-owned SDK session and a deterministic model to generate one batch script,
+filter results inside the VM, and return bounded output. Applications select the
+leaf allowlist; importing the packages creates no connections. The
+[binding guide](agent/codemodetool/README.md) describes error facts, permission
+checks, and the `ToolExecutorFunc` signature change.
 
 ## Account Quota Queries
 

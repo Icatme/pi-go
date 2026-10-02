@@ -267,6 +267,46 @@ Tools may return `StructuredContent` and `IsError`; `RunToolCall` shares validat
 and hooks for programmatic calls. See [runtime contracts](docs/runtime-contracts.md)
 for the request callback, transcript replay and migration details.
 
+## Tool executor migration and bounded child calls
+
+`ToolExecutorFunc` now receives one `ToolExecutionContext`. Update application
+executors directly; the previous positional signature has been removed:
+
+```go
+Execute: func(ctx context.Context, execution core.ToolExecutionContext) (core.ToolResult, error) {
+    args := execution.Args
+    _ = args // Use validated arguments; report progress through execution.OnUpdate.
+    if err := execution.CheckPermission(ctx); err != nil {
+        return core.ToolResult{}, err
+    }
+    return core.ToolResult{Content: []core.Part{core.NewTextPart("done")}}, nil
+},
+```
+
+The runtime checks permission after scheduling. Executors crossing another
+side-effect boundary should check it again immediately before dispatch.
+`ToolCallOutcome.Err` preserves the original Go error chain. `Failure` and
+`Execution` distinguish rejection before entry, a tool-declared failure, result
+rejection after completion, and an unknown remote outcome. After hooks can
+redact content but cannot convert a returned Go error into success or erase
+execution facts. `AgentEvent.ToolErr` is the Go-only tool error;
+`AgentEvent.Err` continues to represent a run/stream error.
+
+Only tools with an explicit `ChildTools` allowlist receive `ChildCaller`.
+Leaves have no child capability; deeper containers are rejected. Children use
+the same argument validation, hooks, gate and final permission checks, with
+host-generated `parent/N` IDs. Nested `Suspend` rejects without a pending batch
+or script replay. Basic records cover every accepted child; optional detail
+retention may truncate. Host-owned `ToolResult.ChildCalls` retains this report
+even if a parent hook fails and discards content/Details; it is Go-only and does
+not enter model JSON. Default child progress contains identity and execution
+state, and end events contain bounded after-hook summaries.
+
+The optional [Codemode binding](codemodetool/README.md) uses this lifecycle
+without adding JavaScript or MCP dependencies to the Agent core. Its JSON store
+is shared by successful scripts within one invocation and resets for every new
+Run/Continue/Resume or direct call. Durable checkpoint runners reject containers.
+
 ## Agents As Task Tools
 
 `prebuilt.NewAgentTool` exposes one named definition as a strict

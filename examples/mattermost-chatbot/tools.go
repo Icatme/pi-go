@@ -112,7 +112,8 @@ func buildDefaultTools(runtime toolRuntime) []core.ToolDefinition {
 				args.Limit = clampOrDefault(args.Limit, defaultSearchLimit, maxSearchLimit)
 				return args, nil
 			},
-			Execute: func(ctx context.Context, _ string, args any, _ core.ToolUpdateFunc) (core.ToolResult, error) {
+			Execute: func(ctx context.Context, execution core.ToolExecutionContext) (core.ToolResult, error) {
+				args := execution.Args
 				return runtime.executeWebSearch(ctx, args.(webSearchArgs))
 			},
 		},
@@ -144,7 +145,8 @@ func buildDefaultTools(runtime toolRuntime) []core.ToolDefinition {
 				args.MaxChars = clampOrDefault(args.MaxChars, defaultFetchChars, maxFetchChars)
 				return args, nil
 			},
-			Execute: func(ctx context.Context, _ string, args any, _ core.ToolUpdateFunc) (core.ToolResult, error) {
+			Execute: func(ctx context.Context, execution core.ToolExecutionContext) (core.ToolResult, error) {
+				args := execution.Args
 				return runtime.executeWebFetch(ctx, args.(webFetchArgs))
 			},
 		},
@@ -171,7 +173,8 @@ func buildDefaultTools(runtime toolRuntime) []core.ToolDefinition {
 				}
 				return args, nil
 			},
-			Execute: func(ctx context.Context, _ string, args any, _ core.ToolUpdateFunc) (core.ToolResult, error) {
+			Execute: func(ctx context.Context, execution core.ToolExecutionContext) (core.ToolResult, error) {
+				args := execution.Args
 				return runtime.executeWebPageMeta(ctx, args.(webPageMetaArgs))
 			},
 		},
@@ -203,7 +206,8 @@ func buildDefaultTools(runtime toolRuntime) []core.ToolDefinition {
 				args.Limit = clampOrDefault(args.Limit, defaultExtractLinksLimit, maxExtractLinksLimit)
 				return args, nil
 			},
-			Execute: func(ctx context.Context, _ string, args any, _ core.ToolUpdateFunc) (core.ToolResult, error) {
+			Execute: func(ctx context.Context, execution core.ToolExecutionContext) (core.ToolResult, error) {
+				args := execution.Args
 				return runtime.executeWebExtractLinks(ctx, args.(webExtractLinksArgs))
 			},
 		},
@@ -226,7 +230,8 @@ func buildDefaultTools(runtime toolRuntime) []core.ToolDefinition {
 				}
 				return args, nil
 			},
-			Execute: func(_ context.Context, _ string, args any, _ core.ToolUpdateFunc) (core.ToolResult, error) {
+			Execute: func(_ context.Context, execution core.ToolExecutionContext) (core.ToolResult, error) {
+				args := execution.Args
 				return runtime.executeGetTime(args.(getTimeArgs))
 			},
 		},
@@ -253,7 +258,8 @@ func buildDefaultTools(runtime toolRuntime) []core.ToolDefinition {
 				}
 				return args, nil
 			},
-			Execute: func(_ context.Context, _ string, args any, _ core.ToolUpdateFunc) (core.ToolResult, error) {
+			Execute: func(_ context.Context, execution core.ToolExecutionContext) (core.ToolResult, error) {
+				args := execution.Args
 				return runtime.executeMathEval(args.(mathEvalArgs))
 			},
 		},

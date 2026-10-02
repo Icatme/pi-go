@@ -28,6 +28,8 @@ type AgentOptions struct {
 	ToolExecution         ToolExecutionMode       `json:"tool_execution,omitempty"`
 	BeforeToolCall        BeforeToolCallHook      `json:"-"`
 	AfterToolCall         AfterToolCallHook       `json:"-"`
+	CheckToolPermission   ToolPermissionHook      `json:"-"`
+	PolicyRevision        string                  `json:"policy_revision,omitempty"`
 	PrepareNextTurn       PrepareNextTurnHook     `json:"-"`
 	PrepareRequest        PrepareRequestHook      `json:"-"`
 	OnProviderStreamEvent ProviderStreamEventHook `json:"-"`
@@ -63,6 +65,8 @@ func (o AgentOptions) build() (AgentDefinition, AgentSnapshot) {
 		ConvertToLLM:          o.ConvertToLLM,
 		BeforeToolCall:        o.BeforeToolCall,
 		AfterToolCall:         o.AfterToolCall,
+		CheckToolPermission:   o.CheckToolPermission,
+		PolicyRevision:        o.PolicyRevision,
 		PrepareNextTurn:       o.PrepareNextTurn,
 		PrepareRequest:        o.PrepareRequest,
 		OnProviderStreamEvent: o.OnProviderStreamEvent,

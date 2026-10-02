@@ -240,7 +240,9 @@ func TestAgentPromptWithToolLoop(t *testing.T) {
 		Name:        "calculator",
 		Label:       "Calculator",
 		Description: "Adds numbers",
-		Execute: func(_ context.Context, callID string, args any, _ ToolUpdateFunc) (ToolResult, error) {
+		Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+			callID := execution.ToolCall.ID
+			args := execution.Args
 			if callID != "call-1" {
 				t.Fatalf("unexpected tool call ID %q", callID)
 			}
@@ -346,7 +348,7 @@ func TestAgentDefinitionResolver(t *testing.T) {
 func TestAgentSteerDuringRun(t *testing.T) {
 	tool := ToolDefinition{
 		Name: "noop",
-		Execute: func(_ context.Context, _ string, _ any, _ ToolUpdateFunc) (ToolResult, error) {
+		Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			return ToolResult{Content: []Part{{Type: PartTypeText, Text: "done"}}}, nil
 		},
 	}
@@ -1116,7 +1118,7 @@ func TestAgentPendingToolCallsUpdateDuringExecution(t *testing.T) {
 		},
 		Tools: []ToolDefinition{{
 			Name: "slow",
-			Execute: func(_ context.Context, _ string, _ any, _ ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 				<-releaseTool
 				return ToolResult{Content: []Part{{Type: PartTypeText, Text: "ok"}}}, nil
 			},

@@ -81,7 +81,7 @@ func TestWebSearchParsesDuckDuckGoHTMLAndClampsLimit(t *testing.T) {
 		t.Fatalf("expected limit clamp to %d, got %d", maxSearchLimit, args.Limit)
 	}
 
-	result, err := tool.Execute(context.Background(), "call-1", webSearchArgs{Query: "golang", Limit: 2}, nil)
+	result, err := tool.Execute(context.Background(), core.ToolExecutionContext{ToolCall: core.ToolCall{ID: "call-1"}, Args: webSearchArgs{Query: "golang", Limit: 2}})
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}

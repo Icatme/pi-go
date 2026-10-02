@@ -68,7 +68,7 @@ func TestNewAgentToolValidatesConfigAndUsesStrictTaskSchema(t *testing.T) {
 		map[string]any{},
 		"task",
 	} {
-		if _, err := again.Execute(context.Background(), "call", args, nil); err == nil {
+		if _, err := again.Execute(context.Background(), core.ToolExecutionContext{ToolCall: core.ToolCall{ID: "call"}, Args: args}); err == nil {
 			t.Fatalf("expected arguments %#v to fail", args)
 		}
 	}
@@ -258,7 +258,7 @@ func TestAgentToolDepthLimitTightensAndCannotWidenInheritedLimit(t *testing.T) {
 				t.Fatalf("NewAgentTool outer returned error: %v", err)
 			}
 
-			result, runErr := outer.Execute(context.Background(), "outer-call", map[string]any{"task": "root"}, nil)
+			result, runErr := outer.Execute(context.Background(), core.ToolExecutionContext{ToolCall: core.ToolCall{ID: "outer-call"}, Args: map[string]any{"task": "root"}})
 			if tt.wantReject {
 				if runErr == nil || !strings.Contains(runErr.Error(), "nested agent was rejected") {
 					t.Fatalf("expected nested depth rejection, result=%+v err=%v", result, runErr)
@@ -297,7 +297,7 @@ func TestAgentToolMaxTurnsIsPerChildUpperBound(t *testing.T) {
 					MaxTurns: tt.definitionTurns,
 					Tools: []core.ToolDefinition{{
 						Name: "again",
-						Execute: func(context.Context, string, any, core.ToolUpdateFunc) (core.ToolResult, error) {
+						Execute: func(_ context.Context, _ core.ToolExecutionContext) (core.ToolResult, error) {
 							return core.ToolResult{Content: []core.Part{{Type: core.PartTypeText, Text: "continue"}}}, nil
 						},
 					}},
@@ -316,7 +316,7 @@ func TestAgentToolMaxTurnsIsPerChildUpperBound(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewAgentTool returned error: %v", err)
 			}
-			_, err = tool.Execute(context.Background(), "call", map[string]any{"task": "loop"}, nil)
+			_, err = tool.Execute(context.Background(), core.ToolExecutionContext{ToolCall: core.ToolCall{ID: "call"}, Args: map[string]any{"task": "loop"}})
 			if !errors.Is(err, core.ErrMaxTurnsExceeded) {
 				t.Fatalf("expected max turns error, got %v", err)
 			}
@@ -359,7 +359,7 @@ func TestAgentToolTimeoutUsesConfiguredOrInheritedContext(t *testing.T) {
 				defer cancel()
 			}
 			started := time.Now()
-			_, err = tool.Execute(ctx, "call", map[string]any{"task": "wait"}, nil)
+			_, err = tool.Execute(ctx, core.ToolExecutionContext{ToolCall: core.ToolCall{ID: "call"}, Args: map[string]any{"task": "wait"}})
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("expected deadline exceeded, got %v", err)
 			}
@@ -389,7 +389,7 @@ func TestAgentToolPreservesCancellationCauseAndDoesNotStartCanceledChild(t *test
 		}
 		ctx, cancel := context.WithCancelCause(context.Background())
 		cancel(cause)
-		_, err = tool.Execute(ctx, "call", map[string]any{"task": "do not start"}, nil)
+		_, err = tool.Execute(ctx, core.ToolExecutionContext{ToolCall: core.ToolCall{ID: "call"}, Args: map[string]any{"task": "do not start"}})
 		if !errors.Is(err, context.Canceled) || !errors.Is(err, cause) {
 			t.Fatalf("Execute error=%v, want canceled and custom cause identities", err)
 		}
@@ -419,7 +419,7 @@ func TestAgentToolPreservesCancellationCauseAndDoesNotStartCanceledChild(t *test
 			<-started
 			cancel(cause)
 		}()
-		_, err = tool.Execute(ctx, "call", map[string]any{"task": "cancel after start"}, nil)
+		_, err = tool.Execute(ctx, core.ToolExecutionContext{ToolCall: core.ToolCall{ID: "call"}, Args: map[string]any{"task": "cancel after start"}})
 		if !errors.Is(err, context.Canceled) || !errors.Is(err, cause) {
 			t.Fatalf("Execute error=%v, want canceled and custom cause identities", err)
 		}
@@ -446,7 +446,7 @@ func TestAgentToolPreservesCancellationCauseAndDoesNotStartCanceledChild(t *test
 			<-started
 			cancel(cause)
 		}()
-		_, err = tool.Execute(ctx, "call", map[string]any{"task": "return cause"}, nil)
+		_, err = tool.Execute(ctx, core.ToolExecutionContext{ToolCall: core.ToolCall{ID: "call"}, Args: map[string]any{"task": "return cause"}})
 		if !errors.Is(err, context.Canceled) || !errors.Is(err, cause) {
 			t.Fatalf("Execute error=%v, want canceled and custom cause identities", err)
 		}
@@ -456,13 +456,13 @@ func TestAgentToolPreservesCancellationCauseAndDoesNotStartCanceledChild(t *test
 func TestAgentToolTerminalTrackingIsScopedToFinalTurn(t *testing.T) {
 	terminal := core.ToolDefinition{
 		Name: "terminal",
-		Execute: func(context.Context, string, any, core.ToolUpdateFunc) (core.ToolResult, error) {
+		Execute: func(_ context.Context, _ core.ToolExecutionContext) (core.ToolResult, error) {
 			return core.ToolResult{Content: []core.Part{{Type: core.PartTypeText, Text: "old terminal"}}, Terminate: true}, nil
 		},
 	}
 	ordinary := core.ToolDefinition{
 		Name: "ordinary",
-		Execute: func(context.Context, string, any, core.ToolUpdateFunc) (core.ToolResult, error) {
+		Execute: func(_ context.Context, _ core.ToolExecutionContext) (core.ToolResult, error) {
 			return core.ToolResult{Content: []core.Part{{Type: core.PartTypeText, Text: "must not escape"}}}, nil
 		},
 	}
@@ -503,7 +503,7 @@ func TestAgentToolTerminalTrackingIsScopedToFinalTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAgentTool returned error: %v", err)
 	}
-	result, err := tool.Execute(context.Background(), "call", map[string]any{"task": "reuse an id"}, nil)
+	result, err := tool.Execute(context.Background(), core.ToolExecutionContext{ToolCall: core.ToolCall{ID: "call"}, Args: map[string]any{"task": "reuse an id"}})
 	if err == nil || !strings.Contains(err.Error(), "non-terminal tool result") {
 		t.Fatalf("Execute result=%+v error=%v, want final non-terminal tool rejection", result, err)
 	}
@@ -516,7 +516,7 @@ func TestAgentToolKeepsChildTerminateInsideChildRun(t *testing.T) {
 			Name: "terminating-child",
 			Tools: []core.ToolDefinition{{
 				Name: "finish",
-				Execute: func(context.Context, string, any, core.ToolUpdateFunc) (core.ToolResult, error) {
+				Execute: func(_ context.Context, _ core.ToolExecutionContext) (core.ToolResult, error) {
 					return core.ToolResult{
 						Content:   []core.Part{{Type: core.PartTypeText, Text: "terminal child output"}},
 						Terminate: true,
@@ -616,13 +616,13 @@ func TestAgentToolDrainsChildEventsAndKeepsFirstEventErrorPrimary(t *testing.T) 
 		t.Fatalf("NewAgentTool returned error: %v", err)
 	}
 	var updates []AgentToolEventDetails
-	_, err = tool.Execute(context.Background(), "call", map[string]any{"task": "fail"}, func(result core.ToolResult) {
+	_, err = tool.Execute(context.Background(), core.ToolExecutionContext{ToolCall: core.ToolCall{ID: "call"}, Args: map[string]any{"task": "fail"}, OnUpdate: func(result core.ToolResult) {
 		details, ok := result.Details.(AgentToolEventDetails)
 		if !ok {
 			t.Fatalf("unexpected partial details type %T", result.Details)
 		}
 		updates = append(updates, details)
-	})
+	}})
 	if !errors.Is(err, firstErr) {
 		t.Fatalf("expected first event error, got %v", err)
 	}

@@ -60,12 +60,50 @@ func newToolArgumentValidator(tool ToolDefinition) (func(any) (any, error), erro
 
 func validateToolDefinitions(tools []ToolDefinition) error {
 	for _, tool := range tools {
+		if err := validateChildTools(tool); err != nil {
+			return err
+		}
 		if _, err := json.Marshal(tool.OutputSchema); err != nil {
 			return fmt.Errorf("agent: marshal output schema for tool %q: %w", tool.Name, err)
 		}
 		if _, err := newToolArgumentValidator(tool); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateToolOutput(tool ToolDefinition, result ToolResult) error {
+	if len(tool.OutputSchema) == 0 {
+		return nil
+	}
+	if len(result.StructuredContent) == 0 {
+		return fmt.Errorf("tool %q returned no structured content for its output schema", tool.Name)
+	}
+	encoded, err := json.Marshal(tool.OutputSchema)
+	if err != nil {
+		return err
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(encoded, &schema); err != nil {
+		return err
+	}
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(result.StructuredContent))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	value, err = normalizeJSONNumbers(value)
+	if err != nil {
+		return err
+	}
+	if err := resolved.Validate(value); err != nil {
+		return fmt.Errorf("tool %q output does not match schema: %w", tool.Name, err)
 	}
 	return nil
 }

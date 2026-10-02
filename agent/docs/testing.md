@@ -47,6 +47,14 @@ The default offline suite covers:
 - shared memory/JSONL session storage conformance, strict replay, torn-tail
   repair, repository writer claims, and path isolation
 - pure lane/context reduction plus complete-turn, tool-pair-safe compaction
+- original tool error chains, independent execution facts, safe after-hook
+  projection, complete child ledgers, queued permission revocation, FIFO
+  admission and permits held until actual executor exit
+- fixed QuickJS WASM stack/heap/deadline enforcement, bounded bridge/output
+  resources, cancellation/Close ownership, unsafe numbers, and invocation-store
+  success-only atomic commits
+- real SDK in-memory MCP and deterministic model integration through
+  `agent/codemodetool`, including business-error envelopes and nested Suspend
 
 ## Race Checks
 
@@ -55,6 +63,20 @@ Recommended pre-release verification:
 ```powershell
 go test ./... -race
 ```
+
+For the sandbox/MCP contract, run from the repository root with live calls off:
+
+```powershell
+$env:GOWORK = 'off'
+$env:PIGO_LIVE_TEST = '0'
+$env:PI_GO_AGENT_LIVE_TEST = '0'
+go test -mod=readonly -count=1 -race ./codemode/... ./agent ./agent/mcptools ./agent/codemodetool
+```
+
+The GitHub Actions matrix runs this contract and the compiled local MCP example
+on Windows amd64, Linux amd64/arm64, and macOS amd64/arm64. Cross-compilation
+alone is not sandbox execution evidence. The local example needs no credentials
+or UI acceptance; real provider tests remain separately gated.
 
 ## Live Provider Tests
 

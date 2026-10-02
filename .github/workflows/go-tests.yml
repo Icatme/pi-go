@@ -13,6 +13,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      GOWORK: 'off'
+      PIGO_LIVE_TEST: '0'
+      PI_GO_AGENT_LIVE_TEST: '0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -20,8 +24,44 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Provider race tests
-        run: go test -race ./pkg/pigo
+        run: go test -mod=readonly -count=1 -race ./pkg/pigo
       - name: All packages
-        run: go test ./...
+        run: go test -mod=readonly -count=1 ./...
       - name: Vet
-        run: go vet ./...
+        run: go vet -mod=readonly ./...
+      - name: Examples
+        working-directory: examples
+        run: |
+          go test -mod=readonly -count=1 ./...
+          go vet -mod=readonly ./...
+
+  codemode:
+    name: Codemode (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2025, macos-15-intel, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      GOWORK: 'off'
+      PIGO_LIVE_TEST: '0'
+      PI_GO_AGENT_LIVE_TEST: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            examples/go.sum
+      - name: Sandbox and common execution contract
+        run: go test -mod=readonly -count=1 -race ./codemode/... ./agent ./agent/mcptools ./agent/codemodetool
+      - name: Compile local MCP example
+        working-directory: examples
+        run: go build -mod=readonly -o mcp-codemode-example.exe ./mcp-codemode
+      - name: Run local MCP example
+        working-directory: examples
+        shell: bash
+        run: ./mcp-codemode-example.exe
