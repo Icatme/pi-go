@@ -1252,17 +1252,18 @@ func emitToolExecutionStart(emit EventSink, call ToolCall, args any) {
 }
 
 type preparedToolCall struct {
-	call        ToolCall
-	tool        ToolDefinition
-	args        any
-	context     AgentContext
-	outcome     toolOutcome
-	immediate   bool
-	gate        ToolGateHook
-	child       bool
-	parentID    string
-	onEntered   func()
-	resultLimit int
+	call         ToolCall
+	tool         ToolDefinition
+	args         any
+	context      AgentContext
+	outcome      toolOutcome
+	immediate    bool
+	gate         ToolGateHook
+	child        bool
+	parentID     string
+	onEntered    func()
+	resultLimit  int
+	summaryLimit int
 }
 
 type toolOutcome struct {
@@ -1728,10 +1729,16 @@ func parseToolArguments(tool ToolDefinition, call ToolCall) (any, error) {
 		return tool.ParseArguments(cloneToolCall(call))
 	}
 	if call.ParsedArgs != nil {
+		if err := checkArgumentStrings(call.ParsedArgs); err != nil {
+			return nil, err
+		}
 		return cloneStringAnyMap(call.ParsedArgs), nil
 	}
 	if len(call.Arguments) == 0 {
 		return map[string]any{}, nil
+	}
+	if err := checkRawArgumentUnicode(call.Arguments); err != nil {
+		return nil, err
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(call.Arguments))
@@ -1746,7 +1753,9 @@ func parseToolArguments(tool ToolDefinition, call ToolCall) (any, error) {
 		}
 		return nil, err
 	}
-	return cloneAny(parsed), nil
+	// The decoder owns this value; validation checks the child byte budget
+	// before making the first copy of the decoded representation.
+	return parsed, nil
 }
 
 func isErrorAssistantMessage(message Message) bool {

@@ -215,18 +215,15 @@ func (r *runState) scriptFailure(vm *quickjs.VM, report, value uint64) error {
 	vm.Free(h)
 	var detail struct {
 		Message, Code string
-		CallID        any `json:"callId"`
+		CauseID       int `json:"causeId"`
 	}
 	if err := json.Unmarshal([]byte(raw), &detail); err != nil {
 		return &ScriptError{Code: "script", Message: "cannot decode script failure", Err: err}
 	}
 	var cause error
 	r.mu.Lock()
-	for _, e := range r.failures {
-		if e.CallID != "" && fmt.Sprint(detail.CallID) == e.CallID {
-			cause = e
-			break
-		}
+	if e := r.failures[detail.CauseID]; e != nil {
+		cause = e
 	}
 	r.mu.Unlock()
 	return &ScriptError{Code: detail.Code, Message: detail.Message, Err: cause}

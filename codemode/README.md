@@ -38,8 +38,9 @@ Scripts get `tools.<name>`, frozen `ALL_TOOLS` name/description summaries,
 `exit`, `store` and `load`. Discovery returns Promises; unavailable descriptions
 resolve to `undefined`. Unknown tool calls reject. Supported image inputs are
 PNG/JPEG/GIF/WebP inline base64 data URLs or `{mimeType,data}` objects; base64,
-format headers and declared MIME are checked before output. No remote image
-fetch is performed.
+format headers, declared MIME and the 64 Mi-pixel limit are checked before
+output, including WebP through the official pure Go configuration decoder.
+No remote image fetch is performed.
 
 `return value` uses the same output budget as text/console/image. Source options
 may appear only on the first line, for example:
@@ -71,14 +72,18 @@ Opaque objects/allocations owned by a Go tool remain the tool's responsibility.
 
 Nonfinite numbers, BigInt, unsafe integers (outside +/-9007199254740991),
 JSON precision loss, unsupported object/accessor values and cycles are
-rejected. `ValidateJSON` exposes this boundary to integrations before parsing
-into JavaScript; `*JSONError` supplies stable `unsafe_number` classification.
+rejected. Invalid UTF-8 and unpaired UTF-16 surrogate escapes are rejected in
+JSON string values and keys before decoding; valid surrogate pairs and U+FFFD
+remain supported. `ValidateJSON` exposes this boundary before parsing into
+JavaScript; `*JSONError` supplies `unsafe_number` or `invalid_unicode` codes.
 Ordinary decimal JSON such as 0.1 and 19.99 roundtrips; this is not arbitrary
 precision arithmetic or a raw-wire preservation guarantee. `*CallError`
 carries `code`, optional `reasonCode`, host `callId`, and independent execution
 facts into JS. Uncaught correlated errors retain their original Go chain while
 it fits the diagnostic budget. Successful tool-declared error envelopes are
-ordinary values. Caught/replaced guest errors cannot invent a Go error chain.
+ordinary values. Only the exact host rejection object can retain its Go cause;
+changing public error properties does not change that identity. Copied, proxied
+or replaced guest errors cannot invent a Go error chain.
 
 Store is isolated to a script unless a caller-owned `*Store` is supplied.
 `NewStore(maxBytes)` provides an invocation-local scope: each script snapshots

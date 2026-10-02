@@ -3,27 +3,38 @@ package codemode
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/big"
 	"strconv"
 	"strings"
+
+	"github.com/Icatme/pi-go/internal/jsontext"
 )
 
-// JSONError exposes precision failure without parsing diagnostic text.
+// JSONError exposes Unicode and precision failures without parsing diagnostic text.
 type JSONError struct{ Code, Message string }
 
 func (e *JSONError) Error() string      { return e.Code + ": " + e.Message }
 func unsafeNumber(message string) error { return &JSONError{Code: "unsafe_number", Message: message} }
 
-// ValidateJSON checks the Number boundary before any JS parse. Ordinary
+// ValidateJSON checks Unicode before Go decoding and the Number boundary before
+// any JS parse. Invalid UTF-8 and unpaired surrogate escapes are rejected in
+// object keys and string values. Ordinary
 // decimal JSON roundtrips are accepted; unsafe integers, precision loss,
 // overflow and underflow fail. This does not provide decimal arithmetic.
 // The caller must apply its byte limit before invoking this function.
 func ValidateJSON(raw json.RawMessage) error {
 	if len(raw) > 64<<20 {
 		return fmt.Errorf("JSON exceeds validation bound")
+	}
+	if err := jsontext.ValidateUnicode(raw); err != nil {
+		if errors.Is(err, jsontext.ErrInvalidUnicode) {
+			return &JSONError{Code: "invalid_unicode", Message: "JSON strings must be valid Unicode"}
+		}
+		return err
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.UseNumber()

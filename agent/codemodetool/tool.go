@@ -16,6 +16,7 @@ import (
 
 	"github.com/Icatme/pi-go/agent"
 	"github.com/Icatme/pi-go/codemode"
+	"github.com/Icatme/pi-go/internal/jsontext"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
@@ -277,8 +278,14 @@ func freezeLeaf(original agent.ToolDefinition, name string, projection Projectio
 		if value == nil {
 			return nil, nil
 		}
+		if err := jsontext.ValidateStrings(value); err != nil {
+			return nil, err
+		}
 		data, err := json.Marshal(value)
 		if err != nil {
+			return nil, err
+		}
+		if err := codemode.ValidateJSON(data); err != nil {
 			return nil, err
 		}
 		var result map[string]any
@@ -306,16 +313,18 @@ func freezeLeaf(original agent.ToolDefinition, name string, projection Projectio
 				return err
 			}
 		}
-		if projection == NativeValue && result.IsError {
-			return nil
-		}
-		if _, err := projectResult(result, projection, len(frozen.OutputSchema) > 0); err != nil {
+		structured := len(frozen.OutputSchema) > 0 && !(projection == NativeValue && result.IsError)
+		if _, err := projectResult(result, projection, structured); err != nil {
 			return &agent.ToolExecutionError{Code: agent.ToolFailureResultRejected, Reason: boundaryReason(err), Message: "tool result rejected at JavaScript boundary", Err: err}
 		}
 		return nil
 	}
 	frozen.Execute = func(ctx context.Context, execution agent.ToolExecutionContext) (agent.ToolResult, error) {
-		encoded, err := json.Marshal(execution.Args)
+		err := jsontext.ValidateStrings(execution.Args)
+		var encoded []byte
+		if err == nil {
+			encoded, err = json.Marshal(execution.Args)
+		}
 		if err == nil {
 			err = codemode.ValidateJSON(encoded)
 		}
@@ -330,6 +339,9 @@ func freezeLeaf(original agent.ToolDefinition, name string, projection Projectio
 }
 
 func boundaryReason(err error) string {
+	if errors.Is(err, jsontext.ErrInvalidUnicode) {
+		return "invalid_unicode"
+	}
 	var precision *codemode.JSONError
 	if errors.As(err, &precision) {
 		return precision.Code
@@ -350,7 +362,11 @@ func projectResult(result agent.ToolResult, projection Projection, structured bo
 			}
 			return append(json.RawMessage(nil), result.StructuredContent...), nil
 		}
-		return json.Marshal(resultText(result))
+		text := resultText(result)
+		if err := jsontext.ValidateStrings(text); err != nil {
+			return nil, err
+		}
+		return json.Marshal(text)
 	}
 	content := make([]map[string]any, 0, len(result.Content))
 	for _, part := range result.Content {
@@ -366,6 +382,9 @@ func projectResult(result agent.ToolResult, projection Projection, structured bo
 	envelope := map[string]any{"content": content, "isError": result.IsError}
 	if len(result.StructuredContent) > 0 {
 		envelope["structuredContent"] = result.StructuredContent
+	}
+	if err := jsontext.ValidateStrings(envelope); err != nil {
+		return nil, err
 	}
 	data, err := json.Marshal(envelope)
 	if err == nil {

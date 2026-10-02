@@ -71,6 +71,9 @@ func tokenize(s string) []string {
 }
 
 func searchTools(catalog []toolDescription, raw string) ([]searchMatch, error) {
+	if err := ValidateJSON([]byte(raw)); err != nil {
+		return nil, err
+	}
 	var req searchRequest
 	if err := json.Unmarshal([]byte(raw), &req); err != nil {
 		return nil, err

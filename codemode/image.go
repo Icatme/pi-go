@@ -10,6 +10,8 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"strings"
+
+	_ "golang.org/x/image/webp"
 )
 
 func (r *runState) image(raw string) string {
@@ -56,15 +58,11 @@ func (r *runState) image(raw string) string {
 		if len(data) < 20 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" || int(binary.LittleEndian.Uint32(data[4:8])) != len(data)-8 || (string(data[12:16]) != "VP8 " && string(data[12:16]) != "VP8L" && string(data[12:16]) != "VP8X") {
 			return fail("image_invalid", "MIME does not match WebP data")
 		}
-	} else {
-		config, format, err := image.DecodeConfig(bytes.NewReader(data))
-		expected := strings.TrimPrefix(value.MimeType, "image/")
-		if expected == "jpeg" {
-			expected = "jpeg"
-		}
-		if err != nil || format != expected || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 64<<20 {
-			return fail("image_invalid", "MIME does not match supported image data")
-		}
+	}
+	config, format, err := image.DecodeConfig(bytes.NewReader(data))
+	expected := strings.TrimPrefix(value.MimeType, "image/")
+	if err != nil || format != expected || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 64<<20 {
+		return fail("image_invalid", "MIME does not match supported image data")
 	}
 	return r.appendOutput(Output{Type: "image", MimeType: value.MimeType, Data: value.Data}, len(value.Data))
 }

@@ -74,11 +74,31 @@ func cloneChildCallReport(report *ChildCallReport) *ChildCallReport {
 	return &copy
 }
 
-type childParentContextKey struct{}
+type childCallContextKey struct{}
+
+type childCallContext struct {
+	parentID string
+	limits   ChildCallLimits
+}
+
+func childCallContextFrom(ctx context.Context) childCallContext {
+	value, _ := ctx.Value(childCallContextKey{}).(childCallContext)
+	return value
+}
 
 func childParentID(ctx context.Context) string {
-	id, _ := ctx.Value(childParentContextKey{}).(string)
-	return id
+	return childCallContextFrom(ctx).parentID
+}
+
+func argumentBudgetFailure(cause error) *ToolExecutionError {
+	return &ToolExecutionError{Code: ToolFailureResource, Message: "child arguments exceed byte limit", Err: cause}
+}
+
+func checkArgumentBudget(value any, limit int) *ToolExecutionError {
+	if limit > 0 && !valueFitsBudget(value, limit) {
+		return argumentBudgetFailure(nil)
+	}
+	return nil
 }
 
 type childTicket struct {
@@ -176,12 +196,12 @@ func (s *childCallScope) Call(ctx context.Context, original ToolCall) ToolCallOu
 	s.mu.Lock()
 	if s.closed || s.stopped {
 		s.mu.Unlock()
-		return publicToolOutcome(rejectedToolOutcome(ToolCall{Name: boundedUTF8(original.Name, 1024)}, errors.New("child call scope is closed or admission stopped"), ToolFailureResource))
+		return rejectedChildOutcome(ToolCall{Name: boundedUTF8(original.Name, 1024)}, errors.New("child call scope is closed or admission stopped"), ToolFailureResource, s.limits.MaxResultBytes)
 	}
 	if len(s.records) >= s.limits.MaxCalls {
 		s.stopped = true
 		s.mu.Unlock()
-		return publicToolOutcome(rejectedToolOutcome(ToolCall{Name: boundedUTF8(original.Name, 1024)}, errors.New("child call budget exhausted"), ToolFailureResource))
+		return rejectedChildOutcome(ToolCall{Name: boundedUTF8(original.Name, 1024)}, errors.New("child call budget exhausted"), ToolFailureResource, s.limits.MaxResultBytes)
 	}
 	index := len(s.records)
 	id := fmt.Sprintf("%s/%d", s.parentID, index+1)
@@ -200,13 +220,16 @@ func (s *childCallScope) Call(ctx context.Context, original ToolCall) ToolCallOu
 	if len(original.Arguments) > s.limits.MaxArgumentBytes || !valueFitsBudget(original.ParsedArgs, s.limits.MaxArgumentBytes) {
 		return s.reject(ticket, call, errors.New("child arguments exceed byte limit"), ToolFailureResource)
 	}
+	if err := checkArgumentStrings(original.ParsedArgs); err != nil {
+		return s.reject(ticket, call, err, ToolFailureArgumentInvalid)
+	}
 	call.Arguments = append(call.Arguments, original.Arguments...)
 	call.ParsedArgs = cloneStringAnyMap(original.ParsedArgs)
 	callCtx, cancel := context.WithCancel(s.ctx)
 	stop := context.AfterFunc(ctx, cancel)
 	defer stop()
 	defer cancel()
-	callCtx = context.WithValue(callCtx, childParentContextKey{}, s.parentID)
+	callCtx = context.WithValue(callCtx, childCallContextKey{}, childCallContext{parentID: s.parentID, limits: s.limits})
 	if err := ctx.Err(); err != nil {
 		return s.reject(ticket, call, err, ToolFailureCanceled)
 	}
@@ -218,6 +241,7 @@ func (s *childCallScope) Call(ctx context.Context, original ToolCall) ToolCallOu
 		return s.reject(ticket, call, errors.New("nested tool suspension is unsupported"), ToolFailureNestedSuspendUnsupported)
 	}
 	if prepared.immediate {
+		prepared.outcome.result = boundedErrorResult(prepared.outcome.result, prepared.outcome.err.Error(), s.limits.MaxResultBytes)
 		outcome := publicToolOutcome(prepared.outcome)
 		s.finish(ticket, outcome)
 		s.emitEnd(outcome)
@@ -230,6 +254,7 @@ func (s *childCallScope) Call(ctx context.Context, original ToolCall) ToolCallOu
 	prepared.child = true
 	prepared.parentID = s.parentID
 	prepared.resultLimit = s.limits.MaxResultBytes
+	prepared.summaryLimit = s.limits.MaxSummaryBytes
 	prepared.onEntered = func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -286,13 +311,19 @@ func (s *childCallScope) release(ticket *childTicket) {
 }
 
 func (s *childCallScope) reject(ticket *childTicket, call ToolCall, err error, code ToolFailureCode) ToolCallOutcome {
-	outcome := publicToolOutcome(rejectedToolOutcome(call, err, code))
+	outcome := rejectedChildOutcome(call, err, code, s.limits.MaxResultBytes)
 	s.finish(ticket, outcome)
 	s.emitEnd(outcome)
 	// A canceled queued call may already have received a scheduling permit.
 	// No executor entered, so that permit can be released immediately.
 	s.release(ticket)
 	return outcome
+}
+
+func rejectedChildOutcome(call ToolCall, err error, code ToolFailureCode, resultLimit int) ToolCallOutcome {
+	rejected := rejectedToolOutcome(call, err, code)
+	rejected.result = boundedErrorResult(rejected.result, rejected.err.Error(), resultLimit)
+	return publicToolOutcome(rejected)
 }
 
 func (s *childCallScope) finish(ticket *childTicket, outcome ToolCallOutcome) {
@@ -425,6 +456,12 @@ func childResultSummary(result ToolResult, limit int) *ToolResult {
 // accepts only data kinds, so cyclic or huge host values cannot allocate an
 // unbounded event/bridge copy. Serialization and transport limits still apply.
 func valueFitsBudget(value any, budget int) bool {
+	_, fits := valueByteCost(value, budget)
+	return fits
+}
+
+func valueByteCost(value any, budget int) (int, bool) {
+	initialBudget := budget
 	items := 0
 	var visit func(reflect.Value, int) bool
 	visit = func(value reflect.Value, depth int) bool {
@@ -493,5 +530,6 @@ func valueFitsBudget(value any, budget int) bool {
 			return false
 		}
 	}
-	return visit(reflect.ValueOf(value), 0)
+	fits := visit(reflect.ValueOf(value), 0)
+	return initialBudget - budget, fits
 }

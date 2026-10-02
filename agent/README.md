@@ -291,6 +291,18 @@ rejection after completion, and an unknown remote outcome. After hooks can
 redact content but cannot convert a returned Go error into success or erase
 execution facts. `AgentEvent.ToolErr` is the Go-only tool error;
 `AgentEvent.Err` continues to represent a run/stream error.
+Trusted remote facts on a returned result survive an ordinary Go error.
+An executor panic becomes `protocol` with reason `executor_panic` and safe
+default text, then passes through after hooks and normal scope/report cleanup.
+An after-hook panic becomes `hook` with reason `after_hook_panic`, discards
+unprocessed output and preserves already reported execution facts. Error-valued
+panics retain their original Go causes for trusted callers.
+
+Raw arguments and serialized `ToolCall` values reject invalid UTF-8 and unpaired
+UTF-16 surrogate escapes before decoding. Go argument strings are checked before
+copying or marshaling; rejection uses `argument_invalid` / `invalid_unicode`
+without entering the executor. Valid surrogate pairs and explicit U+FFFD remain
+unchanged, including in the outer Codemode `code` parameter.
 
 Only tools with an explicit `ChildTools` allowlist receive `ChildCaller`.
 Leaves have no child capability; deeper containers are rejected. Children use
@@ -301,6 +313,10 @@ retention may truncate. Host-owned `ToolResult.ChildCalls` retains this report
 even if a parent hook fails and discards content/Details; it is Go-only and does
 not enter model JSON. Default child progress contains identity and execution
 state, and end events contain bounded after-hook summaries.
+Configured child argument limits apply after parsing, coercion and before-hook
+mutation, before copying or execution. Child result limits also apply to failure
+results and generated failure text, and child end events honor the configured
+summary limit.
 
 The optional [Codemode binding](codemodetool/README.md) uses this lifecycle
 without adding JavaScript or MCP dependencies to the Agent core. Its JSON store

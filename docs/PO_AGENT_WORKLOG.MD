@@ -658,3 +658,47 @@
   Keep raw/cache/identity binding (M3b), managed connections/dynamic hidden
   exposure/transport replay guards (M4), and durable branch CAS (M5) separate.
   No raw-wire precision, arbitrary-session at-most-once, live provider or UI claim.
+
+## 2026-10-02: Fix PR15 execution and JSON boundary findings
+
+- Repair the eight review findings on codex/mcp-codemode-minimal: strict Unicode,
+  executor panic cleanup, private error correlation, preserved remote facts,
+  final argument budgets, failure partial-result budgets, child summary budgets
+  and WebP configuration/pixel validation. Add regression cases that reproduce
+  the original failures before validating the repaired behavior.
+- Reject invalid UTF-8 and unpaired surrogate escapes in JSON values and keys
+  before Go decoding or marshaling. A shared standard-library-only internal
+  helper covers raw JSON and bounded Go string traversal. Agent ToolCall/raw/
+  ParsedArgs, the outer code parameter, native/MCP arguments, effective results,
+  schemas, discovery and Store use the appropriate boundary checks. Actual
+  native/MCP calls remain zero for invalid IDs; emoji and explicit U+FFFD retain
+  their original values. Expose argument_invalid/result_rejected and the
+  invalid_unicode machine reason without losing original Go causes.
+- Convert Execute and AfterToolCall panics inside the common lifecycle to safe
+  typed failures. Run after hooks, close scopes and finish child records; retain
+  completed-write facts and original error-valued panic chains. Private panic
+  text and unprocessed hook-failure output stay out of default events and JS.
+- Correlate Go causes through a private WeakMap and the exact host Error identity
+  plus VM-local sequence. Public callId changes, copied/replacement errors,
+  prototypes and proxies cannot manufacture a canceled parent or another cause.
+- Preserve trusted remote completion facts when a result is accompanied by an
+  ordinary Go error. Check child arguments after parser/coercion/hook mutation
+  before copies or execution. Bound partial failure output and generated error
+  text from preparation, permission, execution, hooks and validators under one
+  retained-payload budget. End events use the configured child summary limit.
+- Use pure-Go golang.org/x/image/webp v0.46.0 configuration decoding, exact RIFF
+  length checks and the existing 64 Mi-pixel limit. Verify its 2026-09-08 release,
+  Go1.26 compatibility and GO-2026-5061 fix before adoption; retain the pinned
+  QuickJS artifact/source/license bytes. Tidy both module graphs, including
+  required x/sys v0.48.0 and the examples' resulting x/* selections; all selected
+  changed x/* versions were released in August/September 2026 and require Go1.26.
+- On the final native Windows Go1.26.4 snapshot, GOWORK=off and both live-test
+  flags disabled: full root/examples ordinary tests, full race suites, vet,
+  build and module verification pass. All 21 changed/new Go files pass gofmt
+  checks; diff checks and pinned artifact/source/license test digests pass.
+  The freshly compiled local MCP example returns 50 open issues and IDs 3/6/9
+  in four host calls. Six original repository-external review probes also pass
+  after recompilation against these fixes.
+- Update package documentation and the existing draft PR. Cross-platform checks
+  will run on the pushed repair commit; prior-head CI is not repair evidence.
+  No live-provider or UI acceptance, version bump, tag, release or PR merge.

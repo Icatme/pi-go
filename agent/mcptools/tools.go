@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 
 	"github.com/Icatme/pi-go/agent"
+	"github.com/Icatme/pi-go/internal/jsontext"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -114,6 +116,14 @@ func Discover(ctx context.Context, session *mcp.ClientSession, options Options) 
 				var data []byte
 				var err error
 				if call.ParsedArgs != nil {
+					if len(call.Arguments) > 0 {
+						if err := argumentJSON(call.Arguments, o.MaxArgumentBytes); err != nil {
+							return nil, err
+						}
+					}
+					if err := jsontext.ValidateStrings(call.ParsedArgs); err != nil {
+						return nil, argumentStringError(err)
+					}
 					data, err = json.Marshal(call.ParsedArgs)
 				} else {
 					data = call.Arguments
@@ -121,8 +131,11 @@ func Discover(ctx context.Context, session *mcp.ClientSession, options Options) 
 				if len(data) == 0 {
 					data = []byte(`{}`)
 				}
-				if err != nil || len(data) > o.MaxArgumentBytes || !json.Valid(data) {
+				if err != nil {
 					return nil, beforeCallError("argument_invalid", "arguments", fmt.Errorf("mcptools: invalid or oversized arguments"))
+				}
+				if err := argumentJSON(data, o.MaxArgumentBytes); err != nil {
+					return nil, err
 				}
 				var args map[string]any
 				d := json.NewDecoder(bytes.NewReader(data))
@@ -142,9 +155,15 @@ func Discover(ctx context.Context, session *mcp.ClientSession, options Options) 
 				if err := callCtx.Err(); err != nil {
 					return agent.ToolResult{}, beforeCallError("canceled", "context", err)
 				}
+				if err := jsontext.ValidateStrings(execution.Args); err != nil {
+					return agent.ToolResult{}, argumentStringError(err)
+				}
 				encoded, err := json.Marshal(execution.Args)
 				if err != nil || len(encoded) > o.MaxArgumentBytes {
 					return agent.ToolResult{}, beforeCallError("argument_invalid", "arguments", fmt.Errorf("mcptools: invalid or oversized arguments"))
+				}
+				if err := argumentJSON(encoded, o.MaxArgumentBytes); err != nil {
+					return agent.ToolResult{}, err
 				}
 				var arguments map[string]any
 				decoder := json.NewDecoder(bytes.NewReader(encoded))
@@ -205,6 +224,24 @@ func Discover(ctx context.Context, session *mcp.ClientSession, options Options) 
 	return definitions, nil
 }
 
+func argumentJSON(raw []byte, limit int) error {
+	if len(raw) > limit {
+		return beforeCallError("argument_invalid", "arguments", fmt.Errorf("mcptools: oversized arguments"))
+	}
+	if err := jsontext.ValidateUnicode(raw); err != nil {
+		return argumentStringError(err)
+	}
+	return nil
+}
+
+func argumentStringError(err error) error {
+	reason := "arguments"
+	if errors.Is(err, jsontext.ErrInvalidUnicode) {
+		reason = "invalid_unicode"
+	}
+	return beforeCallError("argument_invalid", reason, err)
+}
+
 func list(ctx context.Context, session *mcp.ClientSession, o Options) (map[string]*mcp.Tool, error) {
 	result := make(map[string]*mcp.Tool)
 	seen := make(map[string]bool)
@@ -251,6 +288,9 @@ func schema(value any, limit int, required bool) (map[string]any, *jsonschema.Re
 	data, err := json.Marshal(value)
 	if err != nil || len(data) > limit {
 		return nil, nil, fmt.Errorf("invalid or oversized schema")
+	}
+	if err := jsontext.ValidateUnicode(data); err != nil {
+		return nil, nil, err
 	}
 	var object map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(data))

@@ -93,6 +93,15 @@ func success(value any) string {
 func fail(code, message string) string {
 	return callFailure(&CallError{Code: code, Message: message, Execution: Execution{Local: "not_started", Remote: "not_dispatched"}})
 }
+
+func failJSON(code string, err error) string {
+	failure := &CallError{Code: code, Message: err.Error(), Execution: Execution{Local: "not_started", Remote: "not_dispatched"}}
+	var validation *JSONError
+	if errors.As(err, &validation) {
+		failure.ReasonCode = validation.Code
+	}
+	return callFailure(failure)
+}
 func callFailure(e *CallError) string {
 	raw, _ := json.Marshal(struct {
 		OK    bool       `json:"ok"`
@@ -107,7 +116,7 @@ func (r *runState) host(op string, args []string) string {
 	}
 	for _, s := range args {
 		if !utf8.ValidString(s) {
-			return fail("unsupported_string", "Unpaired surrogate cannot cross the host UTF-8 boundary")
+			return failJSON("unsupported_string", &JSONError{Code: "invalid_unicode", Message: "String cannot cross the host UTF-8 boundary"})
 		}
 	}
 	switch op {
@@ -136,12 +145,15 @@ func (r *runState) host(op string, args []string) string {
 		}
 		v, err := searchTools(r.catalog, args[0])
 		if err != nil {
-			return fail("arguments", err.Error())
+			return failJSON("arguments", err)
 		}
 		return success(v)
 	case "describe", "namespace":
 		if len(args) != 1 || len(args[0]) > 512 {
 			return fail("arguments", "invalid description request")
+		}
+		if err := ValidateJSON([]byte(args[0])); err != nil {
+			return failJSON("arguments", err)
 		}
 		var name string
 		if err := json.Unmarshal([]byte(args[0]), &name); err != nil {
@@ -186,7 +198,7 @@ func (r *runState) host(op string, args []string) string {
 			}
 		}
 		if err := ValidateJSON([]byte(args[1])); err != nil {
-			return fail("unsupported_json", err.Error())
+			return failJSON("unsupported_json", err)
 		}
 		if _, ok := r.store[args[0]]; !ok && len(r.store) >= 256 {
 			return fail("store_limit", "store entry limit exceeded")
@@ -281,7 +293,7 @@ func (r *runState) admit(jsID int, name, payload string) string {
 		return fail("argument_limit", "arguments exceed byte limit")
 	}
 	if err := ValidateJSON([]byte(payload)); err != nil {
-		return fail("argument_invalid", err.Error())
+		return failJSON("argument_invalid", err)
 	}
 	r.mu.Lock()
 	if !r.accepting || r.ctx.Err() != nil {

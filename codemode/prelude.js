@@ -13,6 +13,9 @@
   const pending = new Map();
   const mapGet = Function.call.bind(Map.prototype.get), mapSet = Function.call.bind(Map.prototype.set);
   const mapDelete = Function.call.bind(Map.prototype.delete);
+  const hostFailures = new WeakMap();
+  const weakGet = Function.call.bind(WeakMap.prototype.get), weakSet = Function.call.bind(WeakMap.prototype.set);
+  const slice = Function.call.bind(String.prototype.slice);
   let sequence = 0;
 
   function failure(code, message, callId, execution) {
@@ -107,7 +110,7 @@
     settle(id, response) {
       const p=mapGet(pending,id); if(!p)return; mapDelete(pending,id);
       const r=parse(response);
-      if(r.ok)p.resolve(r.value);else {const e=failure(r.error.code,r.error.message,r.error.callId,r.error.execution);e.reasonCode=r.error.reasonCode;p.reject(e);}
+      if(r.ok)p.resolve(r.value);else {const e=failure(r.error.code,r.error.message,r.error.callId,r.error.execution);e.reasonCode=r.error.reasonCode;weakSet(hostFailures,e,id);p.reject(e);}
     },
     finish(value) {if(value!==undefined)api.text(value);},
     error(value) {
@@ -115,8 +118,13 @@
       // and context limits; the Go bridge caps copied strings independently.
       const message=value && typeof value==='object' ? string(value) + (value.stack ? '\n'+string(value.stack):'') : string(value);
       const code=value && typeof value.code==='string'?value.code:'script';
-      const callId=value && (typeof value.callId==='string'||typeof value.callId==='number')?value.callId:null;
-      return stringify({message:message.slice(0,8192),code:code.slice(0,128),callId});
+      // Only the exact rejection object created by settle can refer to a Go
+      // cause. Public error properties, prototypes and proxies are not identity.
+      const causeId=weakGet(hostFailures,value);
+      const detail=create(null);
+      detail.message=slice(message,0,8192);detail.code=slice(code,0,128);
+      detail.causeId=causeId===undefined?null:causeId;
+      return stringify(detail);
     }
   });
 })

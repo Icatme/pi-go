@@ -63,6 +63,12 @@ input-required responses are `input_required_unsupported`. Model text is a
 presentation of these facts, not the source of retry decisions. After hooks may
 redact presentation but cannot erase errors or change execution facts.
 
+Raw JSON arguments reject invalid UTF-8 and unpaired UTF-16 surrogate escapes
+before decoding, including object keys. Go argument values and keys are checked
+before encoding so invalid UTF-8 cannot become a different ID through JSON
+replacement. These failures use reason `invalid_unicode` and never call the
+remote tool. Valid surrogate pairs and an intentional U+FFFD are accepted.
+
 Input and successful structured output are validated with jsonschema-go,
 without external schema loading. Structured output may be an object, array or
 primitive; output declarations must be JSON Schema objects. Text and image

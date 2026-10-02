@@ -189,6 +189,9 @@ type ToolCall struct {
 
 // UnmarshalJSON preserves arbitrary-precision JSON numbers inside ParsedArgs.
 func (c *ToolCall) UnmarshalJSON(data []byte) error {
+	if err := checkRawArgumentUnicode(data); err != nil {
+		return err
+	}
 	type toolCallJSON ToolCall
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()

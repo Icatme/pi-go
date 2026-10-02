@@ -29,3 +29,15 @@ v1.9.1 Go-WASI guest) and #2406 (filesystem symlinks) are tracked upstream;
 this reactor grants no filesystem and is tested on native Windows. goja
 does not offer the accepted WASM isolation; Wasmtime-Go adds CGO. The fixed
 wazero/QuickJS combination keeps the host pure Go and bounds guest memory.
+
+Host image configuration validation uses golang.org/x/image v0.46.0 for WebP.
+The Go project published this version on 2026-09-08; its Go1.26 requirement fits
+the repository, and the configuration decoder is pure Go on all tested platforms.
+It includes the fix for GO-2026-5061 (affected versions before v0.43.0).
+Standard image decoders do not support WebP; a second handwritten format parser
+would duplicate validation, while libwebp through CGO would add native build
+requirements. Configuration-only decoding avoids allocating a full bitmap and
+uses the same 64 Mi-pixel bound as PNG/JPEG/GIF. Its module requirements select
+x/sys v0.48.0, and the examples module is tidied to the resulting dependency graph.
+Sources: https://pkg.go.dev/golang.org/x/image@v0.46.0/webp and
+https://pkg.go.dev/vuln/GO-2026-5061 .
