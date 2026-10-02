@@ -2,9 +2,9 @@ name: Go tests
 
 on:
   pull_request:
-    branches: [master]
+    branches: [master, 'codex/mcp-*']
   push:
-    branches: [master, 'fix/relay-http-evidence']
+    branches: [master, 'fix/relay-http-evidence', 'codex/mcp-*']
 
 permissions:
   contents: read

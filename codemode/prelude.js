@@ -1,4 +1,4 @@
-(function(catalog) {
+(function(catalog, limits) {
   'use strict';
   const host = globalThis.__pigo_host;
   delete globalThis.__pigo_host;
@@ -16,6 +16,7 @@
   const hostFailures = new WeakMap();
   const weakGet = Function.call.bind(WeakMap.prototype.get), weakSet = Function.call.bind(WeakMap.prototype.set);
   const slice = Function.call.bind(String.prototype.slice);
+  const lower = Function.call.bind(String.prototype.toLowerCase), replace = Function.call.bind(String.prototype.replace);
   let sequence = 0;
 
   function failure(code, message, callId, execution) {
@@ -57,6 +58,16 @@
     return visit(value,0);
   }
   function encode(v) { return stringify(safe(v)); }
+  function bytes(value) {
+    let length=0;
+    for(let i=0;i<value.length;i++) {
+      const unit=value.charCodeAt(i);
+      if(unit<128)length++;else if(unit<2048)length+=2;
+      else if(unit>=0xd800 && unit<=0xdbff && i+1<value.length && value.charCodeAt(i+1)>=0xdc00 && value.charCodeAt(i+1)<=0xdfff){length+=4;i++;}
+      else length+=3;
+    }
+    return length;
+  }
   function request(op, ...args) {
     const r = parse(host(op, ...args));
     if (!r.ok) {const e=failure(r.error.code, r.error.message, r.error.callId, r.error.execution);e.reasonCode=r.error.reasonCode;throw e;}
@@ -71,7 +82,10 @@
   }
   const summaries = [], available = create(null);
   for (let i=0;i<catalog.length;i++) {
-    const tool = catalog[i]; summaries[i] = freeze({name:tool.name, description:tool.description});
+    const tool = catalog[i], summary=create(null);
+    summary.name=tool.name;summary.description=tool.description;
+    if(tool.namespace!==undefined)summary.namespace=tool.namespace;
+    summaries[i] = freeze(summary);
     define(available,tool.name,{enumerable:true,value:function(args) {
       return new PromiseClass((resolve,reject)=>{
         let payload; try {payload=encode(args === undefined ? {} : args);} catch(e) {reject(e);return;}
@@ -82,10 +96,46 @@
     }});
   }
   freeze(available);
+  function comparable(name) { return replace(lower(slice(name,0,128)), /[^a-z0-9]/g, ''); }
+  function distance(a,b) {
+    let previous=[]; for(let j=0;j<=b.length;j++)previous[j]=j;
+    for(let i=1;i<=a.length;i++) {
+      const next=[i];
+      for(let j=1;j<=b.length;j++) {
+        const remove=previous[j]+1, insert=next[j-1]+1, change=previous[j-1]+(a[i-1]===b[j-1]?0:1);
+        next[j]=remove<insert?(remove<change?remove:change):(insert<change?insert:change);
+      }
+      previous=next;
+    }
+    return previous[b.length];
+  }
+  function unknownTool(name) {
+    const wanted=comparable(name), matches=[];
+    for(let i=0;i<summaries.length;i++) {
+      const candidate=comparable(summaries[i].name);
+      if(!wanted || !candidate)continue;
+      const score=distance(wanted,candidate);
+      if(score<=2 || candidate.indexOf(wanted)>=0 || wanted.indexOf(candidate)>=0) {
+        let position=matches.length;
+        while(position>0 && matches[position-1].score>score)position--;
+        for(let j=matches.length;j>position;j--)matches[j]=matches[j-1];
+        matches[position]={name:summaries[i].name,score};
+        if(matches.length>3)matches.length=3;
+      }
+    }
+    let message='Unknown or unavailable tools.'+slice(name,0,128)+'.';
+    if(matches.length) {
+      message+=' Did you mean ';
+      for(let i=0;i<matches.length;i++){if(i)message+=', ';message+='tools.'+matches[i].name;}
+      message+='?';
+    }
+    return failure('unknown_tool',message+' Use searchTools(query) or ALL_TOOLS; check availability with "name" in tools.');
+  }
   const tools = new Proxy(available, {get(target,name) {
     if (typeof name !== 'string') return undefined;
     const d=descriptor(target,name); if(d) return d.value;
-    return function(){return PromiseClass.reject(failure('unknown_tool','Unknown or unavailable tool: '+name));};
+    if(name==='then' || name==='toJSON')return undefined;
+    throw unknownTool(name);
   },has(target,name){return !!descriptor(target,name);}});
   const api = {
     tools, ALL_TOOLS:freeze(summaries),
@@ -94,7 +144,7 @@
     describeNamespace(name) { return new PromiseClass((resolve,reject)=>{try {const v=request('namespace',encode(name));resolve(v===null?undefined:deepFreeze(v));} catch(e){reject(e);}}); },
     text(value) {request('text',typeof value==='string'?value:encode(value));},
     image(value) {request('image',encode(value));},
-    store(key,value) {if(typeof key!=='string')throw failure('store_key','Store key must be a string');if(value===undefined){request('delete',key);return;}request('store',key,encode(value));},
+    store(key,value) {if(typeof key!=='string')throw failure('store_key','Store key must be a string');if(value===undefined){request('delete',key);return;}const json=encode(value);if(bytes(json)>limits.storeValueBytes)throw failure('store_limit','value exceeds store byte limit. store() is for small IDs or summaries; keep large data in local variables and show images with image().');request('store',key,json);},
     load(key) {if(typeof key!=='string')throw failure('store_key','Store key must be a string');const v=request('load',key);return v===null?undefined:parse(v);},
     exit() {request('exit');throw failure('exit','Execution finished');}
   };
@@ -110,20 +160,21 @@
     settle(id, response) {
       const p=mapGet(pending,id); if(!p)return; mapDelete(pending,id);
       const r=parse(response);
-      if(r.ok)p.resolve(r.value);else {const e=failure(r.error.code,r.error.message,r.error.callId,r.error.execution);e.reasonCode=r.error.reasonCode;weakSet(hostFailures,e,id);p.reject(e);}
+      if(r.ok)p.resolve(r.value);else {const e=failure(r.error.code,r.error.message,r.error.callId,r.error.execution);e.reasonCode=r.error.reasonCode;weakSet(hostFailures,e,freeze({id,message:r.error.message,code:r.error.code,stack:e.stack}));p.reject(e);}
     },
-    finish(value) {if(value!==undefined)api.text(value);},
+    finish(value) {try {if(value!==undefined)api.text(value);return {ok:true};}catch(e){return {ok:false,error:e};}},
     error(value) {
       // Host errors are bounded before admission. Guest errors remain under heap
       // and context limits; the Go bridge caps copied strings independently.
-      const message=value && typeof value==='object' ? string(value) + (value.stack ? '\n'+string(value.stack):'') : string(value);
-      const code=value && typeof value.code==='string'?value.code:'script';
+      const original=weakGet(hostFailures,value);
+      const message=original?original.message:string(value);
+      const stack=original?original.stack:(value && typeof value==='object'?value.stack:undefined);
+      const code=original?original.code:(value && typeof value.code==='string'?value.code:'script');
       // Only the exact rejection object created by settle can refer to a Go
       // cause. Public error properties, prototypes and proxies are not identity.
-      const causeId=weakGet(hostFailures,value);
       const detail=create(null);
-      detail.message=slice(message,0,8192);detail.code=slice(code,0,128);
-      detail.causeId=causeId===undefined?null:causeId;
+      detail.message=slice(message,0,1536);detail.stack=typeof stack==='string'?slice(stack,0,512):'';detail.code=slice(code,0,128);
+      detail.causeId=original===undefined?null:original.id;
       return stringify(detail);
     }
   });

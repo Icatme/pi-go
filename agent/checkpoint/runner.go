@@ -44,7 +44,7 @@ func NewRunner(config RunnerConfig) (*Runner, error) {
 		return nil, fmt.Errorf("checkpoint runner requires a static tool set; ToolResolver is not supported")
 	}
 	for _, tool := range config.Definition.Tools {
-		if tool.ChildTools != nil {
+		if tool.ChildTools != nil || tool.ResolveChildTools != nil {
 			return nil, fmt.Errorf("checkpoint runner does not support container tools or child caller closures")
 		}
 	}

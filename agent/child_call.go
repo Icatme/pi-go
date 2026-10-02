@@ -149,8 +149,11 @@ func normalizedChildLimits(limits ChildCallLimits) (ChildCallLimits, error) {
 }
 
 func validateChildTools(tool ToolDefinition) error {
-	if tool.ChildTools == nil {
+	if tool.ChildTools == nil && tool.ResolveChildTools == nil {
 		return nil
+	}
+	if tool.ChildTools != nil && tool.ResolveChildTools != nil {
+		return fmt.Errorf("tool %q declares both static and resolved children", tool.Name)
 	}
 	if _, err := normalizedChildLimits(tool.ChildLimits); err != nil {
 		return fmt.Errorf("tool %q: %w", tool.Name, err)
@@ -164,7 +167,7 @@ func validateChildTools(tool ToolDefinition) error {
 			return fmt.Errorf("tool %q has duplicate child %q", tool.Name, child.Name)
 		}
 		seen[child.Name] = struct{}{}
-		if child.ChildTools != nil {
+		if child.ChildTools != nil || child.ResolveChildTools != nil {
 			return fmt.Errorf("tool %q child %q is a container; deeper child calls are unsupported", tool.Name, child.Name)
 		}
 	}

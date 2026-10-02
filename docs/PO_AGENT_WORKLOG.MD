@@ -720,3 +720,27 @@
   formatting and diff checks pass. The examples module is unchanged after its
   previously passing full ordinary/race/vet/build checks. Push the fixture repair
   so the final head can run all six remote checks again.
+
+## 2026-10-02: Pi 1.0 Codemode feedback and lazy child contracts
+
+- Follow the exact upstream v1.0.0 behavior reference, not the article's claims.
+  Implement the first six approved follow-ups as three buildable review units;
+  keep durable branch persistence and model/provider expansion outside scope.
+- Add bounded syntax/source diagnostics, allowed-name suggestions, namespace and
+  result documentation, shared BM25 search, and effective output budget reserves.
+  Explicit safe public errors remain separate from original host Go causes.
+- Add generic ResolveChildTools in Agent after approval/permission, validate and
+  freeze its leaves, then check permission again. Reject nested containers and
+  checkpointed containers; keep MCP and JavaScript out of Agent core.
+- Add NewDynamic with source/header validation before discovery, one absolute
+  setup/execution deadline, fresh executable bindings and a shared private
+  invocation store. No nested suspension recovery or script replay is introduced.
+- Make exceptional normalized/long MCP namespace aliases unambiguous with a
+  namespace hash. Ordinary short aliases remain unchanged; no legacy shim.
+- Reproduce wazero v1.12.0's cold-constructor version-cache race and serialize
+  only runtime construction. Preserve parallel compilation/execution and the
+  pinned WASM artifact. The cold eight-workflow race regression passes; upstream
+  issue 2532/fix 2536 agree with the root cause, but the release lacks the fix.
+- Native Windows Go1.26.4 ordinary root/example tests, vet and builds pass with
+  GOWORK=off and live-test flags disabled. Focused Agent/sandbox/binding race
+  checks pass; final combined full-race evidence belongs to the integration entry.

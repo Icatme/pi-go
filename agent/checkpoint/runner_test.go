@@ -99,12 +99,19 @@ func TestNewRunnerRejectsDynamicToolResolver(t *testing.T) {
 }
 
 func TestNewRunnerRejectsContainerTools(t *testing.T) {
-	_, err := NewRunner(RunnerConfig{
-		Definition:        agent.AgentDefinition{Model: &scriptedModel{}, Tools: []agent.ToolDefinition{{Name: "code", ChildTools: []agent.ToolDefinition{}}}},
-		DefinitionVersion: "v1", Store: NewMemoryStore(),
-	})
-	if err == nil || !strings.Contains(err.Error(), "container") {
-		t.Fatalf("expected non-durable container rejection, got %v", err)
+	for _, tool := range []agent.ToolDefinition{
+		{Name: "code", ChildTools: []agent.ToolDefinition{}},
+		{Name: "code", ResolveChildTools: func(context.Context, agent.ToolExecutionContext) (agent.ChildToolResolution, error) {
+			return agent.ChildToolResolution{}, nil
+		}},
+	} {
+		_, err := NewRunner(RunnerConfig{
+			Definition:        agent.AgentDefinition{Model: &scriptedModel{}, Tools: []agent.ToolDefinition{tool}},
+			DefinitionVersion: "v1", Store: NewMemoryStore(),
+		})
+		if err == nil || !strings.Contains(err.Error(), "container") {
+			t.Fatalf("expected non-durable container rejection, got %v", err)
+		}
 	}
 }
 

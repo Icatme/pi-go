@@ -70,14 +70,25 @@ func (c Config) validate() error {
 }
 
 type Tool struct {
-	Name         string
-	Description  string
-	Namespace    string
-	Parameters   json.RawMessage
-	OutputSchema json.RawMessage
+	Name        string
+	Description string
+	Namespace   string
+	// ResultDescription describes the JavaScript resolution convention. Like
+	// schemas, it is only returned by discovery and is never preloaded in prompts.
+	ResultDescription string
+	Parameters        json.RawMessage
+	OutputSchema      json.RawMessage
 	// Invoke receives a host-generated admission ID. It must respect context.
 	// Returned bytes transfer ownership to the sandbox. No automatic retry occurs.
 	Invoke func(context.Context, HostCall) (json.RawMessage, error)
+}
+
+// Namespace supplies on-demand documentation for a visible tool namespace.
+// Metadata for namespaces without any allowed tools is rejected.
+type Namespace struct {
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
 }
 
 type HostCall struct {
@@ -88,8 +99,14 @@ type HostCall struct {
 
 type RunOptions struct {
 	Tools           []Tool
+	Namespaces      []Namespace
 	Timeout         time.Duration
 	MaxOutputTokens int
+	// OutputReserveBytes reserves bytes and one output slot within the effective
+	// output cap for caller-generated status/diagnostic text, capped at one
+	// quarter of that cap (rounded up). It cannot enlarge config or source-header
+	// limits. Zero leaves the entire cap to the script.
+	OutputReserveBytes int
 	// Sequential dispatches all calls in admission order, including Promise.all.
 	// The next Invoke cannot begin until the previous Invoke actually returns.
 	Sequential bool
@@ -112,6 +129,8 @@ type Execution struct {
 
 // CallError is a machine-readable host failure. A tool-declared business
 // failure belongs in a successful result envelope, rather than this error.
+// Message is bounded public presentation chosen by the host; Err retains the
+// private cause and is never rendered into script/model diagnostics.
 type CallError struct {
 	Code       string    `json:"code"`
 	ReasonCode string    `json:"reasonCode,omitempty"`
@@ -136,11 +155,19 @@ type Result struct {
 	Outputs []Output
 	// All accepted calls have a basic record. Arguments/results are not retained.
 	Calls []CallRecord
+	// Effective caps include config, Run options and the source header. Reserved
+	// bytes remain within OutputLimitBytes; callers must bound all added output.
+	OutputLimitBytes    int
+	OutputLimitItems    int
+	OutputReservedBytes int
 }
 
 type ScriptError struct {
 	Code, Message string
-	Err           error
+	// Diagnostic is explicitly safe, bounded script/API presentation. Go runtime
+	// and host causes remain in Err and must never be rendered as a diagnostic.
+	Diagnostic string
+	Err        error
 }
 
 func (e *ScriptError) Error() string { return "codemode " + e.Code + ": " + e.Message }

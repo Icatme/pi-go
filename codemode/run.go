@@ -21,35 +21,45 @@ type completion struct {
 	failure *CallError
 }
 type runState struct {
-	s           *Sandbox
-	id          uint64
-	ctx         context.Context
-	cancel      context.CancelFunc
-	tools       map[string]Tool
-	catalog     []toolDescription
-	queue       chan invocation
-	queueSlots  chan struct{}
-	completions chan completion
-	mu          sync.Mutex
-	accepting   bool
-	exited      bool
-	sequential  bool
-	records     []CallRecord
-	failures    map[int]*CallError
-	errorBytes  int
-	unsettled   int
-	bridgeBytes int
-	outputs     []Output
-	outputBytes int
-	outputLimit int
-	store       map[string]string
-	storeBytes  int
-	storeDirty  bool
-	storeLimit  int
+	s             *Sandbox
+	id            uint64
+	ctx           context.Context
+	cancel        context.CancelFunc
+	tools         map[string]Tool
+	catalog       []toolDescription
+	namespaces    []Namespace
+	queue         chan invocation
+	queueSlots    chan struct{}
+	completions   chan completion
+	mu            sync.Mutex
+	accepting     bool
+	exited        bool
+	sequential    bool
+	records       []CallRecord
+	failures      map[int]*CallError
+	errorBytes    int
+	unsettled     int
+	bridgeBytes   int
+	outputs       []Output
+	outputBytes   int
+	outputLimit   int
+	outputItems   int
+	outputTotal   int
+	outputReserve int
+	store         map[string]string
+	storeBytes    int
+	storeDirty    bool
+	storeLimit    int
 }
 
-func newRunState(s *Sandbox, id uint64, ctx context.Context, cancel context.CancelFunc, tools []Tool, catalog []toolDescription, tokens int, sequential bool) *runState {
-	r := &runState{s: s, id: id, ctx: ctx, cancel: cancel, tools: map[string]Tool{}, catalog: catalog, queue: make(chan invocation, s.config.MaxQueue), queueSlots: make(chan struct{}, s.config.MaxQueue), completions: make(chan completion, s.config.MaxCalls), accepting: true, sequential: sequential, failures: map[int]*CallError{}, store: map[string]string{}, storeLimit: s.config.MaxStoreBytes, outputLimit: min(s.config.MaxOutputBytes, tokens*4)}
+func newRunState(s *Sandbox, id uint64, ctx context.Context, cancel context.CancelFunc, tools []Tool, catalog []toolDescription, namespaces []Namespace, tokens, reserve int, sequential bool) *runState {
+	total := min(s.config.MaxOutputBytes, tokens*4)
+	reserve = min(reserve, (total+3)/4)
+	items := s.config.MaxOutputItems
+	if reserve > 0 {
+		items--
+	}
+	r := &runState{s: s, id: id, ctx: ctx, cancel: cancel, tools: map[string]Tool{}, catalog: catalog, namespaces: namespaces, queue: make(chan invocation, s.config.MaxQueue), queueSlots: make(chan struct{}, s.config.MaxQueue), completions: make(chan completion, s.config.MaxCalls), accepting: true, sequential: sequential, failures: map[int]*CallError{}, store: map[string]string{}, storeLimit: s.config.MaxStoreBytes, outputLimit: total - reserve, outputItems: items, outputTotal: total, outputReserve: reserve}
 	for _, t := range tools {
 		r.tools[t.Name] = t
 	}
@@ -61,7 +71,7 @@ func (r *runState) stop() { r.mu.Lock(); r.accepting = false; r.cancel(); r.mu.U
 func (r *runState) snapshot() Result {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := Result{Outputs: append([]Output(nil), r.outputs...), Calls: append([]CallRecord(nil), r.records...)}
+	out := Result{Outputs: append([]Output(nil), r.outputs...), Calls: append([]CallRecord(nil), r.records...), OutputLimitBytes: r.outputTotal, OutputLimitItems: r.s.config.MaxOutputItems, OutputReservedBytes: r.outputReserve}
 	for i := range out.Calls {
 		if out.Calls[i].Execution.Local == "entered" {
 			out.Calls[i].Code = "canceled"
@@ -176,16 +186,23 @@ func (r *runState) host(op string, args []string) string {
 		if len(tools) == 0 {
 			return success(nil)
 		}
+		metadata := Namespace{Name: name}
+		for _, namespace := range r.namespaces {
+			if namespace.Name == name {
+				metadata = namespace
+				break
+			}
+		}
 		return success(struct {
-			Name  string            `json:"name"`
+			Namespace
 			Tools []toolDescription `json:"tools"`
-		}{name, tools})
+		}{metadata, tools})
 	case "store":
 		if len(args) != 2 || len(args[0]) > 256 || args[0] == "" {
 			return fail("store_key", "invalid store key")
 		}
 		if len(args[1]) > r.storeLimit {
-			return fail("store_limit", "value exceeds store byte limit")
+			return fail("store_limit", "value exceeds store byte limit. "+storeHint)
 		}
 		units := 0
 		for _, runeValue := range args[1] {
@@ -194,21 +211,21 @@ func (r *runState) host(op string, args []string) string {
 				units++
 			}
 			if units > 256<<10 {
-				return fail("store_limit", "serialized store value exceeds 256 Ki UTF-16 code units")
+				return fail("store_limit", "serialized store value exceeds 256 Ki UTF-16 code units. "+storeHint)
 			}
 		}
 		if err := ValidateJSON([]byte(args[1])); err != nil {
 			return failJSON("unsupported_json", err)
 		}
 		if _, ok := r.store[args[0]]; !ok && len(r.store) >= 256 {
-			return fail("store_limit", "store entry limit exceeded")
+			return fail("store_limit", "store entry limit exceeded. Delete keys with store(key, undefined). "+storeHint)
 		}
 		newBytes := r.storeBytes - len(r.store[args[0]]) + len(args[1])
 		if _, ok := r.store[args[0]]; !ok {
 			newBytes += len(args[0])
 		}
 		if newBytes > r.storeLimit {
-			return fail("store_limit", "store byte limit exceeded")
+			return fail("store_limit", "store byte limit exceeded. Delete keys with store(key, undefined). "+storeHint)
 		}
 		r.store[args[0]] = args[1]
 		r.storeBytes = newBytes
@@ -256,9 +273,9 @@ func (r *runState) stringLimit(op string, index int) int {
 		}
 		return r.s.config.MaxArgumentBytes
 	case "text":
-		return r.outputLimit
+		return r.outputTotal
 	case "image":
-		return r.outputLimit * 2
+		return r.outputTotal * 2
 	case "search":
 		return 8192
 	case "describe", "namespace":
@@ -275,9 +292,11 @@ func (r *runState) stringLimit(op string, index int) int {
 	}
 }
 
+const storeHint = "store() is for small IDs or summaries; keep large data in local variables and show images with image()."
+
 func (r *runState) appendOutput(out Output, n int) string {
-	if n > r.outputLimit-r.outputBytes || len(r.outputs) >= r.s.config.MaxOutputItems {
-		return fail("output_limit", "output byte/item limit exceeded")
+	if n > r.outputLimit-r.outputBytes || len(r.outputs) >= r.outputItems {
+		return fail("output_limit", "output byte/item limit exceeded; filter or summarize results before text(), image() or return")
 	}
 	r.outputBytes += n
 	r.outputs = append(r.outputs, out)
@@ -390,7 +409,11 @@ func (r *runState) execute(call invocation) {
 	func() {
 		defer func() {
 			if p := recover(); p != nil {
-				err = &CallError{Code: "host_panic", Message: fmt.Sprintf("host invocation panicked: %v", p), Execution: Execution{Local: "returned", Remote: "unknown"}}
+				cause, ok := p.(error)
+				if !ok {
+					cause = fmt.Errorf("host invocation panicked: %v", p)
+				}
+				err = &CallError{Code: "host_panic", Message: "host invocation panicked; inspect the host report", Execution: Execution{Local: "returned", Remote: "unknown"}, Err: cause}
 			}
 		}()
 		raw, err = call.invoke(r.ctx, call.call)
@@ -431,7 +454,7 @@ func (r *runState) finish(call invocation, raw json.RawMessage, invokeErr error,
 			if entered {
 				remote = "unknown"
 			}
-			failure = &CallError{Code: code, Message: invokeErr.Error(), Execution: Execution{Local: facts.Local, Remote: remote}, Err: invokeErr}
+			failure = &CallError{Code: code, Message: "host tool failed (" + code + "); inspect the host report", Execution: Execution{Local: facts.Local, Remote: remote}, Err: invokeErr}
 		}
 		// Copy, so setting bridge correlation does not mutate the caller's error.
 		copyOf := *failure

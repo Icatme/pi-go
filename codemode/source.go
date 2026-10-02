@@ -14,7 +14,7 @@ func sourceOptions(source string, config Config, opts RunOptions) (string, time.
 	}
 	timeout := config.Timeout
 	tokens := config.MaxOutputTokens
-	if opts.Timeout < 0 || opts.MaxOutputTokens < 0 {
+	if opts.Timeout < 0 || opts.MaxOutputTokens < 0 || opts.OutputReserveBytes < 0 || opts.OutputReserveBytes > 64<<20 {
 		return "", 0, 0, fmt.Errorf("invalid Run options")
 	}
 	if opts.Timeout > 0 {

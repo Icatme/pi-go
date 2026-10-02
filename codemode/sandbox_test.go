@@ -215,6 +215,35 @@ func TestOutputOptionsSyntaxAndPendingPromises(t *testing.T) {
 	}
 }
 
+func TestPreVMFailuresHonorSourceOutputLimit(t *testing.T) {
+	s := sandboxForTest(t, DefaultConfig())
+	code := "// @options: {\"max_output_tokens\":1}\ntext('must not run');"
+	for _, name := range []string{"catalog", "namespace", "canceled", "closed"} {
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			options := RunOptions{MaxOutputTokens: 100, OutputReserveBytes: 1024}
+			switch name {
+			case "catalog":
+				options.Tools = []Tool{{Name: "missing_executor"}}
+			case "namespace":
+				options.Namespaces = []Namespace{{Name: "unavailable"}}
+			case "canceled":
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			case "closed":
+				if err := s.Close(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := s.Run(ctx, code, options)
+			if err == nil || len(result.Outputs) != 0 || len(result.Calls) != 0 || result.OutputLimitBytes != 4 || result.OutputReservedBytes != 1 || result.OutputLimitItems != s.config.MaxOutputItems {
+				t.Fatalf("pre-VM failure widened source cap: result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
 func TestHostPermitHeldUntilActualExitAndCloseReport(t *testing.T) {
 	c := DefaultConfig()
 	c.MaxConcurrentCalls = 1
