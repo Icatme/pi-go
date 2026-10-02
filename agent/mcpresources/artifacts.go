@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,11 +67,11 @@ func NewFileArtifactStore(root string, maxBytes int) (*FileArtifactStore, error)
 	}
 	resolved, err := filepath.EvalSymlinks(filepath.Clean(root))
 	if err != nil {
-		return nil, errors.New("mcpresources: artifact root is unavailable")
+		return nil, fmt.Errorf("mcpresources: artifact root is unavailable: %w", err)
 	}
 	handle, err := os.OpenRoot(resolved)
 	if err != nil {
-		return nil, errors.New("mcpresources: artifact root is unavailable")
+		return nil, fmt.Errorf("mcpresources: artifact root is unavailable: %w", err)
 	}
 	return &FileArtifactStore{rootPath: resolved, root: handle, maxBytes: maxBytes}, nil
 }
@@ -78,7 +80,7 @@ func NewFileArtifactStore(root string, maxBytes int) (*FileArtifactStore, error)
 // Stored artifacts remain until the host's retention policy removes them.
 func (s *FileArtifactStore) Close() error { return s.root.Close() }
 
-func (s *FileArtifactStore) WriteArtifact(ctx context.Context, artifact ResourceArtifact) (ArtifactDescriptor, error) {
+func (s *FileArtifactStore) WriteArtifact(ctx context.Context, artifact ResourceArtifact) (descriptor ArtifactDescriptor, err error) {
 	if err := ctx.Err(); err != nil {
 		return ArtifactDescriptor{}, err
 	}
@@ -88,7 +90,7 @@ func (s *FileArtifactStore) WriteArtifact(ctx context.Context, artifact Resource
 	if _, err := validMIME(artifact.MIMEType, 256, ""); err != nil || artifact.MIMEType == "" {
 		return ArtifactDescriptor{}, errors.New("mcpresources: invalid artifact MIME")
 	}
-	descriptor := ArtifactDescriptor{
+	descriptor = ArtifactDescriptor{
 		ID: rand.Text(), ScopeKey: artifactScopeKey(artifact.Scope), Scope: artifact.Scope,
 		Server: artifact.Server, URI: artifact.URI, MIMEType: artifact.MIMEType,
 		SHA256: artifact.SHA256, Bytes: len(artifact.Data),
@@ -96,13 +98,20 @@ func (s *FileArtifactStore) WriteArtifact(ctx context.Context, artifact Resource
 	name := "mcp-resource-" + descriptor.ScopeKey[:16] + "-" + descriptor.ID + ".blob"
 	f, err := s.root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
-		return ArtifactDescriptor{}, errors.New("mcpresources: artifact file could not be created")
+		return ArtifactDescriptor{}, fmt.Errorf("mcpresources: artifact file could not be created: %w", err)
 	}
 	complete := false
+	closed := false
 	defer func() {
-		f.Close()
+		if !closed {
+			if closeErr := f.Close(); closeErr != nil {
+				err = errors.Join(err, fmt.Errorf("mcpresources: artifact cleanup close failed: %w", closeErr))
+			}
+		}
 		if !complete {
-			s.root.Remove(name)
+			if removeErr := s.root.Remove(name); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				err = errors.Join(err, fmt.Errorf("mcpresources: artifact cleanup removal failed: %w", removeErr))
+			}
 		}
 	}()
 	for offset := 0; offset < len(artifact.Data); {
@@ -111,16 +120,20 @@ func (s *FileArtifactStore) WriteArtifact(ctx context.Context, artifact Resource
 		}
 		end := min(offset+(32<<10), len(artifact.Data))
 		written, err := f.Write(artifact.Data[offset:end])
-		if err != nil || written != end-offset {
-			return ArtifactDescriptor{}, errors.New("mcpresources: artifact write failed")
+		if err != nil {
+			return ArtifactDescriptor{}, fmt.Errorf("mcpresources: artifact write failed: %w", err)
+		}
+		if written != end-offset {
+			return ArtifactDescriptor{}, fmt.Errorf("mcpresources: artifact write failed: %w", io.ErrShortWrite)
 		}
 		offset = end
 	}
 	if err := f.Sync(); err != nil {
-		return ArtifactDescriptor{}, errors.New("mcpresources: artifact sync failed")
+		return ArtifactDescriptor{}, fmt.Errorf("mcpresources: artifact sync failed: %w", err)
 	}
+	closed = true
 	if err := f.Close(); err != nil {
-		return ArtifactDescriptor{}, errors.New("mcpresources: artifact close failed")
+		return ArtifactDescriptor{}, fmt.Errorf("mcpresources: artifact close failed: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return ArtifactDescriptor{}, err

@@ -832,3 +832,21 @@
 - Update package/root documentation and the six-item acceptance table. No live
   model-provider call, frontend UI acceptance, durable branch store, version bump,
   tag, release or automatic PR merge. Review units are ordered by dependency.
+
+## 2026-10-02: Resource directory identity and filesystem error repairs
+
+- Initial PR18 CI on Windows/macOS exposes a test that compares directory strings
+  after the implementation resolves aliases. Reproduce it on Windows by supplying
+  an existing absolute directory with a trailing dot component. Compare actual
+  filesystem identity with os.SameFile instead; keep filename, byte/hash, scope
+  binding and private-path projection checks, including the resolved directory.
+- Preserve FileArtifactStore root/open/write/sync/close causes with Go wrapping,
+  include cleanup close/removal failures, and use io.ErrShortWrite explicitly.
+  Original filesystem errors stay host-visible while safe Agent failures retain
+  the completed remote read facts. Regressions prove os.ErrNotExist/os.ErrClosed
+  identity and public redaction; the old missing-root behavior fails the test.
+- Native Windows resource full race tests pass ten iterations; examples ordinary
+  tests, vet and build pass. The root ordinary rerun separately exposes an
+  intermittent cross-process credential-store CAS failure under investigation
+  for the managed-connection review unit. No production path normalization or
+  containment limit is weakened to make the directory assertion pass.

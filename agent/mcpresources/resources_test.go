@@ -333,7 +333,9 @@ func TestBinaryResourcesRequireSinkAndPublishBoundDescriptor(t *testing.T) {
 	if err == nil {
 		t.Fatal("binary resource entered context without sink")
 	}
-	root := t.TempDir()
+	// A host can supply any existing absolute spelling of its directory. Exercise
+	// an alias on every platform, including Windows short paths and /var on macOS.
+	root := t.TempDir() + string(os.PathSeparator) + "."
 	store, err := NewFileArtifactStore(root, 1<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -351,7 +353,18 @@ func TestBinaryResourcesRequireSinkAndPublishBoundDescriptor(t *testing.T) {
 		t.Fatalf("missing host descriptor: %T", result.Details)
 	}
 	descriptor := descriptors[0]
-	if descriptor.Scope != m.Scope() || descriptor.URI != uri || descriptor.MIMEType != "application/octet-stream" || descriptor.SHA256 != artifactDigest(data) || descriptor.Bytes != len(data) || filepath.Dir(descriptor.Path) != root || strings.Contains(filepath.Base(descriptor.Path), "outside") || filepath.Ext(descriptor.Path) != ".blob" {
+	expectedDirectory, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactDirectory, err := os.Stat(filepath.Dir(descriptor.Path))
+	if err != nil || !os.SameFile(expectedDirectory, artifactDirectory) {
+		t.Fatalf("artifact escaped the host directory: path=%s root=%s err=%v", descriptor.Path, root, err)
+	}
+	if bytes.Contains(result.StructuredContent, []byte(filepath.Dir(descriptor.Path))) {
+		t.Fatalf("resolved host path leaked into structured result: %s", result.StructuredContent)
+	}
+	if descriptor.Scope != m.Scope() || descriptor.URI != uri || descriptor.MIMEType != "application/octet-stream" || descriptor.SHA256 != artifactDigest(data) || descriptor.Bytes != len(data) || strings.Contains(filepath.Base(descriptor.Path), "outside") || filepath.Ext(descriptor.Path) != ".blob" {
 		t.Fatalf("artifact binding or filename unsafe: %+v", descriptor)
 	}
 	stored, err := os.ReadFile(descriptor.Path)
@@ -383,6 +396,31 @@ func TestCanceledArtifactAndPredictableOutputFailureLeaveNoFiles(t *testing.T) {
 	files, err := os.ReadDir(root)
 	if err != nil || len(files) != 0 {
 		t.Fatalf("artifact persisted after cancellation/predictable output failure: files=%v err=%v", files, err)
+	}
+}
+
+func TestFileArtifactStoreRetainsFilesystemCause(t *testing.T) {
+	_, err := NewFileArtifactStore(filepath.Join(t.TempDir(), "missing"), 1<<20)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("artifact root error lost its filesystem cause: %v", err)
+	}
+	root := t.TempDir()
+	store, err := NewFileArtifactStore(root, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server, _ := resourceServer(t, "demo://blob", "application/octet-stream", []*sdk.ResourceContents{{Blob: []byte("blob")}})
+	m, _ := resourceFixture(t, server, managed.Codemode, false)
+	result, err := invokeResource(t.Context(), resourceDefinition(t, m, Options{ArtifactSink: store}, ReadResourceName), map[string]any{"server": "fixture", "uri": "demo://blob"}, nil)
+	var failure *agent.ToolExecutionError
+	if !errors.Is(err, os.ErrClosed) || !errors.As(err, &failure) || failure.Code != agent.ToolFailureResultRejected || failure.Execution.Remote != agent.ToolRemoteCompleteReported {
+		t.Fatalf("artifact write error lost its cause or execution facts: err=%v failure=%+v", err, failure)
+	}
+	if strings.Contains(failure.Message, "mcp-resource-") || strings.Contains(failure.Message, os.ErrClosed.Error()) || bytes.Contains(result.StructuredContent, []byte(root)) {
+		t.Fatalf("artifact filesystem cause leaked into public result: failure=%+v result=%+v", failure, result)
 	}
 }
 
