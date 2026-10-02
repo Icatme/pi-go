@@ -147,6 +147,7 @@ type Observer struct {
 	bindings   map[sdk.Result]*rawBinding
 	bindOrder  []sdk.Result
 	rawBytes   int
+	ioWriteErr error
 }
 
 func NewObserver(limits WireLimits) *Observer {
@@ -243,19 +244,39 @@ func (o *Observer) Middleware() sdk.Middleware {
 	}
 }
 
-// A malformed/bounded reader is a connection-level failure. The SDK SSE reader
-// may classify generic reader errors as disconnection, so cancel pending calls
-// explicitly rather than letting them wait for a response that cannot arrive.
-func (o *Observer) failPending(err error) {
+// A malformed/bounded reader is a connection-level failure. Cancel pending
+// calls unless a physical IO write has already failed: the pinned SDK must see
+// that genuine writer error with an uncancelled context to retire the session.
+// Its resulting local pipe close cannot replace the original failure cause.
+func (o *Observer) failPending(err error) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.ioWriteErr != nil {
+		err = errors.Join(o.ioWriteErr, err)
+	}
 	for _, slot := range o.pending {
 		if slot.err == nil {
 			slot.err = err
 		}
-		if slot.cancel != nil {
+		if slot.cancel != nil && o.ioWriteErr == nil {
 			slot.cancel()
 		}
+	}
+	return err
+}
+
+// Save a physical IO failure before returning it to the SDK. SDK Close can
+// unblock the reader before Call reaches Await; cancelling the logical context
+// there would let Await lose this error to context.Canceled. Actual writer
+// failures are terminal, unlike local pre-handoff dispatch denials.
+func (o *Observer) failWrite(err error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.ioWriteErr == nil {
+		o.ioWriteErr = err
+	}
+	for _, slot := range o.pending {
+		slot.err = errors.Join(o.ioWriteErr, slot.err)
 	}
 }
 

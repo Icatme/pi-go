@@ -44,15 +44,13 @@ func (r *observedReader) Read(p []byte) (int, error) {
 		frame, err := readWireLine(r.reader, r.observer.limits.MaxFrameBytes)
 		if len(frame) > 0 && !isBlankWireLine(frame) {
 			if observeErr := r.observer.observeFrame(frame, false); observeErr != nil {
-				r.terminal = observeErr
-				r.observer.failPending(observeErr)
-				return 0, observeErr
+				r.terminal = r.observer.failPending(observeErr)
+				return 0, r.terminal
 			}
 		}
 		if err != nil && !errors.Is(err, io.EOF) {
-			r.terminal = err
-			r.observer.failPending(err)
-			return 0, err
+			r.terminal = r.observer.failPending(err)
+			return 0, r.terminal
 		}
 		r.buffer = frame
 		r.terminal = err
@@ -137,6 +135,7 @@ func (w *observedWriter) Write(p []byte) (int, error) {
 		w.buffer = w.buffer[:0]
 		if err != nil {
 			w.terminal = err
+			w.observer.failWrite(err)
 			return consumed, err
 		}
 	}

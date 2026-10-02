@@ -1154,6 +1154,29 @@ func (w *failingWireWriter) Write(p []byte) (int, error) {
 
 func (w *failingWireWriter) Close() error { return w.target.Close() }
 
+type synchronizedWireReader struct {
+	source        io.ReadCloser
+	errorReturned chan struct{}
+	once          sync.Once
+}
+
+func (r *synchronizedWireReader) Read(p []byte) (int, error) {
+	n, err := r.source.Read(p)
+	if err != nil {
+		r.once.Do(func() { close(r.errorReturned) })
+	}
+	return n, err
+}
+
+func (r *synchronizedWireReader) Close() error {
+	err := r.source.Close()
+	// Force the local Close -> observed reader error path before the pinned
+	// SDK returns from Call and begins Await. This controls the real race rather
+	// than relying on scheduler timing or adding a retry to the assertion.
+	<-r.errorReturned
+	return err
+}
+
 func TestWireStdioPhysicalFailureIsTerminal(t *testing.T) {
 	for _, prefix := range []int{0, 3} {
 		t.Run(fmt.Sprint(prefix), func(t *testing.T) {
@@ -1175,9 +1198,19 @@ func TestWireStdioPhysicalFailureIsTerminal(t *testing.T) {
 			defer observer.Close()
 			physicalErr := errors.New("fixture physical stdio failure")
 			writer := &failingWireWriter{target: clientConn, failure: physicalErr, prefix: prefix}
+			reader := &synchronizedWireReader{source: observer.Reader(clientConn), errorReturned: make(chan struct{})}
 			client := sdk.NewClient(&sdk.Implementation{Name: "write-failure", Version: "1"}, &sdk.ClientOptions{MultiRoundTrip: &sdk.MultiRoundTripOptions{Disabled: true}})
-			client.AddSendingMiddleware(observer.Middleware())
-			session, err := client.Connect(ctx, &sdk.IOTransport{Reader: observer.Reader(clientConn), Writer: observer.Writer(writer)}, &sdk.ClientSessionOptions{ProtocolVersion: "2026-07-28"})
+			var sdkContextErr error
+			client.AddSendingMiddleware(observer.Middleware(), func(next sdk.MethodHandler) sdk.MethodHandler {
+				return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
+					result, err := next(ctx, method, req)
+					if method == "tools/call" {
+						sdkContextErr = ctx.Err()
+					}
+					return result, err
+				}
+			})
+			session, err := client.Connect(ctx, &sdk.IOTransport{Reader: reader, Writer: observer.Writer(writer)}, &sdk.ClientSessionOptions{ProtocolVersion: "2026-07-28"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1185,6 +1218,9 @@ func TestWireStdioPhysicalFailureIsTerminal(t *testing.T) {
 			writer.enabled.Store(true)
 			callCtx, snapshot := observer.Track(t.Context())
 			_, err = session.CallTool(callCtx, &sdk.CallToolParams{Name: "write", Arguments: map[string]any{}})
+			if sdkContextErr != nil {
+				t.Fatalf("physical writer failure was changed to logical cancellation: sdk_context=%v err=%v record=%+v", sdkContextErr, err, snapshot())
+			}
 			if !errors.Is(err, physicalErr) || snapshot().Attempts != 1 || snapshot().ResponseReceived || calls.Load() != 0 {
 				t.Fatalf("physical failure lost unknown-dispatch facts: err=%v record=%+v calls=%d", err, snapshot(), calls.Load())
 			}

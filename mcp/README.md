@@ -85,6 +85,8 @@ only a trusted SDK lifecycle result reports completion or `input_required`.
 observer locks. Denials have zero accepted handoffs and preserve their Go cause.
 An unsent stdio permission denial cancels only that logical SDK call and leaves
 the shared session usable; physical write failures still terminate its writer.
+The original physical IO cause is retained across the SDK's concurrent reader
+close, without converting fatal writes into logical context cancellation.
 Recent tombstones and compact exact numeric retirement ranges are independently
 bounded by `WireLimits.MaxTombstones`. Numeric gaps stay available to requests
 still serializing or awaiting approval; exhausting the range bound fails closed.
