@@ -16,6 +16,7 @@ import (
 
 	"github.com/Icatme/pi-go/agent"
 	"github.com/Icatme/pi-go/internal/jsontext"
+	managed "github.com/Icatme/pi-go/mcp"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -68,7 +69,19 @@ func (o Options) defaults() (Options, error) {
 // Execute invokes CallTool once and adds no retry. The caller must disable the
 // SDK client's default MultiRoundTrip middleware to prevent SDK-level retries.
 // No at-most-once guarantee is possible for an arbitrary supplied session.
-func Discover(ctx context.Context, session *mcp.ClientSession, options Options) ([]agent.ToolDefinition, error) {
+func Discover(ctx context.Context, session ToolClient, options Options) ([]agent.ToolDefinition, error) {
+	return discover(ctx, session, options, nil, false)
+}
+
+// FromCatalog binds an already frozen, host-authorized directory without a
+// second discovery read. Executors still recheck the current SDK directory and
+// permissions before calling. This keeps a managed snapshot's schemas and
+// revision from different TTL/notification moments from being mixed together.
+func FromCatalog(session ToolClient, catalog []*mcp.Tool, options Options) ([]agent.ToolDefinition, error) {
+	return discover(context.Background(), session, options, catalog, true)
+}
+
+func discover(ctx context.Context, session ToolClient, options Options, catalog []*mcp.Tool, frozen bool) ([]agent.ToolDefinition, error) {
 	o, err := options.defaults()
 	if err != nil {
 		return nil, err
@@ -83,15 +96,29 @@ func Discover(ctx context.Context, session *mcp.ClientSession, options Options) 
 	if len(wanted) == 0 {
 		return []agent.ToolDefinition{}, nil
 	}
-	if session == nil {
+	if session == nil || (reflect.ValueOf(session).Kind() == reflect.Pointer && reflect.ValueOf(session).IsNil()) {
 		return nil, fmt.Errorf("mcptools: nil session")
 	}
 	if len(wanted) > o.MaxTools {
 		return nil, fmt.Errorf("mcptools: selected tool limit exceeded")
 	}
-	listed, err := list(ctx, session, o)
-	if err != nil {
-		return nil, err
+	var listed map[string]*mcp.Tool
+	if frozen {
+		if len(catalog) > o.MaxTools {
+			return nil, errors.New("mcptools: catalog tool limit exceeded")
+		}
+		listed = make(map[string]*mcp.Tool, len(catalog))
+		for _, tool := range catalog {
+			if tool == nil || tool.Name == "" || listed[tool.Name] != nil {
+				return nil, errors.New("mcptools: invalid or duplicate catalog entry")
+			}
+			listed[tool.Name] = tool
+		}
+	} else {
+		listed, err = list(ctx, session, o)
+		if err != nil {
+			return nil, err
+		}
 	}
 	definitions := make([]agent.ToolDefinition, 0, len(o.Names))
 	for _, name := range o.Names {
@@ -191,8 +218,8 @@ func Discover(ctx context.Context, session *mcp.ClientSession, options Options) 
 				if !ok {
 					return agent.ToolResult{}, beforeCallError("schema_changed", "tool_missing", fmt.Errorf("mcptools: selected tool disappeared"))
 				}
-				in, errIn := json.Marshal(fresh.InputSchema)
-				out, errOut := json.Marshal(fresh.OutputSchema)
+				in, errIn := canonicalSchema(fresh.InputSchema, o.MaxSchemaBytes)
+				out, errOut := canonicalSchema(fresh.OutputSchema, o.MaxSchemaBytes)
 				if errIn != nil || errOut != nil || string(in) != string(inputSnapshot) || string(out) != string(outputSnapshot) {
 					return agent.ToolResult{}, beforeCallError("schema_changed", "schema_changed", fmt.Errorf("mcptools: tool schema changed; rediscover and reapprove"))
 				}
@@ -203,25 +230,75 @@ func Discover(ctx context.Context, session *mcp.ClientSession, options Options) 
 				}
 				if execution.CheckPermission != nil {
 					if err := execution.CheckPermission(callCtx); err != nil {
-						return agent.ToolResult{}, beforeCallError("policy_denied", "permission_revoked", err)
+						return agent.ToolResult{}, permissionError(err)
 					}
 				}
-				result, err := session.CallTool(callCtx, &mcp.CallToolParams{Name: name, Arguments: arguments})
+				params := &mcp.CallToolParams{Name: name, Arguments: arguments}
+				if execution.CheckPermission != nil {
+					callCtx = managed.WithDispatchCheck(callCtx, execution.CheckPermission)
+				}
+				var result *mcp.CallToolResult
+				var facts *agent.ToolExecutionInfo
+				if tracked, ok := session.(trackedToolClient); ok {
+					var record managed.DispatchRecord
+					result, record, err = tracked.CallToolTracked(callCtx, params)
+					facts = dispatchFacts(record)
+				} else {
+					result, err = session.CallTool(callCtx, params)
+				}
 				if err != nil {
+					if facts != nil {
+						return agent.ToolResult{Execution: facts}, trackedCallError(err, *facts)
+					}
 					return agent.ToolResult{}, callError(err)
 				}
 				if result == nil {
 					return agent.ToolResult{}, &agent.ToolExecutionError{Code: "protocol", Reason: "nil_result", Execution: agent.ToolExecutionInfo{Remote: "unknown"}, Err: fmt.Errorf("mcptools: nil call result")}
 				}
 				mapped, err := convertResult(result, outputValidator, o.MaxResultBytes)
+				if facts != nil {
+					// Mapping may reject an input_required response; preserve its
+					// lifecycle facts and actual observed attempt count either way.
+					if mapped.Execution != nil {
+						facts.Remote = mapped.Execution.Remote
+					}
+					for i := range facts.Attempts {
+						facts.Attempts[i].Remote = facts.Remote
+					}
+					mapped.Execution = facts
+				}
 				if err != nil {
-					return mapped, resultError(mapped, err)
+					mappedErr := resultError(mapped, err)
+					if facts != nil {
+						var executionErr *agent.ToolExecutionError
+						if errors.As(mappedErr, &executionErr) {
+							executionErr.Execution = *facts
+						}
+					}
+					return mapped, mappedErr
 				}
 				return mapped, nil
 			},
 		})
 	}
 	return definitions, nil
+}
+
+func canonicalSchema(value any, limit int) ([]byte, error) {
+	raw, err := json.Marshal(value)
+	if err != nil || len(raw) > limit {
+		return nil, errors.New("mcptools: invalid or oversized schema")
+	}
+	if err := jsontext.ValidateUnicode(raw); err != nil {
+		return nil, err
+	}
+	var object any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&object); err != nil {
+		return nil, err
+	}
+	return json.Marshal(object)
 }
 
 func argumentJSON(raw []byte, limit int) error {
@@ -242,7 +319,7 @@ func argumentStringError(err error) error {
 	return beforeCallError("argument_invalid", reason, err)
 }
 
-func list(ctx context.Context, session *mcp.ClientSession, o Options) (map[string]*mcp.Tool, error) {
+func list(ctx context.Context, session ToolClient, o Options) (map[string]*mcp.Tool, error) {
 	result := make(map[string]*mcp.Tool)
 	seen := make(map[string]bool)
 	cursor := ""
@@ -301,6 +378,9 @@ func schema(value any, limit int, required bool) (map[string]any, *jsonschema.Re
 	if required && object["type"] != "object" {
 		return nil, nil, fmt.Errorf("input schema must declare object type")
 	}
+	if err := schemaNumbers(object); err != nil {
+		return nil, nil, err
+	}
 	var parsed jsonschema.Schema
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		return nil, nil, err
@@ -311,6 +391,55 @@ func schema(value any, limit int, required bool) (map[string]any, *jsonschema.Re
 		return nil, nil, err
 	}
 	return object, resolved, nil
+}
+
+// jsonschema-go represents numeric schema keywords and enum values as float64.
+// Restoring raw schemas must not weaken the old SDK precision rejection or
+// permit a rounded minimum/enum to authorize a different input.
+func schemaNumbers(value any) error {
+	switch v := value.(type) {
+	case json.Number:
+		if len(v) > 256 {
+			return mappingFailure("unsafe_number", "mcptools: schema numeric lexeme limit exceeded")
+		}
+		for i, c := range string(v) {
+			if c == 'e' || c == 'E' {
+				exponent, err := strconv.ParseInt(string(v)[i+1:], 10, 32)
+				if err != nil || exponent < -308 || exponent > 308 {
+					return mappingFailure("unsafe_number", "mcptools: schema numeric exponent outside supported domain")
+				}
+				break
+			}
+		}
+		f, err := strconv.ParseFloat(string(v), 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || (math.Trunc(f) == f && math.Abs(f) >= 1<<53) {
+			return mappingFailure("unsafe_number", "mcptools: unsupported schema numeric precision")
+		}
+		raw, err := json.Marshal(f)
+		if err != nil {
+			return err
+		}
+		// Parse the bounded float roundtrip first. Only then compare the input
+		// decimal after its exponent is constrained by float64 parsing.
+		a, aOK := new(big.Rat).SetString(string(v))
+		b, bOK := new(big.Rat).SetString(string(raw))
+		if !aOK || !bOK || a.Cmp(b) != 0 {
+			return mappingFailure("unsafe_number", "mcptools: schema number cannot be validated without rounding")
+		}
+	case map[string]any:
+		for _, child := range v {
+			if err := schemaNumbers(child); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if err := schemaNumbers(child); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func convertResult(result *mcp.CallToolResult, output *jsonschema.Resolved, limit int) (agent.ToolResult, error) {

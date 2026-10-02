@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Icatme/pi-go/agent"
+	managed "github.com/Icatme/pi-go/mcp"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 )
 
@@ -42,6 +43,15 @@ func beforeCallError(code agent.ToolFailureCode, reason string, err error) error
 	}
 }
 
+func permissionError(err error) error {
+	code, reason := agent.ToolFailurePolicyDenied, "permission_revoked"
+	var failure *agent.ToolExecutionError
+	if errors.As(err, &failure) && failure.Code != "" {
+		code, reason = failure.Code, failure.Reason
+	}
+	return beforeCallError(code, reason, err)
+}
+
 func callError(err error) error {
 	code := agent.ToolFailureCode("transport")
 	var protocol *jsonrpc.Error
@@ -55,8 +65,79 @@ func callError(err error) error {
 	}
 	return &agent.ToolExecutionError{
 		Code: code, Reason: "call_failure", Execution: agent.ToolExecutionInfo{Remote: "unknown"},
-		Err: fmt.Errorf("mcptools: call transport/protocol failure; execution may have occurred, do not retry automatically: %w", err),
+		Message: "mcptools: tool request failed; execution may have occurred, do not retry automatically",
+		Err:     fmt.Errorf("mcptools: call transport/protocol failure; execution may have occurred, do not retry automatically: %w", err),
 	}
+}
+
+func dispatchFacts(record managed.DispatchRecord) *agent.ToolExecutionInfo {
+	info := &agent.ToolExecutionInfo{Remote: agent.ToolRemoteUnknown}
+	if record.Attempts == 0 {
+		info.Remote = agent.ToolRemoteNotDispatched
+	}
+	switch record.ResultType {
+	case "complete":
+		info.Remote = agent.ToolRemoteCompleteReported
+	case "input_required":
+		info.Remote = agent.ToolRemoteInputRequired
+	}
+	for i := 0; i < record.Attempts; i++ {
+		info.Attempts = append(info.Attempts, agent.ToolSendAttempt{Number: i + 1, Remote: info.Remote})
+	}
+	return info
+}
+
+func trackedCallError(err error, info agent.ToolExecutionInfo) error {
+	var response *managed.ResponseError
+	if errors.As(err, &response) {
+		info.Remote = agent.ToolRemoteCompleteReported
+		code, reason := agent.ToolFailureResultRejected, "raw_result"
+		if response.NeedsInput {
+			info.Remote = agent.ToolRemoteInputRequired
+			code = agent.ToolFailureInputRequiredUnsupported
+			reason = "input_required"
+		}
+		for i := range info.Attempts {
+			info.Attempts[i].Remote = info.Remote
+		}
+		return &ResultError{Result: agent.ToolResult{Execution: &info}, Err: &agent.ToolExecutionError{Code: code, Reason: reason, Message: "mcptools: result rejected after remote response; do not retry automatically", Execution: info, Err: err}}
+	}
+	var typed *agent.ToolExecutionError
+	errors.As(callError(err), &typed)
+	typed.Execution = info
+	var denied *managed.DispatchDeniedError
+	if errors.As(err, &denied) {
+		typed.Code, typed.Reason = agent.ToolFailurePolicyDenied, "permission_revoked"
+	}
+	if errors.Is(err, managed.ErrAuthRequired) {
+		typed.Code = agent.ToolFailurePolicyDenied
+		typed.Reason = "auth_required"
+	}
+	if errors.Is(err, managed.ErrStale) {
+		typed.Code = agent.ToolFailureSchemaChanged
+		typed.Reason = "identity_changed"
+	}
+	if errors.Is(err, managed.ErrHidden) || errors.Is(err, managed.ErrClosed) {
+		typed.Code = agent.ToolFailurePolicyDenied
+		typed.Reason = "connection_unavailable"
+	}
+	if denied != nil {
+		// Preserve the trusted check's reason, but always retain the transport's
+		// authoritative facts rather than execution claims from that callback.
+		var failure *agent.ToolExecutionError
+		if errors.As(denied.Err, &failure) && failure.Code != "" {
+			typed.Code, typed.Reason = failure.Code, failure.Reason
+		}
+		if errors.Is(denied.Err, context.Canceled) {
+			typed.Code = agent.ToolFailureCanceled
+		} else if errors.Is(denied.Err, context.DeadlineExceeded) {
+			typed.Code = agent.ToolFailureDeadline
+		}
+	}
+	if info.Remote == agent.ToolRemoteNotDispatched {
+		typed.Message = "mcptools: tool request was not dispatched; check host connection, authentication and permission"
+	}
+	return typed
 }
 
 func resultError(mapped agent.ToolResult, err error) error {

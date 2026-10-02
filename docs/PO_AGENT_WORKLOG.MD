@@ -744,3 +744,54 @@
 - Native Windows Go1.26.4 ordinary root/example tests, vet and builds pass with
   GOWORK=off and live-test flags disabled. Focused Agent/sandbox/binding race
   checks pass; final combined full-race evidence belongs to the integration entry.
+
+## 2026-10-02: Managed MCP wire, connection and OAuth boundaries
+
+- Add the standalone mcp package using official SDK v1.8.0. Observe actual
+  JSON/SSE/stdio frames, associate concurrent RPC IDs with exact SDK objects,
+  reuse cache observations, bound retention, and reject missing raw data.
+  Notification invalidation rejects late old responses before SDK cache entry.
+- Freeze catalog identity/epoch, connection generation, revision, raw-page digest
+  and exact schemas together. Walk SDK pages for TTL and notification freshness.
+  Restore structured values with json.Number; reject unsafe numeric schema
+  constraints before float conversion, while retaining ordinary decimal schemas.
+- Own explicit HTTP/stdio connection attempts, bounded cleanup and identity/policy
+  retirement. Windows attaches a suspended hidden process to a kill-on-close Job;
+  Unix uses process groups. Tests cover process-tree exit and repeated cleanup.
+- Repair Linux process-lifetime assertions after CI exposed inconsistent death
+  observations. The old probe could report alive when /proc disappeared after
+  kill(0), omitted X/x death states, and probed a bare PID again after termination.
+  Bind observations to the captured starttime, classify Z/X/x and ENOENT/ESRCH,
+  retain other observation failures and keep a confirmed termination permanent.
+  The original random CI failure did not recur in 500 native Linux iterations;
+  the exit/reap observation window is reproduced with an actual child process.
+  Repaired native Linux targeted race tests pass 100 iterations and full MCP race
+  passes three iterations; Windows targeted tests pass 20 iterations, targeted
+  race passes three, and full MCP race/vet pass. Darwin/Linux arm64 test packages
+  compile. Production cleanup and the three-second death deadline are unchanged.
+- Fix a reproduced Windows cross-process CAS failure: CREATE_NEW could return
+  AccessDenied during lock-file deletion. Load already held the common lock;
+  replace its file-handle lifecycle with an atomic directory lock. Keep bounded
+  contention waiting and reject actual permission errors without retry. Retain
+  original storage/unlock causes behind safe error text. CAS pressure passes
+  500 iterations (2000 child processes); related race checks pass ten iterations,
+  and complete MCP ordinary/race tests pass. Explicit crash recovery still belongs
+  to the host. Native MCP race contracts join the managed PR's platform matrix.
+- Guard tool sends at physical handoff after host permission and token retrieval.
+  Count accepted handoffs without claiming socket delivery, preserve trusted SDK
+  terminal/input-required facts, and block duplicate sends including OAuth replay.
+  Failed connections require explicit reconnect; scripts are never repeated.
+- Add explicit host OAuth, token-only tool execution and true version CAS stores.
+  Bind credentials to server/URL/identity/issuer/client; persist registration and
+  scopes, pin refresh authentication style, retire changed/revoked authorization,
+  and reject stale login completion. File storage uses a host-owned private
+  directory, exclusive writer lock, synced replacement and explicit crash recovery.
+- Keep all existing dependency versions. MCP SDK and wazero are current released
+  versions as checked on 2026-10-02. x/oauth2 v0.35.0 is the SDK-selected minimum;
+  the upstream is active through v0.37.0 on 2026-08-25. x/sys v0.48.0 was published
+  2026-08-31. Existing OAuth/OS dependencies now become direct imports; no new
+  framework or unpublished fork. Native Go1.26.4 build/race checks pass.
+- Real loopback SDK HTTP, JSON/SSE/stdio, reordered responses, TTL/cache changes,
+  OAuth state/issuer/refresh, final permission revocation and identity switches
+  pass regression checks. MCP race tests pass for three consecutive iterations;
+  full combined root/example race, ordinary, vet and build checks also pass.
