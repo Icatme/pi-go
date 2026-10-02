@@ -89,6 +89,9 @@ effective source/configured timeout starts before directory resolution; the same
 absolute deadline covers the subsequent permission recheck, VM, child tools and
 after hooks. An earlier caller deadline still wins. The Agent owns propagation
 through `ChildToolResolution.Deadline`, without knowing JavaScript or MCP.
+After valid source options have been parsed, directory, child-validation and
+final-permission failures use the same reserved diagnostic budget as VM errors.
+Their original Go causes and rejection facts stay available to the host.
 
 `ToolResult.ChildCalls` is the runtime-owned Go recovery ledger, attached after
 parent hooks. It survives a failing parent output hook even when all unprocessed

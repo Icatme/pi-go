@@ -209,6 +209,9 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 		}
 		if err != nil {
 			outcome := rejectedToolOutcome(prepared.call, err, ToolFailurePolicyDenied)
+			if resolved.FailureTextLimitBytes > 0 {
+				outcome.result = errorToolResult(boundedUTF8(outcome.err.Error(), resolved.FailureTextLimitBytes))
+			}
 			outcome.args = cloneAny(prepared.args)
 			emitToolOutcome(emit, prepared, outcome)
 			return outcome, nil

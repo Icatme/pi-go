@@ -20,6 +20,14 @@ type dynamicState struct {
 	tool agent.ToolDefinition
 }
 
+type dynamicResolverPanic struct{ value any }
+
+func (*dynamicResolverPanic) Error() string { return "Codemode directory resolver panicked" }
+func (err *dynamicResolverPanic) Unwrap() error {
+	cause, _ := err.value.(error)
+	return cause
+}
+
 // NewDynamic adds lazy discovery without changing the model-visible schema or
 // storing mutable executors in history. The Agent freezes the resolved children
 // before entering the script. Ordinary New remains a static allowlist binding.
@@ -53,7 +61,7 @@ func NewDynamic(sandbox *codemode.Sandbox, resolver BindingResolver, options Opt
 		}
 		return state, nil
 	}
-	tool.ResolveChildTools = func(ctx context.Context, execution agent.ToolExecutionContext) (agent.ChildToolResolution, error) {
+	tool.ResolveChildTools = func(ctx context.Context, execution agent.ToolExecutionContext) (resolution agent.ChildToolResolution, err error) {
 		args, ok := execution.Args.(map[string]any)
 		if !ok {
 			return agent.ChildToolResolution{}, errors.New("codemodetool: expected code arguments")
@@ -62,14 +70,22 @@ func NewDynamic(sandbox *codemode.Sandbox, resolver BindingResolver, options Opt
 		if !ok {
 			return agent.ChildToolResolution{}, errors.New("codemodetool: invalid code")
 		}
-		timeout, _, err := sandbox.SourceLimits(code, codemode.RunOptions{Timeout: options.Timeout, MaxOutputTokens: options.MaxOutputTokens})
+		limits, err := sandbox.SourceLimits(code, codemode.RunOptions{Timeout: options.Timeout, MaxOutputTokens: options.MaxOutputTokens})
 		if err != nil {
 			return agent.ChildToolResolution{}, &agent.ToolExecutionError{Code: agent.ToolFailureArgumentInvalid, Reason: "options", Message: "Codemode source header or execution limit is invalid", Err: err, Execution: agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotDispatched}}
 		}
+		// Setup failures use the same reserved diagnostic budget as Sandbox.Run.
+		// Return it with errors as well as successful directory resolutions.
+		resolution.FailureTextLimitBytes = min(1024, (limits.OutputBytes+3)/4)
+		defer func() {
+			if value := recover(); value != nil {
+				err = &agent.ToolExecutionError{Code: agent.ToolFailureHook, Reason: "child_resolver_panicked", Message: "Codemode tool directory resolution panicked", Err: &dynamicResolverPanic{value: value}, Execution: agent.ToolExecutionInfo{Local: agent.ToolLocalNotStarted, Remote: agent.ToolRemoteNotDispatched}}
+			}
+		}()
 		var cancel context.CancelFunc
 		var deadline time.Time
-		if timeout > 0 {
-			deadline = time.Now().Add(timeout)
+		if limits.Timeout > 0 {
+			deadline = time.Now().Add(limits.Timeout)
 			ctx, cancel = context.WithDeadline(ctx, deadline)
 		} else {
 			ctx, cancel = context.WithCancel(ctx)
@@ -77,7 +93,7 @@ func NewDynamic(sandbox *codemode.Sandbox, resolver BindingResolver, options Opt
 		defer cancel()
 		state, err := stateFor(execution)
 		if err != nil {
-			return agent.ChildToolResolution{}, err
+			return resolution, err
 		}
 		bindings, namespaces, err := resolver(ctx)
 		if err != nil {
@@ -87,19 +103,20 @@ func NewDynamic(sandbox *codemode.Sandbox, resolver BindingResolver, options Opt
 			} else if errors.Is(err, context.Canceled) {
 				code = agent.ToolFailureCanceled
 			}
-			return agent.ChildToolResolution{}, &agent.ToolExecutionError{Code: code, Reason: "directory_unavailable", Message: "Codemode tool directory unavailable; reconnect or reauthenticate through the host", Err: err, Execution: agent.ToolExecutionInfo{Local: agent.ToolLocalNotStarted, Remote: agent.ToolRemoteNotDispatched}}
+			return resolution, &agent.ToolExecutionError{Code: code, Reason: "directory_unavailable", Message: "Codemode tool directory unavailable; reconnect or reauthenticate through the host", Err: err, Execution: agent.ToolExecutionInfo{Local: agent.ToolLocalNotStarted, Remote: agent.ToolRemoteNotDispatched}}
 		}
 		resolvedOptions := options
 		resolvedOptions.Namespaces = namespaces
 		resolved, err := New(sandbox, bindings, resolvedOptions)
 		if err != nil {
-			return agent.ChildToolResolution{}, &agent.ToolExecutionError{Code: agent.ToolFailureArgumentInvalid, Reason: "catalog", Message: "Codemode directory does not satisfy its schema or limits", Err: err, Execution: agent.ToolExecutionInfo{Local: agent.ToolLocalNotStarted, Remote: agent.ToolRemoteNotDispatched}}
+			return resolution, &agent.ToolExecutionError{Code: agent.ToolFailureArgumentInvalid, Reason: "catalog", Message: "Codemode directory does not satisfy its schema or limits", Err: err, Execution: agent.ToolExecutionInfo{Local: agent.ToolLocalNotStarted, Remote: agent.ToolRemoteNotDispatched}}
 		}
 		state.mu.Lock()
 		state.id = execution.ToolCall.ID
 		state.tool = resolved
 		state.mu.Unlock()
-		return agent.ChildToolResolution{Tools: resolved.ChildTools, Deadline: deadline}, nil
+		resolution.Tools, resolution.Deadline = resolved.ChildTools, deadline
+		return resolution, nil
 	}
 	tool.Execute = func(ctx context.Context, execution agent.ToolExecutionContext) (agent.ToolResult, error) {
 		state, err := stateFor(execution)

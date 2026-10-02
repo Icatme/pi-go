@@ -6,7 +6,47 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
+
+func TestChildResolverSetupFailureTextLimit(t *testing.T) {
+	for _, mode := range []string{"resolver", "catalog", "permission"} {
+		t.Run(mode, func(t *testing.T) {
+			cause := errors.New("PRIVATE setup cause")
+			err := &ToolExecutionError{Code: ToolFailurePolicyDenied, Reason: "setup_rejected", Message: "审批被拒绝", Err: cause}
+			entered, permissions := false, 0
+			tool := ToolDefinition{Name: "container", ResolveChildTools: func(context.Context, ToolExecutionContext) (ChildToolResolution, error) {
+				resolution := ChildToolResolution{FailureTextLimitBytes: 4}
+				if mode == "resolver" {
+					return resolution, err
+				}
+				if mode == "catalog" {
+					resolution.Tools = []ToolDefinition{{Name: "duplicate"}, {Name: "duplicate"}}
+				}
+				return resolution, nil
+			}, Execute: func(context.Context, ToolExecutionContext) (ToolResult, error) {
+				entered = true
+				return ToolResult{}, nil
+			}}
+			out := RunToolCall(t.Context(), ToolCall{Name: tool.Name}, RunToolCallOptions{Tools: []ToolDefinition{tool}, CheckToolPermission: func(context.Context, BeforeToolCallContext) error {
+				permissions++
+				if mode == "permission" && permissions == 2 {
+					return err
+				}
+				return nil
+			}})
+			if out.Err == nil || entered || out.Execution.Local != ToolLocalNotStarted || out.Execution.Remote != ToolRemoteNotDispatched {
+				t.Fatalf("rejected setup lost execution facts: entered=%v outcome=%+v", entered, out)
+			}
+			if mode != "catalog" && (!errors.Is(out.Err, cause) || out.Failure.Reason != "setup_rejected") {
+				t.Fatalf("presentation limit changed cause/classification: %+v", out)
+			}
+			if len(out.Result.Content) != 1 || len(out.Result.Content[0].Text) > 4 || !utf8.ValidString(out.Result.Content[0].Text) {
+				t.Fatalf("setup diagnostic exceeded its UTF-8 budget: %+v", out.Result)
+			}
+		})
+	}
+}
 
 func TestChildResolverRunsAfterApprovalAndRechecksPermission(t *testing.T) {
 	for _, mode := range []string{"blocked", "permission_before", "permission_after", "allowed"} {

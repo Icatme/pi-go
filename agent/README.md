@@ -331,6 +331,10 @@ recheck and the remaining parent, child and after-hook lifecycle; zero inherits
 the caller context, and an earlier caller deadline always wins. Static and
 resolved children are mutually exclusive, and a
 child cannot itself be a container. Panics retain their Go cause with safe text.
+`ChildToolResolution.FailureTextLimitBytes` optionally bounds model-facing setup
+failure text, including resolver errors, invalid child catalogs and the final
+permission rejection. It is honored on an error return; zero leaves ordinary
+presentation unchanged. Original Go errors and execution facts remain intact.
 Host hook/permission errors in child paths use safe default presentation; an
 explicit `ToolExecutionError.Message` supplies a public explanation.
 

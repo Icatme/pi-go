@@ -63,6 +63,10 @@ There is no hidden 30-second cutoff. Supply a deadline for untrusted workloads;
 context cancellation interrupts both CPU loops and endless microtasks. Errors
 retain `codemode.js` source line numbers.
 
+`Sandbox.SourceLimits` returns `SourceLimits{Timeout,OutputBytes}` without
+creating a VM. Lazy adapters can use the effective timeout and the smaller of
+the configured byte ceiling and source/host token budget during directory setup.
+
 `ScriptError.Diagnostic` contains bounded safe script/API presentation; `Err`
 retains the Go chain for trusted callers. Plain host errors and panics use a
 generic public message rather than rendering their raw causes. An explicit

@@ -431,6 +431,11 @@ type ToolDefinition struct {
 type ChildToolResolution struct {
 	Tools    []ToolDefinition
 	Deadline time.Time
+	// FailureTextLimitBytes bounds model-facing diagnostic text if resolution,
+	// child validation or the subsequent permission check rejects setup. It is
+	// honored even when the resolver returns an error. Zero uses the ordinary
+	// rejection presentation; original Go errors and execution facts are kept.
+	FailureTextLimitBytes int
 }
 
 // BeforeToolCallContext is passed to a before-tool hook.
