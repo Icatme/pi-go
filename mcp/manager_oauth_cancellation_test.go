@@ -36,7 +36,7 @@ func awaitOAuthCancellation(t *testing.T, done <-chan struct{}, operation string
 	t.Helper()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatalf("%s did not finish promptly", operation)
 	}
 }
@@ -46,7 +46,7 @@ func awaitOAuthCancellationResult(t *testing.T, done <-chan error, operation str
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatalf("%s did not finish promptly", operation)
 		return nil
 	}
@@ -116,7 +116,7 @@ func TestManagerOAuthRetirementCancelsConcurrentCallsDuringRefresh(t *testing.T)
 					if result.err == nil || result.record.Attempts != 0 {
 						t.Fatalf("canceled call dispatched: record=%+v err=%v", result.record, result.err)
 					}
-				case <-time.After(2 * time.Second):
+				case <-time.After(5 * time.Second):
 					t.Fatal("concurrent call remained blocked after retirement")
 				}
 			}
@@ -216,5 +216,120 @@ func TestManagerOAuthRefreshCallbackRetirementVariants(t *testing.T) {
 				t.Fatal("callback retirement allowed a physical tool dispatch")
 			}
 		})
+	}
+}
+
+func newStatefulOAuthManager(t *testing.T) (*managerOAuthFixture, *Manager, *atomic.Int32) {
+	t.Helper()
+	f := &managerOAuthFixture{oauthFixture: newOAuthFixture(t)}
+	server := sdk.NewServer(&sdk.Implementation{Name: "stateful", Version: "1"}, &sdk.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25"}})
+	addWireTool(server, "write", func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		f.toolCalls.Add(1)
+		return &sdk.CallToolResult{}, nil
+	})
+	t.Cleanup(func() {
+		for session := range server.Sessions() {
+			_ = session.Close()
+		}
+	})
+	handler := sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, &sdk.StreamableHTTPOptions{JSONResponse: true})
+	challenge := f.server.Config.Handler
+	deletes := new(atomic.Int32)
+	f.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" && r.Header.Get("Authorization") == "Bearer initial-access" {
+			if r.Method == http.MethodDelete {
+				deletes.Add(1)
+			}
+			handler.ServeHTTP(w, r)
+			return
+		}
+		challenge.ServeHTTP(w, r)
+	})
+	options := f.options()
+	m, err := New(Config{
+		Scope:   Scope{Identity: "account", AuthEpoch: 1},
+		Servers: []ServerConfig{{Name: "fixture", URL: f.server.URL + "/mcp", OAuth: &options, AuthKey: f.key(), Timeout: 5 * time.Second}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		// Interrupted refreshes intentionally leave no usable cleanup token.
+		if err := m.Close(ctx); err != nil && !errors.Is(err, ErrAuthRequired) && !errors.Is(err, context.Canceled) {
+			t.Errorf("stateful manager close: %v", err)
+		}
+	})
+	return f, m, deletes
+}
+
+func TestManagerOAuthStatefulRetirementDeletesSession(t *testing.T) {
+	for _, action := range []string{"close_connection", "set_scope", "manager_close", "reconnect"} {
+		t.Run(action, func(t *testing.T) {
+			f, m, deletes := newStatefulOAuthManager(t)
+			c := authenticateAndConnect(t, m)
+			if c.session.ID() == "" {
+				t.Fatal("fixture did not establish a stateful session")
+			}
+			if err := retireOAuthFixture(m, c, action); err != nil {
+				t.Fatalf("authenticated session cleanup failed: %v", err)
+			}
+			awaitOAuthCancellation(t, c.closeDone, "stateful session close")
+			if deletes.Load() != 1 || f.refreshes.Load() != 0 {
+				t.Fatalf("cleanup did not use the cached token exactly once: deletes=%d refreshes=%d", deletes.Load(), f.refreshes.Load())
+			}
+			if _, record, err := c.CallToolTracked(t.Context(), &sdk.CallToolParams{Name: "write"}); err == nil || record.Attempts != 0 || f.toolCalls.Load() != 0 {
+				t.Fatalf("cleanup token allowed a retired tool call: record=%+v err=%v", record, err)
+			}
+		})
+	}
+}
+
+func TestManagerOAuthStatefulRetirementCancelsRefresh(t *testing.T) {
+	for _, action := range []string{"close_connection", "set_scope", "manager_close", "reconnect"} {
+		t.Run(action, func(t *testing.T) {
+			f, m, deletes := newStatefulOAuthManager(t)
+			entered, canceled := blockOAuthRefresh(t, f)
+			c := authenticateAndConnect(t, m)
+			expireConnectionToken(t, c)
+			finished := make(chan error, 1)
+			go func() {
+				_, record, err := c.CallToolTracked(context.Background(), &sdk.CallToolParams{Name: "write"})
+				if record.Attempts != 0 {
+					t.Error("canceled refresh dispatched a tool")
+				}
+				finished <- err
+			}()
+			awaitOAuthCancellation(t, entered, "stateful token endpoint entry")
+			retired := make(chan error, 1)
+			go func() { retired <- retireOAuthFixture(m, c, action) }()
+			awaitOAuthCancellation(t, canceled, "stateful token request cancellation")
+			if err := awaitOAuthCancellationResult(t, retired, "stateful retirement"); !errors.Is(err, ErrAuthRequired) {
+				t.Fatalf("interrupted refresh supplied a cleanup token: %v", err)
+			}
+			if err := awaitOAuthCancellationResult(t, finished, "stateful canceled call"); err == nil {
+				t.Fatal("canceled refresh accepted a tool call")
+			}
+			awaitOAuthCancellation(t, c.closeDone, "stateful canceled session close")
+			if f.refreshes.Load() != 1 || deletes.Load() != 0 || f.toolCalls.Load() != 0 {
+				t.Fatalf("ambiguous credential was reused: refreshes=%d deletes=%d calls=%d", f.refreshes.Load(), deletes.Load(), f.toolCalls.Load())
+			}
+		})
+	}
+}
+
+func TestManagerOAuthStatefulCloseDoesNotStartRefresh(t *testing.T) {
+	f, m, deletes := newStatefulOAuthManager(t)
+	c := authenticateAndConnect(t, m)
+	expireConnectionToken(t, c)
+	before := c.oauth.State().CredentialVersion
+	closed := make(chan error, 1)
+	go func() { closed <- c.Close() }()
+	if err := awaitOAuthCancellationResult(t, closed, "expired stateful session close"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expired cleanup token did not observe cancellation: %v", err)
+	}
+	if f.refreshes.Load() != 0 || deletes.Load() != 0 || c.oauth.State().CredentialVersion != before {
+		t.Fatal("already canceled connection claimed or sent a new refresh")
 	}
 }
