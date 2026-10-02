@@ -13,12 +13,27 @@ codeTool, err := codemodetool.New(sandbox, []codemodetool.Binding{
 // Handle err, then add only codeTool to agent.AgentDefinition.Tools.
 ```
 
-MCP names map to `mcp__server__tool`. Names longer than 64 bytes or requiring
-sanitization get a deterministic identity hash suffix; duplicate final names
+Ordinary short MCP names map to `mcp__server__tool`. Namespace names longer than
+24 bytes, requiring sanitization, or containing the `__` separator use a capped
+readable namespace plus a 12-hex identity hash. Tool names exceeding the remaining
+64-byte identifier budget or requiring sanitization get a tool-identity hash
+suffix. `Binding.NamespacePrefix()` lets hosts reconnect only the exact original
+namespace for a saved alias; `Binding.ExportedName()` returns the complete alias.
+Exceptional namespace aliases changed from the previous combined-prefix hash;
+there are no legacy aliases. Duplicate final names
 and conflicting native/MCP namespace identities fail construction. Applications
 can inspect `codeTool.ChildTools` for the frozen exported names. Leaf descriptions
 and schemas appear only through the sandbox discovery API. Omitted tools are
 absent from discovery and execution.
+
+The default description gives a compact globals/async/discovery reference without
+preloading leaf schemas. `searchTools(query,{namespace?,limit?})` can restrict a
+BM25 query to one allowed namespace. `describeTool` includes a `resultDescription`
+for native text/structured values or the MCP envelope. Applications may supply
+`Options.Namespaces` descriptions and instructions, available only on demand;
+every entry must belong to a namespace represented in the binding allowlist.
+Probe tools with `"name" in tools`; unknown member reads throw with close allowed
+names, including `typeof tools.unknown`.
 
 Every call uses the current invocation's `ChildCaller`, including validation,
 before and after hooks, gate, cancellation, host-generated child IDs, and final
@@ -45,6 +60,13 @@ Use explicit string IDs when the service schema permits them.
 Output and script options cannot widen sandbox limits. Any sequential leaf or
 effective sequential Agent policy preserves VM admission order even for
 `Promise.all`. The model sees bounded explicit output and one call-count summary.
+Failures include a safe script/API diagnostic and source location when available;
+raw Go causes remain host-only. Earlier accepted calls are never replayed and
+the failure text warns that they may already have effects. Up to 1024 bytes,
+capped at one quarter of the effective output cap, and one item are reserved
+inside the configured/source-header limit for the summary/diagnostic. Explicit
+partial output remains available on failure, and final diagnostics cannot expand
+the output cap when the script fills its remaining budget.
 `ToolResult.Details` contains `Report{Sandbox,Children}`; `Children` holds the
 authoritative execution facts, and `Sandbox.Calls` describes bridge execution.
 Reports retain partial output and accepted calls on script failure. They do not

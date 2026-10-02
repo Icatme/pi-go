@@ -32,11 +32,16 @@ including `Promise.all`, and waits for actual host exit before starting the
 next. Generic successful host results have remote `not_applicable`; integrations
 retain their authoritative protocol facts in their own outcome/ledger.
 
-Scripts get `tools.<name>`, frozen `ALL_TOOLS` name/description summaries,
-`searchTools(query, {limit?})` (BM25, default 5, max 50), `describeTool(name)`,
+Scripts get `tools.<name>`, frozen `ALL_TOOLS` name/description/namespace summaries,
+`searchTools(query, {namespace?,limit?})` (BM25, default 5, max 50), `describeTool(name)`,
 `describeNamespace(name)`, `text`, `image`, `console.log/info/warn/error/debug`,
 `exit`, `store` and `load`. Discovery returns Promises; unavailable descriptions
-resolve to `undefined`. Unknown tool calls reject. Supported image inputs are
+resolve to `undefined`. Unknown tool members throw immediately with close names
+from the current allowed catalog; probe with `"name" in tools`, rather than
+`typeof tools.name`. `RunOptions.Namespaces` supplies bounded namespace descriptions
+and instructions only through `describeNamespace`; metadata for unavailable
+namespaces is rejected. `Tool.ResultDescription` explains the JavaScript resolved
+value on demand alongside input/output schemas. Supported image inputs are
 PNG/JPEG/GIF/WebP inline base64 data URLs or `{mimeType,data}` objects; base64,
 format headers, declared MIME and the 64 Mi-pixel limit are checked before
 output, including WebP through the official pure Go configuration decoder.
@@ -57,6 +62,19 @@ options and explicitly configured host deadlines take the earliest bound.
 There is no hidden 30-second cutoff. Supply a deadline for untrusted workloads;
 context cancellation interrupts both CPU loops and endless microtasks. Errors
 retain `codemode.js` source line numbers.
+
+`ScriptError.Diagnostic` contains bounded safe script/API presentation; `Err`
+retains the Go chain for trusted callers. Plain host errors and panics use a
+generic public message rather than rendering their raw causes. An explicit
+`CallError.Message` must already be safe. Changing a host rejection's public
+message, stack or code cannot change its original diagnostic or cause.
+
+Integrations can use `RunOptions.OutputReserveBytes` to reserve one output item
+and up to one quarter of the effective byte cap for their status/diagnostic.
+The reservation includes source-header reductions and never widens a cap.
+`Result.OutputLimitBytes`, `OutputLimitItems` and `OutputReservedBytes` describe
+the effective bounds; all caller-added output must fit them. With no reservation,
+the entire configured budget remains available to the script.
 
 Default bounds are 64 MiB QuickJS heap, 128 MiB linear memory (2048 pages),
 512 KiB native QuickJS stack (positive, at most the artifact's 512 KiB maximum),

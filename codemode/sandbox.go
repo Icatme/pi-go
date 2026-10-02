@@ -8,8 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/Icatme/pi-go/codemode/internal/assets"
 	"github.com/Icatme/pi-go/codemode/internal/quickjs"
@@ -18,6 +21,11 @@ import (
 
 //go:embed prelude.js
 var prelude string
+
+// wazero v1.12.0 initializes a process-wide version cache from its compiler
+// engine constructor without synchronization (wazero/wazero#2532). Serialize
+// our runtime construction; module compilation and VM execution stay parallel.
+var runtimeCreation sync.Mutex
 
 type callKey struct {
 	run uint64
@@ -49,7 +57,12 @@ func NewSandbox(ctx context.Context, config Config) (*Sandbox, error) {
 	if hex.EncodeToString(hash[:]) != assets.SHA256 {
 		return nil, fmt.Errorf("embedded QuickJS digest mismatch")
 	}
-	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true).WithMemoryLimitPages(config.MemoryLimitPages))
+	var rt wazero.Runtime
+	func() {
+		runtimeCreation.Lock()
+		defer runtimeCreation.Unlock()
+		rt = wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true).WithMemoryLimitPages(config.MemoryLimitPages))
+	}()
 	compiled, err := rt.CompileModule(ctx, assets.WASM)
 	if err != nil {
 		_ = rt.Close(context.Background())
@@ -68,16 +81,29 @@ func (s *Sandbox) notifyLocked() { close(s.changed); s.changed = make(chan struc
 // Run owns one new reactor instance until it is actually closed. Its host
 // executions can outlive cancellation, and remain tracked by Sandbox.Close.
 func (s *Sandbox) Run(ctx context.Context, code string, options RunOptions) (result Result, err error) {
+	// Even a pre-VM failure returns bounded presentation caps to integrations.
+	tokens := s.config.MaxOutputTokens
+	if options.MaxOutputTokens > 0 {
+		tokens = min(tokens, options.MaxOutputTokens)
+	}
+	result.OutputLimitBytes = min(s.config.MaxOutputBytes, tokens*4)
+	result.OutputLimitItems = s.config.MaxOutputItems
+	result.OutputReservedBytes = min(max(0, options.OutputReserveBytes), (result.OutputLimitBytes+3)/4)
 	source, timeout, tokens, err := sourceOptions(code, s.config, options)
 	if err != nil {
-		return result, &ScriptError{Code: "options", Message: err.Error(), Err: err}
+		return result, &ScriptError{Code: "options", Message: err.Error(), Diagnostic: boundedDiagnostic(err.Error()), Err: err}
 	}
 	tools, catalog, err := copyTools(options.Tools, s.config.MaxCatalogBytes)
 	if err != nil {
 		return result, &ScriptError{Code: "catalog", Message: err.Error(), Err: err}
 	}
+	namespaces, err := copyNamespaces(options.Namespaces, catalog, s.config.MaxCatalogBytes)
+	if err != nil {
+		return result, &ScriptError{Code: "catalog", Message: err.Error(), Err: err}
+	}
 	catalogJSON, err := json.Marshal(catalog)
-	if err != nil || len(catalogJSON) > s.config.MaxCatalogBytes {
+	namespaceJSON, namespaceErr := json.Marshal(namespaces)
+	if err != nil || namespaceErr != nil || len(catalogJSON)+len(namespaceJSON) > s.config.MaxCatalogBytes {
 		return result, &ScriptError{Code: "catalog", Message: "serialized catalog exceeds limit", Err: err}
 	}
 	var runCtx context.Context
@@ -106,7 +132,7 @@ func (s *Sandbox) Run(ctx context.Context, code string, options RunOptions) (res
 	s.runs[runID] = cancel
 	s.notifyLocked()
 	s.mu.Unlock()
-	r := newRunState(s, runID, runCtx, cancel, tools, catalog, tokens, options.Sequential)
+	r := newRunState(s, runID, runCtx, cancel, tools, catalog, namespaces, tokens, options.OutputReserveBytes, options.Sequential)
 	var storeRevision uint64
 	var vm *quickjs.VM
 	defer func() {
@@ -130,11 +156,17 @@ func (s *Sandbox) Run(ctx context.Context, code string, options RunOptions) (res
 			if errors.Is(contextErr, context.DeadlineExceeded) {
 				code = "deadline"
 			}
-			err = &ScriptError{Code: code, Message: contextErr.Error(), Err: contextErr}
+			err = &ScriptError{Code: code, Message: contextErr.Error(), Diagnostic: contextErr.Error(), Err: contextErr}
 		} else if err != nil {
 			var script *ScriptError
 			if !errors.As(err, &script) {
-				err = &ScriptError{Code: "script", Message: err.Error(), Err: err}
+				diagnostic := ""
+				// Parse faults are guest-generated and name only the source location.
+				// WASM traps, runtime errors and other Go causes are host-only.
+				if strings.HasPrefix(err.Error(), "SyntaxError:") {
+					diagnostic = boundedDiagnostic(err.Error())
+				}
+				err = &ScriptError{Code: "script", Message: err.Error(), Diagnostic: diagnostic, Err: err}
 			}
 		}
 		if err == nil && contextErr == nil && options.Store != nil && r.storeDirty {
@@ -153,7 +185,7 @@ func (s *Sandbox) Run(ctx context.Context, code string, options RunOptions) (res
 	if err != nil {
 		return result, &ScriptError{Code: "sandbox", Message: err.Error(), Err: err}
 	}
-	control := vm.Eval(prelude+"("+string(catalogJSON)+")", "codemode-prelude.js")
+	control := vm.Eval(prelude+"("+string(catalogJSON)+",{storeValueBytes:"+strconv.Itoa(r.storeLimit)+"})", "codemode-prelude.js")
 	settle := vm.Prop(control, "settle")
 	finish := vm.Prop(control, "finish")
 	errorReport := vm.Prop(control, "error")
@@ -172,6 +204,13 @@ func (s *Sandbox) Run(ctx context.Context, code string, options RunOptions) (res
 				return result, r.scriptFailure(vm, errorReport, value)
 			}
 			out := vm.Invoke(finish, value)
+			ok := vm.Prop(out, "ok")
+			completed := vm.String(ok, 5) == "true"
+			vm.Free(ok)
+			if !completed {
+				failure := vm.Prop(out, "error")
+				return result, r.scriptFailure(vm, errorReport, failure)
+			}
 			vm.Free(out)
 			vm.Free(value)
 			for vm.PendingJobs() {
@@ -188,7 +227,7 @@ func (s *Sandbox) Run(ctx context.Context, code string, options RunOptions) (res
 			return result, nil
 		}
 		if r.pending() == 0 {
-			return result, &ScriptError{Code: "pending_promise", Message: "script awaits a Promise with no pending host work"}
+			return result, &ScriptError{Code: "pending_promise", Message: "script awaits a Promise with no pending host work", Diagnostic: "script awaits a Promise with no pending host work; await tool calls and use Promise.all for concurrent work"}
 		}
 		select {
 		case reply := <-r.completions:
@@ -214,8 +253,8 @@ func (r *runState) scriptFailure(vm *quickjs.VM, report, value uint64) error {
 	raw := vm.String(h, 16384)
 	vm.Free(h)
 	var detail struct {
-		Message, Code string
-		CauseID       int `json:"causeId"`
+		Message, Stack, Code string
+		CauseID              int `json:"causeId"`
 	}
 	if err := json.Unmarshal([]byte(raw), &detail); err != nil {
 		return &ScriptError{Code: "script", Message: "cannot decode script failure", Err: err}
@@ -224,9 +263,31 @@ func (r *runState) scriptFailure(vm *quickjs.VM, report, value uint64) error {
 	r.mu.Lock()
 	if e := r.failures[detail.CauseID]; e != nil {
 		cause = e
+		// Public JS properties can be mutated, but private identity always selects
+		// the original safe host presentation and execution failure.
+		detail.Message, detail.Code = e.Message, e.Code
 	}
 	r.mu.Unlock()
-	return &ScriptError{Code: detail.Code, Message: detail.Message, Err: cause}
+	message := detail.Message
+	if location := scriptLocation.FindString(detail.Stack); location != "" {
+		message = location + ": " + message
+	}
+	diagnostic := boundedDiagnostic(message)
+	return &ScriptError{Code: detail.Code, Message: diagnostic, Diagnostic: diagnostic, Err: cause}
+}
+
+var scriptLocation = regexp.MustCompile(`codemode\.js:[0-9]+(?::[0-9]+)?`)
+
+func boundedDiagnostic(value string) string {
+	value = strings.ToValidUTF8(value, "\uFFFD")
+	if len(value) <= 4096 {
+		return value
+	}
+	limit := 4093
+	for !utf8.ValidString(value[:limit]) {
+		limit--
+	}
+	return value[:limit] + "…"
 }
 
 // Close stops admission, cancels VMs and tools, and waits only as long as ctx.

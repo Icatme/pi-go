@@ -415,6 +415,12 @@ type ToolDefinition struct {
 	// A child may not itself declare ChildTools.
 	ChildTools  []ToolDefinition `json:"-"`
 	ChildLimits ChildCallLimits  `json:"-"`
+	// ResolveChildTools lazily captures a host-authorized leaf set at container
+	// execution, after admission and permission checks. The result is frozen for
+	// this parent call; children cannot use this resolver or declare children.
+	// It is mutually exclusive with ChildTools and cannot be restored by a
+	// checkpoint runner without a host resolver.
+	ResolveChildTools func(context.Context, ToolExecutionContext) ([]ToolDefinition, error) `json:"-"`
 }
 
 // BeforeToolCallContext is passed to a before-tool hook.

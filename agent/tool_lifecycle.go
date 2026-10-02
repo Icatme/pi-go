@@ -28,6 +28,9 @@ func (e *Engine) prepareToolInvocation(ctx context.Context, definition AgentDefi
 	}
 	call := cloneToolCall(original)
 	fail := func(args any, err error, code ToolFailureCode) (preparedToolCall, *SuspendedToolCall, error) {
+		if childParentID(ctx) != "" {
+			err = safeChildError(err, code, "Child tool preflight failed; check its input schema and host permissions")
+		}
 		if budgetErr := checkArgumentBudget(args, argumentLimit); budgetErr != nil {
 			budgetErr.Err = err
 			return preparedFailure(call, nil, budgetErr, ToolFailureResource), nil, nil
@@ -98,6 +101,9 @@ func (e *Engine) prepareToolInvocation(ctx context.Context, definition AgentDefi
 	if gate != nil {
 		decision, gateErr := gate(ctx, toolHookContext(ctx, assistant, call, cloneAny(executionArgs), currentContext))
 		if gateErr != nil {
+			if childParentID(ctx) != "" {
+				gateErr = safeChildError(gateErr, ToolFailureHook, "Child tool approval hook failed")
+			}
 			return preparedToolCall{}, nil, fmt.Errorf("agent: tool gate for %q failed: %w", call.Name, gateErr)
 		}
 		if err := ctx.Err(); err != nil {
@@ -162,6 +168,9 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 		return definition.CheckToolPermission(checkCtx, toolHookContext(ctx, assistant, prepared.call, cloneAny(prepared.args), prepared.context))
 	}
 	if err := checkPermission(ctx); err != nil {
+		if prepared.child {
+			err = safeChildError(err, ToolFailurePolicyDenied, "Child tool permission was denied before execution")
+		}
 		outcome := rejectedToolOutcome(prepared.call, err, ToolFailurePolicyDenied)
 		outcome.args = cloneAny(prepared.args)
 		if prepared.child {
@@ -171,6 +180,29 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 		return outcome, nil
 	}
 	var children *childCallScope
+	if prepared.tool.ResolveChildTools != nil {
+		resolved, err := resolveToolChildren(ctx, prepared.tool.ResolveChildTools, ToolExecutionContext{
+			ToolCall: cloneToolCall(prepared.call), Args: cloneAny(prepared.args), Context: cloneAgentContext(prepared.context),
+			CheckPermission: checkPermission, Invocation: toolInvocationFromContext(ctx),
+		})
+		if err == nil {
+			prepared.tool.ChildTools = cloneTools(resolved)
+			if prepared.tool.ChildTools == nil {
+				prepared.tool.ChildTools = []ToolDefinition{}
+			}
+			prepared.tool.ResolveChildTools = nil
+			err = validateChildTools(prepared.tool)
+		}
+		if err == nil {
+			err = checkPermission(ctx)
+		}
+		if err != nil {
+			outcome := rejectedToolOutcome(prepared.call, err, ToolFailurePolicyDenied)
+			outcome.args = cloneAny(prepared.args)
+			emitToolOutcome(emit, prepared, outcome)
+			return outcome, nil
+		}
+	}
 	if prepared.tool.ChildTools != nil {
 		children = newChildCallScope(ctx, e, definition, assistant, prepared, emit)
 	}
@@ -264,6 +296,9 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 			Result: cloneToolResult(outcome.result), IsError: outcome.isError, Err: outcome.err,
 			Execution: *cloneToolExecutionInfo(&outcome.execution), Failure: cloneToolFailure(outcome.failure), ParentToolCallID: prepared.parentID})
 		if hookErr != nil {
+			if prepared.child {
+				hookErr = safeChildError(hookErr, ToolFailureHook, "Child tool output hook failed; output withheld")
+			}
 			// Preserve the execution chain, but discard all unprocessed output.
 			setOutcomeFailure(&outcome, hookErr, ToolFailureHook, prepared.failureResultLimit())
 		} else {
@@ -322,6 +357,28 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 	}
 	emitToolOutcome(emit, prepared, outcome)
 	return outcome, nil
+}
+
+func safeChildError(err error, code ToolFailureCode, message string) error {
+	var typed *ToolExecutionError
+	if errors.As(err, &typed) && typed.Message != "" {
+		return err
+	}
+	reason := ""
+	if typed != nil {
+		reason = typed.Reason
+	}
+	return &ToolExecutionError{Code: failureCode(err, code), Reason: reason, Message: message, Err: err}
+}
+
+func resolveToolChildren(ctx context.Context, resolver func(context.Context, ToolExecutionContext) ([]ToolDefinition, error), execution ToolExecutionContext) (tools []ToolDefinition, err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			tools = nil
+			err = &ToolExecutionError{Code: ToolFailureHook, Reason: "child_resolver_panicked", Message: "child tool resolver panicked", Execution: ToolExecutionInfo{Local: ToolLocalNotStarted, Remote: ToolRemoteNotDispatched}, Err: &toolCallbackPanic{value: value}}
+		}
+	}()
+	return resolver(ctx, execution)
 }
 
 // A host executor panic is an execution failure, not a way to skip the common

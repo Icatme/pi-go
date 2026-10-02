@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Icatme/pi-go/agent"
 	"github.com/Icatme/pi-go/codemode"
@@ -46,14 +47,32 @@ func MCP(tool agent.ToolDefinition, server string) Binding {
 	return Binding{Tool: tool, Namespace: server, Projection: MCPEnvelope}
 }
 
+// ExportedName is the deterministic JavaScript/Agent alias for this binding.
+// It does not validate or grant the tool; New validates the actual allowlist.
+func (binding Binding) ExportedName() string { return exportedName(binding) }
+
+// NamespacePrefix identifies this MCP namespace before the tool-specific
+// suffix. Exceptional namespace names include a stable identity hash, allowing
+// saved aliases to reconnect only their original namespace without guessing.
+func (binding Binding) NamespacePrefix() string {
+	if binding.Projection != MCPEnvelope {
+		return ""
+	}
+	return mcpNamespacePrefix(binding.Namespace)
+}
+
 // Options limits this container invocation. Zero values use bounded defaults.
 // ChildLimits applies to the Agent's complete basic ledger and optional details.
 type Options struct {
+	storeKey        *byte
 	Name            string
 	Description     string
 	Timeout         time.Duration
 	MaxOutputTokens int
 	ChildLimits     agent.ChildCallLimits
+	// Namespace documentation is exposed only by describeNamespace. Each entry
+	// must name a namespace represented by an allowed binding.
+	Namespaces []codemode.Namespace
 }
 
 // Report retains bounded Go-side observations without exposing leaf schemas or
@@ -95,10 +114,10 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 		if binding.Projection != NativeValue && binding.Projection != MCPEnvelope {
 			return agent.ToolDefinition{}, errors.New("codemodetool: projection must be native or mcp")
 		}
-		if binding.Namespace == "" || binding.Tool.Name == "" || binding.Tool.Execute == nil {
+		if binding.Namespace == "" || len(binding.Namespace) > 128 || !utf8.ValidString(binding.Namespace) || binding.Tool.Name == "" || binding.Tool.Execute == nil {
 			return agent.ToolDefinition{}, errors.New("codemodetool: namespace, leaf name and executor are required")
 		}
-		if binding.Tool.ChildTools != nil {
+		if binding.Tool.ChildTools != nil || binding.Tool.ResolveChildTools != nil {
 			return agent.ToolDefinition{}, errors.New("codemodetool: recursive containers are unsupported")
 		}
 		if previous, exists := namespaces[binding.Namespace]; exists && previous != binding.Projection {
@@ -123,9 +142,26 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 			return agent.ToolDefinition{}, fmt.Errorf("codemodetool: output schema %q: %w", name, err)
 		}
 		definitions = append(definitions, tool)
+		resolution := "Resolves to joined text."
+		if binding.Projection == MCPEnvelope {
+			resolution = "Resolves to {content, structuredContent?, isError}; tool-reported business failures resolve with isError:true. Transport, permission and validation failures reject."
+		} else if len(output) > 0 {
+			resolution = "Resolves to the validated outputSchema value; failures reject."
+		}
 		templates = append(templates, codemode.Tool{Name: name, Namespace: binding.Namespace,
-			Description: tool.Description, Parameters: input, OutputSchema: output})
+			Description: tool.Description, ResultDescription: resolution, Parameters: input, OutputSchema: output})
 		sequential = sequential || tool.ExecutionMode == agent.ToolExecutionSequential
+	}
+	metadata := append([]codemode.Namespace(nil), options.Namespaces...)
+	if len(metadata) > len(namespaces) {
+		return agent.ToolDefinition{}, errors.New("codemodetool: too many namespace descriptions")
+	}
+	seen := make(map[string]bool)
+	for _, value := range metadata {
+		if _, ok := namespaces[value.Name]; !ok || seen[value.Name] || len(value.Description) > 4096 || len(value.Instructions) > 32<<10 || !utf8.ValidString(value.Description+value.Instructions) {
+			return agent.ToolDefinition{}, errors.New("codemodetool: invalid or unavailable namespace description")
+		}
+		seen[value.Name] = true
 	}
 	if options.Description == "" {
 		list := make([]string, 0, len(namespaces))
@@ -133,12 +169,22 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 			list = append(list, name)
 		}
 		sort.Strings(list)
-		options.Description = "Run JavaScript to call and filter allowed tools. Available namespaces: " + strings.Join(list, ", ") +
-			". Discover tools with searchTools/describeTool inside the script; emit bounded output with text or return."
+		available := fmt.Sprintf("%d allowed namespaces", len(list))
+		if len(list) > 0 && len(list) <= 12 && len(strings.Join(list, ", ")) <= 384 {
+			available = strings.Join(list, ", ")
+		}
+		options.Description = "Run an async JavaScript body; await tools.<name>(args) or use Promise.all. " +
+			"Discover with ALL_TOOLS, searchTools(query,{namespace?,limit?}), describeTool(name), describeNamespace(name). " +
+			"Descriptions explain input and resolved values. Check availability with \"name\" in tools. " +
+			"Globals: text/return and console.* emit bounded output; image emits inline images; store/load keep small invocation state; exit succeeds. " +
+			"Allowed namespaces: " + available + ". No filesystem, network or timers except through allowed tools."
 	}
 	// A non-zero-size allocation gives this binding a private comparable identity.
 	// The invocation owns the resource; no session/run ID is retained globally.
-	storeKey := new(byte)
+	storeKey := options.storeKey
+	if storeKey == nil {
+		storeKey = new(byte)
+	}
 	return agent.ToolDefinition{
 		Name: options.Name, Description: options.Description,
 		Parameters:    map[string]any{"type": "object", "properties": map[string]any{"code": map[string]any{"type": "string", "maxLength": 65536}}, "required": []string{"code"}, "additionalProperties": false},
@@ -194,7 +240,7 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 					return value, nil
 				}
 			}
-			result, err := sandbox.Run(ctx, code, codemode.RunOptions{Tools: tools, Timeout: options.Timeout, MaxOutputTokens: options.MaxOutputTokens, Sequential: sequential || execution.ChildSequential, Store: store})
+			result, err := sandbox.Run(ctx, code, codemode.RunOptions{Tools: tools, Namespaces: metadata, Timeout: options.Timeout, MaxOutputTokens: options.MaxOutputTokens, OutputReserveBytes: 1024, Sequential: sequential || execution.ChildSequential, Store: store})
 			reportState := result
 			// Output is retained in Content once. It cannot consume the failure
 			// report's budget and evict the complete basic call ledger.
@@ -208,20 +254,57 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 					parts = append(parts, agent.Part{Type: agent.PartTypeText, Text: output.Text})
 				}
 			}
-			status := "completed"
+			presentation := fmt.Sprintf("Codemode completed; %d host calls.", len(result.Calls))
 			if err != nil {
-				status = "failed"
+				presentation = fmt.Sprintf("Codemode failed; %d host calls. ", len(result.Calls))
+				if len(result.Calls) > 0 {
+					presentation += "Earlier calls may have effects; inspect execution facts before retrying. "
+				}
+				presentation += scriptDiagnostic(err)
 			}
-			parts = append(parts, agent.Part{Type: agent.PartTypeText, Text: fmt.Sprintf("Codemode %s; %d host calls. Execution details are retained by the host.", status, len(result.Calls))})
+			if result.OutputReservedBytes > 0 && len(parts) < result.OutputLimitItems {
+				parts = append(parts, agent.Part{Type: agent.PartTypeText, Text: boundedText(presentation, result.OutputReservedBytes)})
+			}
 			mapped := agent.ToolResult{Content: parts, Details: report, IsError: err != nil}
 			if err != nil {
 				code, reason := scriptFailure(err)
-				return mapped, &agent.ToolExecutionError{Code: code, Reason: reason, Message: "Codemode script failed; inspect the bounded output and host report", Err: err,
+				return mapped, &agent.ToolExecutionError{Code: code, Reason: reason, Message: boundedText(presentation, result.OutputReservedBytes), Err: err,
 					Execution: agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotApplicable}}
 			}
 			return mapped, nil
 		},
 	}, nil
+}
+
+func scriptDiagnostic(err error) string {
+	var script *codemode.ScriptError
+	if errors.As(err, &script) && script.Diagnostic != "" {
+		return script.Diagnostic
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "Deadline exceeded."
+	}
+	if errors.Is(err, context.Canceled) {
+		return "Execution canceled."
+	}
+	if script != nil {
+		return "Failure code: " + boundedText(script.Code, 128) + "; inspect the host report."
+	}
+	return "Script could not finish; inspect the host report."
+}
+
+func boundedText(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	value = strings.ToValidUTF8(value, "\uFFFD")
+	if len(value) <= limit {
+		return value
+	}
+	for !utf8.ValidString(value[:limit]) {
+		limit--
+	}
+	return value[:limit]
 }
 
 func scriptFailure(err error) (agent.ToolFailureCode, string) {
@@ -304,13 +387,17 @@ func freezeLeaf(original agent.ToolDefinition, name string, projection Projectio
 	if original.ParseArguments != nil {
 		frozen.ParseArguments = func(call agent.ToolCall) (any, error) {
 			call.Name = original.Name
-			return original.ParseArguments(call)
+			args, err := original.ParseArguments(call)
+			if err != nil {
+				return nil, &agent.ToolExecutionError{Code: agent.ToolFailureArgumentInvalid, Message: "arguments rejected by the tool parser; check describeTool(name)", Err: err}
+			}
+			return args, nil
 		}
 	}
 	frozen.ValidateResult = func(result agent.ToolResult) error {
 		if original.ValidateResult != nil {
 			if err := original.ValidateResult(result); err != nil {
-				return err
+				return &agent.ToolExecutionError{Code: agent.ToolFailureResultRejected, Message: "tool result rejected by its validator; inspect the host report", Err: err}
 			}
 		}
 		structured := len(frozen.OutputSchema) > 0 && !(projection == NativeValue && result.IsError)
@@ -333,7 +420,22 @@ func freezeLeaf(original agent.ToolDefinition, name string, projection Projectio
 				Execution: agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotDispatched}}
 		}
 		execution.ToolCall.Name = original.Name
-		return original.Execute(ctx, execution)
+		result, err := original.Execute(ctx, execution)
+		if err == nil {
+			return result, nil
+		}
+		// Raw causes may contain credentials or payloads. Only an explicit safe
+		// ToolExecutionError.Message may become the default lifecycle presentation;
+		// after hooks can still replace it with their own processed public output.
+		var typed *agent.ToolExecutionError
+		if errors.As(err, &typed) && typed.Message != "" {
+			return result, err
+		}
+		failure := &agent.ToolExecutionError{Message: "tool call failed; inspect the host report", Err: err}
+		if typed != nil {
+			failure.Code, failure.Reason, failure.Execution = typed.Code, typed.Reason, typed.Execution
+		}
+		return result, failure
 	}
 	return frozen, nil
 }
@@ -430,20 +532,22 @@ func identifier(value string) bool {
 func exportedName(binding Binding) string {
 	value := binding.Tool.Name
 	if binding.Projection == MCPEnvelope {
-		value = "mcp__" + binding.Namespace + "__" + value
+		prefix := mcpNamespacePrefix(binding.Namespace)
+		value = prefix + value
+		if identifier(value) && len(value) <= 64 {
+			return value
+		}
+		tool := cleanIdentifier(binding.Tool.Name)
+		if len(tool) > 64-len(prefix)-14 {
+			tool = tool[:64-len(prefix)-14]
+		}
+		identity := sha256.Sum256([]byte(string(binding.Projection) + "\x00" + binding.Namespace + "\x00" + binding.Tool.Name))
+		return prefix + tool + "__" + hex.EncodeToString(identity[:6])
 	}
 	if identifier(value) && len(value) <= 64 {
 		return value
 	}
-	var clean strings.Builder
-	for _, c := range value {
-		if c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' {
-			clean.WriteRune(c)
-		} else {
-			clean.WriteByte('_')
-		}
-	}
-	prefix := clean.String()
+	prefix := cleanIdentifier(value)
 	if prefix == "" || prefix[0] >= '0' && prefix[0] <= '9' {
 		prefix = "tool_" + prefix
 	}
@@ -452,4 +556,31 @@ func exportedName(binding Binding) string {
 	}
 	identity := sha256.Sum256([]byte(string(binding.Projection) + "\x00" + binding.Namespace + "\x00" + binding.Tool.Name))
 	return prefix + "__" + hex.EncodeToString(identity[:6])
+}
+
+func cleanIdentifier(value string) string {
+	var clean strings.Builder
+	for _, c := range value {
+		if c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' {
+			clean.WriteRune(c)
+		} else {
+			clean.WriteByte('_')
+		}
+	}
+	return clean.String()
+}
+
+func mcpNamespacePrefix(namespace string) string {
+	clean := cleanIdentifier(namespace)
+	if clean == namespace && len(namespace) <= 24 && !strings.Contains(namespace, "__") {
+		return "mcp__" + namespace + "__"
+	}
+	if clean == "" {
+		clean = "server"
+	}
+	if len(clean) > 12 {
+		clean = clean[:12]
+	}
+	identity := sha256.Sum256([]byte(namespace))
+	return "mcp__" + clean + "_" + hex.EncodeToString(identity[:6]) + "__"
 }
