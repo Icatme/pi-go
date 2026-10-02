@@ -795,3 +795,40 @@
   OAuth state/issuer/refresh, final permission revocation and identity switches
   pass regression checks. MCP race tests pass for three consecutive iterations;
   full combined root/example race, ordinary, vet and build checks also pass.
+
+## 2026-10-02: Dynamic MCP projection and bounded resources
+
+- Add agent/toolset over host-owned Manager/Sandbox. Direct tools load initially;
+  deferred/codemode tools connect lazily and load through bounded shared BM25
+  search. Model search excludes already-declared leaves. Hidden leaves are absent
+  from schemas/discovery and reject guessed invocation. Catalog publication uses
+  one frozen snapshot plus final live-generation/revision checks.
+- Keep live selections in bounded opaque host records tied to successful results
+  on the exact transcript branch. Restore requires trusted saved identity/epoch;
+  recreate executable definitions from the current catalog, never serialized
+  executors or a shared SessionID. Source deadlines cover catalog setup and VM.
+- Add resource/template list and read tools with explicit pagination cursors,
+  scope/permission checks at dispatch and publication, and aggregate output caps.
+  Preserve supported images into Codemode; validate image formats/pixels. Export
+  arbitrary binary only via an explicit host ArtifactSink with inert generated
+  names and scope/server/URI/MIME/hash descriptors. Paths and identities stay
+  host-only; private export errors retain safe text and their original Go causes.
+- Add examples/mcp-managed: real loopback HTTP SDK server, ordinary Agent runner,
+  explicit permissions and deterministic model fixture. The compiled executable
+  produces one bounded JSON summary: 50 open issues, titles 3/6/9, resource guide
+  and hiddenAbsent=true, with three remote tool calls and one resource read.
+- Fix the example's bounded shutdown by releasing its owned transport's idle
+  connections after Manager cleanup. Synchronized eight-workflow tests reproduce
+  the previous StateNew connection timeout and pass without larger timeouts.
+- Native Windows Go1.26.4 final root/examples full ordinary and full race suites,
+  vet, build and module verification pass, with GOWORK=off and both live flags off.
+  All 50 changed/new Go files pass normalized gofmt checks; diff checks pass.
+  Both separately compiled MCP examples execute successfully. The first two
+  committed trees independently pass root/example test compilation, vet and build.
+- Extend CI to native Windows amd64, Linux amd64/arm64, macOS amd64/arm64 MCP/race
+  contracts and both compiled examples; allow stacked MCP PR base branches. Remote
+  checks will report against pushed heads. Do not claim native Unix execution
+  from Windows cross-compilation or count local checks as remote CI results.
+- Update package/root documentation and the six-item acceptance table. No live
+  model-provider call, frontend UI acceptance, durable branch store, version bump,
+  tag, release or automatic PR merge. Review units are ordered by dependency.
