@@ -115,13 +115,14 @@ func (r *observedJSONBody) Read(p []byte) (int, error) {
 func (r *observedJSONBody) Close() error { return r.source.Close() }
 
 type observedSSEBody struct {
-	observer  *Observer
-	requestID string
-	source    io.ReadCloser
-	reader    *bufio.Reader
-	mu        sync.Mutex
-	buffer    []byte
-	err       error
+	observer         *Observer
+	requestID        string
+	source           io.ReadCloser
+	reader           *bufio.Reader
+	mu               sync.Mutex
+	buffer           []byte
+	err              error
+	responseReceived bool
 }
 
 func (r *observedSSEBody) Read(p []byte) (int, error) {
@@ -141,10 +142,11 @@ func (r *observedSSEBody) Read(p []byte) (int, error) {
 			event = append(event, line...)
 			if err != nil && !errors.Is(err, io.EOF) {
 				r.err = err
-				// SDK cancels/drains a POST stream after its response. Its body
-				// may then return context.Canceled while another call is active.
-				// Such carrier errors belong to that stream, never all calls.
-				if errors.Is(err, ErrWireLimit) {
+				// Preserve this POST's IO cause before the SDK replaces it with
+				// "request terminated without response". A completed response is
+				// followed by SDK cancellation/drain, which must not fail the RPC.
+				// Ordinary GET carrier errors remain SDK resumption decisions.
+				if !r.responseReceived && (r.requestID != "" || errors.Is(err, ErrWireLimit)) {
 					r.observer.failRequest(r.requestID, err)
 				}
 				return 0, err
@@ -173,6 +175,13 @@ func (r *observedSSEBody) Read(p []byte) (int, error) {
 						r.err = observeErr
 						r.observer.failRequest(r.requestID, observeErr)
 						return 0, observeErr
+					}
+					if !r.responseReceived && r.requestID != "" {
+						var message wireEnvelope
+						if json.Unmarshal(data, &message) == nil && message.Method == "" && (len(message.Result) > 0 || len(message.Error) > 0) {
+							id, idErr := rpcKey(message.ID)
+							r.responseReceived = idErr == nil && id == r.requestID
+						}
 					}
 				}
 				r.buffer, r.err = event, err
