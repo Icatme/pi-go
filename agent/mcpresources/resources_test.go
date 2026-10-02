@@ -459,3 +459,85 @@ func TestArtifactSinkErrorPreservesCancellationAndRedactsCause(t *testing.T) {
 		}
 	}
 }
+
+func TestInvalidatedSuccessfulResourceListRetainsCompletion(t *testing.T) {
+	server, _ := resourceServer(t, "demo://a", "text/plain", []*sdk.ResourceContents{{URI: "demo://a", Text: "a"}})
+	entered, release := make(chan struct{}), make(chan struct{})
+	var blocked, released atomic.Bool
+	server.AddReceivingMiddleware(func(next sdk.MethodHandler) sdk.MethodHandler {
+		return func(ctx context.Context, method string, request sdk.Request) (sdk.Result, error) {
+			result, err := next(ctx, method, request)
+			if method == "resources/list" && blocked.CompareAndSwap(false, true) {
+				close(entered)
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			return result, err
+		}
+	})
+	manager, _ := resourceFixture(t, server, managed.Codemode, false)
+	t.Cleanup(func() {
+		if released.CompareAndSwap(false, true) {
+			close(release)
+		}
+	})
+	connection, err := manager.Connect(t.Context(), "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := connection.Refresh(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := resourceDefinition(t, manager, Options{}, ListResourcesName)
+	type outcome struct {
+		result agent.ToolResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := invokeResource(t.Context(), definition, map[string]any{"server": "fixture"}, nil)
+		done <- outcome{result, err}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("list did not generate its successful page")
+	}
+	server.AddResource(&sdk.Resource{URI: "demo://b", Name: "b"}, func(context.Context, *sdk.ReadResourceRequest) (*sdk.ReadResourceResult, error) {
+		return &sdk.ReadResourceResult{Contents: []*sdk.ResourceContents{{URI: "demo://b", Text: "b"}}}, nil
+	})
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for connection.IsCurrent(catalog) {
+		select {
+		case <-ticker.C:
+		case <-timer.C:
+			t.Fatal("resource notification did not invalidate the catalog")
+		}
+	}
+	if released.CompareAndSwap(false, true) {
+		close(release)
+	}
+	var got outcome
+	select {
+	case got = <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("invalidated list did not finish")
+	}
+	var failure *agent.ToolExecutionError
+	if !errors.Is(got.err, managed.ErrWireInvalidated) || !errors.As(got.err, &failure) {
+		t.Fatalf("late successful list was not rejected: %v", got.err)
+	}
+	if failure.Code != agent.ToolFailureResultRejected || failure.Execution.Remote != agent.ToolRemoteCompleteReported || len(failure.Execution.Attempts) != 1 || failure.Execution.Attempts[0].Remote != agent.ToolRemoteCompleteReported {
+		t.Fatalf("trusted successful list lost terminal facts: failure=%+v err=%v", failure, got.err)
+	}
+	if len(got.result.Content) != 0 || len(got.result.StructuredContent) != 0 {
+		t.Fatalf("invalidated raw page escaped into output: %+v", got.result)
+	}
+}

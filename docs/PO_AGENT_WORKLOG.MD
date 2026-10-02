@@ -850,3 +850,41 @@
   intermittent cross-process credential-store CAS failure under investigation
   for the managed-connection review unit. No production path normalization or
   containment limit is weakened to make the directory assertion pass.
+
+## 2026-10-02: Review remediation for MCP PR16, PR17 and PR18
+
+- Apply valid source-header output caps before every post-parse pre-VM return.
+  Replace the unreleased child-resolver return with ChildToolResolution, carrying
+  one absolute deadline through catalog setup, permission rechecks, execution,
+  child calls and after hooks. Keep MCP/JavaScript outside the Agent core.
+- Bind Toolset exposure to the actual connection configuration, not an earlier
+  Manager enumeration. Check the captured catalog at entry and at the physical
+  HTTP/stdio handoff, including after waiting for approval and with no host hook.
+  Preserve typed rejection reasons while transport facts remain authoritative.
+- Serialize final credential CAS with epoch replacement; cancel old dispatch
+  before CAS, then retire actual SDK sessions outside the lock, including on
+  failed publication. Keep host callbacks/network login outside Manager locks.
+  Persist a refresh claim before its POST so ambiguity/cancellation survives
+  reconstruction and concurrent instances; successful refresh advances twice.
+- Persist the SDK-validated resource indicator and registered DCR auth style.
+  Preserve private authentication/storage causes under safe error text, including
+  nonzero published CAS versions followed by cleanup errors. Resource is required
+  in this unreleased credential structure: old development records require a
+  host CAS tombstone before explicit login, without an inferred migration.
+- Observe actual SDK-session/stdio-owner exit, reject old cached catalogs and
+  require explicit reconnect. Drain stderr independently of exec.Cmd.Wait so
+  inherited handles cannot conceal owner exit; retain exit/cleanup causes.
+  Record ordinary successful SDK list responses as completed even when the raw
+  snapshot is subsequently rejected by local invalidation.
+- Correct Unix ownership to the assigned process group. Trusted servers must
+  not escape it with setsid/setpgid/daemonization; those servers require host
+  containment. Windows retains Job Object ownership. Real Linux tests prove this
+  boundary and independently reclaim the deliberately detached fixture; they
+  do not claim the Unix launcher can contain escaped descendants.
+- Root and examples full ordinary/race suites, vet, build and module verification
+  pass on Windows Go1.26.4, with GOWORK=off and both live flags off. The newly
+  compiled managed example produces 50 open issues, titles 3/6/9, resource guide
+  and hiddenAbsent=true. Process regressions pass three focused Windows race
+  iterations; the complete MCP test binary also passes on native WSL2 Linux.
+  All changed/new Go files pass formatting checks. No dependency/WASM upgrade,
+  live-provider request, UI acceptance, release, tag or automatic merge.

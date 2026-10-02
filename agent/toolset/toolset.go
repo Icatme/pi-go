@@ -265,6 +265,10 @@ func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string
 		if err != nil {
 			return nil, nil, scope, err
 		}
+		// Policy and schemas must belong to the same connection generation. The
+		// manager's earlier enumeration may have changed while another server
+		// was connecting.
+		server = connection.Config()
 		catalog, err := connection.Refresh(ctx)
 		if err != nil || catalog.Scope != scope {
 			if err == nil {
@@ -288,6 +292,7 @@ func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string
 		snapshots[connection] = catalog
 		for _, definition := range definitions {
 			definition.Revision = fmt.Sprintf("%s/%d/%d", scopeRevision(scope), catalog.Generation, catalog.Revision)
+			definition = guardCatalog(definition, connection, catalog)
 			values = append(values, entry{binding: codemodetool.MCP(definition, server.Name), exposure: server.ToolExposure(definition.Name)})
 		}
 		namespaces = append(namespaces, codemode.Namespace{Name: server.Name, Description: catalog.Description, Instructions: catalog.Instructions})
@@ -304,6 +309,42 @@ func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string
 		return nil, nil, scope, managed.ErrStale
 	}
 	return values, namespaces, scope, nil
+}
+
+func guardCatalog(definition agent.ToolDefinition, connection *managed.Connection, catalog managed.Catalog) agent.ToolDefinition {
+	execute := definition.Execute
+	current := func() error {
+		if connection.IsCurrent(catalog) {
+			return nil
+		}
+		return &agent.ToolExecutionError{
+			Code: agent.ToolFailureSchemaChanged, Reason: "catalog_changed", Err: managed.ErrStale,
+			Message:   "MCP directory changed; resolve the current tools and approve again",
+			Execution: agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotDispatched},
+		}
+	}
+	definition.Execute = func(ctx context.Context, execution agent.ToolExecutionContext) (agent.ToolResult, error) {
+		if err := current(); err != nil {
+			return agent.ToolResult{}, err
+		}
+		permission := execution.CheckPermission
+		// mcptools passes this check through to the managed transport's actual
+		// handoff, including when the host supplied no permission callback.
+		execution.CheckPermission = func(ctx context.Context) error {
+			if err := current(); err != nil {
+				return err
+			}
+			if permission != nil {
+				if err := permission(ctx); err != nil {
+					return err
+				}
+			}
+			// Approval can wait while a notification invalidates the catalog.
+			return current()
+		}
+		return execute(ctx, execution)
+	}
+	return definition
 }
 
 func selectsServer(selected map[string]bool, server string) bool {

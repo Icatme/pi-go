@@ -9,7 +9,7 @@ with host-owned application UI, identity, permissions and network policy.
 | --- | --- | --- | --- |
 | 1 | Useful Codemode diagnostics and discovery reference | `codemode`, `agent/codemodetool` | Syntax/source locations, allowed-name suggestions, shared BM25, namespace/result descriptions, safe errors under the effective output/header budget |
 | 2 | Real raw data and SDK cache binding | `mcp.Observer`, catalog snapshots, `mcptools.FromCatalog` | JSON/SSE/stdio, shuffled requests, exact numeric lexemes, cache hits/TTL/notifications, late-response rejection, no typed/raw fallback |
-| 3 | Managed connections and lifecycle | `mcp.Manager`, HTTP/stdio, process ownership, dispatch checks | Shared setup attempt, explicit reconnect, identity retirement, actual process-tree exit, bounded repeatable Close, no tool replay |
+| 3 | Managed connections and lifecycle | `mcp.Manager`, HTTP/stdio, process ownership, dispatch checks | Shared setup attempt, explicit reconnect, identity retirement, session/owner-exit invalidation, Windows Job Object or Unix process-group cleanup, bounded repeatable Close, no tool replay |
 | 4 | Dynamic exposure and restoration | `agent/toolset`, generic `ResolveChildTools`, `NewDynamic` | Four exposure modes, lazy indirect setup, hidden discovery/guessed-name denial, search selections isolated by branch, trusted-scope resume with fresh executors |
 | 5 | Explicit OAuth and credential state | `mcp.OAuth`, Manager auth/logout, memory/file stores | Issuer/state/scope handling via SDK, account/client isolation, real version CAS, restored registration/scopes, single token refresh attempt, no auth-driven tool POST replay |
 | 6 | Resource list/templates/read | `agent/mcpresources`, host artifact sink | Pagination cursor, scope/permission/cancellation, bounded text/blob/images, image projection into Codemode, inert generated artifact names |
@@ -40,10 +40,14 @@ It makes no model-provider request and starts no OAuth UI.
   retain `IsError`; local rejection, ambiguous remote execution, terminal remote
   response and `input_required` remain distinct execution facts. Errors retain
   original Go causes and an explicitly safe model presentation.
-- Dynamic source/header deadlines include catalog setup and subsequent VM work.
+- Dynamic source/header deadlines include catalog setup, subsequent permission
+  checks and VM work.
   Successful scripts share only the existing invocation-local store. Nested
   suspension is rejected and never restarts a script with earlier side effects.
   Runtime stacks and executable closures are not serialized.
+- Unix stdio ownership ends at the assigned process group. Trusted servers must
+  not daemonize or use `setsid`/`setpgid` to escape it; those servers require
+  host-provided external containment. Windows owns the Job Object's process tree.
 - Restore requires trusted saved identity and authorization epoch. Live search
   records apply only to the exact transcript branch where they succeeded. A
   reconnect rebuilds executable definitions from the current catalog; hidden or
