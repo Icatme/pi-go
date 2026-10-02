@@ -402,6 +402,73 @@ func TestAfterHookPanicCompletesChildAndKeepsExecutionFacts(t *testing.T) {
 	}
 }
 
+func TestResultValidatorPanicReturnsDirectFailureWithExecutionFacts(t *testing.T) {
+	cause := errors.New("SECRET_VALIDATOR_PANIC")
+	for _, test := range []struct {
+		name  string
+		value any
+	}{
+		{"error", cause},
+		{"string", "SECRET_VALIDATOR_PANIC"},
+		{"nil", nil},
+	} {
+		for _, businessError := range []bool{false, true} {
+			name := test.name + map[bool]string{false: "/success", true: "/business_error"}[businessError]
+			t.Run(name, func(t *testing.T) {
+				var order []string
+				tool := ToolDefinition{Name: "write", Execute: func(context.Context, ToolExecutionContext) (ToolResult, error) {
+					order = append(order, "execute")
+					return ToolResult{Content: []Part{{Type: PartTypeText, Text: "SECRET_COMPLETED_OUTPUT"}},
+						StructuredContent: json.RawMessage(`{"secret":"value"}`), Details: "SECRET_DETAILS", IsError: businessError,
+						Execution: &ToolExecutionInfo{Remote: ToolRemoteCompleteReported,
+							Attempts: []ToolSendAttempt{{Number: 1, Remote: ToolRemoteCompleteReported}}}}, nil
+				}, ValidateResult: func(result ToolResult) error {
+					order = append(order, "validate")
+					if result.IsError != businessError || result.Content[0].Text != "SECRET_AFTER_OUTPUT" || result.Execution.Remote != ToolRemoteCompleteReported {
+						t.Errorf("validator did not receive effective result: %+v", result)
+					}
+					// A failed validator must not be able to rewrite completed facts.
+					result.Execution.Remote = ToolRemoteNotDispatched
+					result.Execution.Attempts[0].Number = 99
+					panic(test.value)
+				}}
+				var out ToolCallOutcome
+				var escaped any
+				func() {
+					defer func() { escaped = recover() }()
+					out = RunToolCall(t.Context(), ToolCall{ID: "direct", Name: tool.Name}, RunToolCallOptions{Tools: []ToolDefinition{tool},
+						AfterToolCall: func(context.Context, AfterToolCallContext) (AfterToolCallResult, error) {
+							order = append(order, "after")
+							return AfterToolCallResult{Result: &ToolResult{Content: []Part{{Type: PartTypeText, Text: "SECRET_AFTER_OUTPUT"}}}}, nil
+						}})
+				}()
+				if escaped != nil || strings.Join(order, ",") != "execute,after,validate" {
+					t.Fatalf("validator panic escaped lifecycle: escaped=%v order=%v", escaped != nil, order)
+				}
+				if out.Err == nil || !out.IsError || !out.Result.IsError || out.Failure == nil || out.Failure.Code != ToolFailureResultRejected || out.Failure.Reason != "result_validator_panic" {
+					t.Fatalf("validator panic did not become result rejection: %+v", out)
+				}
+				var typed *ToolExecutionError
+				if !errors.As(out.Err, &typed) || typed.Code != out.Failure.Code || typed.Reason != out.Failure.Reason {
+					t.Fatalf("validator panic error lost classification: %v", out.Err)
+				}
+				for _, execution := range []*ToolExecutionInfo{&out.Execution, out.Result.Execution, &typed.Execution} {
+					if execution == nil || execution.Local != ToolLocalReturned || execution.Remote != ToolRemoteCompleteReported || len(execution.Attempts) != 1 || execution.Attempts[0].Number != 1 || execution.Attempts[0].Remote != ToolRemoteCompleteReported {
+						t.Fatalf("validator panic changed completed execution facts: %+v", execution)
+					}
+				}
+				if test.name == "error" && !errors.Is(out.Err, cause) {
+					t.Fatal("original panic error missing from trusted error chain")
+				}
+				encoded, err := json.Marshal(out)
+				if err != nil || strings.Contains(string(encoded), "SECRET_") || strings.Contains(out.Err.Error(), "SECRET_") || len(out.Result.StructuredContent) != 0 || out.Result.Details != nil {
+					t.Fatalf("validator panic exposed rejected output: %s error=%v", encoded, err)
+				}
+			})
+		}
+	}
+}
+
 func TestToolArgumentsRejectUnicodeBeforeReplacement(t *testing.T) {
 	invalid := string([]byte{0xff})
 	for _, call := range []ToolCall{

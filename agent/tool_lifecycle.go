@@ -354,7 +354,7 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 		effective.IsError = outcome.isError
 		effective.Execution = cloneToolExecutionInfo(&outcome.execution)
 		effective.Failure = cloneToolFailure(outcome.failure)
-		if err := prepared.tool.ValidateResult(effective); err != nil {
+		if err := executeToolResultValidator(prepared.tool.ValidateResult, effective); err != nil {
 			setOutcomeFailure(&outcome, err, ToolFailureResultRejected, prepared.failureResultLimit())
 		}
 	}
@@ -423,6 +423,18 @@ func executeAfterToolHook(ctx context.Context, hook AfterToolCallHook, in AfterT
 		}
 	}()
 	return hook(ctx, in)
+}
+
+func executeToolResultValidator(validate func(ToolResult) error, result ToolResult) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			// Validation runs after execution. Reject the output without
+			// discarding completed side effects or skipping child finalization.
+			err = &ToolExecutionError{Code: ToolFailureResultRejected, Reason: "result_validator_panic",
+				Message: "tool result validator panicked", Err: &toolCallbackPanic{value: value}}
+		}
+	}()
+	return validate(result)
 }
 
 func effectiveResultCandidate(base, override ToolResult) ToolResult {
