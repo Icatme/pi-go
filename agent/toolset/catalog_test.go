@@ -287,6 +287,12 @@ func TestPolicyChangeDuringOtherNamespaceConnectHidesMetadata(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("resolve did not finish")
 	}
+	if !errors.Is(got.err, managed.ErrStale) || len(got.tools) != 0 {
+		t.Fatalf("changed configuration published an older directory: tools=%s err=%v", toolNames(got.tools), got.err)
+	}
+	// Explicitly resolve the new policy after rejection. The first resolution
+	// must not silently mix old resource declarations with new MCP tool policy.
+	got.tools, got.err = ts.Resolve(t.Context(), agent.AgentSnapshot{})
 	if got.err != nil {
 		t.Fatal(got.err)
 	}

@@ -66,8 +66,9 @@ type entry struct {
 }
 
 type directorySnapshot struct {
-	scope    managed.Scope
-	catalogs map[*managed.Connection]managed.Catalog
+	scope         managed.Scope
+	configuration managed.ConfigSnapshot
+	catalogs      map[*managed.Connection]managed.Catalog
 }
 
 func (snapshot directorySnapshot) check(manager *managed.Manager) error {
@@ -76,7 +77,7 @@ func (snapshot directorySnapshot) check(manager *managed.Manager) error {
 			return managed.ErrStale
 		}
 	}
-	if manager.Scope() != snapshot.scope {
+	if !manager.IsCurrentConfig(snapshot.configuration) {
 		return managed.ErrStale
 	}
 	return nil
@@ -250,9 +251,13 @@ func (t *Toolset) selected(snapshot agent.AgentSnapshot, scope managed.Scope) ma
 }
 
 func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string, selected map[string]bool) ([]entry, []codemode.Namespace, directorySnapshot, error) {
-	scope := t.manager.Scope()
+	configuration, err := t.manager.ConfigSnapshot()
+	if err != nil {
+		return nil, nil, directorySnapshot{}, err
+	}
+	scope := configuration.Scope()
 	values := make([]entry, 0, len(t.options.Native)+3)
-	frozen := directorySnapshot{scope: scope, catalogs: make(map[*managed.Connection]managed.Catalog)}
+	frozen := directorySnapshot{scope: scope, configuration: configuration, catalogs: make(map[*managed.Connection]managed.Catalog)}
 	namespaces := append([]codemode.Namespace(nil), t.options.Code.Namespaces...)
 	for _, binding := range t.options.Native {
 		if namespace == "" || binding.Namespace == namespace {
@@ -269,7 +274,7 @@ func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string
 			values = append(values, entry{binding: codemodetool.Native(resource, "mcp_resources"), exposure: managed.Direct})
 		}
 	}
-	for _, server := range t.manager.Servers() {
+	for _, server := range configuration.Servers() {
 		if server.Disabled || server.Exposure == managed.Hidden && len(server.ToolRules) == 0 || namespace != "" && namespace != server.Name {
 			continue
 		}

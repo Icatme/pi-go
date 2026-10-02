@@ -114,14 +114,21 @@ func Definitions(manager *managed.Manager, options Options) ([]agent.ToolDefinit
 	if err != nil {
 		return nil, err
 	}
-	scope := manager.Scope()
+	configuration, err := manager.ConfigSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	scope := configuration.Scope()
 	var servers []string
-	for _, server := range manager.Servers() {
+	for _, server := range configuration.Servers() {
 		if !server.Disabled && server.Exposure != managed.Hidden {
 			servers = append(servers, server.Name)
 		}
 	}
 	if len(servers) == 0 {
+		if !manager.IsCurrentConfig(configuration) {
+			return nil, managed.ErrStale
+		}
 		return []agent.ToolDefinition{}, nil
 	}
 	binding, _ := json.Marshal(scope)
@@ -206,12 +213,20 @@ func Definitions(manager *managed.Manager, options Options) ([]agent.ToolDefinit
 					if err := checkPermission(ctx, execution); err != nil {
 						return agent.ToolResult{}, failure(permissionCode(err), "permission", dispatchInfo(snapshot(), agent.ToolRemoteCompleteReported), err)
 					}
+					if err := checkConnection(manager, connection, scope, args.Server); err != nil {
+						return agent.ToolResult{}, failure(agent.ToolFailurePolicyDenied, "scope_or_exposure_changed", dispatchInfo(snapshot(), agent.ToolRemoteCompleteReported), err)
+					}
 					converted, err = convertRead(ctx, scope, args.Server, args.URI, response, o, func() error {
 						if err := checkConnection(manager, connection, scope, args.Server); err != nil {
 							return failure(agent.ToolFailurePolicyDenied, "scope_or_exposure_changed", dispatchInfo(snapshot(), agent.ToolRemoteCompleteReported), err)
 						}
 						if err := checkPermission(ctx, execution); err != nil {
 							return failure(permissionCode(err), "permission", dispatchInfo(snapshot(), agent.ToolRemoteCompleteReported), err)
+						}
+						// Approval may wait while the host retires this identity or
+						// policy. Validate again before handing bytes to the sink.
+						if err := checkConnection(manager, connection, scope, args.Server); err != nil {
+							return failure(agent.ToolFailurePolicyDenied, "scope_or_exposure_changed", dispatchInfo(snapshot(), agent.ToolRemoteCompleteReported), err)
 						}
 						return nil
 					})
@@ -235,9 +250,17 @@ func Definitions(manager *managed.Manager, options Options) ([]agent.ToolDefinit
 				if err := checkPermission(ctx, execution); err != nil {
 					return agent.ToolResult{Execution: &info}, failure(permissionCode(err), "permission", info, err)
 				}
+				// The last approval can suspend. Do not publish the old result
+				// after a completed scope or exposure change during that wait.
+				if err := checkConnection(manager, connection, scope, args.Server); err != nil {
+					return agent.ToolResult{Execution: &info}, failure(agent.ToolFailurePolicyDenied, "scope_or_exposure_changed", info, err)
+				}
 				return converted, nil
 			},
 		})
+	}
+	if !manager.IsCurrentConfig(configuration) {
+		return nil, managed.ErrStale
 	}
 	return definitions, nil
 }
@@ -284,11 +307,18 @@ func parseArguments(raw []byte, value any, name string, o Options) (arguments, e
 }
 
 func checkScope(manager *managed.Manager, scope managed.Scope, name string) error {
-	if manager.Scope() != scope {
+	configuration, err := manager.ConfigSnapshot()
+	if err != nil {
+		return err
+	}
+	if configuration.Scope() != scope {
 		return managed.ErrStale
 	}
-	for _, server := range manager.Servers() {
+	for _, server := range configuration.Servers() {
 		if server.Name == name && !server.Disabled && server.Exposure != managed.Hidden {
+			if !manager.IsCurrentConfig(configuration) {
+				return managed.ErrStale
+			}
 			return nil
 		}
 	}
@@ -314,9 +344,11 @@ func checkPermission(ctx context.Context, execution agent.ToolExecutionContext) 
 		return err
 	}
 	if execution.CheckPermission != nil {
-		return execution.CheckPermission(ctx)
+		if err := execution.CheckPermission(ctx); err != nil {
+			return err
+		}
 	}
-	return nil
+	return ctx.Err()
 }
 
 func convertResources(server, cursor string, response *sdk.ListResourcesResult, o Options) (agent.ToolResult, error) {
