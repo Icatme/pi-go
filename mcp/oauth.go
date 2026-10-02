@@ -96,6 +96,9 @@ type OAuth struct {
 	snapshot CredentialSnapshot
 	invalid  bool
 	closed   bool
+	// Set by a Connection before use. Retirement cancels refresh I/O, while
+	// valid cached tokens remain available for the SDK's session DELETE.
+	refreshLife context.Context
 	// Only the owning Connection installs this hook, before using the source.
 	// It fences terminal auth state while mu and gate still hide new tokens;
 	// it must not reenter OAuth, invoke host callbacks, or wait for Close.
@@ -413,6 +416,17 @@ func (o *OAuth) token(ctx context.Context) (*oauth2.Token, error) {
 		state := o.invalidate()
 		changed = &state
 		return nil, ErrAuthRequired
+	}
+	if o.refreshLife != nil {
+		refreshCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(o.refreshLife, cancel)
+		defer func() { stop(); cancel() }()
+		// AfterFunc runs asynchronously even for an already-canceled owner.
+		// Do not claim or send a refresh while that callback is still queued.
+		if err := o.refreshLife.Err(); err != nil {
+			return nil, err
+		}
+		ctx = refreshCtx
 	}
 	// Claim before any physical refresh POST. CAS makes independent OAuth
 	// objects and processes contend before sending, rather than discovering a
