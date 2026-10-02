@@ -795,3 +795,196 @@
   OAuth state/issuer/refresh, final permission revocation and identity switches
   pass regression checks. MCP race tests pass for three consecutive iterations;
   full combined root/example race, ordinary, vet and build checks also pass.
+
+## 2026-10-02: Dynamic MCP projection and bounded resources
+
+- Add agent/toolset over host-owned Manager/Sandbox. Direct tools load initially;
+  deferred/codemode tools connect lazily and load through bounded shared BM25
+  search. Model search excludes already-declared leaves. Hidden leaves are absent
+  from schemas/discovery and reject guessed invocation. Catalog publication uses
+  one frozen snapshot plus final live-generation/revision checks.
+- Keep live selections in bounded opaque host records tied to successful results
+  on the exact transcript branch. Restore requires trusted saved identity/epoch;
+  recreate executable definitions from the current catalog, never serialized
+  executors or a shared SessionID. Source deadlines cover catalog setup and VM.
+- Add resource/template list and read tools with explicit pagination cursors,
+  scope/permission checks at dispatch and publication, and aggregate output caps.
+  Preserve supported images into Codemode; validate image formats/pixels. Export
+  arbitrary binary only via an explicit host ArtifactSink with inert generated
+  names and scope/server/URI/MIME/hash descriptors. Paths and identities stay
+  host-only; private export errors retain safe text and their original Go causes.
+- Add examples/mcp-managed: real loopback HTTP SDK server, ordinary Agent runner,
+  explicit permissions and deterministic model fixture. The compiled executable
+  produces one bounded JSON summary: 50 open issues, titles 3/6/9, resource guide
+  and hiddenAbsent=true, with three remote tool calls and one resource read.
+- Fix the example's bounded shutdown by releasing its owned transport's idle
+  connections after Manager cleanup. Synchronized eight-workflow tests reproduce
+  the previous StateNew connection timeout and pass without larger timeouts.
+- Native Windows Go1.26.4 final root/examples full ordinary and full race suites,
+  vet, build and module verification pass, with GOWORK=off and both live flags off.
+  All 50 changed/new Go files pass normalized gofmt checks; diff checks pass.
+  Both separately compiled MCP examples execute successfully. The first two
+  committed trees independently pass root/example test compilation, vet and build.
+- Extend CI to native Windows amd64, Linux amd64/arm64, macOS amd64/arm64 MCP/race
+  contracts and both compiled examples; allow stacked MCP PR base branches. Remote
+  checks will report against pushed heads. Do not claim native Unix execution
+  from Windows cross-compilation or count local checks as remote CI results.
+- Update package/root documentation and the six-item acceptance table. No live
+  model-provider call, frontend UI acceptance, durable branch store, version bump,
+  tag, release or automatic PR merge. Review units are ordered by dependency.
+
+## 2026-10-02: Resource directory identity and filesystem error repairs
+
+- Initial PR18 CI on Windows/macOS exposes a test that compares directory strings
+  after the implementation resolves aliases. Reproduce it on Windows by supplying
+  an existing absolute directory with a trailing dot component. Compare actual
+  filesystem identity with os.SameFile instead; keep filename, byte/hash, scope
+  binding and private-path projection checks, including the resolved directory.
+- Preserve FileArtifactStore root/open/write/sync/close causes with Go wrapping,
+  include cleanup close/removal failures, and use io.ErrShortWrite explicitly.
+  Original filesystem errors stay host-visible while safe Agent failures retain
+  the completed remote read facts. Regressions prove os.ErrNotExist/os.ErrClosed
+  identity and public redaction; the old missing-root behavior fails the test.
+- Native Windows resource full race tests pass ten iterations; examples ordinary
+  tests, vet and build pass. The root ordinary rerun separately exposes an
+  intermittent cross-process credential-store CAS failure under investigation
+  for the managed-connection review unit. No production path normalization or
+  containment limit is weakened to make the directory assertion pass.
+
+## 2026-10-02: Review remediation for MCP PR16, PR17 and PR18
+
+- Apply valid source-header output caps before every post-parse pre-VM return.
+  Replace the unreleased child-resolver return with ChildToolResolution, carrying
+  one absolute deadline through catalog setup, permission rechecks, execution,
+  child calls and after hooks. Keep MCP/JavaScript outside the Agent core.
+- Bind Toolset exposure to the actual connection configuration, not an earlier
+  Manager enumeration. Check the captured catalog at entry and at the physical
+  HTTP/stdio handoff, including after waiting for approval and with no host hook.
+  Preserve typed rejection reasons while transport facts remain authoritative.
+- Serialize final credential CAS with epoch replacement; cancel old dispatch
+  before CAS, then retire actual SDK sessions outside the lock, including on
+  failed publication. Keep host callbacks/network login outside Manager locks.
+  Persist a refresh claim before its POST so ambiguity/cancellation survives
+  reconstruction and concurrent instances; successful refresh advances twice.
+- Persist the SDK-validated resource indicator and registered DCR auth style.
+  Preserve private authentication/storage causes under safe error text, including
+  nonzero published CAS versions followed by cleanup errors. Resource is required
+  in this unreleased credential structure: old development records require a
+  host CAS tombstone before explicit login, without an inferred migration.
+- Observe actual SDK-session/stdio-owner exit, reject old cached catalogs and
+  require explicit reconnect. Drain stderr independently of exec.Cmd.Wait so
+  inherited handles cannot conceal owner exit; retain exit/cleanup causes.
+  Record ordinary successful SDK list responses as completed even when the raw
+  snapshot is subsequently rejected by local invalidation.
+- Correct Unix ownership to the assigned process group. Trusted servers must
+  not escape it with setsid/setpgid/daemonization; those servers require host
+  containment. Windows retains Job Object ownership. Real Linux tests prove this
+  boundary and independently reclaim the deliberately detached fixture; they
+  do not claim the Unix launcher can contain escaped descendants.
+- Root and examples full ordinary/race suites, vet, build and module verification
+  pass on Windows Go1.26.4, with GOWORK=off and both live flags off. The newly
+  compiled managed example produces 50 open issues, titles 3/6/9, resource guide
+  and hiddenAbsent=true. Process regressions pass three focused Windows race
+  iterations; the complete MCP test binary also passes on native WSL2 Linux.
+  All changed/new Go files pass formatting checks. No dependency/WASM upgrade,
+  live-provider request, UI acceptance, release, tag or automatic merge.
+
+## 2026-10-02: Second review fixes for MCP PR16, PR17 and PR18
+
+- Bound dynamic pre-VM directory, invalid-catalog and final-permission failures
+  with the effective source/configured diagnostic budget. Preserve private Go
+  causes, failure classification and zero-dispatch facts, including resolver
+  panic and cancellation. Replace the unreleased SourceLimits tuple with
+  SourceLimits{Timeout, OutputBytes}; the generic child resolution contract adds
+  FailureTextLimitBytes without introducing MCP/JavaScript into the Agent core.
+- Fence terminal OAuth publication with synchronous connection stale/cancel
+  before any refreshed token is visible. Keep external callbacks reentrant and
+  lock-free, SDK Close asynchronous, and durable refresh claims unchanged.
+  Separate mixed registration configuration keys from the SDK-resolved client;
+  persist and restore actual CIMD fallback clients and authentication methods
+  without re-registering or changing identity when AS capabilities change.
+  Earlier mixed-strategy development keys require explicit login under the new
+  derived key; no guessed migration or compatibility wrapper is introduced.
+- Retain unsent RPC ID reservations through approval, and replace the maximum
+  retired-ID watermark with bounded exact numeric ranges. Delayed requests
+  remain valid, while actual replay and responses to unsent slots stay rejected.
+  Each MaxTombstones bound applies to recent IDs and compact ranges separately;
+  range/string exhaustion fails closed instead of losing replay protection.
+- Return real unsent stdio rejection errors while cancelling only the logical
+  SDK child context. Clear the unsent frame so later and concurrent calls on
+  the same session work; partial/physical write failures remain terminal, with
+  no fabricated send success, retry or automatic reconnect.
+- Revalidate search identity, connection generation and catalog after final
+  approval and before selection publication. Server/tool hiding and directory
+  notifications reject old metadata without consuming the selection budget;
+  fresh searches retain transcript-branch isolation.
+- Root-cause macOS reconnect EPERM in XNU's zombie-only group signal handling.
+  Inspect the exact process group only after EPERM; exclusively zombie/absent
+  members mean cleanup is complete, while live members and inspection failures
+  preserve the error. Add a native Darwin zombie-group regression and retain
+  the existing supported descendant and reconnect contracts.
+- Preserve the first physical stdio write cause before the SDK closes the
+  transport. Reader-side close errors retain that cause and do not cancel the
+  logical context, so fatal IO still retires the session instead of being
+  mistaken for an unsent denial. A controlled real-SDK close ordering reproduces
+  the lost-cause failure on both zero-byte and partial writes without scheduler
+  retries; original call and session errors must retain the physical cause.
+- Permanent regressions reproduce the reviewed OAuth defects on the old
+  implementation and pass on the repair. After the final IO-cause correction,
+  root/examples full ordinary/race suites, vet, build, module verification,
+  formatting and diff checks pass on Windows Go1.26.4. The new PR17 parent also
+  independently passes all-package ordinary tests, MCP race, vet and build.
+  Native WSL2 Linux passes the complete freshly compiled MCP binary, controlled
+  physical-write regressions 100 times, and all wire tests three times. Native
+  macOS ARM/Intel CI passed MCP race and process/reconnect regressions on the
+  first repaired PR17 head, confirming the Darwin cleanup fix; the final branches
+  use the existing five-platform CI matrix. Newly compiled local examples return
+  50 open issues, titles 3/6/9, the guide and hiddenAbsent=true. No dependency/WASM
+  upgrade, UI/live-provider acceptance, release, tag or merge is performed.
+  Keep all three existing PRs layered.
+
+## 2026-10-02: Final review repairs for MCP delivery
+
+- Return conservative host/RunOptions diagnostic bounds even when source options
+  are invalid, and carry them through dynamic child resolution before returning
+  the error. No directory or VM runs for rejected source. Regress malformed,
+  invalid and oversized source through both RunToolCall and the next model
+  request, including an eight-byte host ceiling and a one-token option.
+- Share only the pinned QuickJS compilation cache for the process lifetime;
+  serialize cold compilation, while runtime imports, memory limits, VM state,
+  cancellation and Close remain independent. The macOS Intel CI timeout occurred
+  after ten cumulative minutes in the codemodetool package, with its stack in
+  repeated WASM compilation. Do not raise timeouts or weaken assertions. A local
+  five-creation benchmark, including the initial cold compile, changes from
+  257 ms/op to 56 ms/op; warmed creation is about 9 ms/op. Runtime isolation,
+  active-script cancellation, concurrent creation and linear memory caps pass
+  repeated Windows race tests.
+- Preserve the OAuth authorization endpoint's fixed query parameters, including
+  encoded, empty and repeated values, while requiring an unambiguous SDK-owned
+  authorization-code/PKCE query. Reject fixed collisions and duplicated OAuth
+  parameters before the host callback or token exchange. Real SDK control cases
+  that failed on the old wrapper now pass; no dependency or public API change.
+- Retain a POST SSE body's original non-EOF IO error in its own RPC slot before
+  the SDK replaces it with a generic termination error. Track whether that
+  body's matching result/error has arrived, so normal post-response cancellation
+  and drain cannot overwrite a completed RPC. GET/EOF handling keeps the SDK's
+  existing stream semantics. Real SDK/server controls preserve the error chain,
+  one actual side effect, concurrent/next calls and completed-response results.
+- After every waiting resource approval, recheck the actual scope, connection
+  and exposure before publication or ArtifactSink handoff. Rejection withholds
+  old text/structured data but retains completed remote-read facts. Regress real
+  Agent reads/lists/templates, sink side effects, identity/exposure changes,
+  reconnect, ABA and cancellation.
+- Capture a Manager configuration snapshot that includes every server slot,
+  including cold servers. Revalidate it before publishing the tool directory so
+  hidden names cannot survive in resource schemas. Snapshot accessors detach
+  configuration; slot replacement detects exposure/rule changes and ABA. An
+  in-flight configuration change rejects the old directory; a fresh explicit
+  Resolve uses the new policy without replaying any script.
+- The completed repair tree passes root/examples full ordinary and race tests,
+  vet, build, module verification, changed-Go formatting and diff checks on
+  Windows Go1.26.4, with GOWORK=off and live flags off. Newly built local examples
+  report 50 open issues, titles 3/6/9, the resource guide and hiddenAbsent=true.
+  OAuth and wire targeted race regressions also pass three iterations. Keep the
+  existing five-platform CI matrix for native validation of the updated PRs.
+  No dependency/WASM upgrade, UI/live-provider check, release, tag or merge.

@@ -131,6 +131,9 @@ _ = final
 | [`agent`](agent) | Exported single-agent runtime and `prebuilt` helpers |
 | [`codemode`](codemode) | Bounded QuickJS WASM sandbox, discovery, and invocation-local JSON store |
 | [`agent/codemodetool`](agent/codemodetool) | Optional script tool with an explicit native/MCP leaf allowlist |
+| [`mcp`](mcp) | Managed HTTP/stdio connections, wire-bound catalogs and explicit OAuth |
+| [`agent/toolset`](agent/toolset) | Dynamic exposure, bounded discovery and trusted session restoration |
+| [`agent/mcpresources`](agent/mcpresources) | Bounded resource lists, text/images and explicit artifact export |
 | [`examples`](examples) | Runnable examples in a dependency-isolated nested module |
 | [`cmd/pigo`](cmd/pigo) | CLI entrypoint |
 | [`internal/cli`](internal/cli) | CLI-only login and credential-store logic |

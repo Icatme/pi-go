@@ -338,6 +338,12 @@ presentation unchanged. Original Go errors and execution facts remain intact.
 Host hook/permission errors in child paths use safe default presentation; an
 explicit `ToolExecutionError.Message` supplies a public explanation.
 
+[`agent/toolset`](toolset/README.md) provides managed MCP discovery without
+putting exposure, OAuth or JavaScript in the core package. Its `Resolve` method
+can be assigned to `AgentDefinition.ToolResolver`. Resume rebuilds current
+executors only after the trusted host supplies identity provenance; it never
+restores an executor from serialized history.
+
 ## Agents As Task Tools
 
 `prebuilt.NewAgentTool` exposes one named definition as a strict

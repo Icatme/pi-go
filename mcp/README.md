@@ -143,3 +143,8 @@ host-owned private directory. It uses a cross-process exclusive lock, real
 version CAS, synced temporary file and replacement. Token files contain secrets;
 the host supplies ACL/keychain policy and retention. A crash lock requires host
 verification and removal; the library does not guess that another writer is dead.
+
+For Agent integration use [`agent/toolset`](../agent/toolset/README.md); for
+bounded resources use [`agent/mcpresources`](../agent/mcpresources/README.md).
+The [`managed example`](../examples/mcp-managed/README.md) uses loopback fixtures
+and a deterministic model, with no provider API or interactive login.
