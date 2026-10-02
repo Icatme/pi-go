@@ -165,7 +165,13 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 		if definition.CheckToolPermission == nil {
 			return nil
 		}
-		return definition.CheckToolPermission(checkCtx, toolHookContext(ctx, assistant, prepared.call, cloneAny(prepared.args), prepared.context))
+		if err := definition.CheckToolPermission(checkCtx, toolHookContext(ctx, assistant, prepared.call, cloneAny(prepared.args), prepared.context)); err != nil {
+			return err
+		}
+		if err := checkCtx.Err(); err != nil {
+			return err
+		}
+		return ctx.Err()
 	}
 	if err := checkPermission(ctx); err != nil {
 		if prepared.child {
@@ -186,7 +192,12 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 			CheckPermission: checkPermission, Invocation: toolInvocationFromContext(ctx),
 		})
 		if err == nil {
-			prepared.tool.ChildTools = cloneTools(resolved)
+			if !resolved.Deadline.IsZero() {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithDeadline(ctx, resolved.Deadline)
+				defer cancel()
+			}
+			prepared.tool.ChildTools = cloneTools(resolved.Tools)
 			if prepared.tool.ChildTools == nil {
 				prepared.tool.ChildTools = []ToolDefinition{}
 			}
@@ -371,10 +382,10 @@ func safeChildError(err error, code ToolFailureCode, message string) error {
 	return &ToolExecutionError{Code: failureCode(err, code), Reason: reason, Message: message, Err: err}
 }
 
-func resolveToolChildren(ctx context.Context, resolver func(context.Context, ToolExecutionContext) ([]ToolDefinition, error), execution ToolExecutionContext) (tools []ToolDefinition, err error) {
+func resolveToolChildren(ctx context.Context, resolver func(context.Context, ToolExecutionContext) (ChildToolResolution, error), execution ToolExecutionContext) (resolution ChildToolResolution, err error) {
 	defer func() {
 		if value := recover(); value != nil {
-			tools = nil
+			resolution = ChildToolResolution{}
 			err = &ToolExecutionError{Code: ToolFailureHook, Reason: "child_resolver_panicked", Message: "child tool resolver panicked", Execution: ToolExecutionInfo{Local: ToolLocalNotStarted, Remote: ToolRemoteNotDispatched}, Err: &toolCallbackPanic{value: value}}
 		}
 	}()

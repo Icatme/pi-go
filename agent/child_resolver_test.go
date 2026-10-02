@@ -5,15 +5,16 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestChildResolverRunsAfterApprovalAndRechecksPermission(t *testing.T) {
 	for _, mode := range []string{"blocked", "permission_before", "permission_after", "allowed"} {
 		t.Run(mode, func(t *testing.T) {
 			resolved, entered, permissions := 0, 0, 0
-			parent := ToolDefinition{Name: "container", ResolveChildTools: func(context.Context, ToolExecutionContext) ([]ToolDefinition, error) {
+			parent := ToolDefinition{Name: "container", ResolveChildTools: func(context.Context, ToolExecutionContext) (ChildToolResolution, error) {
 				resolved++
-				return []ToolDefinition{{Name: "leaf", Execute: func(context.Context, ToolExecutionContext) (ToolResult, error) { entered++; return ToolResult{}, nil }}}, nil
+				return ChildToolResolution{Tools: []ToolDefinition{{Name: "leaf", Execute: func(context.Context, ToolExecutionContext) (ToolResult, error) { entered++; return ToolResult{}, nil }}}}, nil
 			}, Execute: func(ctx context.Context, in ToolExecutionContext) (ToolResult, error) {
 				child := in.ChildCaller.Call(ctx, ToolCall{Name: "leaf"})
 				return child.Result, child.Err
@@ -58,22 +59,24 @@ func TestChildResolverRejectsInvalidCatalogAndPanic(t *testing.T) {
 	for _, mode := range []string{"duplicate", "nested", "schema", "panic", "both"} {
 		t.Run(mode, func(t *testing.T) {
 			entered := false
-			tool := ToolDefinition{Name: "container", ResolveChildTools: func(context.Context, ToolExecutionContext) ([]ToolDefinition, error) {
+			tool := ToolDefinition{Name: "container", ResolveChildTools: func(context.Context, ToolExecutionContext) (ChildToolResolution, error) {
 				switch mode {
 				case "duplicate":
-					return []ToolDefinition{leaf, leaf}, nil
+					return ChildToolResolution{Tools: []ToolDefinition{leaf, leaf}}, nil
 				case "nested":
 					child := leaf
-					child.ResolveChildTools = func(context.Context, ToolExecutionContext) ([]ToolDefinition, error) { return nil, nil }
-					return []ToolDefinition{child}, nil
+					child.ResolveChildTools = func(context.Context, ToolExecutionContext) (ChildToolResolution, error) {
+						return ChildToolResolution{}, nil
+					}
+					return ChildToolResolution{Tools: []ToolDefinition{child}}, nil
 				case "schema":
 					child := leaf
 					child.Parameters = map[string]any{"type": 42}
-					return []ToolDefinition{child}, nil
+					return ChildToolResolution{Tools: []ToolDefinition{child}}, nil
 				case "panic":
 					panic(secret)
 				default:
-					return []ToolDefinition{leaf}, nil
+					return ChildToolResolution{Tools: []ToolDefinition{leaf}}, nil
 				}
 			}, Execute: func(context.Context, ToolExecutionContext) (ToolResult, error) {
 				entered = true
@@ -95,12 +98,12 @@ func TestChildResolverRejectsInvalidCatalogAndPanic(t *testing.T) {
 
 func TestChildResolverUsesFreshDetachedDefinitions(t *testing.T) {
 	resolved := 0
-	parent := ToolDefinition{Name: "container", ResolveChildTools: func(context.Context, ToolExecutionContext) ([]ToolDefinition, error) {
+	parent := ToolDefinition{Name: "container", ResolveChildTools: func(context.Context, ToolExecutionContext) (ChildToolResolution, error) {
 		resolved++
 		value := resolved
-		return []ToolDefinition{{Name: "leaf", Execute: func(context.Context, ToolExecutionContext) (ToolResult, error) {
+		return ChildToolResolution{Tools: []ToolDefinition{{Name: "leaf", Execute: func(context.Context, ToolExecutionContext) (ToolResult, error) {
 			return ToolResult{Content: []Part{{Type: PartTypeText, Text: strings.Repeat("x", value)}}}, nil
-		}}}, nil
+		}}}}, nil
 	}, Execute: func(ctx context.Context, in ToolExecutionContext) (ToolResult, error) {
 		out := in.ChildCaller.Call(ctx, ToolCall{Name: "leaf"})
 		return out.Result, out.Err
@@ -110,6 +113,90 @@ func TestChildResolverUsesFreshDetachedDefinitions(t *testing.T) {
 		if out.Err != nil || out.Result.Content[0].Text != strings.Repeat("x", i) || out.Result.ChildCalls == nil {
 			t.Fatal(out)
 		}
+	}
+}
+
+func TestChildResolverDeadlineBoundsRemainingLifecycle(t *testing.T) {
+	for _, mode := range []string{"resolved", "earlier_caller", "zero"} {
+		t.Run(mode, func(t *testing.T) {
+			callerDeadline := time.Now().Add(2 * time.Second)
+			ctx, cancel := context.WithDeadline(t.Context(), callerDeadline)
+			defer cancel()
+			resolvedDeadline := time.Now().Add(time.Second)
+			if mode == "earlier_caller" {
+				resolvedDeadline = callerDeadline.Add(time.Second)
+			} else if mode == "zero" {
+				resolvedDeadline = time.Time{}
+			}
+			expected := callerDeadline
+			if mode == "resolved" {
+				expected = resolvedDeadline
+			}
+			var phases []string
+			checkDeadline := func(ctx context.Context, phase string) {
+				deadline, ok := ctx.Deadline()
+				if !ok || !deadline.Equal(expected) {
+					t.Fatalf("%s deadline changed: got=%v want=%v", phase, deadline, expected)
+				}
+				phases = append(phases, phase)
+			}
+			leaf := ToolDefinition{Name: "leaf", Execute: func(ctx context.Context, in ToolExecutionContext) (ToolResult, error) {
+				checkDeadline(ctx, "child_execute")
+				if err := in.CheckPermission(ctx); err != nil {
+					return ToolResult{}, err
+				}
+				return ToolResult{}, nil
+			}}
+			parent := ToolDefinition{Name: "container", ResolveChildTools: func(context.Context, ToolExecutionContext) (ChildToolResolution, error) {
+				return ChildToolResolution{Tools: []ToolDefinition{leaf}, Deadline: resolvedDeadline}, nil
+			}, Execute: func(ctx context.Context, in ToolExecutionContext) (ToolResult, error) {
+				checkDeadline(ctx, "parent_execute")
+				// A child caller must inherit the parent limit even when its caller
+				// offers a fresh context without a deadline.
+				child := in.ChildCaller.Call(context.Background(), ToolCall{Name: "leaf"})
+				return child.Result, child.Err
+			}}
+			permissions := 0
+			out := RunToolCall(ctx, ToolCall{Name: parent.Name}, RunToolCallOptions{Tools: []ToolDefinition{parent},
+				CheckToolPermission: func(ctx context.Context, in BeforeToolCallContext) error {
+					permissions++
+					if permissions > 1 {
+						checkDeadline(ctx, "permission")
+					}
+					return nil
+				}, AfterToolCall: func(ctx context.Context, in AfterToolCallContext) (AfterToolCallResult, error) {
+					checkDeadline(ctx, "after_hook")
+					return AfterToolCallResult{}, nil
+				}})
+			if out.Err != nil || len(phases) != 7 {
+				t.Fatalf("remaining lifecycle not completed: phases=%v outcome=%+v", phases, out)
+			}
+		})
+	}
+}
+
+func TestChildResolverDeadlineRejectsLatePermissionSuccess(t *testing.T) {
+	deadline := time.Now().Add(100 * time.Millisecond)
+	entered, permissions := false, 0
+	tool := ToolDefinition{Name: "container", ResolveChildTools: func(context.Context, ToolExecutionContext) (ChildToolResolution, error) {
+		return ChildToolResolution{Deadline: deadline}, nil
+	}, Execute: func(context.Context, ToolExecutionContext) (ToolResult, error) {
+		entered = true
+		return ToolResult{}, nil
+	}}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	out := RunToolCall(ctx, ToolCall{Name: tool.Name}, RunToolCallOptions{Tools: []ToolDefinition{tool},
+		CheckToolPermission: func(ctx context.Context, _ BeforeToolCallContext) error {
+			permissions++
+			if permissions == 2 {
+				<-ctx.Done()
+				return nil
+			}
+			return nil
+		}})
+	if entered || permissions != 2 || !errors.Is(out.Err, context.DeadlineExceeded) || out.Failure.Code != ToolFailureDeadline || out.Execution.Local != ToolLocalNotStarted || out.Execution.Remote != ToolRemoteNotDispatched {
+		t.Fatalf("late permission success entered parent: permissions=%d entered=%v outcome=%+v", permissions, entered, out)
 	}
 }
 

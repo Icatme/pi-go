@@ -88,6 +88,39 @@ func TestDynamicSourceDeadlineIncludesCatalogSetup(t *testing.T) {
 	}
 }
 
+func TestDynamicSourceDeadlineIncludesPermissionRecheck(t *testing.T) {
+	var directoryDeadline, permissionDeadline time.Time
+	var permissions, calls int
+	tool, err := NewDynamic(newSandbox(t), func(ctx context.Context) ([]Binding, []codemode.Namespace, error) {
+		directoryDeadline, _ = ctx.Deadline()
+		leaf := agent.ToolDefinition{Name: "write", Execute: func(context.Context, agent.ToolExecutionContext) (agent.ToolResult, error) {
+			calls++
+			return agent.ToolResult{}, nil
+		}}
+		return []Binding{Native(leaf, "local")}, nil, nil
+	}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	started := time.Now()
+	out := agent.RunToolCall(ctx, agent.ToolCall{Name: tool.Name, ParsedArgs: map[string]any{
+		"code": "// @options: {\"timeout_ms\":250}\nawait tools.write({});",
+	}}, agent.RunToolCallOptions{Tools: []agent.ToolDefinition{tool}, CheckToolPermission: func(ctx context.Context, _ agent.BeforeToolCallContext) error {
+		permissions++
+		if permissions == 2 {
+			permissionDeadline, _ = ctx.Deadline()
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}})
+	if permissions != 2 || calls != 0 || directoryDeadline.IsZero() || !permissionDeadline.Equal(directoryDeadline) || !errors.Is(out.Err, context.DeadlineExceeded) || out.Failure.Code != agent.ToolFailureDeadline || out.Execution.Local != agent.ToolLocalNotStarted || out.Execution.Remote != agent.ToolRemoteNotDispatched || time.Since(started) > time.Second {
+		t.Fatalf("permission recheck escaped script deadline: directory=%v permission=%v elapsed=%v permissions=%d calls=%d outcome=%+v", directoryDeadline, permissionDeadline, time.Since(started), permissions, calls, out)
+	}
+}
+
 func TestDynamicInvalidSourceLimitsDoNotLoadCatalog(t *testing.T) {
 	called := false
 	tool, err := NewDynamic(newSandbox(t), func(context.Context) ([]Binding, []codemode.Namespace, error) { called = true; return nil, nil, nil }, Options{})

@@ -101,7 +101,9 @@ func TestNewRunnerRejectsDynamicToolResolver(t *testing.T) {
 func TestNewRunnerRejectsContainerTools(t *testing.T) {
 	for _, tool := range []agent.ToolDefinition{
 		{Name: "code", ChildTools: []agent.ToolDefinition{}},
-		{Name: "code", ResolveChildTools: func(context.Context, agent.ToolExecutionContext) ([]agent.ToolDefinition, error) { return nil, nil }},
+		{Name: "code", ResolveChildTools: func(context.Context, agent.ToolExecutionContext) (agent.ChildToolResolution, error) {
+			return agent.ChildToolResolution{}, nil
+		}},
 	} {
 		_, err := NewRunner(RunnerConfig{
 			Definition:        agent.AgentDefinition{Model: &scriptedModel{}, Tools: []agent.ToolDefinition{tool}},

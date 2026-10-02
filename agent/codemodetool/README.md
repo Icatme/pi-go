@@ -84,6 +84,12 @@ No binding-specific deadline is introduced. Script header options may only
 shorten an effective host limit. `Report.Sandbox.Outputs` is omitted because
 the bounded output is already retained in `ToolResult.Content`.
 
+`NewDynamic` captures a fresh host-authorized directory for each script. Its
+effective source/configured timeout starts before directory resolution; the same
+absolute deadline covers the subsequent permission recheck, VM, child tools and
+after hooks. An earlier caller deadline still wins. The Agent owns propagation
+through `ChildToolResolution.Deadline`, without knowing JavaScript or MCP.
+
 `ToolResult.ChildCalls` is the runtime-owned Go recovery ledger, attached after
 parent hooks. It survives a failing parent output hook even when all unprocessed
 content and `Details` are discarded. It is not serialized into default model

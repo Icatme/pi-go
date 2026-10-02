@@ -419,8 +419,18 @@ type ToolDefinition struct {
 	// execution, after admission and permission checks. The result is frozen for
 	// this parent call; children cannot use this resolver or declare children.
 	// It is mutually exclusive with ChildTools and cannot be restored by a
-	// checkpoint runner without a host resolver.
-	ResolveChildTools func(context.Context, ToolExecutionContext) ([]ToolDefinition, error) `json:"-"`
+	// checkpoint runner without a host resolver. Its absolute Deadline bounds
+	// the remaining permission, execution, child and after-hook lifecycle.
+	ResolveChildTools func(context.Context, ToolExecutionContext) (ChildToolResolution, error) `json:"-"`
+}
+
+// ChildToolResolution supplies a frozen child directory and an optional host
+// deadline. A zero Deadline inherits the caller context; a nonzero value can
+// only shorten its deadline. The resolver must use this same absolute deadline
+// for its own work when the limit also covers directory setup.
+type ChildToolResolution struct {
+	Tools    []ToolDefinition
+	Deadline time.Time
 }
 
 // BeforeToolCallContext is passed to a before-tool hook.

@@ -93,6 +93,8 @@ func (s *Sandbox) Run(ctx context.Context, code string, options RunOptions) (res
 	if err != nil {
 		return result, &ScriptError{Code: "options", Message: err.Error(), Diagnostic: boundedDiagnostic(err.Error()), Err: err}
 	}
+	result.OutputLimitBytes = min(s.config.MaxOutputBytes, tokens*4)
+	result.OutputReservedBytes = min(max(0, options.OutputReserveBytes), (result.OutputLimitBytes+3)/4)
 	tools, catalog, err := copyTools(options.Tools, s.config.MaxCatalogBytes)
 	if err != nil {
 		return result, &ScriptError{Code: "catalog", Message: err.Error(), Err: err}

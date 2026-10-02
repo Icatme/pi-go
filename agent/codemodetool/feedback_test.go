@@ -133,6 +133,21 @@ func TestModelDiagnosticReservesBytesAndItemWithinEffectiveLimits(t *testing.T) 
 	}
 }
 
+func TestModelPreVMFailureDiagnosticHonorsSourceOutputLimit(t *testing.T) {
+	sandbox := newSandbox(t)
+	tool, err := New(sandbox, nil, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sandbox.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	result := modelVisibleCodemodeCall(t, tool, "// @options: {\"max_output_tokens\":1}\ntext('must not run');")
+	if !result.IsError || len(result.Content) != 1 || len(result.Content[0].Text) > 1 {
+		t.Fatalf("closed sandbox diagnostic widened source cap: %+v", result)
+	}
+}
+
 func TestDefaultGuidanceAndOnDemandNamespaceMetadata(t *testing.T) {
 	leaf := agent.ToolDefinition{Name: "records", Description: "Read records", Parameters: map[string]any{"type": "object", "description": "PRIVATE_LEAF_SCHEMA"}, Execute: func(context.Context, agent.ToolExecutionContext) (agent.ToolResult, error) {
 		return agent.ToolResult{}, nil

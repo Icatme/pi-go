@@ -323,6 +323,17 @@ without adding JavaScript or MCP dependencies to the Agent core. Its JSON store
 is shared by successful scripts within one invocation and resets for every new
 Run/Continue/Resume or direct call. Durable checkpoint runners reject containers.
 
+`ToolDefinition.ResolveChildTools` is an optional host callback for lazy child
+catalogs. It runs after approval and the first permission check; its
+`ChildToolResolution.Tools` are copied and validated, then permission is checked
+again before the parent enters. The optional absolute `Deadline` applies to that
+recheck and the remaining parent, child and after-hook lifecycle; zero inherits
+the caller context, and an earlier caller deadline always wins. Static and
+resolved children are mutually exclusive, and a
+child cannot itself be a container. Panics retain their Go cause with safe text.
+Host hook/permission errors in child paths use safe default presentation; an
+explicit `ToolExecutionError.Message` supplies a public explanation.
+
 ## Agents As Task Tools
 
 `prebuilt.NewAgentTool` exposes one named definition as a strict
