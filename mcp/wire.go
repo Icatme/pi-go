@@ -15,6 +15,7 @@ import (
 
 	"github.com/Icatme/pi-go/internal/jsontext"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	wirejson "github.com/segmentio/encoding/json"
 )
 
 var (
@@ -581,7 +582,9 @@ func (o *Observer) observeFrame(frame []byte, outgoing bool) error {
 
 func (o *Observer) observeMessage(frame []byte, outgoing bool) error {
 	var message wireEnvelope
-	if err := json.Unmarshal(frame, &message); err != nil {
+	// Match the SDK's case-sensitive envelope decoding. Otherwise an unrelated
+	// field such as RESULT can replace the raw snapshot of the SDK's result.
+	if _, err := wirejson.Parse(frame, &message, wirejson.DontMatchCaseInsensitiveStructFields); err != nil {
 		return err
 	}
 	id, err := rpcKey(message.ID)

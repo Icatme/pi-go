@@ -577,16 +577,15 @@ func (c *Connection) ReadResource(ctx context.Context, p *sdk.ReadResourceParams
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.raw(result); err != nil {
+	raw, err := c.raw(result)
+	if err != nil {
 		return nil, &ResponseError{NeedsInput: result.NeedsInput(), Err: err}
 	}
-	out := *result
-	out.Contents = append([]*sdk.ResourceContents(nil), result.Contents...)
-	for i, v := range out.Contents {
-		if v != nil {
-			x := *v
-			out.Contents[i] = &x
-		}
+	// Re-decode the observed response with the SDK's decoder so all mutable
+	// content, metadata and input requests are detached from its cached result.
+	var out sdk.ReadResourceResult
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, &ResponseError{NeedsInput: result.NeedsInput(), Err: err}
 	}
 	if err := c.available(); err != nil {
 		return nil, err

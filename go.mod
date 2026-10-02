@@ -7,6 +7,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/openai/openai-go/v3 v3.35.0
+	github.com/segmentio/encoding v0.5.4
 	github.com/tetratelabs/wazero v1.12.0
 	golang.org/x/image v0.46.0
 	golang.org/x/oauth2 v0.35.0
@@ -15,7 +16,6 @@ require (
 
 require (
 	github.com/segmentio/asm v1.1.3 // indirect
-	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
