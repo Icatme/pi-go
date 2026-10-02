@@ -71,12 +71,12 @@ func NewDynamic(sandbox *codemode.Sandbox, resolver BindingResolver, options Opt
 			return agent.ChildToolResolution{}, errors.New("codemodetool: invalid code")
 		}
 		limits, err := sandbox.SourceLimits(code, codemode.RunOptions{Timeout: options.Timeout, MaxOutputTokens: options.MaxOutputTokens})
-		if err != nil {
-			return agent.ChildToolResolution{}, &agent.ToolExecutionError{Code: agent.ToolFailureArgumentInvalid, Reason: "options", Message: "Codemode source header or execution limit is invalid", Err: err, Execution: agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotDispatched}}
-		}
 		// Setup failures use the same reserved diagnostic budget as Sandbox.Run.
-		// Return it with errors as well as successful directory resolutions.
+		// Source validation errors retain host bounds without authorizing setup.
 		resolution.FailureTextLimitBytes = min(1024, (limits.OutputBytes+3)/4)
+		if err != nil {
+			return resolution, &agent.ToolExecutionError{Code: agent.ToolFailureArgumentInvalid, Reason: "options", Message: "Codemode source header or execution limit is invalid", Err: err, Execution: agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotDispatched}}
+		}
 		defer func() {
 			if value := recover(); value != nil {
 				err = &agent.ToolExecutionError{Code: agent.ToolFailureHook, Reason: "child_resolver_panicked", Message: "Codemode tool directory resolution panicked", Err: &dynamicResolverPanic{value: value}, Execution: agent.ToolExecutionInfo{Local: agent.ToolLocalNotStarted, Remote: agent.ToolRemoteNotDispatched}}

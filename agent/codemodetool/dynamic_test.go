@@ -230,3 +230,58 @@ func TestDynamicInvalidSourceLimitsDoNotLoadCatalog(t *testing.T) {
 		t.Fatal(out, called)
 	}
 }
+
+func TestDynamicInvalidSourceHonorsDiagnosticBudget(t *testing.T) {
+	config := codemode.DefaultConfig()
+	config.MaxOutputBytes, config.MaxCodeBytes = 8, 128
+	sandbox, err := codemode.NewSandbox(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := sandbox.Close(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	for _, test := range []struct {
+		name, source string
+		options      Options
+		want         int
+	}{
+		{"invalid_timeout", "// @options: {\"timeout_ms\":-1}\ntext(1);", Options{}, 2},
+		{"invalid_tokens", "// @options: {\"max_output_tokens\":0}\ntext(1);", Options{MaxOutputTokens: 1}, 1},
+		{"malformed_header", "// @options: {", Options{}, 2},
+		{"oversized_source", strings.Repeat("x", 129), Options{}, 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resolved := 0
+			tool, err := NewDynamic(sandbox, func(context.Context) ([]Binding, []codemode.Namespace, error) {
+				resolved++
+				return nil, nil, nil
+			}, test.options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := agent.RunToolCall(t.Context(), agent.ToolCall{Name: tool.Name, ParsedArgs: map[string]any{"code": test.source}}, agent.RunToolCallOptions{Tools: []agent.ToolDefinition{tool}})
+			if out.Err == nil || out.Failure.Code != agent.ToolFailureArgumentInvalid || out.Execution.Local != agent.ToolLocalNotStarted || out.Execution.Remote != agent.ToolRemoteNotDispatched {
+				t.Fatalf("invalid source changed classification or ran: %+v", out)
+			}
+			visible := modelVisibleCodemodeCall(t, tool, test.source)
+			if !visible.IsError || resolved != 0 {
+				t.Fatalf("invalid source loaded directory or lost failure: resolved=%d result=%+v", resolved, visible)
+			}
+			for _, parts := range [][]agent.Part{out.Result.Content, visible.Content} {
+				bytes := 0
+				for _, part := range parts {
+					bytes += len(part.Text)
+					if part.Type != agent.PartTypeText || !utf8.ValidString(part.Text) {
+						t.Fatalf("invalid diagnostic: %+v", part)
+					}
+				}
+				if bytes > test.want {
+					t.Fatalf("invalid-source diagnostic exceeded budget %d: %+v", test.want, parts)
+				}
+			}
+		})
+	}
+}

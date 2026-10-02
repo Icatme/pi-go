@@ -24,8 +24,14 @@ var prelude string
 
 // wazero v1.12.0 initializes a process-wide version cache from its compiler
 // engine constructor without synchronization (wazero/wazero#2532). Serialize
-// our runtime construction; module compilation and VM execution stay parallel.
+// runtime construction and compilation to also avoid duplicate cold compiles.
+// VM execution stays parallel, with separate runtime/instance state.
 var runtimeCreation sync.Mutex
+
+// Only the pinned QuickJS machine code is retained for the process lifetime.
+// Runtimes own their host imports, memory, cancellation and script state. A
+// runtime Close must not discard code still used by other/new sandboxes.
+var compilationCache = wazero.NewCompilationCache()
 
 type callKey struct {
 	run uint64
@@ -58,14 +64,21 @@ func NewSandbox(ctx context.Context, config Config) (*Sandbox, error) {
 		return nil, fmt.Errorf("embedded QuickJS digest mismatch")
 	}
 	var rt wazero.Runtime
+	var compiled wazero.CompiledModule
+	var err error
 	func() {
 		runtimeCreation.Lock()
 		defer runtimeCreation.Unlock()
-		rt = wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true).WithMemoryLimitPages(config.MemoryLimitPages))
+		if err = ctx.Err(); err != nil {
+			return
+		}
+		rt = wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCompilationCache(compilationCache).WithCloseOnContextDone(true).WithMemoryLimitPages(config.MemoryLimitPages))
+		compiled, err = rt.CompileModule(ctx, assets.WASM)
 	}()
-	compiled, err := rt.CompileModule(ctx, assets.WASM)
 	if err != nil {
-		_ = rt.Close(context.Background())
+		if rt != nil {
+			_ = rt.Close(context.Background())
+		}
 		return nil, err
 	}
 	if err := quickjs.RegisterImports(ctx, rt, compiled); err != nil {
@@ -82,11 +95,7 @@ func (s *Sandbox) notifyLocked() { close(s.changed); s.changed = make(chan struc
 // executions can outlive cancellation, and remain tracked by Sandbox.Close.
 func (s *Sandbox) Run(ctx context.Context, code string, options RunOptions) (result Result, err error) {
 	// Even a pre-VM failure returns bounded presentation caps to integrations.
-	tokens := s.config.MaxOutputTokens
-	if options.MaxOutputTokens > 0 {
-		tokens = min(tokens, options.MaxOutputTokens)
-	}
-	result.OutputLimitBytes = min(s.config.MaxOutputBytes, tokens*4)
+	result.OutputLimitBytes = s.outputLimitBytes(options)
 	result.OutputLimitItems = s.config.MaxOutputItems
 	result.OutputReservedBytes = min(max(0, options.OutputReserveBytes), (result.OutputLimitBytes+3)/4)
 	source, timeout, tokens, err := sourceOptions(code, s.config, options)
