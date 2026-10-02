@@ -758,6 +758,17 @@
 - Own explicit HTTP/stdio connection attempts, bounded cleanup and identity/policy
   retirement. Windows attaches a suspended hidden process to a kill-on-close Job;
   Unix uses process groups. Tests cover process-tree exit and repeated cleanup.
+- Repair Linux process-lifetime assertions after CI exposed inconsistent death
+  observations. The old probe could report alive when /proc disappeared after
+  kill(0), omitted X/x death states, and probed a bare PID again after termination.
+  Bind observations to the captured starttime, classify Z/X/x and ENOENT/ESRCH,
+  retain other observation failures and keep a confirmed termination permanent.
+  The original random CI failure did not recur in 500 native Linux iterations;
+  the exit/reap observation window is reproduced with an actual child process.
+  Repaired native Linux targeted race tests pass 100 iterations and full MCP race
+  passes three iterations; Windows targeted tests pass 20 iterations, targeted
+  race passes three, and full MCP race/vet pass. Darwin/Linux arm64 test packages
+  compile. Production cleanup and the three-second death deadline are unchanged.
 - Fix a reproduced Windows cross-process CAS failure: CREATE_NEW could return
   AccessDenied during lock-file deletion. Load already held the common lock;
   replace its file-handle lifecycle with an atomic directory lock. Keep bounded

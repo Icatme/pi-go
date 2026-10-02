@@ -8,8 +8,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -79,10 +81,11 @@ func TestManagerManagedStdio(t *testing.T) {
 		t.Fatalf("stdio result incorrect: %#v", result)
 	}
 	pid := c.process.cmd.Process.Pid
+	alive := captureFixtureProcess(t, pid)
 	if err := c.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if processPIDAlive(pid) {
+	if alive() {
 		t.Fatal("closed stdio parent still alive")
 	}
 }
@@ -107,7 +110,8 @@ func TestManagedProcessOwnsWholeTree(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("managed child did not start")
 	}
-	if !processPIDAlive(child) {
+	childAlive := captureFixtureProcess(t, child)
+	if !childAlive() {
 		t.Fatal("fixture child exited before tree test")
 	}
 	cancel()
@@ -120,11 +124,90 @@ func TestManagedProcessOwnsWholeTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(3 * time.Second)
-	for processPIDAlive(child) && time.Now().Before(deadline) {
+	alive := childAlive()
+	for alive && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
+		alive = childAlive()
 	}
-	if processPIDAlive(child) {
+	if alive {
 		t.Fatalf("managed descendant escaped cleanup: %d", child)
+	}
+}
+
+// Capture Linux's starttime before cancellation, so a recycled PID cannot be
+// mistaken for the original fixture. A confirmed termination is permanent.
+// Other platforms keep their native probe; none need Linux-specific syscalls.
+func captureFixtureProcess(t *testing.T, pid int) func() bool {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		return func() bool { return processPIDAlive(pid) }
+	}
+	initial, err := readLinuxFixtureProcess(pid)
+	if err != nil {
+		t.Fatalf("capture fixture process %d identity: %v", pid, err)
+	}
+	terminated := false
+	return func() bool {
+		t.Helper()
+		if terminated {
+			return false
+		}
+		current, readErr := readLinuxFixtureProcess(pid)
+		alive, err := linuxFixtureProcessAlive(initial, current, readErr)
+		if err != nil {
+			t.Fatalf("observe fixture process %d identity: %v", pid, err)
+		}
+		terminated = !alive
+		return alive
+	}
+}
+
+type linuxFixtureProcess struct {
+	state     byte
+	startTime uint64
+}
+
+func readLinuxFixtureProcess(pid int) (linuxFixtureProcess, error) {
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return linuxFixtureProcess{}, err
+	}
+	return parseLinuxFixtureProcess(raw)
+}
+
+func parseLinuxFixtureProcess(raw []byte) (linuxFixtureProcess, error) {
+	// comm (field 2) can contain spaces and parentheses. Fields after its final
+	// ')' start with state (field 3); starttime is field 22, index 19 here.
+	at := strings.LastIndexByte(string(raw), ')')
+	if at < 0 {
+		return linuxFixtureProcess{}, errors.New("invalid /proc process stat: missing comm")
+	}
+	fields := strings.Fields(string(raw[at+1:]))
+	if len(fields) < 20 || len(fields[0]) != 1 {
+		return linuxFixtureProcess{}, errors.New("invalid /proc process stat: missing state or starttime")
+	}
+	startTime, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil {
+		return linuxFixtureProcess{}, fmt.Errorf("invalid /proc process starttime: %w", err)
+	}
+	return linuxFixtureProcess{state: fields[0][0], startTime: startTime}, nil
+}
+
+func linuxFixtureProcessAlive(initial, current linuxFixtureProcess, readErr error) (bool, error) {
+	if errors.Is(readErr, os.ErrNotExist) || errors.Is(readErr, syscall.ESRCH) {
+		return false, nil // The task was reaped after a previous observation.
+	}
+	if readErr != nil {
+		return false, readErr // Permission/I/O/format errors cannot prove death.
+	}
+	if initial.startTime != current.startTime {
+		return false, nil // This PID now identifies a different process.
+	}
+	switch current.state {
+	case 'Z', 'X', 'x':
+		return false, nil
+	default:
+		return true, nil
 	}
 }
 
