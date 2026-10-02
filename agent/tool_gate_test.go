@@ -34,7 +34,7 @@ func TestToolGateSuspendsWholeParallelBatchWithoutSideEffects(t *testing.T) {
 				"properties": map[string]any{"value": map[string]any{"type": "string"}},
 				"required":   []any{"value"},
 			},
-			Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 				executed.Add(1)
 				return ToolResult{}, nil
 			},
@@ -136,7 +136,8 @@ func TestToolGateUsesFinalIsolatedArgsBeforeExecutionStart(t *testing.T) {
 				"properties": map[string]any{"value": map[string]any{"type": "string"}},
 				"required":   []any{"value"},
 			},
-			Execute: func(_ context.Context, _ string, args any, _ ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+				args := execution.Args
 				appendSequence("execute")
 				executed = args.(map[string]any)["value"]
 				return ToolResult{}, nil
@@ -197,7 +198,7 @@ func TestToolGateBlockBecomesErrorToolResult(t *testing.T) {
 			}
 			return newStaticAssistantStream(Message{Role: RoleAssistant, Parts: []Part{{Type: PartTypeText, Text: "done"}}, StopReason: StopReasonStop, Timestamp: time.Now().UTC()}, nil), nil
 		}},
-		Tools: []ToolDefinition{{Name: "danger", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "danger", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			executed.Store(true)
 			return ToolResult{}, nil
 		}}},
@@ -256,7 +257,7 @@ func TestToolGateInvalidDecisionFailsClosed(t *testing.T) {
 						Timestamp:  time.Now().UTC(),
 					}, nil), nil
 				}},
-				Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+				Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 					executed.Add(1)
 					return ToolResult{}, nil
 				}}},
@@ -335,7 +336,7 @@ func TestToolGateSiblingSuspensionDiscardsPreflightFailures(t *testing.T) {
 							"properties": map[string]any{"value": map[string]any{"type": "string"}},
 							"required":   []any{"value"},
 						},
-						Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+						Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 							executed.Add(1)
 							return ToolResult{}, nil
 						},
@@ -484,7 +485,7 @@ func TestNormalRunRejectsPendingToolStateWithoutExecution(t *testing.T) {
 			modelCalls.Add(1)
 			return nil, errors.New("model must not run")
 		}},
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			executed.Add(1)
 			return ToolResult{}, nil
 		}}},
@@ -616,7 +617,7 @@ func TestResumePendingToolCallsRetriesPreExecutionFailureAndEndsOldTurnOnce(t *t
 		executed     atomic.Int32
 	)
 	definition := AgentDefinition{
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			executed.Add(1)
 			return ToolResult{}, nil
 		}}},
@@ -679,7 +680,7 @@ func TestToolGateCancellationAfterSiblingSuspensionTakesPrecedence(t *testing.T)
 				Timestamp:  time.Now().UTC(),
 			}, nil), nil
 		}},
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			executed.Add(1)
 			return ToolResult{}, nil
 		}}},
@@ -722,7 +723,7 @@ func TestResumePendingToolCallsRejectsSuspendedAssistantArgumentTamper(t *testin
 				Timestamp:  time.Now().UTC(),
 			}, nil), nil
 		}},
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			executed.Add(1)
 			return ToolResult{}, nil
 		}}},
@@ -778,7 +779,7 @@ func TestResumePendingToolCallsAcceptsCanonicalRawArgumentsAfterJSONRoundTrip(t 
 				"properties": map[string]any{"value": map[string]any{"type": "number"}},
 				"required":   []any{"value"},
 			},
-			Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 				executed.Add(1)
 				return ToolResult{}, nil
 			},
@@ -848,7 +849,8 @@ func TestResumePendingToolCallsPreservesParsedArgumentNumbersAfterJSONRoundTrip(
 			}
 			return newStaticAssistantStream(Message{Role: RoleAssistant, StopReason: StopReasonStop, Timestamp: time.Now().UTC()}, nil), nil
 		}},
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ string, args any, _ ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+			args := execution.Args
 			parsed := args.(map[string]any)
 			if fmt.Sprint(parsed["large"]) != "9007199254740993" || fmt.Sprint(parsed["exponent"]) != "1e3" {
 				return ToolResult{}, fmt.Errorf("numeric precision changed: %#v", parsed)
@@ -915,7 +917,7 @@ func TestPendingToolBindingDistinguishesRawPresenceForCustomParser(t *testing.T)
 				}
 				return map[string]any{"source": "explicit"}, nil
 			},
-			Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 				t.Fatal("tampered raw presence must not execute")
 				return ToolResult{}, nil
 			},
@@ -978,7 +980,7 @@ func TestPendingToolBindingNormalizesZeroLengthRawArgumentsAcrossJSONRoundTrip(t
 				}
 				return map[string]any{"normalized": true}, nil
 			},
-			Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 				executed.Add(1)
 				return ToolResult{}, nil
 			},
@@ -1049,7 +1051,8 @@ func TestPendingToolBindingCanonicalizesTypedParsedArgsAcrossJSONRoundTrip(t *te
 		}},
 		Tools: []ToolDefinition{{
 			Name: "echo",
-			Execute: func(_ context.Context, _ string, args any, _ ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+				args := execution.Args
 				parsed := args.(map[string]any)
 				for _, key := range []string{"typed", "raw"} {
 					nested, ok := parsed[key].(map[string]any)
@@ -1123,7 +1126,7 @@ func TestToolGateRejectsNonDurableParsedArgsBeforeGateOrExecution(t *testing.T) 
 						Timestamp:  time.Now().UTC(),
 					}, nil), nil
 				}},
-				Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+				Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 					executed.Add(1)
 					return ToolResult{}, nil
 				}}},
@@ -1181,7 +1184,7 @@ func TestResumePendingToolCallsStopsBeforePrepareWithResumeMessageWindow(t *test
 			t.Fatal("FinishTurn should prevent another model call")
 			return nil, nil
 		}),
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			return ToolResult{Content: []Part{{Type: PartTypeText, Text: "ok"}}}, nil
 		}}},
 		PrepareNextTurn: func(_ context.Context, input PrepareNextTurnContext) (*AgentLoopTurnUpdate, error) {
@@ -1257,7 +1260,7 @@ func TestRunnerResumeReSuspendsThenExecutesCurrentResolvedToolsWithoutDuplicateA
 		ToolResolver: func(context.Context, AgentSnapshot) ([]ToolDefinition, error) {
 			version := toolResolutions.Add(1)
 			makeTool := func(name string) ToolDefinition {
-				return ToolDefinition{Name: name, Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+				return ToolDefinition{Name: name, Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 					executedMu.Lock()
 					executed = append(executed, fmt.Sprintf("%s@%d", name, version))
 					executedMu.Unlock()
@@ -1379,7 +1382,7 @@ func TestResumePendingToolCallsPreservesMaxTurnBudgetAcrossAttempts(t *testing.T
 				Timestamp:  time.Now().UTC(),
 			}, nil), nil
 		}},
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			return ToolResult{}, nil
 		}}},
 	}

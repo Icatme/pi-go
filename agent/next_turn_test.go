@@ -262,7 +262,7 @@ func TestNextTurnPreparationKeepsDequeuedInputs(t *testing.T) {
 							}
 							return newStaticAssistantStream(Message{Role: RoleAssistant, StopReason: StopReasonStop}, nil), nil
 						}),
-						Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+						Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 							enqueue()
 							return ToolResult{}, nil
 						}}},

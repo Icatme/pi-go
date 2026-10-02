@@ -3,15 +3,17 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/Icatme/pi-go/internal/jsontext"
 	"github.com/Icatme/pi-go/pkg/pigo"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
-func newToolArgumentValidator(tool ToolDefinition) (func(any) (any, error), error) {
+func newToolArgumentValidator(tool ToolDefinition, argumentLimit int) (func(any) (any, error), error) {
 	var resolved *jsonschema.Resolved
 	if len(tool.Parameters) > 0 {
 		encoded, err := json.Marshal(tool.Parameters)
@@ -30,6 +32,12 @@ func newToolArgumentValidator(tool ToolDefinition) (func(any) (any, error), erro
 	}
 
 	return func(args any) (any, error) {
+		if err := checkArgumentBudget(args, argumentLimit); err != nil {
+			return nil, err
+		}
+		if err := checkArgumentStrings(args); err != nil {
+			return nil, err
+		}
 		validated := cloneAny(args)
 		if resolved != nil {
 			if object, ok := validated.(map[string]any); ok && tool.ParseArguments == nil {
@@ -42,9 +50,15 @@ func newToolArgumentValidator(tool ToolDefinition) (func(any) (any, error), erro
 				}
 				validated = coerced
 			}
+			if err := checkArgumentBudget(validated, argumentLimit); err != nil {
+				return nil, err
+			}
+			if err := checkArgumentStrings(validated); err != nil {
+				return nil, err
+			}
 			instance := validated
 			if tool.ParseArguments != nil {
-				projected, err := projectJSONInstance(validated)
+				projected, err := projectJSONInstance(validated, argumentLimit)
 				if err != nil {
 					return nil, fmt.Errorf("agent: project arguments for tool %q: %w", tool.Name, err)
 				}
@@ -60,19 +74,66 @@ func newToolArgumentValidator(tool ToolDefinition) (func(any) (any, error), erro
 
 func validateToolDefinitions(tools []ToolDefinition) error {
 	for _, tool := range tools {
+		if err := validateChildTools(tool); err != nil {
+			return err
+		}
 		if _, err := json.Marshal(tool.OutputSchema); err != nil {
 			return fmt.Errorf("agent: marshal output schema for tool %q: %w", tool.Name, err)
 		}
-		if _, err := newToolArgumentValidator(tool); err != nil {
+		if _, err := newToolArgumentValidator(tool, 0); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func projectJSONInstance(value any) (any, error) {
+func validateToolOutput(tool ToolDefinition, result ToolResult) error {
+	if len(tool.OutputSchema) == 0 {
+		return nil
+	}
+	if len(result.StructuredContent) == 0 {
+		return fmt.Errorf("tool %q returned no structured content for its output schema", tool.Name)
+	}
+	encoded, err := json.Marshal(tool.OutputSchema)
+	if err != nil {
+		return err
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(encoded, &schema); err != nil {
+		return err
+	}
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(result.StructuredContent))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	value, err = normalizeJSONNumbers(value)
+	if err != nil {
+		return err
+	}
+	if err := resolved.Validate(value); err != nil {
+		return fmt.Errorf("tool %q output does not match schema: %w", tool.Name, err)
+	}
+	return nil
+}
+
+func projectJSONInstance(value any, argumentLimit int) (any, error) {
+	if err := checkArgumentBudget(value, argumentLimit); err != nil {
+		return nil, err
+	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
+		return nil, err
+	}
+	if argumentLimit > 0 && len(encoded) > argumentLimit {
+		return nil, argumentBudgetFailure(nil)
+	}
+	if err := checkRawArgumentUnicode(encoded); err != nil {
 		return nil, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
@@ -82,6 +143,30 @@ func projectJSONInstance(value any) (any, error) {
 		return nil, err
 	}
 	return normalizeJSONNumbers(instance)
+}
+
+func argumentTextFailure(err error) *ToolExecutionError {
+	reason := "arguments"
+	if errors.Is(err, jsontext.ErrInvalidUnicode) {
+		reason = "invalid_unicode"
+	}
+	return &ToolExecutionError{Code: ToolFailureArgumentInvalid, Reason: reason, Message: err.Error(), Err: err,
+		Execution: ToolExecutionInfo{Local: ToolLocalNotStarted, Remote: ToolRemoteNotDispatched}}
+}
+
+func checkArgumentStrings(value any) error {
+	if err := jsontext.ValidateStrings(value); err != nil {
+		return argumentTextFailure(err)
+	}
+	return nil
+}
+
+func checkRawArgumentUnicode(raw []byte) error {
+	if err := jsontext.ValidateUnicode(raw); err != nil && !errors.Is(err, jsontext.ErrInvalidJSON) {
+		return argumentTextFailure(err)
+	}
+	// Keep grammar diagnostics with the caller's existing JSON decoder.
+	return nil
 }
 
 func normalizeJSONNumbers(value any) (any, error) {

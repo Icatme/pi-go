@@ -87,7 +87,7 @@ func TestEngineDoesNotExecuteToolCallsFromLengthTruncatedMessage(t *testing.T) {
 		}},
 		Tools: []ToolDefinition{{
 			Name: "write",
-			Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 				executeCalls.Add(1)
 				return ToolResult{}, nil
 			},
@@ -145,7 +145,7 @@ func TestEngineDoesNotExecuteToolCallsFromFailedAssistantMessages(t *testing.T) 
 				}},
 				Tools: []ToolDefinition{{
 					Name: "side_effect",
-					Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+					Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 						executed = true
 						return ToolResult{}, nil
 					},
@@ -212,7 +212,7 @@ func TestEngineValidatesToolArgumentsAndHookMutations(t *testing.T) {
 						"required":             []any{"value"},
 						"additionalProperties": false,
 					},
-					Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+					Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 						executed = true
 						return ToolResult{}, nil
 					},
@@ -259,7 +259,8 @@ func TestEngineSchemaCoercionIsTheExecutedValue(t *testing.T) {
 				"properties": map[string]any{"value": map[string]any{"type": "integer"}},
 				"required":   []any{"value"},
 			},
-			Execute: func(_ context.Context, _ string, args any, _ ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+				args := execution.Args
 				executed = args.(map[string]any)["value"]
 				return ToolResult{}, nil
 			},
@@ -304,7 +305,7 @@ func TestEngineSchemaValidationKeepsCustomIntegerPrecision(t *testing.T) {
 			ParseArguments: func(ToolCall) (any, error) {
 				return map[string]any{"value": actual}, nil
 			},
-			Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 				executed = true
 				return ToolResult{}, nil
 			},
@@ -350,7 +351,7 @@ func TestEngineSchemaValidationKeepsRawIntegerPrecision(t *testing.T) {
 				"type":       "object",
 				"properties": map[string]any{"value": map[string]any{"type": "integer", "maximum": maximum}},
 			},
-			Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 				executed = true
 				return ToolResult{}, nil
 			},
@@ -394,7 +395,8 @@ func TestEngineRawIntegerConversionIsBounded(t *testing.T) {
 				"type":       "object",
 				"properties": map[string]any{"value": map[string]any{"type": "integer"}},
 			},
-			Execute: func(_ context.Context, _ string, args any, _ ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+				args := execution.Args
 				executed = args.(map[string]any)["value"]
 				return ToolResult{}, nil
 			},
@@ -469,7 +471,8 @@ func TestEngineCustomArgumentParserRunsOnceWithBeforeHook(t *testing.T) {
 				parseCalls++
 				return &customArgs{Value: "parsed"}, nil
 			},
-			Execute: func(_ context.Context, _ string, args any, _ ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+				args := execution.Args
 				executed = args.(*customArgs).Value == "canonical"
 				return ToolResult{}, nil
 			},
@@ -540,7 +543,7 @@ func TestEngineToolResultDetailsAreIsolatedAcrossHooksEventsAndTranscript(t *tes
 			}
 			return newStaticAssistantStream(Message{Role: RoleAssistant, StopReason: StopReasonStop, Timestamp: time.Now().UTC()}, nil), nil
 		}},
-		Tools: []ToolDefinition{{Name: "details", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "details", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			return ToolResult{Details: &resultDetails{Labels: map[string]string{"source": "tool"}}}, nil
 		}}},
 		AfterToolCall: func(_ context.Context, input AfterToolCallContext) (AfterToolCallResult, error) {
@@ -615,7 +618,8 @@ func TestEngineIgnoresToolUpdatesAfterExecutionSettles(t *testing.T) {
 		}},
 		Tools: []ToolDefinition{{
 			Name: "echo",
-			Execute: func(_ context.Context, _ string, _ any, update ToolUpdateFunc) (ToolResult, error) {
+			Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+				update := execution.OnUpdate
 				lateUpdate = update
 				update(ToolResult{Content: []Part{{Type: PartTypeText, Text: "accepted"}}})
 				return ToolResult{}, nil
@@ -653,7 +657,7 @@ func TestEngineAbortStopsLaterToolPreflight(t *testing.T) {
 				Timestamp:  time.Now().UTC(),
 			}, nil), nil
 		}},
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			return ToolResult{}, nil
 		}}},
 		BeforeToolCall: func(_ context.Context, input BeforeToolCallContext) (BeforeToolCallResult, error) {
@@ -694,7 +698,7 @@ func TestEngineParallelAbortAfterSecondPreflightStartsNoToolBodies(t *testing.T)
 				Timestamp:  time.Now().UTC(),
 			}, nil), nil
 		}},
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			executed.Add(1)
 			return ToolResult{}, nil
 		}}},
@@ -738,7 +742,8 @@ func TestEngineSequentialAbortDuringExecutionStopsLaterPreflight(t *testing.T) {
 				Timestamp:  time.Now().UTC(),
 			}, nil), nil
 		}},
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, id string, _ any, _ ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+			id := execution.ToolCall.ID
 			if id == "first" {
 				cancel()
 			}
@@ -775,7 +780,7 @@ func TestEngineSequentialCancellationCannotBeHiddenByTerminate(t *testing.T) {
 			}, nil), nil
 		}},
 		ToolExecution: ToolExecutionSequential,
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			cancel()
 			return ToolResult{Terminate: true}, nil
 		}}},
@@ -808,7 +813,7 @@ func TestAgentPostTurnCancellationKeepsBalancedLifecycleAndInvocationWindow(t *t
 				Timestamp:  time.Now().UTC(),
 			}, nil), nil
 		}},
-		Tools: []ToolDefinition{{Name: "cancel", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "cancel", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			cancel()
 			return ToolResult{}, nil
 		}}},
@@ -1012,7 +1017,7 @@ func TestEnginePerToolSequentialModeForcesWholeBatchSequential(t *testing.T) {
 	tool := ToolDefinition{
 		Name:          "echo",
 		ExecutionMode: ToolExecutionSequential,
-		Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			current := active.Add(1)
 			for {
 				seen := maxActive.Load()
@@ -1159,7 +1164,7 @@ func TestEngineAfterHookContentOverridePreservesTerminate(t *testing.T) {
 				Timestamp:  time.Now().UTC(),
 			}, nil), nil
 		}},
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			return ToolResult{Content: []Part{{Type: PartTypeText, Text: "original"}}, Terminate: true}, nil
 		}}},
 		AfterToolCall: func(context.Context, AfterToolCallContext) (AfterToolCallResult, error) {
@@ -1237,7 +1242,8 @@ func TestEngineToolHookErrorsRemainPerCallAndPreserveSiblings(t *testing.T) {
 					return newStaticAssistantStream(Message{Role: RoleAssistant, StopReason: StopReasonStop, Timestamp: time.Now().UTC()}, nil), nil
 				}},
 				ToolExecution: ToolExecutionSequential,
-				Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, id string, _ any, _ ToolUpdateFunc) (ToolResult, error) {
+				Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+					id := execution.ToolCall.ID
 					bodies = append(bodies, id)
 					return ToolResult{}, nil
 				}}},
@@ -1499,7 +1505,7 @@ func TestEngineContinueContextPruningPreservesHistoryAndNewMessageWindow(t *test
 }
 
 func terminatingTool(terminate bool) ToolExecutorFunc {
-	return func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+	return func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 		return ToolResult{Terminate: terminate}, nil
 	}
 }
@@ -1588,14 +1594,14 @@ func TestEngineTurnContextToolsOverrideToolResolver(t *testing.T) {
 	)
 	toolA := ToolDefinition{
 		Name: "tool_a",
-		Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			aExecuted = true
 			return ToolResult{}, nil
 		},
 	}
 	toolB := ToolDefinition{
 		Name: "tool_b",
-		Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			bExecuted = true
 			return ToolResult{}, nil
 		},
@@ -1671,7 +1677,8 @@ func TestEngineProgressGateSerializesSettlement(t *testing.T) {
 			}
 			return newStaticAssistantStream(Message{Role: RoleAssistant, StopReason: StopReasonStop, Timestamp: time.Now().UTC()}, nil), nil
 		}},
-		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, _ string, _ any, update ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "echo", Execute: func(_ context.Context, execution ToolExecutionContext) (ToolResult, error) {
+			update := execution.OnUpdate
 			go update(ToolResult{})
 			<-entered
 			return ToolResult{}, nil

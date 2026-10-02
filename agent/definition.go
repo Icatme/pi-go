@@ -21,6 +21,8 @@ type AgentDefinition struct {
 	ConvertToLLM          ConvertToLLM            `json:"-"`
 	BeforeToolCall        BeforeToolCallHook      `json:"-"`
 	AfterToolCall         AfterToolCallHook       `json:"-"`
+	CheckToolPermission   ToolPermissionHook      `json:"-"`
+	PolicyRevision        string                  `json:"policy_revision,omitempty"`
 	PrepareNextTurn       PrepareNextTurnHook     `json:"-"`
 	PrepareRequest        PrepareRequestHook      `json:"-"`
 	OnProviderStreamEvent ProviderStreamEventHook `json:"-"`

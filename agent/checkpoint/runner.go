@@ -43,6 +43,11 @@ func NewRunner(config RunnerConfig) (*Runner, error) {
 	if config.Definition.ToolResolver != nil {
 		return nil, fmt.Errorf("checkpoint runner requires a static tool set; ToolResolver is not supported")
 	}
+	for _, tool := range config.Definition.Tools {
+		if tool.ChildTools != nil {
+			return nil, fmt.Errorf("checkpoint runner does not support container tools or child caller closures")
+		}
+	}
 	if config.Definition.PrepareNextTurn != nil {
 		return nil, fmt.Errorf("checkpoint runner does not support PrepareNextTurn because runtime overrides are not durable")
 	}

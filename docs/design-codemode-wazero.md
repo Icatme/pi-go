@@ -6,7 +6,7 @@
 
 状态：Accepted，已综合两份审核意见并获准分阶段实施；各阶段仍须测试与验收
 
-讨论：本次 pi-go MCP 与 Codemode 设计讨论。本文是实现提案，未表示运行时代码已经完成。
+讨论：本次 pi-go MCP 与 Codemode 设计讨论。首轮实现覆盖 M1/M2/M3a 的最小闭环；完整目标按下文阶段继续验收。
 
 ## Abstract 摘要
 
@@ -18,9 +18,9 @@ Codemode 行为参考 Pi v1.0.0 的源码与测试；MCP 协议采用官方 Go S
 
 ## Background 背景
 
-当前实现基线为 `master@4398f85`（v0.12.0），已在 2026-10-02 按依赖顺序合并 PR13、PR14，具备模型协议、单 Agent 循环、工具校验和 hook、ToolGate、会话日志、checkpoint 及可选 MCP 工具适配层。尚未具备 MCP 连接管理、JS 执行环境和工具暴露注册层。
+设计原始基线为 `master@4398f85`（v0.12.0），已在 2026-10-02 按依赖顺序合并 PR13、PR14，具备模型协议、单 Agent 循环、工具校验和 hook、ToolGate、会话日志、checkpoint 及可选 MCP 工具适配层。首轮实现从已提交设计的 `e4de3c8` 开始；MCP 连接管理与动态工具暴露注册层仍属后续阶段。
 
-现有 `agent.RunToolCall` 复用参数处理与 before/after hook，但缺少 gate、父调用事件及共享调度；Go 执行错误会在 `executePreparedTool` 中变成文字和 IsError，原始错误及返回的部分结果丢失。它使用临时 Engine 和 Snapshot，不能直接充当 Codemode 子调用入口。实现时先统一执行合同，保留机器可判断的错误、执行事实和 hook 后结果，随后才进行必要的核心 API 修改。
+原基线的 `agent.RunToolCall` 复用参数处理与 before/after hook，但缺少 gate、父调用事件及共享调度；Go 执行错误会在 `executePreparedTool` 中变成文字和 IsError，原始错误及返回的部分结果丢失。它使用临时 Engine 和 Snapshot，不能直接充当 Codemode 子调用入口。首轮实现统一这一合同，保留机器可判断的错误、执行事实和 hook 后结果，并一次性迁移 executor 公共签名。
 
 [PR14](https://github.com/Icatme/pi-go/pull/14) 已在 2026-10-02 合并，最终 head 为 `49910c79cf6266d0a29e31a26dfde39bb1536a64`，merge commit 为 `4398f8565ab82c460ddafc5fcfc20a35ef1187db`；先行依赖 PR13 已保留提交历史合并。其 `agent/mcptools.Discover` 提供显式 Names 白名单、参数和成功结果校验、schema 漂移拒绝、精度拒绝及执行后的 `ResultError`；不拥有连接、认证或授权。合并核查补齐了 examples 子模块的 x/sys 版本及校验和同步，根模块和 examples 全量测试、vet、构建、模块校验及 provider/Agent/MCP race 测试通过，Linux PR CI 通过。首个闭环以这个已合并适配层为代码基础，不复制另一套适配器；后文执行合同和 Codemode 运行时仍待实施与验收。
 
@@ -64,7 +64,7 @@ Codemode 行为参考 Pi v1.0.0 的源码与测试；MCP 协议采用官方 Go S
 
 来源：[Pi 1.0](https://github.com/earendil-works/pi/releases/tag/v1.0.0)、[MCP SDK 1.8](https://github.com/modelcontextprotocol/go-sdk/releases/tag/v1.8.0)、[wazero 1.12](https://github.com/wazero/wazero/releases/tag/v1.12.0)、[quickjs-wasi 源码](https://github.com/vercel-labs/quickjs-wasi/tree/5a7a0eeda87c99542f8cf3095b6d61ecfa755977)、[npm 元数据](https://registry.npmjs.org/quickjs-wasi/3.6.2)。最近提交日期通过 GitHub API 核查，后续实施前再次核查。
 
-建议包布局如下。路径是待实现的模块归属，不代表这些包当前已经存在。
+包布局如下。首轮实现独立沙箱、内部 ABI/资产和 Agent 绑定；后续包仅在对应阶段增加。
 
 ```text
 pkg/pigo/                         模型元数据、认证、provider 协议及流式输出
@@ -464,7 +464,7 @@ MCP 协议变化由官方 SDK 维护，应用负责身份、策略、输入等�
 
 新增能力由应用显式选择。普通 `pkg/pigo` 模型调用不启用 MCP、注入 Codemode 或自动连接。M3a 按确定的 PR14 适配提交接入；不通过复制包或未发布依赖的本地 replace 绕过分支整合。
 
-工具 executor 的执行上下文调整属于 agent 公共 API 破坏性变更。实施时一次性更新根模块、prebuilt 和 examples 中的全部调用者，迁移说明记录新入口及嵌套执行规则，不留 deprecated executor 或兼容 adapter。是否发布新 minor 版本由独立发布任务决定，本设计不授权 bump、commit、push 或 release。
+工具 executor 的执行上下文调整属于 agent 公共 API 破坏性变更。首轮一次性更新根模块、prebuilt 和 examples 中的全部调用者，迁移说明记录新入口及嵌套执行规则，不留 deprecated executor 或兼容 adapter。用户已授权提交并推送实现；是否发布新 minor 版本由独立发布任务决定，本轮不 bump、打 tag 或 release。
 
 模型消息及 hooks 原有语义继续保留；新增父调用和机器记录不生成额外模型回合。普通静态工具/checkpoint 保留回归测试。首版明确限制两层调用树、nested Suspend、交互 MRTR 及 Run 外 store；这些是功能边界，不通过静默降级或脚本重放“兼容”完整 Pi。
 
@@ -484,7 +484,7 @@ MCP 协议变化由官方 SDK 维护，应用负责身份、策略、输入等�
 | 可选后续交付 | examples 与文档 | 对外 MCP 任务服务、资源能力、更多原生工具和更深调用树，按明确需求推进 |
 | 后续优化 | pkg/pigo 与可选模型扩展 | 真实 custom grammar 协议、分类和图片模型，按独立需求推进 |
 
-先固定 M0 合同；M1 可独立于 MCP 连接扩展完成，M2 的公共 API 只在合同确定后迁移。M3a 同时依赖 M1、M2 和已确定的 PR14 基础，不以暂时绕过 Agent 生命周期的原型当作闭环。M3b 通过是扩展 raw/动态目录合同的门槛，不能在无证据时宣称无损。M4/M5 分 PR 验收。若实施采用并行工作，按独立 session 明确文件归属及整合责任，公共 agent API 由一处整合；本轮没有启动其他 session 或 agent。
+先固定 M0 合同；M1 可独立于 MCP 连接扩展完成，M2 的公共 API 只在合同确定后迁移。M3a 同时依赖 M1、M2 和已确定的 PR14 基础，不以暂时绕过 Agent 生命周期的原型当作闭环。M3b 通过是扩展 raw/动态目录合同的门槛，不能在无证据时宣称无损。M4/M5 分 PR 验收。首轮在独立 worktree 按文件归属拆分沙箱、核心执行链和绑定，核心公共 API 由一处整合；主工作区保留已推送的设计基线。
 
 M0 给出下列永久测试的输入、调用计数和执行事实断言；测试随对应实现 PR 落地。未实现用例不是已经通过的测试。
 
@@ -525,4 +525,18 @@ M0 给出下列永久测试的输入、调用计数和执行事实断言；测�
 
 栈探针最初把异常名称误写为 InternalError，断言失败；固定产物实际为 RangeError，按实测修正断言后两个设置均通过。该差异不影响“必须是 guest 可捕获异常且 VM 可继续”的合同；记录它以免实施时照搬错误异常名字。
 
-实施时将原型转成仓库内可重复测试，完成上述数据及生命周期合同。当前仍未验证 SSE/stdio/raw 并发与缓存、nested Suspend、宿主取消记账、存储 CAS 或真实模型闭环；不能把本轮文档修订或原型当作这些验收已通过。
+首轮将原型转成仓库内可重复测试，覆盖 nested Suspend、宿主取消记账及 invocation-local Store CAS；具体实现边界见下节。SSE/stdio/raw 并发与 SDK 缓存、持久化分支 CAS 及真实模型仍属于未完成验收，不能把原型或本地 mock 闭环当作这些验收已通过。
+
+### 首轮实现边界
+
+- `codemode` 使用固定 QuickJS WASM 和 wazero v1.12.0，无运行时下载、Node 或 CGO。脚本只有明确的工具和发现/输出/store API；新 VM 按脚本隔离。栈上限显式设置，堆、线性内存、代码、参数、结果、在途桥接数据、输出与详情分别有界。
+- 初值采用比建议表更小的宿主预算：64 MiB heap、128 MiB linear memory、512 KiB native stack、每共享 Sandbox 4 VM/16 实际宿主调用、1024 次调用、64 KiB 参数、1 MiB 结果、16 MiB 在途桥接数据、32 KiB 最终输出。绑定默认 2000 估算输出 token；字节预算是更严格的物理约束，不代表真实模型 token 计费。
+- `ToolExecutorFunc` 改为 `(context.Context, ToolExecutionContext) (ToolResult, error)`。模型、直接调用和孩子复用同一生命周期；参数 hook 后复核，显式结果投影验证在 after hook 后、事件和台账前。普通 OutputSchema 仍为元数据，批准的孩子验证成功 structured 输出。
+- 原始 Go 错误保留且可 `errors.Is/As`；local/remote 事实与失败码独立。宿主拥有的 Go-only `ToolResult.ChildCalls` 保留全部基础记录，即使父 hook 失败清除原内容/Details，也不会抹去已完成副作用；不会把 Go error 序列化到模型。
+- `agent/codemodetool` 仅绑定调用方批准的静态叶子白名单，模型只声明一个 code 工具；MCP 业务错误 resolve envelope，基础设施错误 reject。非白名单无法发现或调用；不等同于 M4 的动态 hidden/exposure 管理。
+- MCP 适配层在 schema 复核后、紧邻 SDK CallTool 再检查当前权限；参数/结果在 JS 边界主动拒绝不安全 Number。SDK typed 缓存并不是 raw 数据，首轮不声称无损 wire JSON 或一次 SDK 调用只有一次物理 POST。M3b/M4 继续承担 raw/cache/身份绑定及 transport 重发防护。
+- Store 仅跨同一 Agent invocation 的成功脚本共享，按一致 revision 快照和原子 CAS 提交；异常/取消不提交、冲突不重跑。新 Run/Continue/Resume 或直接调用重新隔离，不持久化到 session。单值字符限额与宿主 UTF-8 字节限额分别检查。
+- CPU/microtask 终止关闭 VM；未退出的宿主工具保留实际配额，独立有界 Close 返回未退出清单。nested Suspend 被明确拒绝；现有静态 checkpoint 回归保留，容器不进入 durable checkpoint。
+- 本地示例使用 SDK in-memory 会话和确定性模型，150 条长正文数据在 VM 内筛选，只输出数量与 3 个标题。默认不设置额外脚本期限；示例显式配置 5 分钟，服务可以通过 caller context/host options 缩短期限。
+
+根模块和 examples 的普通/race/vet/构建、真实 Windows 沙箱和五目标平台 CI 的结果统一写入 `docs/PO_AGENT_WORKLOG.MD`。后续仍分 PR 实施 M3b raw 门槛、M4 连接与动态目录、M5 分支持久化；本轮不宣称完整 Pi 行为对等或 UI/真实 provider 验收。

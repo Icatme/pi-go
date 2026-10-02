@@ -104,7 +104,7 @@ func TestPiAgentMessageDuplication(t *testing.T) {
 					},
 					"required": []string{"expression"},
 				},
-				Execute: func(_ context.Context, _ string, _ any, _ core.ToolUpdateFunc) (core.ToolResult, error) {
+				Execute: func(_ context.Context, _ core.ToolExecutionContext) (core.ToolResult, error) {
 					return core.ToolResult{
 						Content: []core.Part{{Type: core.PartTypeText, Text: "Result: 42"}},
 					}, nil

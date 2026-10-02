@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -27,7 +28,7 @@ func TestRunnerInterruptsBeforeToolSideEffectsAndReturnsDurableClone(t *testing.
 			Model: model,
 			Tools: []agent.ToolDefinition{{
 				Name: "write",
-				Execute: func(context.Context, string, any, agent.ToolUpdateFunc) (agent.ToolResult, error) {
+				Execute: func(_ context.Context, _ agent.ToolExecutionContext) (agent.ToolResult, error) {
 					executions.Add(1)
 					return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: "written"}}}, nil
 				},
@@ -94,6 +95,16 @@ func TestNewRunnerRejectsDynamicToolResolver(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected dynamic ToolResolver to be rejected")
+	}
+}
+
+func TestNewRunnerRejectsContainerTools(t *testing.T) {
+	_, err := NewRunner(RunnerConfig{
+		Definition:        agent.AgentDefinition{Model: &scriptedModel{}, Tools: []agent.ToolDefinition{{Name: "code", ChildTools: []agent.ToolDefinition{}}}},
+		DefinitionVersion: "v1", Store: NewMemoryStore(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "container") {
+		t.Fatalf("expected non-durable container rejection, got %v", err)
 	}
 }
 
@@ -547,7 +558,8 @@ func TestRunnerArgumentDriftReinterruptsWholeBatch(t *testing.T) {
 					"properties": map[string]any{"value": map[string]any{"type": "string"}},
 					"required":   []any{"value"},
 				},
-				Execute: func(_ context.Context, _ string, args any, _ agent.ToolUpdateFunc) (agent.ToolResult, error) {
+				Execute: func(_ context.Context, execution agent.ToolExecutionContext) (agent.ToolResult, error) {
+					args := execution.Args
 					executions.Add(1)
 					return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: args.(map[string]any)["value"].(string)}}}, nil
 				},
@@ -1003,7 +1015,7 @@ func requireApproval(context.Context, ToolApprovalRequest) (ApprovalRequirement,
 }
 
 func countingTool(counter *atomic.Int64) agent.ToolExecutorFunc {
-	return func(context.Context, string, any, agent.ToolUpdateFunc) (agent.ToolResult, error) {
+	return func(_ context.Context, _ agent.ToolExecutionContext) (agent.ToolResult, error) {
 		counter.Add(1)
 		return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: "ok"}}}, nil
 	}

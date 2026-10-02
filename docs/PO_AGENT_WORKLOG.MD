@@ -611,3 +611,112 @@
   master to 4398f85 after verifying the pending worklog and design bytes remain
   unchanged. Update the design's implementation baseline without committing the
   pending design work; no version bump, tag or release.
+
+## 2026-10-02: Implement the first MCP Codemode delivery
+
+- Commit and push the accepted design/worklog to master at e4de3c8, after
+  verifying PR13 and PR14 are merged. Implement M1/M2/M3a in an isolated managed
+  worktree on codex/mcp-codemode-minimal, with explicit sandbox/core/binding
+  ownership and parent integration. No version bump, tag or release.
+- Add standalone codemode with wazero v1.12.0 and embedded quickjs-wasi 3.6.2
+  (637405 bytes, SHA256 d4c9375f2b1ca4dc95f72c8aa2982a7a9951ac8011490d79c6582df732b4bbd9).
+  Retain the exact source ABI, MIT notices and digest-preserving attributes;
+  verify current maintenance, Go1.25 compatibility and native Windows execution.
+- Bound heap/linear memory/native stack, code/catalog/arguments/results,
+  admission/completion bytes, output and diagnostic retention. Provide Promise
+  orchestration, BM25 discovery, source options and invocation-local Store with
+  atomic revision CAS/success-only commits. No hidden default timeout; the local
+  service example explicitly sets five minutes. UTF-16 value caps and physical
+  UTF-8 store caps are checked separately.
+- Replace ToolExecutorFunc positional arguments with ToolExecutionContext in
+  core, prebuilt, existing MCP tools and examples. Unify model/direct/child
+  lifecycle; retain typed failures, original Go chains, partial results and
+  independent local/remote execution facts. Check current permission after
+  scheduling and in mcptools immediately before CallTool.
+- Add explicit two-level ChildCaller capabilities, FIFO for sequential policy,
+  actual-exit permits, complete 1024-call basic records and bounded after-hook
+  child events. Reject nested Suspend without pending state or script replay;
+  static checkpoints reject containers. Go-only host-owned ChildCalls survives
+  parent hook failure independently of discarded raw Content/Details.
+- Add agent/codemodetool and examples/mcp-codemode using caller-owned official
+  SDK sessions, fixed explicit native/MCP leaf allowlists and only one model
+  code declaration. Validate effective post-hook projections before events and
+  records. Unsafe JS numbers reject before dispatch or after response with
+  appropriate facts/reason codes; tool-declared MCP failures resolve envelopes.
+- With GOWORK=off and both live-test flags disabled, native Windows Go1.26.4
+  root/examples ordinary tests, full race suites, vet, build and module verify
+  pass. Formatting for all 47 changed/new Go files passes with normalized line
+  endings. The compiled local example returns 50 open issues and titles 3/6/9
+  from 150 long-body records in four host calls.
+- Regression coverage includes catchable 64/512-KiB stack limits, heap/linear
+  limits, CPU/microtask deadlines, unsafe JSON, failed Store commits/CAS conflicts,
+  schema drift, queued permission revocation, nested Suspend after a write,
+  hook redaction/original error chains, all basic records beyond detail limits,
+  actual host exit after VM cancellation, and bounded Close outstanding lists.
+- Add CI execution/race and compiled-example matrix for Windows amd64, Linux
+  amd64/arm64 and macOS amd64/arm64; execution results are reported by PR checks.
+  Keep raw/cache/identity binding (M3b), managed connections/dynamic hidden
+  exposure/transport replay guards (M4), and durable branch CAS (M5) separate.
+  No raw-wire precision, arbitrary-session at-most-once, live provider or UI claim.
+
+## 2026-10-02: Fix PR15 execution and JSON boundary findings
+
+- Repair the eight review findings on codex/mcp-codemode-minimal: strict Unicode,
+  executor panic cleanup, private error correlation, preserved remote facts,
+  final argument budgets, failure partial-result budgets, child summary budgets
+  and WebP configuration/pixel validation. Add regression cases that reproduce
+  the original failures before validating the repaired behavior.
+- Reject invalid UTF-8 and unpaired surrogate escapes in JSON values and keys
+  before Go decoding or marshaling. A shared standard-library-only internal
+  helper covers raw JSON and bounded Go string traversal. Agent ToolCall/raw/
+  ParsedArgs, the outer code parameter, native/MCP arguments, effective results,
+  schemas, discovery and Store use the appropriate boundary checks. Actual
+  native/MCP calls remain zero for invalid IDs; emoji and explicit U+FFFD retain
+  their original values. Expose argument_invalid/result_rejected and the
+  invalid_unicode machine reason without losing original Go causes.
+- Convert Execute and AfterToolCall panics inside the common lifecycle to safe
+  typed failures. Run after hooks, close scopes and finish child records; retain
+  completed-write facts and original error-valued panic chains. Private panic
+  text and unprocessed hook-failure output stay out of default events and JS.
+- Correlate Go causes through a private WeakMap and the exact host Error identity
+  plus VM-local sequence. Public callId changes, copied/replacement errors,
+  prototypes and proxies cannot manufacture a canceled parent or another cause.
+- Preserve trusted remote completion facts when a result is accompanied by an
+  ordinary Go error. Check child arguments after parser/coercion/hook mutation
+  before copies or execution. Bound partial failure output and generated error
+  text from preparation, permission, execution, hooks and validators under one
+  retained-payload budget. End events use the configured child summary limit.
+- Use pure-Go golang.org/x/image/webp v0.46.0 configuration decoding, exact RIFF
+  length checks and the existing 64 Mi-pixel limit. Verify its 2026-09-08 release,
+  Go1.26 compatibility and GO-2026-5061 fix before adoption; retain the pinned
+  QuickJS artifact/source/license bytes. Tidy both module graphs, including
+  required x/sys v0.48.0 and the examples' resulting x/* selections; all selected
+  changed x/* versions were released in August/September 2026 and require Go1.26.
+- On the final native Windows Go1.26.4 snapshot, GOWORK=off and both live-test
+  flags disabled: full root/examples ordinary tests, full race suites, vet,
+  build and module verification pass. All 21 changed/new Go files pass gofmt
+  checks; diff checks and pinned artifact/source/license test digests pass.
+  The freshly compiled local MCP example returns 50 open issues and IDs 3/6/9
+  in four host calls. Six original repository-external review probes also pass
+  after recompilation against these fixes.
+- Update package documentation and the existing draft PR. Cross-platform checks
+  will run on the pushed repair commit; prior-head CI is not repair evidence.
+  No live-provider or UI acceptance, version bump, tag, release or PR merge.
+
+- The first repair commit's CI run 36966156132 passes the Linux repository job
+  and Windows/Linux amd64/Linux arm64/macOS arm64 Codemode jobs. macOS Intel
+  reaches the 10-minute Go test alarm in the pre-existing host-permit test.
+  Its stack shows Run already trying to send its error while the test waits
+  forever for host entry: the 40ms startup deadline does not guarantee Invoke
+  was entered, and the unbuffered result channel hides that early termination.
+- Make the host-permit fixture synchronize on actual host entry and second-call
+  admission, then cancel explicitly. Check the occupied global permit, queued
+  cancellation and retirement before Close's outstanding report. Every wait is
+  bounded; buffered result channels and idempotent cleanup release callbacks on
+  failures. Add an expired-startup-deadline case proving zero host dispatch.
+  This changes tests only, without runtime timeout or retry-policy changes.
+- The compiled native Windows race test executable passes both cases for ten
+  iterations. Final root ordinary and full race suites pass again; Codemode vet,
+  formatting and diff checks pass. The examples module is unchanged after its
+  previously passing full ordinary/race/vet/build checks. Push the fixture repair
+  so the final head can run all six remote checks again.

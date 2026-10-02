@@ -160,7 +160,7 @@ func TestPeekQueuedMessagesPreservesPriorityAndIsolation(t *testing.T) {
 
 func TestRunToolCallPreservesStructuredErrorAndHooks(t *testing.T) {
 	var order []string
-	tool := ToolDefinition{Name: "work", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+	tool := ToolDefinition{Name: "work", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 		order = append(order, "execute")
 		return ToolResult{Content: []Part{{Type: PartTypeText, Text: "failure"}}, StructuredContent: json.RawMessage(`{"code":42}`), IsError: true}, nil
 	}}
@@ -186,7 +186,7 @@ func TestRunToolCallPreservesStructuredErrorAndHooks(t *testing.T) {
 
 func TestAfterToolContentReplacementDropsStaleStructuredContent(t *testing.T) {
 	base := ToolResult{Content: []Part{{Type: PartTypeText, Text: "old"}}, StructuredContent: json.RawMessage(`{"old":true}`)}
-	tool := ToolDefinition{Name: "work", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) { return base, nil }}
+	tool := ToolDefinition{Name: "work", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) { return base, nil }}
 	outcome := RunToolCall(context.Background(), ToolCall{ID: "call", Name: "work"}, RunToolCallOptions{Tools: []ToolDefinition{tool}, AfterToolCall: func(context.Context, AfterToolCallContext) (AfterToolCallResult, error) {
 		return AfterToolCallResult{Result: &ToolResult{Content: []Part{{Type: PartTypeText, Text: "new"}}}}, nil
 	}})
@@ -221,7 +221,7 @@ func TestFinishTurnOnCanceledCommittedResume(t *testing.T) {
 	setPendingToolControlState(&snapshot, 1, assistant)
 	var order []string
 	definition := AgentDefinition{
-		Tools: []ToolDefinition{{Name: "work", Execute: func(context.Context, string, any, ToolUpdateFunc) (ToolResult, error) {
+		Tools: []ToolDefinition{{Name: "work", Execute: func(_ context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			cancel()
 			return ToolResult{Content: []Part{{Type: PartTypeText, Text: "committed"}}}, nil
 		}}},

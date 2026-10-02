@@ -87,7 +87,9 @@ func NewAgentTool(config AgentToolConfig) (core.ToolDefinition, error) {
 		Name:        name,
 		Description: config.Description,
 		Parameters:  cloneAgentToolParameters(),
-		Execute: func(ctx context.Context, _ string, args any, update core.ToolUpdateFunc) (core.ToolResult, error) {
+		Execute: func(ctx context.Context, execution core.ToolExecutionContext) (core.ToolResult, error) {
+			args := execution.Args
+			update := execution.OnUpdate
 			task, err := agentToolTask(args)
 			if err != nil {
 				return core.ToolResult{}, err

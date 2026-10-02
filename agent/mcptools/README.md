@@ -24,28 +24,50 @@ tools, err := mcptools.Discover(ctx, session, mcptools.Options{
 Nil/empty `Names` selects no tools and performs no I/O. There is no implicit
 "all tools" mode. Missing or duplicate names, pagination limits and invalid
 schemas fail discovery. Descriptions and outputs remain untrusted peer data.
-Discovery is selection, not authorization. Wrap each returned `Execute` with
-your current permission and approval checks before giving it to any caller.
-The same wrapped definitions can be supplied to an Agent or used without a
-model through `agent.RunToolCall`. The latter has no `ToolGate` option, so a
-gate used by an Agent does not protect direct invocation. Do not put trusted
-identity or approval decisions in model-controlled arguments.
+Discovery is selection, not authorization. Supply current permission checks
+through `CheckToolPermission` and approval decisions through `ToolGate`.
+The same definitions can be supplied to an Agent or used without a
+model through `agent.RunToolCall`; both support these checks. The adapter also
+rechecks `execution.CheckPermission` after its directory/schema check, immediately
+before `CallTool`. Use the current host-owned identity in this permission hook.
+Do not put trusted identity or approval decisions in model-controlled arguments.
 
 The adapter adds no retries. SDK 1.8.0 enables automatic multi-round-trip
 retries by default, including load-shedding responses. A supplied session's
 private configuration cannot be inspected here: the construction contract above
-is required for the supported no-automatic-retry configuration. Configure no
+is required for the supported no-automatic-retry configuration. Disabling this
+handler does not prevent an OAuth transport from resending a POST. Physical-send
+attempts must be observed and controlled at the transport boundary; one SDK
+`CallTool` invocation is not evidence of one network request. Configure no
 sampling/elicitation/roots callbacks. Input-required responses are rejected;
 the adapter never answers them. Transport/protocol errors are returned as Go
 errors; tool-declared errors return `ToolResult.IsError` with their structured
-content intact. `RunToolCall` represents Go execution errors as error outcomes,
-so use `Execute` when your workflow needs the original Go error chain.
+content intact. `RunToolCall` retains the original Go error chain in
+`ToolCallOutcome.Err`, including through after-hook redaction. `errors.Is` and
+`errors.As` remain available to trusted Go callers.
 
-`ResultError` means the remote tool already returned but its result could not be
-mapped safely. It does not mean the operation failed or is safe to repeat.
+`ResultError` means a remote response could not be mapped safely. Ordinary terminal
+responses have `remote=complete_reported`; input-required responses remain
+`remote=input_required` and are rejected without answering them. Neither state
+means the operation failed or is safe to repeat.
 Supported content is retained in its `Result` when within bounds. Transport
 failures can also occur after execution; neither category should trigger an
 automatic retry of a side effect.
+
+Errors carry `agent.ToolExecutionError` codes, a stable reason, and separate local
+and remote execution facts. Rejected arguments, changed schemas, and permission
+denials remain `remote=not_dispatched`; transport/protocol failures from
+`CallTool` remain `remote=unknown`. Rejected terminal results are
+`result_rejected`, tool-declared failures are `tool_reported_error`, and
+input-required responses are `input_required_unsupported`. Model text is a
+presentation of these facts, not the source of retry decisions. After hooks may
+redact presentation but cannot erase errors or change execution facts.
+
+Raw JSON arguments reject invalid UTF-8 and unpaired UTF-16 surrogate escapes
+before decoding, including object keys. Go argument values and keys are checked
+before encoding so invalid UTF-8 cannot become a different ID through JSON
+replacement. These failures use reason `invalid_unicode` and never call the
+remote tool. Valid surrogate pairs and an intentional U+FFFD are accepted.
 
 Input and successful structured output are validated with jsonschema-go,
 without external schema loading. Structured output may be an object, array or
@@ -61,7 +83,9 @@ jsonschema-go's type classifier treats json.Number as a string. Integers are
 projected exactly; decimals must round-trip through float64 back to the same JSON
 numeric value. Ordinary values such as 0.1 and 19.99 are supported. Integers outside
 the native ranges or decimals requiring more precision fail explicitly before
-invocation. Original wire values remain untouched. Validation follows
+invocation. Original wire values remain untouched. Numeric lexemes are bounded
+to 256 bytes and exponents to an absolute value of 308 before rational conversion.
+These checks prevent hostile exponent expansion. Validation follows
 jsonschema-go v0.4.3 numeric semantics, not arbitrary-precision JSON Schema: its
 float64 multipleOf division rejects some valid decimal multiples, including 19.99
 with 0.01 and 0.3 with 0.1. Those calls fail before execution; schemas requiring
@@ -88,6 +112,13 @@ Default bounds: 16 pages, 256 discovered tools, 64 KiB per schema/arguments and
 limits. Set transport limits and context deadlines separately. Cancellation is
 forwarded to the SDK; remote termination is best effort. The adapter never closes
 the session on cancellation.
+
+For script orchestration, pass an explicitly selected subset to
+`agent/codemodetool` as MCP bindings. That boundary additionally rejects unsafe
+JavaScript numbers before invocation and checks effective results after hooks.
+Only the code container is presented as a model tool; leaf capabilities stay
+inside its approved child whitelist. Nested approval suspension is rejected
+without restarting the script or replaying earlier side effects.
 
 This optional package adds the official SDK v1.8.0 to the root module graph,
 including its encoding, URI-template and x/* dependencies. It reuses the existing

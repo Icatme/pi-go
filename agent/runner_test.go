@@ -233,7 +233,7 @@ func TestRunnerPropagatesNestedRunLineageAndKeepsSequencesLocal(t *testing.T) {
 	var childEvents []AgentEvent
 	childTool := ToolDefinition{
 		Name: "delegate",
-		Execute: func(ctx context.Context, _ string, _ any, _ ToolUpdateFunc) (ToolResult, error) {
+		Execute: func(ctx context.Context, _ ToolExecutionContext) (ToolResult, error) {
 			stream := childRunner.Query(ctx, "child task")
 			for event := range stream.Events() {
 				childEvents = append(childEvents, event)

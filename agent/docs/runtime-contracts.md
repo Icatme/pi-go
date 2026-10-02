@@ -87,11 +87,16 @@ and is executed by the runtime engine in [`engine.go`](../engine.go).
 - `afterToolCall` runs after the tool body returns.
 - It may override fields in `Result`; omitted fields preserve the tool body's
   finalized result.
-- It may override `IsError`.
+- It may override a tool-declared `IsError`, but cannot turn a returned Go error
+  into success or replace the original execution facts.
 - Override order is: tool body result first, then `afterToolCall` merges result
   fields and may override the error flag.
 - Returning an error from `afterToolCall` becomes that call's error tool result.
-  Already-completed sibling results remain durable.
+  The original executor error remains in the joined Go error chain. Unprocessed
+  output is discarded; already-completed sibling results remain durable.
+- An explicitly configured `ToolDefinition.ValidateResult` checks the effective
+  result after hooks and before final events/records. A failure becomes
+  `result_rejected` and retains the executor's local/remote execution facts.
 
 ### Tool execution safety
 
@@ -195,12 +200,43 @@ at the request root. Dynamic provider tool anchoring is not implemented.
 Go error and survives hooks/events/transcripts. Replacing content in an after
 hook clears old structured content unless new structured content is supplied.
 Invalid structured JSON becomes an error result. `OutputSchema` is declaration
-metadata; it does not automatically validate executor output.
+metadata for ordinary tools. Approved child leaves validate successful structured
+output against it; a configured `ValidateResult` also runs on ordinary tools.
 
-`RunToolCall` shares argument validation, before/after hooks and execution with
+`RunToolCall` shares argument validation, before/after hooks, ToolGate, current
+permission checks and execution with
 model-issued calls, including explicit error and structured results. It emits
 no agent message events and appends no history; `OnUpdate` receives detached
 progress results. Durable tool approval is still an outer runtime concern.
+
+`ToolCallOutcome.Err` retains original errors for `errors.Is/As` and is not
+serialized. `Failure` and `Execution` are serialized separately from text and
+`IsError`. Remote outcomes are `not_dispatched`, `complete_reported`,
+`input_required`, `unknown` or `not_applicable`; local stages are `not_started`,
+`entered` and `returned`. A local cancellation does not prove remote rollback.
+Physical send attempts are reported only when the transport actually observes
+them. `AgentEvent.ToolErr` is a Go-only ordinary tool error, distinct from the
+run/stream failure in `AgentEvent.Err`.
+
+Only an explicitly configured container receives `ChildCaller` and the trusted
+`ToolInvocation` resource holder. Its leaves are frozen for the invocation, have
+host-assigned IDs and cannot create further containers. A sequential Agent policy
+or any sequential leaf serializes all children in admission order. A sequential
+parent alone preserves the outer model batch and does not disable parallel leaf
+orchestration. Queued calls recheck permission at actual entry; executors may
+recheck immediately before dispatch.
+
+Nested gate suspension returns `nested_suspend_unsupported` without a pending
+batch. Earlier child side effects remain recorded and are never replayed. Child
+start/update events project identity/state before cloning, and final events use
+bounded effective result summaries. All accepted calls retain basic execution
+records independently of the optional 256-entry/32-KiB detail budget. Parent
+outcomes/events retain the host-owned `ToolResult.ChildCalls` report independently
+of raw `Details`, even when a parent hook fails. Its Go-only records are not
+serialized to model JSON or durable snapshots, and executors/hooks cannot forge
+them. Parent
+completion closes admission and suppresses late events; active executors retain
+their scheduling permits until actual return, including after cancellation.
 
 `OnProviderStreamEvent` receives copied `json.RawMessage` and model identity
 before provider normalization. Unknown fields and exact JSON numbers survive.
@@ -407,7 +443,8 @@ The `agent/checkpoint` child package stores a strict, versioned
 
 Checkpoint runners require a non-empty `DefinitionVersion`, a fixed tool set,
 and no `PrepareNextTurn` or `PrepareRequest`. `ToolResolver` and invocation-local next-turn
-overrides are rejected because their executable/model values are not durable.
+overrides and tool containers are rejected because their executable/model values
+and live child execution state are not durable.
 Custom parsers and `BeforeToolCall` hooks may run again on resume and must be
 pure and deterministic.
 

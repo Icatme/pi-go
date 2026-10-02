@@ -470,7 +470,7 @@ func TestMaxTurnsPreservesQueuedInputs(t *testing.T) {
 				Tools: []agent.ToolDefinition{{
 					Name:       "echo",
 					Parameters: map[string]any{"type": "object", "additionalProperties": false},
-					Execute: func(context.Context, string, any, agent.ToolUpdateFunc) (agent.ToolResult, error) {
+					Execute: func(_ context.Context, _ agent.ToolExecutionContext) (agent.ToolResult, error) {
 						return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: "ok"}}}, nil
 					},
 				}},

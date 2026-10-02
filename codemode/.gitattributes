@@ -1,0 +1,8 @@
+*.go text eol=lf
+*.js text eol=lf
+*.md text eol=lf
+internal/assets/quickjs.wasm binary
+internal/assets/interface.c.txt -text
+internal/assets/LICENSE.* -text
+internal/assets/LICENSE.quickjs-ng whitespace=-blank-at-eol
+internal/assets/interface.c.txt whitespace=-blank-at-eof
