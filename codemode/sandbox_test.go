@@ -224,28 +224,99 @@ func TestHostPermitHeldUntilActualExitAndCloseReport(t *testing.T) {
 	}
 	entered := make(chan struct{})
 	release := make(chan struct{})
+	releaseHost := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(func() {
+		releaseHost()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.Close(ctx); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+	})
+	guard, stopGuard := context.WithTimeout(t.Context(), 30*time.Second)
+	defer stopGuard()
 	var second atomic.Bool
 	tool := Tool{Name: "blocked", Invoke: func(context.Context, HostCall) (json.RawMessage, error) {
 		close(entered)
 		<-release
 		return json.RawMessage(`true`), nil
 	}}
-	done := make(chan error)
+	firstCtx, cancelFirst := context.WithCancel(guard)
+	defer cancelFirst()
+	done := make(chan error, 1)
 	go func() {
-		_, e := s.Run(context.Background(), `await tools.blocked({})`, RunOptions{Tools: []Tool{tool}, Timeout: 40 * time.Millisecond})
+		_, e := s.Run(firstCtx, `await tools.blocked({})`, RunOptions{Tools: []Tool{tool}})
 		done <- e
 	}()
-	<-entered
-	if e := <-done; !errors.Is(e, context.DeadlineExceeded) {
-		t.Fatalf("cancel: %v", e)
+	select {
+	case <-entered:
+	case e := <-done:
+		t.Fatalf("script finished before host entry: %v", e)
+	case <-guard.Done():
+		t.Fatalf("waiting for host entry: %v", guard.Err())
+	}
+	cancelFirst()
+	select {
+	case e := <-done:
+		if !errors.Is(e, context.Canceled) {
+			t.Fatalf("cancel: %v", e)
+		}
+	case <-guard.Done():
+		t.Fatalf("waiting for VM cancellation: %v", guard.Err())
+	}
+	if len(s.callSlots) != 1 {
+		t.Fatal("VM cancellation released the active host permit")
 	}
 	tool.Invoke = func(context.Context, HostCall) (json.RawMessage, error) {
 		second.Store(true)
 		return json.RawMessage(`true`), nil
 	}
-	_, err = s.Run(context.Background(), `await tools.blocked({})`, RunOptions{Tools: []Tool{tool}, Timeout: 30 * time.Millisecond})
-	if !errors.Is(err, context.DeadlineExceeded) || second.Load() {
-		t.Fatalf("released occupied host permit: %v", err)
+	secondCtx, cancelSecond := context.WithCancel(guard)
+	defer cancelSecond()
+	secondDone := make(chan error, 1)
+	go func() {
+		_, e := s.Run(secondCtx, `await tools.blocked({})`, RunOptions{Tools: []Tool{tool}})
+		secondDone <- e
+	}()
+	// Observe actual admission instead of assuming startup fits a short timer.
+	// The first callback remains blocked, so two active calls include one waiter.
+	for {
+		s.mu.Lock()
+		active, changed := len(s.active), s.changed
+		s.mu.Unlock()
+		if active == 2 {
+			break
+		}
+		select {
+		case <-changed:
+		case e := <-secondDone:
+			t.Fatalf("second script finished before queued admission: %v", e)
+		case <-guard.Done():
+			t.Fatalf("waiting for queued admission: %v", guard.Err())
+		}
+	}
+	cancelSecond()
+	select {
+	case e := <-secondDone:
+		if !errors.Is(e, context.Canceled) || second.Load() {
+			t.Fatalf("released occupied host permit: %v", e)
+		}
+	case <-guard.Done():
+		t.Fatalf("waiting for queued cancellation: %v", guard.Err())
+	}
+	// Close must report the still-entered callback after the queued call retires.
+	for {
+		s.mu.Lock()
+		active, changed := len(s.active), s.changed
+		s.mu.Unlock()
+		if active == 1 {
+			break
+		}
+		select {
+		case <-changed:
+		case <-guard.Done():
+			t.Fatalf("waiting for queued host exit: %v", guard.Err())
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
@@ -254,11 +325,26 @@ func TestHostPermitHeldUntilActualExitAndCloseReport(t *testing.T) {
 	if !errors.As(err, &closeErr) || len(closeErr.Outstanding) != 1 || closeErr.Outstanding[0].Execution.Local != "entered" {
 		t.Fatalf("close report %v", err)
 	}
-	close(release)
+	releaseHost()
 	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second)
 	defer cancel2()
 	if err = s.Close(ctx2); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStartupDeadlineCanFinishBeforeHostEntry(t *testing.T) {
+	s := sandboxForTest(t, DefaultConfig())
+	var calls atomic.Int32
+	tool := Tool{Name: "blocked", Invoke: func(context.Context, HostCall) (json.RawMessage, error) {
+		calls.Add(1)
+		return json.RawMessage(`true`), nil
+	}}
+	ctx, cancel := context.WithDeadline(t.Context(), time.Unix(0, 0))
+	defer cancel()
+	result, err := s.Run(ctx, `await tools.blocked({})`, RunOptions{Tools: []Tool{tool}})
+	if !errors.Is(err, context.DeadlineExceeded) || calls.Load() != 0 || len(result.Calls) != 0 {
+		t.Fatalf("startup deadline must not require host entry: calls=%d result=%+v err=%v", calls.Load(), result, err)
 	}
 }
 

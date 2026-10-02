@@ -702,3 +702,21 @@
 - Update package documentation and the existing draft PR. Cross-platform checks
   will run on the pushed repair commit; prior-head CI is not repair evidence.
   No live-provider or UI acceptance, version bump, tag, release or PR merge.
+
+- The first repair commit's CI run 36966156132 passes the Linux repository job
+  and Windows/Linux amd64/Linux arm64/macOS arm64 Codemode jobs. macOS Intel
+  reaches the 10-minute Go test alarm in the pre-existing host-permit test.
+  Its stack shows Run already trying to send its error while the test waits
+  forever for host entry: the 40ms startup deadline does not guarantee Invoke
+  was entered, and the unbuffered result channel hides that early termination.
+- Make the host-permit fixture synchronize on actual host entry and second-call
+  admission, then cancel explicitly. Check the occupied global permit, queued
+  cancellation and retirement before Close's outstanding report. Every wait is
+  bounded; buffered result channels and idempotent cleanup release callbacks on
+  failures. Add an expired-startup-deadline case proving zero host dispatch.
+  This changes tests only, without runtime timeout or retry-policy changes.
+- The compiled native Windows race test executable passes both cases for ten
+  iterations. Final root ordinary and full race suites pass again; Codemode vet,
+  formatting and diff checks pass. The examples module is unchanged after its
+  previously passing full ordinary/race/vet/build checks. Push the fixture repair
+  so the final head can run all six remote checks again.
