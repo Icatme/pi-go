@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -55,8 +56,10 @@ func WithDispatchCheck(ctx context.Context, check func(context.Context) error) c
 }
 
 // WireLimits bound frame buffering, in-flight requests, retained raw responses,
-// and cancelled/completed request tombstones. Zero values select the defaults.
-// A negative value also selects the default; bounds cannot be disabled.
+// and cancelled/completed request tombstones. MaxTombstones independently bounds
+// recent IDs and exact numeric ranges compacted from older IDs. Exhausting the
+// range bound closes observation rather than treating unobserved IDs as retired.
+// Zero or negative values select the defaults; bounds cannot be disabled.
 type WireLimits struct {
 	MaxFrameBytes int
 	MaxPending    int
@@ -124,6 +127,8 @@ type rawBinding struct {
 	uri    string
 }
 
+type retiredIDRange struct{ first, last int64 }
+
 // Observer binds real wire response bytes to the exact object returned by the
 // pinned MCP SDK. Allocate one observer per identity and connection generation.
 // It does not own transports, negotiate protocols, authenticate, or retry calls.
@@ -138,8 +143,7 @@ type Observer struct {
 	ids        map[string]string
 	tombstones map[string]struct{}
 	tombOrder  []string
-	retiredID  int64
-	hasRetired bool
+	retiredIDs []retiredIDRange
 	bindings   map[sdk.Result]*rawBinding
 	bindOrder  []sdk.Result
 	rawBytes   int
@@ -212,7 +216,9 @@ func (o *Observer) Middleware() sdk.Middleware {
 			defer o.mu.Unlock()
 			if callErr != nil {
 				// Never turn an RPC/transport error into a completed tool result.
-				return result, errors.Join(callErr, slot.err)
+				// A saved local denial takes precedence over the internal child
+				// cancellation used to keep SDK stdio writes nonfatal.
+				return result, errors.Join(slot.err, callErr)
 			}
 			if slot.trace != nil && result != nil && !(reflect.ValueOf(result).Kind() == reflect.Pointer && reflect.ValueOf(result).IsNil()) {
 				slot.trace.value.ResultType = "complete"
@@ -372,15 +378,60 @@ func (o *Observer) retireLocked(id string) {
 	delete(o.tombstones, old)
 	if strings.HasPrefix(old, "n:") {
 		n, _ := strconv.ParseInt(old[2:], 10, 64)
-		if !o.hasRetired || n > o.retiredID {
-			o.retiredID = n
-			o.hasRetired = true
-		}
+		o.retireNumberLocked(n)
 	} else {
 		// The SDK issues numeric IDs. If an unsupported string-ID source exhausts
 		// tombstones, stop accepting requests rather than risk a late response bind.
 		o.closed = true
 	}
+}
+
+func (o *Observer) retireNumberLocked(n int64) {
+	// SDK IDs are monotonic allocations, not handoff order. Keep the holes: a
+	// smaller ID may still be serializing or awaiting its final authorization.
+	for i, interval := range o.retiredIDs {
+		if n < interval.first && (n == math.MaxInt64 || n+1 < interval.first) {
+			if len(o.retiredIDs) >= o.limits.MaxTombstones {
+				o.closed = true
+				return
+			}
+			o.retiredIDs = append(o.retiredIDs, retiredIDRange{})
+			copy(o.retiredIDs[i+1:], o.retiredIDs[i:])
+			o.retiredIDs[i] = retiredIDRange{n, n}
+			return
+		}
+		if n <= interval.last || (interval.last != math.MaxInt64 && n == interval.last+1) {
+			o.retiredIDs[i].first = min(interval.first, n)
+			o.retiredIDs[i].last = max(interval.last, n)
+			if i+1 < len(o.retiredIDs) {
+				next := o.retiredIDs[i+1]
+				last := o.retiredIDs[i].last
+				if next.first <= last || (last != math.MaxInt64 && next.first == last+1) {
+					o.retiredIDs[i].last = max(last, next.last)
+					copy(o.retiredIDs[i+1:], o.retiredIDs[i+2:])
+					o.retiredIDs = o.retiredIDs[:len(o.retiredIDs)-1]
+				}
+			}
+			return
+		}
+	}
+	if len(o.retiredIDs) >= o.limits.MaxTombstones {
+		o.closed = true
+		return
+	}
+	o.retiredIDs = append(o.retiredIDs, retiredIDRange{n, n})
+}
+
+func (o *Observer) numberRetiredLocked(n int64) bool {
+	for _, interval := range o.retiredIDs {
+		if n < interval.first {
+			return false
+		}
+		if n <= interval.last {
+			return true
+		}
+	}
+	return false
 }
 
 func (o *Observer) bindLocked(result sdk.Result, raw json.RawMessage, method, uri string) {
@@ -451,6 +502,7 @@ func (o *Observer) Close() {
 	clear(o.tombstones)
 	o.bindOrder = nil
 	o.tombOrder = nil
+	o.retiredIDs = nil
 	o.rawBytes = 0
 }
 
@@ -539,7 +591,7 @@ func (o *Observer) observeMessage(frame []byte, outgoing bool) error {
 		return nil // Server requests use the opposite RPC ID direction.
 	}
 	slot := o.pending[o.ids[id]]
-	if slot == nil {
+	if slot == nil || !slot.sent {
 		return nil // A cancelled/old generation response cannot bind a new result.
 	}
 	if slot.trace != nil && (len(message.Result) > 0 || len(message.Error) > 0) {
@@ -582,11 +634,12 @@ func (o *Observer) sendCheckLocked(id string, slot *wirePending) error {
 	}
 	_, tombstone := o.tombstones[id]
 	retired := false
-	if strings.HasPrefix(id, "n:") && o.hasRetired {
+	if strings.HasPrefix(id, "n:") {
 		n, _ := strconv.ParseInt(id[2:], 10, 64)
-		retired = n <= o.retiredID
+		retired = o.numberRetiredLocked(n)
 	}
-	if slot.sent || o.ids[id] != "" || tombstone || retired {
+	owner := o.pending[o.ids[id]]
+	if slot.sent || (owner != nil && owner != slot) || (slot.id != "" && slot.id != id) || tombstone || retired {
 		slot.err = ErrWireReplay
 		return ErrWireReplay
 	}
@@ -621,6 +674,10 @@ func (o *Observer) observeOutgoing(id string, message wireEnvelope) error {
 		o.mu.Unlock()
 		return ErrWireReplay
 	}
+	// Reserve RPC identity through the unlocked host check. A response for this
+	// reservation is ignored until a physical handoff is actually accepted.
+	slot.id = id
+	o.ids[id] = token
 	slot.claiming = true
 	check, ctx := slot.check, slot.ctx
 	o.mu.Unlock()
@@ -638,17 +695,22 @@ func (o *Observer) observeOutgoing(id string, message wireEnvelope) error {
 	}
 	if denial != nil {
 		slot.err = denial
+		// The pinned SDK treats non-cancelled IO writer errors as fatal to the
+		// entire session. Cancel only this middleware's logical child context,
+		// retaining the genuine denial error and its zero-handoff facts.
+		if slot.cancel != nil {
+			slot.cancel()
+		}
 		return denial
 	}
 	if err := o.sendCheckLocked(id, slot); err != nil {
 		return err
 	}
-	slot.sent, slot.id = true, id
+	slot.sent = true
 	if slot.trace != nil {
 		slot.trace.value.RPCID = string(message.ID)
 		slot.trace.value.Attempts++
 	}
-	o.ids[id] = token
 	return nil
 }
 

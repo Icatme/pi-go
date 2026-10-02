@@ -33,6 +33,10 @@ containment (for example a container or cgroup) instead of this stdio launcher.
 Shutdown terminates the supported Job Object/process group and waits for the
 owned server's actual exit. Stderr is privately drained with a bounded retention
 buffer; inherited stderr handles cannot conceal that server's exit.
+On macOS, a zombie-only group can report `EPERM` from `killpg1`; cleanup
+checks `kern.proc.pgrp` and accepts only an empty group or exclusively zombie
+members. A live member or inspection error preserves the original failure.
+This follows the [XNU process-group signal implementation](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_sig.c).
 HTTP endpoints require HTTPS or loopback HTTP. Redirects are disabled, MCP
 multi-round-trip execution is disabled, and the SDK owns protocol negotiation.
 The pinned SDK negotiates its supported current protocol with legacy peers.
@@ -79,6 +83,11 @@ only a trusted SDK lifecycle result reports completion or `input_required`.
 `ResponseError` retains these facts if local raw/result mapping rejects a response.
 `WithDispatchCheck` composes host permission checks at the actual handoff, outside
 observer locks. Denials have zero accepted handoffs and preserve their Go cause.
+An unsent stdio permission denial cancels only that logical SDK call and leaves
+the shared session usable; physical write failures still terminate its writer.
+Recent tombstones and compact exact numeric retirement ranges are independently
+bounded by `WireLimits.MaxTombstones`. Numeric gaps stay available to requests
+still serializing or awaiting approval; exhausting the range bound fails closed.
 Repeated physical `tools/call` sends for a logical request are blocked, including
 OAuth POST replay. There is no automatic recovery by repeating a script.
 
@@ -103,6 +112,8 @@ successful refresh advances `CredentialVersion` twice (claim and completion).
 Token requests retain the SDK-validated MCP resource indicator, and restored
 DCR clients retain their registered client authentication method.
 Scope/revocation changes retire a live connection before another handoff.
+The internal retirement fence completes before refreshed tokens become visible;
+external `OnChange` callbacks still run after publication without internal locks.
 `OAuthState` returns a credential version and granted scopes without secrets;
 `ClearCredentials` performs versioned logout and retires the old epoch.
 The credential CAS and Manager's epoch replacement share one publication
@@ -115,6 +126,14 @@ record written by the earlier branch without it is rejected, including by
 Manager login/logout entry points. The host must use the saved `AuthKey` and
 current store version to CAS that record to a tombstone, then authenticate
 explicitly; there is no inferred-resource migration.
+
+When multiple registration strategies are configured, the derived client key
+hashes all strategies, discovery override, redirect, resource and issuer. The
+credential separately stores the client actually selected by the SDK, including
+a preregistered or DCR fallback when the AS does not support CIMD. Restoration
+reuses that client and its authentication method instead of selecting or
+registering again. Earlier development keys for mixed strategies are not
+migrated; omit `AuthKey.ClientID` to derive the new key and authenticate explicitly.
 
 The default credential store is shared for the server within this Manager.
 Persistence is opt-in via `NewFileCredentialStore(absolutePath)` in an existing

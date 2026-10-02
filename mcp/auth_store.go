@@ -43,7 +43,9 @@ func authStoreCause(operation string, cause error) error {
 }
 
 // AuthKey isolates credentials by server configuration, host account, issuer and
-// OAuth client. NewOAuth canonicalizes URL and derives ClientID when omitted.
+// OAuth client configuration. NewOAuth canonicalizes URL and derives ClientID
+// when omitted. Multiple registration methods use a configuration digest,
+// rather than pretending that the first configured method was selected.
 type AuthKey struct {
 	Server   string `json:"server"`
 	URL      string `json:"url"`
@@ -55,7 +57,8 @@ type AuthKey struct {
 // OAuthCredential contains secrets. Hosts must protect the credential store and
 // must not include this value in logs, tool descriptions, traces or JS results.
 type OAuthCredential struct {
-	Binding      AuthKey         `json:"binding"`
+	Binding AuthKey `json:"binding"`
+	// ClientID is the actual SDK-resolved client, separate from Binding.ClientID.
 	ClientID     string          `json:"clientId"`
 	ClientSecret string          `json:"clientSecret,omitempty"`
 	Endpoint     oauth2.Endpoint `json:"endpoint"`

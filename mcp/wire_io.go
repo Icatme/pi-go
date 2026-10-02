@@ -3,6 +3,7 @@ package mcp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"sync"
@@ -97,6 +98,7 @@ func (w *observedWriter) Write(p []byte) (int, error) {
 		return 0, w.terminal
 	}
 	consumed := 0
+	physicalBytes := 0
 	for len(p) > 0 {
 		n := bytes.IndexByte(p, '\n')
 		if n < 0 {
@@ -116,11 +118,19 @@ func (w *observedWriter) Write(p []byte) (int, error) {
 		}
 		if !isBlankWireLine(w.buffer) {
 			if err := w.observer.observeFrame(w.buffer, true); err != nil {
-				w.terminal = err
+				// A locally denied/cancelled complete frame wrote no bytes. Its
+				// logical child context is cancelled so the SDK can return this
+				// real error without poisoning the shared session write path.
+				w.buffer = w.buffer[:0]
+				localRejection := errors.Is(err, ErrDispatchDenied) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+				if !localRejection || physicalBytes != 0 {
+					w.terminal = err
+				}
 				return consumed - n, err
 			}
 		}
 		written, err := w.target.Write(w.buffer)
+		physicalBytes += written
 		if err == nil && written != len(w.buffer) {
 			err = io.ErrShortWrite
 		}

@@ -24,5 +24,5 @@ func (*processControl) kill(p *os.Process) error {
 	if errors.Is(err, syscall.ESRCH) {
 		return nil
 	}
-	return err
+	return processGroupKillError(p.Pid, err)
 }

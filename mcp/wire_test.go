@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -265,7 +266,7 @@ func TestWireCancellationTombstoneAndIDReuse(t *testing.T) {
 	if len(secondSlot.raw) != 0 {
 		t.Fatal("notification bound as result")
 	}
-	observer.finish(second) // Evicts numeric tombstone 1, retaining a safe floor.
+	observer.finish(second) // Evicts tombstone 1 into an exact retired range.
 	reuse, _, _ := observer.begin("tools/call")
 	if err := observer.observeFrame(wireRequest(1, reuse, "tools/call"), true); !errors.Is(err, ErrWireReplay) {
 		t.Fatalf("evicted ID reuse allowed: %v", err)
@@ -755,5 +756,495 @@ func TestWireDispatchChecksComposeWithoutRetries(t *testing.T) {
 	check := ctx.Value(dispatchCheckKey{}).(func(context.Context) error)
 	if err := check(ctx); err != denied || len(calls) != 2 || calls[0] != 1 || calls[1] != 2 {
 		t.Fatalf("check composition lost prior policy: %v %#v", err, calls)
+	}
+}
+
+type heldWireArguments struct {
+	entered chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (a *heldWireArguments) MarshalJSON() ([]byte, error) {
+	a.once.Do(func() { close(a.entered) })
+	<-a.release
+	return []byte(`{}`), nil
+}
+
+func TestWireSlowFirstHandoffSurvivesDefaultTombstoneCompaction(t *testing.T) {
+	for _, stage := range []string{"dispatch_check", "sdk_params_marshal"} {
+		t.Run(stage, func(t *testing.T) {
+			server := wireTestServer()
+			var calls atomic.Int32
+			addWireTool(server, "write", func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+				calls.Add(1)
+				return &sdk.CallToolResult{Content: []sdk.Content{}}, nil
+			})
+			observer, session := newWireFixture(t, "json", server, nil)
+			entered, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			t.Cleanup(func() { once.Do(func() { close(release) }) })
+			ctx, snapshot := observer.Track(t.Context())
+			var args any = map[string]any{}
+			if stage == "dispatch_check" {
+				ctx = WithDispatchCheck(ctx, func(ctx context.Context) error {
+					close(entered)
+					select {
+					case <-release:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				})
+			} else {
+				// The pinned SDK assigns an RPC ID before marshaling arguments.
+				// This pauses before even the first observed byte-boundary check.
+				args = &heldWireArguments{entered: entered, release: release}
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "write", Arguments: args})
+				done <- err
+			}()
+			select {
+			case <-entered:
+			case <-time.After(3 * time.Second):
+				t.Fatal("first handoff did not park")
+			}
+			later := observer.limits.MaxTombstones + 2
+			for i := 0; i < later; i++ {
+				if _, err := session.CallTool(t.Context(), &sdk.CallToolParams{Name: "write", Arguments: map[string]any{}}); err != nil {
+					t.Fatalf("new call %d: %v", i, err)
+				}
+			}
+			once.Do(func() { close(release) })
+			select {
+			case err := <-done:
+				if err != nil || calls.Load() != int32(later+1) {
+					t.Fatalf("first authorized handoff rejected after later completions: calls=%d err=%v record=%+v", calls.Load(), err, snapshot())
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("first handoff did not finish")
+			}
+			if record := snapshot(); record.Attempts != 1 || !record.ResponseReceived || record.ResultType != "complete" {
+				t.Fatalf("delayed handoff facts incorrect: %+v", record)
+			}
+			observer.mu.Lock()
+			defer observer.mu.Unlock()
+			if len(observer.pending) != 0 || len(observer.ids) != 0 || len(observer.tombstones) != observer.limits.MaxTombstones || len(observer.retiredIDs) != 1 {
+				t.Fatalf("ID state did not stay bounded: pending=%d ids=%d tombstones=%d ranges=%v", len(observer.pending), len(observer.ids), len(observer.tombstones), observer.retiredIDs)
+			}
+		})
+	}
+}
+
+func TestWireDispatchDenialKeepsSDKSessionUsable(t *testing.T) {
+	for _, kind := range []string{"json", "sse", "io"} {
+		t.Run(kind, func(t *testing.T) {
+			server := wireTestServer()
+			var calls atomic.Int32
+			entered, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			addWireTool(server, "held", func(ctx context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+				close(entered)
+				select {
+				case <-release:
+					return &sdk.CallToolResult{Content: []sdk.Content{}}, nil
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			})
+			addWireTool(server, "write", func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+				calls.Add(1)
+				return &sdk.CallToolResult{Content: []sdk.Content{}}, nil
+			})
+			observer, session := newWireFixture(t, kind, server, nil)
+			t.Cleanup(func() { once.Do(func() { close(release) }) })
+			heldCtx, heldSnapshot := observer.Track(t.Context())
+			heldDone := make(chan error, 1)
+			go func() {
+				_, err := session.CallTool(heldCtx, &sdk.CallToolParams{Name: "held", Arguments: map[string]any{}})
+				heldDone <- err
+			}()
+			select {
+			case <-entered:
+			case <-time.After(3 * time.Second):
+				t.Fatal("concurrent call did not enter")
+			}
+			denied := errors.New("host revoked one tool approval")
+			ctx, snapshot := observer.Track(t.Context())
+			ctx = WithDispatchCheck(ctx, func(context.Context) error { return denied })
+			_, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "write", Arguments: map[string]any{}})
+			var denial *DispatchDeniedError
+			if !errors.As(err, &denial) || denial.Err != denied || !errors.Is(err, denied) || ctx.Err() != nil {
+				t.Fatalf("local denial lost its cause or cancelled caller: err=%v caller=%v", err, ctx.Err())
+			}
+			if record := snapshot(); record.Attempts != 0 || record.ResponseReceived || record.ResultType != "" || calls.Load() != 0 {
+				t.Fatalf("local denial pretended to send: %+v calls=%d", record, calls.Load())
+			}
+			if _, err := session.CallTool(t.Context(), &sdk.CallToolParams{Name: "write", Arguments: map[string]any{}}); err != nil || calls.Load() != 1 {
+				t.Fatalf("one rejected call disabled another allowed call: calls=%d err=%v", calls.Load(), err)
+			}
+			once.Do(func() { close(release) })
+			select {
+			case err := <-heldDone:
+				if err != nil || heldSnapshot().ResultType != "complete" {
+					t.Fatalf("local denial cancelled concurrent call: err=%v record=%+v", err, heldSnapshot())
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("concurrent call did not finish")
+			}
+		})
+	}
+}
+
+func TestWireManagedStdioDenialDoesNotRetireSession(t *testing.T) {
+	manager, err := New(Config{Scope: Scope{Identity: "account", AuthEpoch: 1}, Servers: []ServerConfig{processFixtureConfig("server")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeManager(t, manager)
+	connection, err := manager.Connect(t.Context(), "stdio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	alive := captureFixtureProcess(t, connection.process.cmd.Process.Pid)
+	denied := errors.New("host revoked one tool approval")
+	ctx := WithDispatchCheck(t.Context(), func(context.Context) error { return denied })
+	_, record, err := connection.CallToolTracked(ctx, &sdk.CallToolParams{Name: "echo", Arguments: map[string]any{}})
+	if !errors.Is(err, denied) || !errors.Is(err, ErrDispatchDenied) || record.Attempts != 0 || record.ResponseReceived {
+		t.Fatalf("not a local denial: err=%v record=%+v", err, record)
+	}
+	_, later, err := connection.CallToolTracked(t.Context(), &sdk.CallToolParams{Name: "echo", Arguments: map[string]any{}})
+	if err != nil || later.Attempts != 1 || later.ResultType != "complete" {
+		t.Fatalf("one local denial poisoned real managed stdio SDK session: err=%v next=%+v", err, later)
+	}
+	if ready, err := manager.Ready("stdio"); err != nil || ready != connection || !alive() {
+		t.Fatalf("local denial replaced connection or stopped server: ready=%t err=%v alive=%t", ready == connection, err, alive())
+	}
+	select {
+	case <-connection.sessionDone:
+		t.Fatal("local denial ended actual SDK session")
+	default:
+	}
+}
+
+func TestWireSDKCancelledDispatchReservationIsReleased(t *testing.T) {
+	for _, fixture := range []struct {
+		kind         string
+		returnCancel bool
+	}{{"json", true}, {"json", false}, {"io", true}, {"io", false}} {
+		t.Run(fmt.Sprintf("%s/return_cancel=%t", fixture.kind, fixture.returnCancel), func(t *testing.T) {
+			server := wireTestServer()
+			var calls atomic.Int32
+			addWireTool(server, "write", func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+				calls.Add(1)
+				return &sdk.CallToolResult{Content: []sdk.Content{}}, nil
+			})
+			observer, session := newWireFixture(t, fixture.kind, server, nil)
+			observer.limits.MaxPending = 1
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			ctx, snapshot := observer.Track(ctx)
+			entered := make(chan struct{})
+			ctx = WithDispatchCheck(ctx, func(ctx context.Context) error {
+				close(entered)
+				<-ctx.Done()
+				if fixture.returnCancel {
+					return ctx.Err()
+				}
+				return nil
+			})
+			done := make(chan error, 1)
+			go func() {
+				_, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "write", Arguments: map[string]any{}})
+				done <- err
+			}()
+			select {
+			case <-entered:
+			case <-time.After(3 * time.Second):
+				t.Fatal("reservation did not enter")
+			}
+			observer.mu.Lock()
+			if len(observer.pending) != 1 || len(observer.ids) != 1 {
+				t.Errorf("reservation not covered by pending bound: pending=%d ids=%d", len(observer.pending), len(observer.ids))
+			}
+			observer.mu.Unlock()
+			if _, err := session.CallTool(t.Context(), &sdk.CallToolParams{Name: "write", Arguments: map[string]any{}}); !errors.Is(err, ErrWireLimit) {
+				t.Fatalf("pending bound allowed second request: %v", err)
+			}
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) || snapshot().Attempts != 0 || calls.Load() != 0 {
+					t.Fatalf("cancelled reservation handed off: err=%v record=%+v calls=%d", err, snapshot(), calls.Load())
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("cancelled reservation did not finish")
+			}
+			observer.mu.Lock()
+			if len(observer.pending) != 0 || len(observer.ids) != 0 {
+				t.Errorf("cancelled reservation retained state: pending=%d ids=%d", len(observer.pending), len(observer.ids))
+			}
+			observer.mu.Unlock()
+			if _, err := session.CallTool(t.Context(), &sdk.CallToolParams{Name: "write", Arguments: map[string]any{}}); err != nil || calls.Load() != 1 {
+				t.Fatalf("cancelled reservation disabled next call: err=%v calls=%d", err, calls.Load())
+			}
+		})
+	}
+}
+
+func TestWireUnsentReservationIgnoresResponsesAndIDReuse(t *testing.T) {
+	observer := NewObserver(WireLimits{})
+	defer observer.Close()
+	ctx, snapshot := observer.Track(t.Context())
+	token, slot, err := observer.beginTraced("tools/call", ctx.Value(wireTraceKey{}).(*wireTrace))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer observer.finish(token)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	slot.ctx = ctx
+	slot.check = func(context.Context) error { close(entered); <-release; return nil }
+	done := make(chan error, 1)
+	go func() { done <- observer.observeFrame(wireRequest(7, token, "tools/call"), true) }()
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("reservation did not enter")
+	}
+	if err := observer.observeFrame([]byte(`{"jsonrpc":"2.0","id":7,"result":{"late":true}}`), false); err != nil {
+		t.Fatal(err)
+	}
+	observer.mu.Lock()
+	if len(slot.raw) != 0 || slot.sent || slot.trace.value.ResponseReceived {
+		t.Error("response bound to an unsent reservation")
+	}
+	observer.mu.Unlock()
+	reuse, _, err := observer.begin("tools/call")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := observer.observeFrame(wireRequest(7, reuse, "tools/call"), true); !errors.Is(err, ErrWireReplay) {
+		t.Fatalf("reserved ID acquired by another call: %v", err)
+	}
+	observer.finish(reuse)
+	once.Do(func() { close(release) })
+	select {
+	case err := <-done:
+		if err != nil || snapshot().Attempts != 1 || snapshot().ResponseReceived {
+			t.Fatalf("reservation lost ownership/facts: err=%v record=%+v", err, snapshot())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("reservation did not finish")
+	}
+}
+
+func wireRawIDRequest(id string, token string) []byte {
+	return []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"_meta":{%q:%q}}}`, id, wireTokenKey, token))
+}
+
+func TestWireRetiredIDRangesAreExactAndBounded(t *testing.T) {
+	t.Run("boundaries_and_holes", func(t *testing.T) {
+		observer := NewObserver(WireLimits{MaxTombstones: 2})
+		defer observer.Close()
+		for _, n := range []int64{math.MaxInt64 - 2, math.MaxInt64 - 1, math.MaxInt64, math.MinInt64, math.MinInt64 + 1, math.MinInt64 + 2} {
+			token, _, err := observer.begin("tools/call")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := observer.observeFrame(wireRawIDRequest(fmt.Sprint(n), token), true); err != nil {
+				t.Fatal(err)
+			}
+			observer.finish(token)
+		}
+		if observer.closed || len(observer.retiredIDs) != 2 || len(observer.tombstones) != 2 {
+			t.Fatalf("boundary IDs did not compact: closed=%t ranges=%v recent=%v", observer.closed, observer.retiredIDs, observer.tombstones)
+		}
+		for _, n := range []int64{math.MaxInt64, math.MinInt64} {
+			token, _, _ := observer.begin("tools/call")
+			if err := observer.observeFrame(wireRawIDRequest(fmt.Sprint(n), token), true); !errors.Is(err, ErrWireReplay) {
+				t.Fatalf("compacted ID %d was reusable: %v", n, err)
+			}
+			observer.finish(token)
+		}
+		token, slot, _ := observer.begin("tools/call")
+		if err := observer.observeFrame(wireRequest(0, token, "tools/call"), true); err != nil {
+			t.Fatalf("unobserved numeric hole was treated as retired: %v", err)
+		}
+		if err := observer.observeFrame([]byte(`{"jsonrpc":"2.0","id":9223372036854775807,"result":{"late":true}}`), false); err != nil || len(slot.raw) != 0 {
+			t.Fatalf("retired response acquired hole: err=%v raw=%s", err, slot.raw)
+		}
+		observer.finish(token)
+		if observer.closed || len(observer.retiredIDs) != 2 {
+			t.Fatalf("numeric boundary extension overflowed: ranges=%v closed=%t", observer.retiredIDs, observer.closed)
+		}
+	})
+	t.Run("range_limit", func(t *testing.T) {
+		observer := NewObserver(WireLimits{MaxTombstones: 2})
+		defer observer.Close()
+		for _, n := range []int{1, 3, 5, 7, 9} {
+			token, _, err := observer.begin("tools/call")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := observer.observeFrame(wireRequest(n, token, "tools/call"), true); err != nil {
+				t.Fatal(err)
+			}
+			observer.finish(token)
+		}
+		if !observer.closed || len(observer.retiredIDs) != 2 || len(observer.tombstones) != 2 {
+			t.Fatalf("fragmented retirement exceeded bound: closed=%t ranges=%v recent=%v", observer.closed, observer.retiredIDs, observer.tombstones)
+		}
+		if _, _, err := observer.begin("tools/call"); !errors.Is(err, ErrObserverClosed) {
+			t.Fatalf("range exhaustion accepted more requests: %v", err)
+		}
+	})
+	t.Run("string_limit_and_invalid_numeric", func(t *testing.T) {
+		observer := NewObserver(WireLimits{MaxTombstones: 1})
+		defer observer.Close()
+		token, _, _ := observer.begin("tools/call")
+		for _, invalid := range []string{"9223372036854775808", "18446744073709551615", "-9223372036854775809"} {
+			if err := observer.observeFrame(wireRawIDRequest(invalid, token), true); err == nil {
+				t.Fatalf("out-of-int64 ID accepted: %s", invalid)
+			}
+		}
+		if err := observer.observeFrame(wireRawIDRequest(`"old"`, token), true); err != nil {
+			t.Fatal(err)
+		}
+		observer.finish(token)
+		token, _, _ = observer.begin("tools/call")
+		if err := observer.observeFrame(wireRequest(1, token, "tools/call"), true); err != nil {
+			t.Fatal(err)
+		}
+		observer.finish(token)
+		if !observer.closed {
+			t.Fatal("uncompactable string retirement evicted without closing")
+		}
+	})
+}
+
+type failingWireWriter struct {
+	target  io.WriteCloser
+	failure error
+	prefix  int
+	enabled atomic.Bool
+	writes  atomic.Int32
+}
+
+func (w *failingWireWriter) Write(p []byte) (int, error) {
+	if !w.enabled.Load() {
+		return w.target.Write(p)
+	}
+	w.writes.Add(1)
+	if w.prefix > 0 {
+		n, err := w.target.Write(p[:min(w.prefix, len(p))])
+		if err != nil {
+			return n, err
+		}
+		return n, w.failure
+	}
+	return 0, w.failure
+}
+
+func (w *failingWireWriter) Close() error { return w.target.Close() }
+
+func TestWireStdioPhysicalFailureIsTerminal(t *testing.T) {
+	for _, prefix := range []int{0, 3} {
+		t.Run(fmt.Sprint(prefix), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			server := wireTestServer()
+			var calls atomic.Int32
+			addWireTool(server, "write", func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+				calls.Add(1)
+				return &sdk.CallToolResult{Content: []sdk.Content{}}, nil
+			})
+			clientConn, serverConn := net.Pipe()
+			ss, err := server.Connect(ctx, &sdk.IOTransport{Reader: serverConn, Writer: serverConn}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ss.Close()
+			observer := NewObserver(WireLimits{})
+			defer observer.Close()
+			physicalErr := errors.New("fixture physical stdio failure")
+			writer := &failingWireWriter{target: clientConn, failure: physicalErr, prefix: prefix}
+			client := sdk.NewClient(&sdk.Implementation{Name: "write-failure", Version: "1"}, &sdk.ClientOptions{MultiRoundTrip: &sdk.MultiRoundTripOptions{Disabled: true}})
+			client.AddSendingMiddleware(observer.Middleware())
+			session, err := client.Connect(ctx, &sdk.IOTransport{Reader: observer.Reader(clientConn), Writer: observer.Writer(writer)}, &sdk.ClientSessionOptions{ProtocolVersion: "2026-07-28"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+			writer.enabled.Store(true)
+			callCtx, snapshot := observer.Track(t.Context())
+			_, err = session.CallTool(callCtx, &sdk.CallToolParams{Name: "write", Arguments: map[string]any{}})
+			if !errors.Is(err, physicalErr) || snapshot().Attempts != 1 || snapshot().ResponseReceived || calls.Load() != 0 {
+				t.Fatalf("physical failure lost unknown-dispatch facts: err=%v record=%+v calls=%d", err, snapshot(), calls.Load())
+			}
+			waited := make(chan error, 1)
+			go func() { waited <- session.Wait() }()
+			select {
+			case err := <-waited:
+				if !errors.Is(err, physicalErr) {
+					t.Fatalf("actual SDK session lost fatal write cause: %v", err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("actual IO failure did not end SDK session")
+			}
+			if _, err := session.CallTool(t.Context(), &sdk.CallToolParams{Name: "write", Arguments: map[string]any{}}); err == nil || writer.writes.Load() != 1 {
+				t.Fatalf("fatal IO failure retried physical send: err=%v writes=%d", err, writer.writes.Load())
+			}
+		})
+	}
+}
+
+func TestWireWriterDoesNotRecoverAfterAnyPhysicalBytes(t *testing.T) {
+	observer := NewObserver(WireLimits{})
+	defer observer.Close()
+	token, slot, _ := observer.begin("tools/call")
+	defer observer.finish(token)
+	slot.ctx = t.Context()
+	denied := errors.New("revoked")
+	slot.check = func(context.Context) error { return denied }
+	var target wireBufferCloser
+	writer := observer.Writer(&target)
+	frame := append([]byte("\n"), append(wireRequest(1, token, "tools/call"), '\n')...)
+	if n, err := writer.Write(frame); n != 1 || !errors.Is(err, denied) || target.String() != "\n" {
+		t.Fatalf("mixed write denial facts incorrect: n=%d err=%v physical=%q", n, err, target.String())
+	}
+	if _, err := writer.Write([]byte("\n")); !errors.Is(err, denied) || target.String() != "\n" {
+		t.Fatalf("writer recovered after partially delivered Write: err=%v physical=%q", err, target.String())
+	}
+}
+
+func TestWireWriterClearsDeniedPartialFrame(t *testing.T) {
+	observer := NewObserver(WireLimits{})
+	defer observer.Close()
+	token, slot, _ := observer.begin("tools/call")
+	slot.ctx = t.Context()
+	denied := errors.New("revoked")
+	slot.check = func(context.Context) error { return denied }
+	var target wireBufferCloser
+	writer := observer.Writer(&target)
+	frame := append(wireRequest(1, token, "tools/call"), '\n')
+	if n, err := writer.Write(frame[:10]); n != 10 || err != nil || target.Len() != 0 {
+		t.Fatalf("partial frame was delivered: n=%d err=%v physical=%q", n, err, target.String())
+	}
+	if n, err := writer.Write(frame[10:]); n != 0 || !errors.Is(err, denied) || target.Len() != 0 {
+		t.Fatalf("denied frame was delivered: n=%d err=%v physical=%q", n, err, target.String())
+	}
+	observer.finish(token)
+	token, _, _ = observer.begin("tools/call")
+	defer observer.finish(token)
+	allowed := append(wireRequest(2, token, "tools/call"), '\n')
+	if n, err := writer.Write(allowed); n != len(allowed) || err != nil || !bytes.Equal(target.Bytes(), allowed) {
+		t.Fatalf("denied bytes leaked into next frame: n=%d err=%v physical=%q", n, err, target.String())
 	}
 }

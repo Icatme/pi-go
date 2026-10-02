@@ -92,6 +92,10 @@ type OAuth struct {
 	snapshot CredentialSnapshot
 	invalid  bool
 	closed   bool
+	// Only the owning Connection installs this hook, before using the source.
+	// It fences terminal auth state while mu and gate still hide new tokens;
+	// it must not reenter OAuth, invoke host callbacks, or wait for Close.
+	onPublish func(OAuthState)
 	// The manager supplies an atomic credential/session publication boundary.
 	// Network requests and host callbacks always run outside that boundary.
 	commit func(context.Context, uint64, *OAuthCredential) (uint64, error)
@@ -106,7 +110,7 @@ func NewOAuth(ctx context.Context, key AuthKey, options OAuthOptions) (*OAuth, e
 		return nil, ErrOAuthConfiguration
 	}
 	var err error
-	key, err = authNormalizeKey(key, config)
+	key, err = authNormalizeKey(key, config, options.MetadataURL)
 	if err != nil {
 		return nil, err
 	}
@@ -139,8 +143,10 @@ func NewOAuth(ctx context.Context, key AuthKey, options OAuthOptions) (*OAuth, e
 	if err != nil {
 		return nil, authStoreError(err)
 	}
-	if snapshot.Credential != nil && authValidateCredential(key, snapshot.Credential) != nil {
-		return nil, ErrOAuthConfiguration
+	if snapshot.Credential != nil {
+		if authValidateCredential(key, snapshot.Credential) != nil || !authConfiguredClient(config, snapshot.Credential.ClientID) {
+			return nil, ErrOAuthConfiguration
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -153,9 +159,9 @@ func NewOAuth(ctx context.Context, key AuthKey, options OAuthOptions) (*OAuth, e
 	}, nil
 }
 
-// Key returns the canonical credential binding. For a dynamic registration with
-// no supplied ClientID, ClientID identifies the registration configuration; the
-// actual registered client is pinned separately in the persisted credential.
+// Key returns the canonical credential binding. For dynamic or multiple
+// configured registration methods, ClientID identifies the configuration; the
+// SDK-resolved client is pinned separately in the persisted credential.
 func (o *OAuth) Key() AuthKey { return o.key }
 
 func (o *OAuth) State() OAuthState {
@@ -227,9 +233,10 @@ func (o *OAuth) Authenticate(ctx context.Context) error {
 	client := *o.client
 	client.Transport = boundTransport
 	config.Client = &client
-	// A restored DCR client must be reused rather than registered again under a
-	// different client identity. The SDK's resolved client is captured below.
-	if previous.Credential != nil && strings.HasPrefix(o.key.ClientID, "registration:") {
+	// Reuse the actual SDK-resolved client, including a CIMD fallback. Changed
+	// AS capabilities must not select a different client or repeat registration.
+	if previous.Credential != nil {
+		config.ClientIDMetadataDocumentConfig = nil
 		config.DynamicClientRegistrationConfig = nil
 		config.PreregisteredClient = &oauthex.ClientCredentials{ClientID: previous.Credential.ClientID, Issuer: o.key.Issuer}
 		boundTransport.registeredClient = previous.Credential
@@ -271,7 +278,7 @@ func (o *OAuth) Authenticate(ctx context.Context) error {
 		if !boundTransport.matchesEndpoints(cfg.Endpoint) {
 			return nil, ErrOAuthConfiguration
 		}
-		if !strings.HasPrefix(o.key.ClientID, "registration:") && cfg.ClientID != o.key.ClientID {
+		if !authConfiguredClient(o.config, cfg.ClientID) {
 			return nil, ErrOAuthConfiguration
 		}
 		if previous.Credential != nil && cfg.ClientID != previous.Credential.ClientID {
@@ -398,7 +405,7 @@ func (o *OAuth) token(ctx context.Context) (*oauth2.Token, error) {
 	credential.RefreshPending = true
 	claimVersion, err := o.store.CompareAndSwap(ctx, o.key, previous.Version, credential)
 	if claimVersion != 0 {
-		o.publishSnapshot(claimVersion, credential)
+		o.publishRefreshClaim(claimVersion, credential)
 	}
 	if err != nil {
 		state := o.invalidate()
@@ -463,14 +470,30 @@ func (o *OAuth) publishSnapshot(version uint64, credential *OAuthCredential) OAu
 	defer o.mu.Unlock()
 	o.snapshot = CredentialSnapshot{Version: version, Credential: cloneOAuthCredential(credential)}
 	o.invalid = false
-	return o.stateLocked()
+	state := o.stateLocked()
+	if o.onPublish != nil {
+		o.onPublish(state)
+	}
+	return state
+}
+
+// A pending claim blocks refresh reuse without retiring a same-scope session.
+// Its terminal success or failure performs the connection publication fence.
+func (o *OAuth) publishRefreshClaim(version uint64, credential *OAuthCredential) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.snapshot = CredentialSnapshot{Version: version, Credential: cloneOAuthCredential(credential)}
+	o.invalid = false
 }
 
 func (o *OAuth) invalidate() OAuthState {
 	o.mu.Lock()
+	defer o.mu.Unlock()
 	o.invalid = true
 	state := o.stateLocked()
-	o.mu.Unlock()
+	if o.onPublish != nil {
+		o.onPublish(state)
+	}
 	return state
 }
 
@@ -555,7 +578,7 @@ func (o *OAuth) acquire(ctx context.Context) error {
 
 func (o *OAuth) release() { <-o.gate }
 
-func authNormalizeKey(key AuthKey, config auth.AuthorizationCodeHandlerConfig) (AuthKey, error) {
+func authNormalizeKey(key AuthKey, config auth.AuthorizationCodeHandlerConfig, metadataURL string) (AuthKey, error) {
 	if err := authValidateKeyFields(key, true); err != nil {
 		return key, err
 	}
@@ -569,8 +592,35 @@ func authNormalizeKey(key AuthKey, config auth.AuthorizationCodeHandlerConfig) (
 		return key, ErrOAuthConfiguration
 	}
 	key.Issuer = authCanonicalURL(u)
+	if config.ClientIDMetadataDocumentConfig != nil && !authValidKeyString(config.ClientIDMetadataDocumentConfig.URL, 4096) || config.PreregisteredClient != nil && !authValidKeyString(config.PreregisteredClient.ClientID, 4096) {
+		return key, ErrOAuthConfiguration
+	}
 	client := ""
-	if config.ClientIDMetadataDocumentConfig != nil {
+	methods := 0
+	for _, configured := range []bool{config.ClientIDMetadataDocumentConfig != nil, config.PreregisteredClient != nil, config.DynamicClientRegistrationConfig != nil} {
+		if configured {
+			methods++
+		}
+	}
+	if methods > 1 {
+		// Bind every fallback choice, discovery source and redirect to the
+		// resource/issuer tuple. The actual selected client remains separate.
+		binding := struct {
+			CIMD          *auth.ClientIDMetadataDocumentConfig  `json:"cimd,omitempty"`
+			Preregistered *oauthex.ClientCredentials            `json:"preregistered,omitempty"`
+			Dynamic       *auth.DynamicClientRegistrationConfig `json:"dynamic,omitempty"`
+			RedirectURL   string                                `json:"redirectUrl"`
+			MetadataURL   string                                `json:"metadataUrl"`
+			Resource      string                                `json:"resource"`
+			Issuer        string                                `json:"issuer"`
+		}{config.ClientIDMetadataDocumentConfig, config.PreregisteredClient, config.DynamicClientRegistrationConfig, config.RedirectURL, metadataURL, key.URL, key.Issuer}
+		data, err := json.Marshal(binding)
+		if err != nil {
+			return key, ErrOAuthConfiguration
+		}
+		digest := sha256.Sum256(data)
+		client = "registration:" + hex.EncodeToString(digest[:])
+	} else if config.ClientIDMetadataDocumentConfig != nil {
 		client = config.ClientIDMetadataDocumentConfig.URL
 	} else if config.PreregisteredClient != nil {
 		client = config.PreregisteredClient.ClientID
@@ -592,6 +642,22 @@ func authNormalizeKey(key AuthKey, config auth.AuthorizationCodeHandlerConfig) (
 		return key, err
 	}
 	return key, nil
+}
+
+// The SDK resolves registration using actual AS metadata. Static client IDs
+// must match configured choices; only configured DCR can supply a new ID.
+func authConfiguredClient(config auth.AuthorizationCodeHandlerConfig, clientID string) bool {
+	if !authValidKeyString(clientID, 4096) {
+		return false
+	}
+	if config.ClientIDMetadataDocumentConfig != nil && clientID == config.ClientIDMetadataDocumentConfig.URL {
+		return true
+	}
+	if config.PreregisteredClient != nil && clientID == config.PreregisteredClient.ClientID {
+		return true
+	}
+	// Preregistration always precedes DCR in the SDK's fallback order.
+	return config.PreregisteredClient == nil && config.DynamicClientRegistrationConfig != nil
 }
 
 func authEndpointURL(value string) (*url.URL, error) {
@@ -750,8 +816,8 @@ type authBoundedBody struct {
 }
 
 // authBoundTransport retains actual metadata bytes. Only discovery GETs for the
-// explicitly pinned issuer may be redirected to MetadataURL. Restored DCR token
-// requests retain their registered auth method; MCP requests are not rewritten
+// explicitly pinned issuer may be redirected to MetadataURL. Restored client
+// requests retain their resolved auth method; MCP requests are not rewritten
 // and no requests are retried here.
 type authBoundTransport struct {
 	base             http.RoundTripper

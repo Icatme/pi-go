@@ -37,6 +37,7 @@ type oauthFixture struct {
 	exchanges     atomic.Int32
 	refreshes     atomic.Int32
 	registrations atomic.Int32
+	cimd          atomic.Bool
 }
 
 func newOAuthFixture(t *testing.T) *oauthFixture {
@@ -65,6 +66,7 @@ func newOAuthFixture(t *testing.T) *oauthFixture {
 				Issuer: f.server.URL, AuthorizationEndpoint: f.server.URL + "/authorize", TokenEndpoint: f.server.URL + "/token", RegistrationEndpoint: f.server.URL + "/register",
 				CodeChallengeMethodsSupported: []string{"S256"}, ScopesSupported: []string{"read", "write", "offline_access"},
 				AuthorizationResponseIssParameterSupported: true, TokenEndpointAuthMethodsSupported: []string{"client_secret_post"},
+				ClientIDMetadataDocumentSupported: f.cimd.Load(),
 			})
 		case "/token":
 			if err := r.ParseForm(); err != nil {

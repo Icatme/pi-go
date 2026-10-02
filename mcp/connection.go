@@ -108,13 +108,6 @@ func connect(ctx context.Context, s ServerConfig, scope Scope, generation uint64
 			key.URL = s.URL
 			key.Identity = scope.Identity
 			options := *cloneOAuthOptions(s.OAuth)
-			hostChange := options.OnChange
-			options.OnChange = func(state OAuthState) {
-				c.authChanged(state)
-				if hostChange != nil {
-					hostChange(state)
-				}
-			}
 			o, err := NewOAuth(life, key, options)
 			if err != nil {
 				c.Close()
@@ -122,6 +115,7 @@ func connect(ctx context.Context, s ServerConfig, scope Scope, generation uint64
 			}
 			c.oauth = o
 			c.authState = o.State()
+			o.onPublish = c.authChanged
 			t.OAuthHandler = o.TokenOnlyHandler()
 		}
 		transport = t
@@ -223,8 +217,9 @@ func (c *Connection) authChanged(state OAuthState) {
 	changed := state.Authenticated != c.authState.Authenticated || !slices.Equal(oldScopes, newScopes)
 	c.authState = state
 	c.authState.GrantedScopes = newScopes
+	retire := changed && c.stale.CompareAndSwap(false, true)
 	c.authMu.Unlock()
-	if changed && c.stale.CompareAndSwap(false, true) {
+	if retire {
 		c.cancel()
 		// A token callback can run inside an SDK request. Do not wait for that
 		// same request's teardown while holding its token-source call stack.
