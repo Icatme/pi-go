@@ -72,6 +72,10 @@ type OAuthOptions struct {
 	Store CredentialStore
 	// OnChange is called after publication with a secret-free snapshot and no
 	// internal lock held. The host can invalidate or rebuild its MCP session.
+	// A connection fences dispatch until the callback returns or the session is
+	// canceled. On cancellation, the callback may finish after the request so it
+	// can wait for that same session's teardown without deadlocking the SDK.
+	// A panicking connection callback retires the session and rejects dispatch.
 	OnChange func(OAuthState)
 }
 
