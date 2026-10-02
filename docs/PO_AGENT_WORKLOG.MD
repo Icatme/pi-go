@@ -942,3 +942,49 @@
   50 open issues, titles 3/6/9, the guide and hiddenAbsent=true. No dependency/WASM
   upgrade, UI/live-provider acceptance, release, tag or merge is performed.
   Keep all three existing PRs layered.
+
+## 2026-10-02: Final review repairs for MCP delivery
+
+- Return conservative host/RunOptions diagnostic bounds even when source options
+  are invalid, and carry them through dynamic child resolution before returning
+  the error. No directory or VM runs for rejected source. Regress malformed,
+  invalid and oversized source through both RunToolCall and the next model
+  request, including an eight-byte host ceiling and a one-token option.
+- Share only the pinned QuickJS compilation cache for the process lifetime;
+  serialize cold compilation, while runtime imports, memory limits, VM state,
+  cancellation and Close remain independent. The macOS Intel CI timeout occurred
+  after ten cumulative minutes in the codemodetool package, with its stack in
+  repeated WASM compilation. Do not raise timeouts or weaken assertions. A local
+  five-creation benchmark, including the initial cold compile, changes from
+  257 ms/op to 56 ms/op; warmed creation is about 9 ms/op. Runtime isolation,
+  active-script cancellation, concurrent creation and linear memory caps pass
+  repeated Windows race tests.
+- Preserve the OAuth authorization endpoint's fixed query parameters, including
+  encoded, empty and repeated values, while requiring an unambiguous SDK-owned
+  authorization-code/PKCE query. Reject fixed collisions and duplicated OAuth
+  parameters before the host callback or token exchange. Real SDK control cases
+  that failed on the old wrapper now pass; no dependency or public API change.
+- Retain a POST SSE body's original non-EOF IO error in its own RPC slot before
+  the SDK replaces it with a generic termination error. Track whether that
+  body's matching result/error has arrived, so normal post-response cancellation
+  and drain cannot overwrite a completed RPC. GET/EOF handling keeps the SDK's
+  existing stream semantics. Real SDK/server controls preserve the error chain,
+  one actual side effect, concurrent/next calls and completed-response results.
+- After every waiting resource approval, recheck the actual scope, connection
+  and exposure before publication or ArtifactSink handoff. Rejection withholds
+  old text/structured data but retains completed remote-read facts. Regress real
+  Agent reads/lists/templates, sink side effects, identity/exposure changes,
+  reconnect, ABA and cancellation.
+- Capture a Manager configuration snapshot that includes every server slot,
+  including cold servers. Revalidate it before publishing the tool directory so
+  hidden names cannot survive in resource schemas. Snapshot accessors detach
+  configuration; slot replacement detects exposure/rule changes and ABA. An
+  in-flight configuration change rejects the old directory; a fresh explicit
+  Resolve uses the new policy without replaying any script.
+- The completed repair tree passes root/examples full ordinary and race tests,
+  vet, build, module verification, changed-Go formatting and diff checks on
+  Windows Go1.26.4, with GOWORK=off and live flags off. Newly built local examples
+  report 50 open issues, titles 3/6/9, the resource guide and hiddenAbsent=true.
+  OAuth and wire targeted race regressions also pass three iterations. Keep the
+  existing five-platform CI matrix for native validation of the updated PRs.
+  No dependency/WASM upgrade, UI/live-provider check, release, tag or merge.
