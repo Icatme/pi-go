@@ -923,13 +923,22 @@
   members mean cleanup is complete, while live members and inspection failures
   preserve the error. Add a native Darwin zombie-group regression and retain
   the existing supported descendant and reconnect contracts.
+- Preserve the first physical stdio write cause before the SDK closes the
+  transport. Reader-side close errors retain that cause and do not cancel the
+  logical context, so fatal IO still retires the session instead of being
+  mistaken for an unsent denial. A controlled real-SDK close ordering reproduces
+  the lost-cause failure on both zero-byte and partial writes without scheduler
+  retries; original call and session errors must retain the physical cause.
 - Permanent regressions reproduce the reviewed OAuth defects on the old
-  implementation and pass on the repair. Root/examples ordinary and full race
-  suites, vet, build, module verification, formatting and diff checks pass on
-  Windows Go1.26.4; the final MCP source also passes a separate full ordinary
-  and race run after the final writer cancellation fix. Native WSL2 Linux passes
-  the complete freshly compiled MCP binary. Both Darwin architectures compile;
-  native Darwin execution is delegated to the existing five-platform CI matrix.
-  Newly compiled local examples return 50 open issues, titles 3/6/9, the guide
-  and hiddenAbsent=true. No dependency/WASM upgrade, UI/live-provider acceptance,
-  release, tag or merge is performed. Keep all three existing PRs layered.
+  implementation and pass on the repair. After the final IO-cause correction,
+  root/examples full ordinary/race suites, vet, build, module verification,
+  formatting and diff checks pass on Windows Go1.26.4. The new PR17 parent also
+  independently passes all-package ordinary tests, MCP race, vet and build.
+  Native WSL2 Linux passes the complete freshly compiled MCP binary, controlled
+  physical-write regressions 100 times, and all wire tests three times. Native
+  macOS ARM/Intel CI passed MCP race and process/reconnect regressions on the
+  first repaired PR17 head, confirming the Darwin cleanup fix; the final branches
+  use the existing five-platform CI matrix. Newly compiled local examples return
+  50 open issues, titles 3/6/9, the guide and hiddenAbsent=true. No dependency/WASM
+  upgrade, UI/live-provider acceptance, release, tag or merge is performed.
+  Keep all three existing PRs layered.
