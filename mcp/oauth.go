@@ -1,0 +1,784 @@
+package mcp
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/auth"
+	"github.com/modelcontextprotocol/go-sdk/oauthex"
+	"golang.org/x/oauth2"
+)
+
+var (
+	ErrAuthRequired       = errors.New("MCP authentication required")
+	ErrOAuthClosed        = errors.New("MCP OAuth is closed")
+	ErrOAuthConfiguration = errors.New("invalid MCP OAuth configuration")
+	errOAuthAuthorization = errors.New("MCP OAuth authorization failed")
+	errOAuthRefresh       = &OAuthRefreshError{}
+)
+
+// AuthRequiredError reports an authentication challenge without exposing its
+// headers, response body, request URL or credentials. It never authorizes replay.
+type AuthRequiredError struct {
+	StatusCode int
+}
+
+func (*AuthRequiredError) Error() string { return ErrAuthRequired.Error() }
+func (*AuthRequiredError) Unwrap() error { return ErrAuthRequired }
+
+// OAuthRefreshError hides token endpoint response bodies and marks a refresh as
+// requiring explicit authentication. An ambiguous refresh is never repeated.
+type OAuthRefreshError struct{}
+
+func (*OAuthRefreshError) Error() string {
+	return "MCP OAuth token refresh failed; explicit authentication required"
+}
+func (*OAuthRefreshError) Unwrap() error { return ErrAuthRequired }
+
+// OAuthState is safe for host lifecycle decisions; it contains no credentials.
+// CredentialVersion changes after a successful login, refresh or clear.
+type OAuthState struct {
+	Authenticated     bool
+	CredentialVersion uint64
+	GrantedScopes     []string
+}
+
+// OAuthOptions leaves presentation, browser callbacks, server trust and secure
+// storage to the host. AuthorizationCodeFetcher must return code, state and iss
+// unchanged from the actual redirect. No browser or callback server is started.
+//
+// SDKConfig.Client, registration, redirect, ScopeFilter, RequestRefreshToken and
+// AcceptUnadvertisedIss are honored. InitialTokenSource and NewTokenSource are
+// owned by this adapter and must be nil. Configuration is copied on construction.
+type OAuthOptions struct {
+	SDKConfig auth.AuthorizationCodeHandlerConfig
+	// MetadataURL explicitly overrides authorization-server metadata discovery
+	// for the configured issuer. Real response bytes still pass SDK validation.
+	MetadataURL string
+	// Store defaults to a process-local MemoryCredentialStore.
+	Store CredentialStore
+	// OnChange is called after publication with a secret-free snapshot and no
+	// internal lock held. The host can invalidate or rebuild its MCP session.
+	OnChange func(OAuthState)
+}
+
+// OAuth manages one server/host-account/issuer/client credential binding. Login
+// is explicit; transports receive only TokenOnlyHandler, so a tools/call POST is
+// never retransmitted because authentication completed inside Authorize.
+type OAuth struct {
+	key      AuthKey
+	config   auth.AuthorizationCodeHandlerConfig
+	client   *http.Client
+	metadata string
+	store    CredentialStore
+	onChange func(OAuthState)
+	gate     chan struct{}
+	life     context.Context
+	cancel   context.CancelFunc
+	mu       sync.RWMutex
+	snapshot CredentialSnapshot
+	invalid  bool
+	closed   bool
+}
+
+func NewOAuth(ctx context.Context, key AuthKey, options OAuthOptions) (*OAuth, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	config := authCloneConfig(options.SDKConfig)
+	if config.InitialTokenSource != nil || config.NewTokenSource != nil || config.AuthorizationCodeFetcher == nil {
+		return nil, ErrOAuthConfiguration
+	}
+	var err error
+	key, err = authNormalizeKey(key, config)
+	if err != nil {
+		return nil, err
+	}
+	if options.MetadataURL != "" {
+		if _, err := authEndpointURL(options.MetadataURL); err != nil {
+			return nil, ErrOAuthConfiguration
+		}
+	}
+	if config.PreregisteredClient != nil {
+		if config.PreregisteredClient.Issuer != "" && strings.TrimSuffix(config.PreregisteredClient.Issuer, "/") != strings.TrimSuffix(key.Issuer, "/") {
+			return nil, ErrOAuthConfiguration
+		}
+		config.PreregisteredClient.Issuer = key.Issuer
+	}
+	if _, err := auth.NewAuthorizationCodeHandler(&config); err != nil {
+		return nil, ErrOAuthConfiguration
+	}
+	client := *config.Client
+	if client.Timeout == 0 {
+		client.Timeout = 30 * time.Second
+	}
+	// OAuth endpoints must not redirect requests containing client credentials.
+	// Hosts can provide their own transport for proxy/SSRF controls; redirects
+	// remain an explicit failure rather than credential forwarding or fallback.
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	if options.Store == nil {
+		options.Store = NewMemoryCredentialStore()
+	}
+	snapshot, err := options.Store.Load(ctx, key)
+	if err != nil {
+		return nil, authStoreError(err)
+	}
+	if snapshot.Credential != nil && authValidateCredential(key, snapshot.Credential) != nil {
+		return nil, ErrOAuthConfiguration
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	life, cancel := context.WithCancel(context.Background())
+	return &OAuth{
+		key: key, config: config, client: &client, metadata: options.MetadataURL,
+		store: options.Store, onChange: options.OnChange, gate: make(chan struct{}, 1),
+		life: life, cancel: cancel, snapshot: cloneCredentialSnapshot(snapshot),
+	}, nil
+}
+
+// Key returns the canonical credential binding. For a dynamic registration with
+// no supplied ClientID, ClientID identifies the registration configuration; the
+// actual registered client is pinned separately in the persisted credential.
+func (o *OAuth) Key() AuthKey { return o.key }
+
+func (o *OAuth) State() OAuthState {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.stateLocked()
+}
+
+func (o *OAuth) stateLocked() OAuthState {
+	state := OAuthState{CredentialVersion: o.snapshot.Version}
+	if o.snapshot.Credential != nil && !o.invalid && !o.closed {
+		state.Authenticated = true
+		state.GrantedScopes = append([]string(nil), o.snapshot.Credential.Scopes...)
+	}
+	return state
+}
+
+// Authenticate probes only the protected resource with GET and handles its
+// challenge using the SDK. It does not send, resume or repeat an MCP POST. The
+// host must call this outside tool execution, then connect a new MCP session.
+func (o *OAuth) Authenticate(ctx context.Context) error {
+	ctx, finish := o.context(ctx)
+	defer finish()
+	if err := o.acquire(ctx); err != nil {
+		return err
+	}
+	var changed *OAuthState
+	defer func() {
+		o.release()
+		if changed != nil {
+			o.notify(*changed)
+		}
+	}()
+	o.mu.RLock()
+	previous := cloneCredentialSnapshot(o.snapshot)
+	invalid := o.invalid
+	o.mu.RUnlock()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.key.URL, nil)
+	if err != nil {
+		return ErrOAuthConfiguration
+	}
+	if previous.Credential != nil && !invalid && previous.Credential.Token.Valid() {
+		previous.Credential.Token.SetAuthHeader(req)
+	}
+	resp, err := o.client.Do(req)
+	if err != nil {
+		return authFlowError(ctx, err)
+	}
+	resp.Body = &authBoundedBody{Reader: io.LimitReader(resp.Body, 1<<20), Closer: resp.Body}
+	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+		resp.Body.Close()
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 && previous.Credential != nil && !invalid {
+			return ctx.Err()
+		}
+		return &AuthRequiredError{StatusCode: resp.StatusCode}
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		challenges, err := oauthex.ParseWWWAuthenticate(resp.Header.Values("WWW-Authenticate"))
+		if err != nil || !authInsufficientScope(challenges) {
+			resp.Body.Close()
+			return &AuthRequiredError{StatusCode: resp.StatusCode}
+		}
+	}
+	config := authCloneConfig(o.config)
+	boundTransport := &authBoundTransport{base: o.client.Transport, issuer: o.key.Issuer, metadataURL: o.metadata}
+	if boundTransport.base == nil {
+		boundTransport.base = http.DefaultTransport
+	}
+	client := *o.client
+	client.Transport = boundTransport
+	config.Client = &client
+	// A restored DCR client must be reused rather than registered again under a
+	// different client identity. The SDK's resolved client is captured below.
+	if previous.Credential != nil && strings.HasPrefix(o.key.ClientID, "registration:") {
+		config.DynamicClientRegistrationConfig = nil
+		config.PreregisteredClient = &oauthex.ClientCredentials{ClientID: previous.Credential.ClientID, Issuer: o.key.Issuer}
+		if previous.Credential.ClientSecret != "" {
+			config.PreregisteredClient.ClientSecretAuth = &oauthex.ClientSecretAuth{ClientSecret: previous.Credential.ClientSecret}
+		}
+	}
+	var requested []string
+	filter := config.ScopeFilter
+	config.ScopeFilter = func(scopes []string) []string {
+		if filter != nil {
+			scopes = filter(append([]string(nil), scopes...))
+		}
+		if previous.Credential != nil {
+			scopes = authUnionScopes(previous.Credential.Scopes, scopes)
+		}
+		requested = append([]string(nil), scopes...)
+		return scopes
+	}
+	fetch := config.AuthorizationCodeFetcher
+	config.AuthorizationCodeFetcher = func(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
+		if !authValidScopes(requested) || !boundTransport.matchesAuthorization(args.URL) {
+			return nil, ErrOAuthConfiguration
+		}
+		result, err := fetch(ctx, args)
+		if err != nil {
+			return nil, authFlowError(ctx, err)
+		}
+		if result == nil || result.Code == "" {
+			return nil, errOAuthAuthorization
+		}
+		return result, nil // Preserve state and RFC 9207 iss for SDK validation.
+	}
+	var staged *OAuthCredential
+	config.NewTokenSource = func(_ context.Context, cfg *oauth2.Config, token *oauth2.Token) (oauth2.TokenSource, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !boundTransport.matchesEndpoints(cfg.Endpoint) {
+			return nil, ErrOAuthConfiguration
+		}
+		if !strings.HasPrefix(o.key.ClientID, "registration:") && cfg.ClientID != o.key.ClientID {
+			return nil, ErrOAuthConfiguration
+		}
+		if previous.Credential != nil && cfg.ClientID != previous.Credential.ClientID {
+			return nil, ErrOAuthConfiguration
+		}
+		scopes := append([]string(nil), cfg.Scopes...)
+		if granted, ok := token.Extra("scope").(string); ok {
+			scopes = strings.Fields(granted) // An explicit empty scope grants none.
+		}
+		staged = &OAuthCredential{
+			Binding: o.key, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret,
+			Endpoint: cfg.Endpoint, RedirectURL: cfg.RedirectURL, Scopes: authUnionScopes(nil, scopes), Token: token,
+		}
+		// oauth2.AuthStyleAutoDetect can retry a failed refresh POST using a
+		// second client-auth style. Persist the style actually used for the
+		// successful code exchange so refresh never performs that retry.
+		if staged.Endpoint.AuthStyle == oauth2.AuthStyleAutoDetect {
+			staged.Endpoint.AuthStyle = boundTransport.tokenStyle
+		}
+		if err := authValidateCredential(o.key, staged); err != nil {
+			return nil, err
+		}
+		return oauth2.StaticTokenSource(token), nil
+	}
+	handler, err := auth.NewAuthorizationCodeHandler(&config)
+	if err != nil {
+		resp.Body.Close()
+		return ErrOAuthConfiguration
+	}
+	if err := handler.Authorize(ctx, req, resp); err != nil {
+		return authFlowError(ctx, err)
+	}
+	if staged == nil {
+		return errOAuthAuthorization
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	version, err := o.store.CompareAndSwap(ctx, o.key, previous.Version, staged)
+	if err != nil {
+		return authStoreError(err)
+	}
+	o.mu.Lock()
+	o.snapshot = CredentialSnapshot{Version: version, Credential: cloneOAuthCredential(staged)}
+	o.invalid = false
+	state := o.stateLocked()
+	o.mu.Unlock()
+	changed = &state
+	return nil
+}
+
+// TokenOnlyHandler provides access tokens and rejects every challenge. Even a
+// read-only MCP POST is not automatically replayed: authentication is explicit.
+func (o *OAuth) TokenOnlyHandler() auth.OAuthHandler { return authTokenOnlyHandler{o} }
+
+func (o *OAuth) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.closed {
+		return nil, ErrOAuthClosed
+	}
+	if o.snapshot.Credential == nil || o.invalid {
+		return nil, ErrAuthRequired
+	}
+	return authContextTokenSource{o: o, ctx: ctx}, nil
+}
+
+type authTokenOnlyHandler struct{ o *OAuth }
+
+func (h authTokenOnlyHandler) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
+	return h.o.TokenSource(ctx)
+}
+
+func (authTokenOnlyHandler) Authorize(_ context.Context, _ *http.Request, resp *http.Response) error {
+	status := 0
+	if resp != nil {
+		status = resp.StatusCode
+		if resp.Body != nil {
+			resp.Body.Close()
+		}
+	}
+	return &AuthRequiredError{StatusCode: status}
+}
+
+type authContextTokenSource struct {
+	o   *OAuth
+	ctx context.Context
+}
+
+func (s authContextTokenSource) Token() (*oauth2.Token, error) { return s.o.token(s.ctx) }
+
+func (o *OAuth) token(ctx context.Context) (*oauth2.Token, error) {
+	ctx, finish := o.context(ctx)
+	defer finish()
+	if err := o.acquire(ctx); err != nil {
+		return nil, err
+	}
+	var changed *OAuthState
+	defer func() {
+		o.release()
+		if changed != nil {
+			o.notify(*changed)
+		}
+	}()
+	o.mu.RLock()
+	previous := cloneCredentialSnapshot(o.snapshot)
+	invalid := o.invalid
+	o.mu.RUnlock()
+	if previous.Credential == nil || invalid {
+		return nil, ErrAuthRequired
+	}
+	credential := previous.Credential
+	if credential.Token.Valid() {
+		return credential.Token, nil
+	}
+	if credential.Token.RefreshToken == "" {
+		state := o.invalidate()
+		changed = &state
+		return nil, ErrAuthRequired
+	}
+	cfg := &oauth2.Config{
+		ClientID: credential.ClientID, ClientSecret: credential.ClientSecret,
+		Endpoint: credential.Endpoint, RedirectURL: credential.RedirectURL,
+		Scopes: append([]string(nil), credential.Scopes...),
+	}
+	refreshCtx := context.WithValue(ctx, oauth2.HTTPClient, o.client)
+	token, err := cfg.TokenSource(refreshCtx, credential.Token).Token()
+	if err != nil {
+		// A refresh may have rotated its token remotely. Do not retry it after an
+		// ambiguous failure or cancellation, even if the stored token is unchanged.
+		state := o.invalidate()
+		changed = &state
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, errOAuthRefresh
+	}
+	if err := ctx.Err(); err != nil {
+		state := o.invalidate()
+		changed = &state
+		return nil, err
+	}
+	credential.Token = token
+	if granted, ok := token.Extra("scope").(string); ok {
+		credential.Scopes = authUnionScopes(nil, strings.Fields(granted))
+	}
+	if authValidateCredential(o.key, credential) != nil {
+		state := o.invalidate()
+		changed = &state
+		return nil, errOAuthRefresh
+	}
+	version, err := o.store.CompareAndSwap(ctx, o.key, previous.Version, credential)
+	if err != nil {
+		state := o.invalidate()
+		changed = &state
+		return nil, authStoreError(err)
+	}
+	o.mu.Lock()
+	o.snapshot = CredentialSnapshot{Version: version, Credential: cloneOAuthCredential(credential)}
+	state := o.stateLocked()
+	o.mu.Unlock()
+	changed = &state
+	return cloneOAuthCredential(credential).Token, nil
+}
+
+func (o *OAuth) invalidate() OAuthState {
+	o.mu.Lock()
+	o.invalid = true
+	state := o.stateLocked()
+	o.mu.Unlock()
+	return state
+}
+
+// Clear atomically tombstones this binding. Other server/account/client entries
+// remain intact. It does not revoke tokens at the remote authorization server.
+func (o *OAuth) Clear(ctx context.Context) error {
+	ctx, finish := o.context(ctx)
+	defer finish()
+	if err := o.acquire(ctx); err != nil {
+		return err
+	}
+	var changed *OAuthState
+	defer func() {
+		o.release()
+		if changed != nil {
+			o.notify(*changed)
+		}
+	}()
+	o.mu.RLock()
+	previous := o.snapshot.Version
+	o.mu.RUnlock()
+	version, err := o.store.CompareAndSwap(ctx, o.key, previous, nil)
+	if err != nil {
+		return authStoreError(err)
+	}
+	o.mu.Lock()
+	o.snapshot = CredentialSnapshot{Version: version}
+	o.invalid = false
+	state := o.stateLocked()
+	o.mu.Unlock()
+	changed = &state
+	return nil
+}
+
+func (o *OAuth) Close() error {
+	o.mu.Lock()
+	if o.closed {
+		o.mu.Unlock()
+		return nil
+	}
+	o.closed = true
+	o.mu.Unlock()
+	o.cancel()
+	return nil
+}
+
+func (o *OAuth) notify(state OAuthState) {
+	if o.onChange != nil {
+		o.onChange(state)
+	}
+}
+
+func (o *OAuth) context(ctx context.Context) (context.Context, func()) {
+	child, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(o.life, cancel)
+	return child, func() { stop(); cancel() }
+}
+
+func (o *OAuth) acquire(ctx context.Context) error {
+	select {
+	case o.gate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	o.mu.RLock()
+	closed := o.closed
+	o.mu.RUnlock()
+	if closed || ctx.Err() != nil {
+		o.release()
+		if closed {
+			return ErrOAuthClosed
+		}
+		return ctx.Err()
+	}
+	return nil
+}
+
+func (o *OAuth) release() { <-o.gate }
+
+func authNormalizeKey(key AuthKey, config auth.AuthorizationCodeHandlerConfig) (AuthKey, error) {
+	if err := authValidateKeyFields(key, true); err != nil {
+		return key, err
+	}
+	u, err := authEndpointURL(key.URL)
+	if err != nil || u.RawQuery != "" {
+		return key, ErrOAuthConfiguration
+	}
+	key.URL = authCanonicalURL(u)
+	u, err = authEndpointURL(key.Issuer)
+	if err != nil || u.RawQuery != "" {
+		return key, ErrOAuthConfiguration
+	}
+	key.Issuer = authCanonicalURL(u)
+	client := ""
+	if config.ClientIDMetadataDocumentConfig != nil {
+		client = config.ClientIDMetadataDocumentConfig.URL
+	} else if config.PreregisteredClient != nil {
+		client = config.PreregisteredClient.ClientID
+	} else if config.DynamicClientRegistrationConfig != nil {
+		data, err := json.Marshal(config.DynamicClientRegistrationConfig)
+		if err != nil {
+			return key, ErrOAuthConfiguration
+		}
+		digest := sha256.Sum256(data)
+		client = "registration:" + hex.EncodeToString(digest[:])
+	}
+	if key.ClientID == "" {
+		key.ClientID = client
+	}
+	if key.ClientID == "" || key.ClientID != client {
+		return key, ErrOAuthConfiguration
+	}
+	if err := authValidateKeyFields(key, false); err != nil {
+		return key, err
+	}
+	return key, nil
+}
+
+func authEndpointURL(value string) (*url.URL, error) {
+	if !authValidKeyString(value, 4096) {
+		return nil, ErrOAuthConfiguration
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return nil, ErrOAuthConfiguration
+	}
+	if u.Scheme == "http" {
+		ip := net.ParseIP(u.Hostname())
+		if !strings.EqualFold(u.Hostname(), "localhost") && (ip == nil || !ip.IsLoopback()) {
+			return nil, ErrOAuthConfiguration
+		}
+	}
+	return u, nil
+}
+
+func authCanonicalURL(u *url.URL) string {
+	copyURL := *u
+	copyURL.Scheme = strings.ToLower(copyURL.Scheme)
+	copyURL.Host = strings.ToLower(copyURL.Host)
+	if (copyURL.Scheme == "https" && copyURL.Port() == "443") || (copyURL.Scheme == "http" && copyURL.Port() == "80") {
+		copyURL.Host = copyURL.Hostname()
+		if strings.Contains(copyURL.Host, ":") {
+			copyURL.Host = "[" + copyURL.Host + "]"
+		}
+	}
+	return copyURL.String()
+}
+
+func authValidateCredential(key AuthKey, credential *OAuthCredential) error {
+	if credential.Binding != key || credential.ClientID == "" || credential.Token == nil || credential.Token.AccessToken == "" || !authValidScopes(credential.Scopes) {
+		return ErrOAuthConfiguration
+	}
+	if !strings.HasPrefix(key.ClientID, "registration:") && credential.ClientID != key.ClientID {
+		return ErrOAuthConfiguration
+	}
+	if _, err := authEndpointURL(credential.Endpoint.AuthURL); err != nil {
+		return err
+	}
+	if _, err := authEndpointURL(credential.Endpoint.TokenURL); err != nil {
+		return err
+	}
+	if credential.Endpoint.AuthStyle != oauth2.AuthStyleInHeader && credential.Endpoint.AuthStyle != oauth2.AuthStyleInParams {
+		return ErrOAuthConfiguration
+	}
+	return nil
+}
+
+func authCloneConfig(config auth.AuthorizationCodeHandlerConfig) auth.AuthorizationCodeHandlerConfig {
+	if config.ClientIDMetadataDocumentConfig != nil {
+		value := *config.ClientIDMetadataDocumentConfig
+		config.ClientIDMetadataDocumentConfig = &value
+	}
+	if config.PreregisteredClient != nil {
+		value := *config.PreregisteredClient
+		if value.ClientSecretAuth != nil {
+			secret := *value.ClientSecretAuth
+			value.ClientSecretAuth = &secret
+		}
+		config.PreregisteredClient = &value
+	}
+	if config.DynamicClientRegistrationConfig != nil {
+		value := *config.DynamicClientRegistrationConfig
+		if value.Metadata != nil {
+			metadata := *value.Metadata
+			metadata.RedirectURIs = append([]string(nil), metadata.RedirectURIs...)
+			metadata.GrantTypes = append([]string(nil), metadata.GrantTypes...)
+			metadata.ResponseTypes = append([]string(nil), metadata.ResponseTypes...)
+			metadata.Contacts = append([]string(nil), metadata.Contacts...)
+			value.Metadata = &metadata
+		}
+		config.DynamicClientRegistrationConfig = &value
+	}
+	return config
+}
+
+func authUnionScopes(existing, requested []string) []string {
+	result := append(append([]string(nil), existing...), requested...)
+	slices.Sort(result)
+	return slices.Compact(result)
+}
+
+func authValidScopes(scopes []string) bool {
+	for _, scope := range scopes {
+		if scope == "" {
+			return false
+		}
+		for _, value := range []byte(scope) {
+			if value < 0x21 || value == '"' || value == '\\' || value > 0x7e {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func authInsufficientScope(challenges []oauthex.Challenge) bool {
+	for _, challenge := range challenges {
+		if challenge.Scheme == "bearer" && challenge.Params["error"] == "insufficient_scope" {
+			return true
+		}
+	}
+	return false
+}
+
+func authFlowError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	for _, public := range []error{context.Canceled, context.DeadlineExceeded, ErrOAuthConfiguration, ErrAuthRequired} {
+		if errors.Is(err, public) {
+			return public
+		}
+	}
+	// SDK token endpoint errors may include the response body. Keep that data
+	// out of returned error strings and default traces.
+	return errOAuthAuthorization
+}
+
+func authStoreError(err error) error {
+	for _, public := range []error{context.Canceled, context.DeadlineExceeded, ErrOAuthCredentialConflict, ErrOAuthStoreBusy} {
+		if errors.Is(err, public) {
+			return public
+		}
+	}
+	return errOAuthStore
+}
+
+type authBoundedBody struct {
+	io.Reader
+	io.Closer
+}
+
+// authBoundTransport retains actual metadata bytes. Only discovery GETs for the
+// explicitly pinned issuer may be redirected to MetadataURL; token requests and
+// MCP wire requests are never rewritten or retried here.
+type authBoundTransport struct {
+	base        http.RoundTripper
+	issuer      string
+	metadataURL string
+	metadata    *oauthex.AuthServerMeta
+	tokenStyle  oauth2.AuthStyle
+}
+
+func (t *authBoundTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == http.MethodPost {
+		tokenURL := t.issuer + "/token"
+		if t.metadata != nil {
+			tokenURL = t.metadata.TokenEndpoint
+		}
+		if req.URL.String() == tokenURL {
+			t.tokenStyle = oauth2.AuthStyleInParams
+			if req.Header.Get("Authorization") != "" {
+				t.tokenStyle = oauth2.AuthStyleInHeader
+			}
+		}
+	}
+	isMetadata := req.Method == http.MethodGet && (strings.Contains(req.URL.Path, "/.well-known/oauth-authorization-server") || strings.Contains(req.URL.Path, "/.well-known/openid-configuration"))
+	if !isMetadata {
+		return t.base.RoundTrip(req)
+	}
+	if !slices.Contains(authMetadataURLs(t.issuer), req.URL.String()) {
+		return nil, ErrOAuthConfiguration
+	}
+	if t.metadataURL != "" {
+		clone := req.Clone(req.Context())
+		clone.URL, _ = url.Parse(t.metadataURL)
+		clone.Host = ""
+		req = clone
+	}
+	resp, err := t.base.RoundTrip(req)
+	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return resp, err
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	resp.Body.Close()
+	if err != nil || len(data) > 1<<20 {
+		return nil, ErrOAuthConfiguration
+	}
+	var metadata oauthex.AuthServerMeta
+	if json.Unmarshal(data, &metadata) != nil || strings.TrimSuffix(metadata.Issuer, "/") != strings.TrimSuffix(t.issuer, "/") {
+		return nil, ErrOAuthConfiguration
+	}
+	t.metadata = &metadata
+	resp.Body = io.NopCloser(bytes.NewReader(data))
+	return resp, nil
+}
+
+func (t *authBoundTransport) matchesAuthorization(value string) bool {
+	u, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+	u.RawQuery = ""
+	if t.metadata != nil {
+		return u.String() == t.metadata.AuthorizationEndpoint
+	}
+	return u.String() == t.issuer+"/authorize"
+}
+
+func (t *authBoundTransport) matchesEndpoints(endpoint oauth2.Endpoint) bool {
+	if t.metadata != nil {
+		return endpoint.AuthURL == t.metadata.AuthorizationEndpoint && endpoint.TokenURL == t.metadata.TokenEndpoint
+	}
+	return endpoint.AuthURL == t.issuer+"/authorize" && endpoint.TokenURL == t.issuer+"/token"
+}
+
+func authMetadataURLs(issuer string) []string {
+	u, _ := url.Parse(issuer)
+	if u.Path == "" {
+		u.Path = "/.well-known/oauth-authorization-server"
+		first := u.String()
+		u.Path = "/.well-known/openid-configuration"
+		return []string{first, u.String()}
+	}
+	path := u.Path
+	u.Path = "/.well-known/oauth-authorization-server/" + strings.TrimLeft(path, "/")
+	first := u.String()
+	u.Path = "/.well-known/openid-configuration/" + strings.TrimLeft(path, "/")
+	second := u.String()
+	u.Path = "/" + strings.Trim(path, "/") + "/.well-known/openid-configuration"
+	return []string{first, second, u.String()}
+}
