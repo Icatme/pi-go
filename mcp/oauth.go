@@ -26,7 +26,6 @@ var (
 	ErrOAuthClosed        = errors.New("MCP OAuth is closed")
 	ErrOAuthConfiguration = errors.New("invalid MCP OAuth configuration")
 	errOAuthAuthorization = errors.New("MCP OAuth authorization failed")
-	errOAuthRefresh       = &OAuthRefreshError{}
 )
 
 // AuthRequiredError reports an authentication challenge without exposing its
@@ -40,15 +39,17 @@ func (*AuthRequiredError) Unwrap() error { return ErrAuthRequired }
 
 // OAuthRefreshError hides token endpoint response bodies and marks a refresh as
 // requiring explicit authentication. An ambiguous refresh is never repeated.
-type OAuthRefreshError struct{}
+type OAuthRefreshError struct{ cause error }
 
 func (*OAuthRefreshError) Error() string {
 	return "MCP OAuth token refresh failed; explicit authentication required"
 }
-func (*OAuthRefreshError) Unwrap() error { return ErrAuthRequired }
+func (e *OAuthRefreshError) Unwrap() error      { return e.cause }
+func (*OAuthRefreshError) Is(target error) bool { return target == ErrAuthRequired }
 
 // OAuthState is safe for host lifecycle decisions; it contains no credentials.
-// CredentialVersion changes after a successful login, refresh or clear.
+// CredentialVersion changes after login, clear, and each durable refresh claim
+// or completion. A successful refresh advances the version twice.
 type OAuthState struct {
 	Authenticated     bool
 	CredentialVersion uint64
@@ -91,6 +92,9 @@ type OAuth struct {
 	snapshot CredentialSnapshot
 	invalid  bool
 	closed   bool
+	// The manager supplies an atomic credential/session publication boundary.
+	// Network requests and host callbacks always run outside that boundary.
+	commit func(context.Context, uint64, *OAuthCredential) (uint64, error)
 }
 
 func NewOAuth(ctx context.Context, key AuthKey, options OAuthOptions) (*OAuth, error) {
@@ -162,7 +166,7 @@ func (o *OAuth) State() OAuthState {
 
 func (o *OAuth) stateLocked() OAuthState {
 	state := OAuthState{CredentialVersion: o.snapshot.Version}
-	if o.snapshot.Credential != nil && !o.invalid && !o.closed {
+	if o.snapshot.Credential != nil && !o.snapshot.Credential.RefreshPending && !o.invalid && !o.closed {
 		state.Authenticated = true
 		state.GrantedScopes = append([]string(nil), o.snapshot.Credential.Scopes...)
 	}
@@ -187,7 +191,7 @@ func (o *OAuth) Authenticate(ctx context.Context) error {
 	}()
 	o.mu.RLock()
 	previous := cloneCredentialSnapshot(o.snapshot)
-	invalid := o.invalid
+	invalid := o.invalid || previous.Credential != nil && previous.Credential.RefreshPending
 	o.mu.RUnlock()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.key.URL, nil)
 	if err != nil {
@@ -228,6 +232,7 @@ func (o *OAuth) Authenticate(ctx context.Context) error {
 	if previous.Credential != nil && strings.HasPrefix(o.key.ClientID, "registration:") {
 		config.DynamicClientRegistrationConfig = nil
 		config.PreregisteredClient = &oauthex.ClientCredentials{ClientID: previous.Credential.ClientID, Issuer: o.key.Issuer}
+		boundTransport.registeredClient = previous.Credential
 		if previous.Credential.ClientSecret != "" {
 			config.PreregisteredClient.ClientSecretAuth = &oauthex.ClientSecretAuth{ClientSecret: previous.Credential.ClientSecret}
 		}
@@ -278,14 +283,13 @@ func (o *OAuth) Authenticate(ctx context.Context) error {
 		}
 		staged = &OAuthCredential{
 			Binding: o.key, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret,
-			Endpoint: cfg.Endpoint, RedirectURL: cfg.RedirectURL, Scopes: authUnionScopes(nil, scopes), Token: token,
+			Endpoint: cfg.Endpoint, Resource: boundTransport.resource, RedirectURL: cfg.RedirectURL,
+			Scopes: authUnionScopes(nil, scopes), Token: token,
 		}
 		// oauth2.AuthStyleAutoDetect can retry a failed refresh POST using a
 		// second client-auth style. Persist the style actually used for the
 		// successful code exchange so refresh never performs that retry.
-		if staged.Endpoint.AuthStyle == oauth2.AuthStyleAutoDetect {
-			staged.Endpoint.AuthStyle = boundTransport.tokenStyle
-		}
+		staged.Endpoint.AuthStyle = boundTransport.tokenStyle
 		if err := authValidateCredential(o.key, staged); err != nil {
 			return nil, err
 		}
@@ -305,16 +309,14 @@ func (o *OAuth) Authenticate(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	version, err := o.store.CompareAndSwap(ctx, o.key, previous.Version, staged)
+	version, err := o.commitCredential(ctx, previous.Version, staged)
+	if version != 0 {
+		state := o.publishSnapshot(version, staged)
+		changed = &state
+	}
 	if err != nil {
 		return authStoreError(err)
 	}
-	o.mu.Lock()
-	o.snapshot = CredentialSnapshot{Version: version, Credential: cloneOAuthCredential(staged)}
-	o.invalid = false
-	state := o.stateLocked()
-	o.mu.Unlock()
-	changed = &state
 	return nil
 }
 
@@ -331,7 +333,7 @@ func (o *OAuth) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 	if o.closed {
 		return nil, ErrOAuthClosed
 	}
-	if o.snapshot.Credential == nil || o.invalid {
+	if o.snapshot.Credential == nil || o.snapshot.Credential.RefreshPending || o.invalid {
 		return nil, ErrAuthRequired
 	}
 	return authContextTokenSource{o: o, ctx: ctx}, nil
@@ -378,7 +380,7 @@ func (o *OAuth) token(ctx context.Context) (*oauth2.Token, error) {
 	previous := cloneCredentialSnapshot(o.snapshot)
 	invalid := o.invalid
 	o.mu.RUnlock()
-	if previous.Credential == nil || invalid {
+	if previous.Credential == nil || previous.Credential.RefreshPending || invalid {
 		return nil, ErrAuthRequired
 	}
 	credential := previous.Credential
@@ -390,12 +392,31 @@ func (o *OAuth) token(ctx context.Context) (*oauth2.Token, error) {
 		changed = &state
 		return nil, ErrAuthRequired
 	}
+	// Claim before any physical refresh POST. CAS makes independent OAuth
+	// objects and processes contend before sending, rather than discovering a
+	// conflict only after both have consumed the same remote refresh token.
+	credential.RefreshPending = true
+	claimVersion, err := o.store.CompareAndSwap(ctx, o.key, previous.Version, credential)
+	if claimVersion != 0 {
+		o.publishSnapshot(claimVersion, credential)
+	}
+	if err != nil {
+		state := o.invalidate()
+		changed = &state
+		return nil, authStoreError(err)
+	}
 	cfg := &oauth2.Config{
 		ClientID: credential.ClientID, ClientSecret: credential.ClientSecret,
 		Endpoint: credential.Endpoint, RedirectURL: credential.RedirectURL,
 		Scopes: append([]string(nil), credential.Scopes...),
 	}
-	refreshCtx := context.WithValue(ctx, oauth2.HTTPClient, o.client)
+	refreshClient := *o.client
+	base := refreshClient.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	refreshClient.Transport = authRefreshTransport{base: base, endpoint: credential.Endpoint.TokenURL, resource: credential.Resource}
+	refreshCtx := context.WithValue(ctx, oauth2.HTTPClient, &refreshClient)
 	token, err := cfg.TokenSource(refreshCtx, credential.Token).Token()
 	if err != nil {
 		// A refresh may have rotated its token remotely. Do not retry it after an
@@ -403,36 +424,46 @@ func (o *OAuth) token(ctx context.Context) (*oauth2.Token, error) {
 		state := o.invalidate()
 		changed = &state
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			err = errors.Join(ctx.Err(), err)
 		}
-		return nil, errOAuthRefresh
+		return nil, &OAuthRefreshError{cause: err}
 	}
 	if err := ctx.Err(); err != nil {
 		state := o.invalidate()
 		changed = &state
-		return nil, err
+		return nil, &OAuthRefreshError{cause: err}
 	}
 	credential.Token = token
+	credential.RefreshPending = false
 	if granted, ok := token.Extra("scope").(string); ok {
 		credential.Scopes = authUnionScopes(nil, strings.Fields(granted))
 	}
-	if authValidateCredential(o.key, credential) != nil {
+	if err := authValidateCredential(o.key, credential); err != nil {
 		state := o.invalidate()
 		changed = &state
-		return nil, errOAuthRefresh
+		return nil, &OAuthRefreshError{cause: err}
 	}
-	version, err := o.store.CompareAndSwap(ctx, o.key, previous.Version, credential)
-	if err != nil {
-		state := o.invalidate()
+	version, err := o.store.CompareAndSwap(ctx, o.key, claimVersion, credential)
+	if version != 0 {
+		state := o.publishSnapshot(version, credential)
 		changed = &state
+	}
+	if err != nil {
+		if version == 0 {
+			state := o.invalidate()
+			changed = &state
+		}
 		return nil, authStoreError(err)
 	}
-	o.mu.Lock()
-	o.snapshot = CredentialSnapshot{Version: version, Credential: cloneOAuthCredential(credential)}
-	state := o.stateLocked()
-	o.mu.Unlock()
-	changed = &state
 	return cloneOAuthCredential(credential).Token, nil
+}
+
+func (o *OAuth) publishSnapshot(version uint64, credential *OAuthCredential) OAuthState {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.snapshot = CredentialSnapshot{Version: version, Credential: cloneOAuthCredential(credential)}
+	o.invalid = false
+	return o.stateLocked()
 }
 
 func (o *OAuth) invalidate() OAuthState {
@@ -461,17 +492,22 @@ func (o *OAuth) Clear(ctx context.Context) error {
 	o.mu.RLock()
 	previous := o.snapshot.Version
 	o.mu.RUnlock()
-	version, err := o.store.CompareAndSwap(ctx, o.key, previous, nil)
+	version, err := o.commitCredential(ctx, previous, nil)
+	if version != 0 {
+		state := o.publishSnapshot(version, nil)
+		changed = &state
+	}
 	if err != nil {
 		return authStoreError(err)
 	}
-	o.mu.Lock()
-	o.snapshot = CredentialSnapshot{Version: version}
-	o.invalid = false
-	state := o.stateLocked()
-	o.mu.Unlock()
-	changed = &state
 	return nil
+}
+
+func (o *OAuth) commitCredential(ctx context.Context, version uint64, credential *OAuthCredential) (uint64, error) {
+	if o.commit != nil {
+		return o.commit(ctx, version, credential)
+	}
+	return o.store.CompareAndSwap(ctx, o.key, version, credential)
 }
 
 func (o *OAuth) Close() error {
@@ -601,6 +637,16 @@ func authValidateCredential(key AuthKey, credential *OAuthCredential) error {
 	if _, err := authEndpointURL(credential.Endpoint.TokenURL); err != nil {
 		return err
 	}
+	resource, err := authEndpointURL(credential.Resource)
+	if err != nil || resource.RawQuery != "" {
+		return ErrOAuthConfiguration
+	}
+	server, _ := url.Parse(key.URL)
+	root := *server
+	root.Path, root.RawPath = "", ""
+	if authCanonicalURL(resource) != key.URL && authCanonicalURL(resource) != authCanonicalURL(&root) {
+		return ErrOAuthConfiguration
+	}
 	if credential.Endpoint.AuthStyle != oauth2.AuthStyleInHeader && credential.Endpoint.AuthStyle != oauth2.AuthStyleInParams {
 		return ErrOAuthConfiguration
 	}
@@ -666,26 +712,37 @@ func authInsufficientScope(challenges []oauthex.Challenge) bool {
 
 func authFlowError(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return &authPrivateError{public: ctx.Err(), cause: errors.Join(ctx.Err(), err)}
 	}
 	for _, public := range []error{context.Canceled, context.DeadlineExceeded, ErrOAuthConfiguration, ErrAuthRequired} {
 		if errors.Is(err, public) {
-			return public
+			return &authPrivateError{public: public, cause: err}
 		}
 	}
 	// SDK token endpoint errors may include the response body. Keep that data
 	// out of returned error strings and default traces.
-	return errOAuthAuthorization
+	return &authPrivateError{public: errOAuthAuthorization, cause: err}
 }
 
 func authStoreError(err error) error {
-	for _, public := range []error{context.Canceled, context.DeadlineExceeded, ErrOAuthCredentialConflict, ErrOAuthStoreBusy} {
+	for _, public := range []error{context.Canceled, context.DeadlineExceeded, ErrOAuthCredentialConflict, ErrOAuthStoreBusy, ErrStale, ErrClosed} {
 		if errors.Is(err, public) {
-			return public
+			return &authPrivateError{public: public, cause: err}
 		}
 	}
-	return errOAuthStore
+	return &authPrivateError{public: errOAuthStore, cause: err}
 }
+
+// Public error strings are safe for ordinary logs and tool projection. The
+// original SDK/store/host error remains available to explicit host inspection.
+type authPrivateError struct {
+	public error
+	cause  error
+}
+
+func (e *authPrivateError) Error() string        { return e.public.Error() }
+func (e *authPrivateError) Unwrap() error        { return e.cause }
+func (e *authPrivateError) Is(target error) bool { return errors.Is(e.public, target) }
 
 type authBoundedBody struct {
 	io.Reader
@@ -693,14 +750,17 @@ type authBoundedBody struct {
 }
 
 // authBoundTransport retains actual metadata bytes. Only discovery GETs for the
-// explicitly pinned issuer may be redirected to MetadataURL; token requests and
-// MCP wire requests are never rewritten or retried here.
+// explicitly pinned issuer may be redirected to MetadataURL. Restored DCR token
+// requests retain their registered auth method; MCP requests are not rewritten
+// and no requests are retried here.
 type authBoundTransport struct {
-	base        http.RoundTripper
-	issuer      string
-	metadataURL string
-	metadata    *oauthex.AuthServerMeta
-	tokenStyle  oauth2.AuthStyle
+	base             http.RoundTripper
+	issuer           string
+	metadataURL      string
+	metadata         *oauthex.AuthServerMeta
+	tokenStyle       oauth2.AuthStyle
+	resource         string
+	registeredClient *OAuthCredential
 }
 
 func (t *authBoundTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -710,6 +770,11 @@ func (t *authBoundTransport) RoundTrip(req *http.Request) (*http.Response, error
 			tokenURL = t.metadata.TokenEndpoint
 		}
 		if req.URL.String() == tokenURL {
+			var err error
+			req, t.resource, err = authTokenRequest(req, t.registeredClient, "")
+			if err != nil {
+				return nil, err
+			}
 			t.tokenStyle = oauth2.AuthStyleInParams
 			if req.Header.Get("Authorization") != "" {
 				t.tokenStyle = oauth2.AuthStyleInHeader
@@ -745,6 +810,78 @@ func (t *authBoundTransport) RoundTrip(req *http.Request) (*http.Response, error
 	t.metadata = &metadata
 	resp.Body = io.NopCloser(bytes.NewReader(data))
 	return resp, nil
+}
+
+// Keep refresh form generation and response handling in oauth2. The adapter
+// supplies the SDK-validated resource identifier, which Config.TokenSource
+// cannot express. No token response or metadata is fabricated or replayed.
+type authRefreshTransport struct {
+	base     http.RoundTripper
+	endpoint string
+	resource string
+}
+
+func (t authRefreshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method != http.MethodPost || req.URL.String() != t.endpoint {
+		return nil, ErrOAuthConfiguration
+	}
+	rewritten, _, err := authTokenRequest(req, nil, t.resource)
+	if err != nil {
+		return nil, err
+	}
+	return t.base.RoundTrip(rewritten)
+}
+
+func authTokenRequest(req *http.Request, registered *OAuthCredential, resource string) (*http.Request, string, error) {
+	if req.Body == nil {
+		return nil, "", ErrOAuthConfiguration
+	}
+	data, readErr := io.ReadAll(io.LimitReader(req.Body, (1<<20)+1))
+	closeErr := req.Body.Close()
+	if err := errors.Join(readErr, closeErr); err != nil {
+		return nil, "", &authPrivateError{public: ErrOAuthConfiguration, cause: err}
+	}
+	if len(data) > 1<<20 {
+		return nil, "", ErrOAuthConfiguration
+	}
+	form, err := url.ParseQuery(string(data))
+	if err != nil {
+		return nil, "", &authPrivateError{public: ErrOAuthConfiguration, cause: err}
+	}
+	if resource != "" {
+		if form.Get("grant_type") != "refresh_token" {
+			return nil, "", ErrOAuthConfiguration
+		}
+		form.Set("resource", resource)
+	}
+	clone := req.Clone(req.Context())
+	clone.Header = req.Header.Clone()
+	if registered != nil {
+		// The SDK's preregistered-client API cannot select a per-client auth
+		// method. Enforce the previously registered method on the real token
+		// request while retaining its unchanged authorization-server metadata.
+		switch registered.Endpoint.AuthStyle {
+		case oauth2.AuthStyleInHeader:
+			form.Del("client_id")
+			form.Del("client_secret")
+			clone.SetBasicAuth(url.QueryEscape(registered.ClientID), url.QueryEscape(registered.ClientSecret))
+		case oauth2.AuthStyleInParams:
+			clone.Header.Del("Authorization")
+			form.Set("client_id", registered.ClientID)
+			if registered.ClientSecret != "" {
+				form.Set("client_secret", registered.ClientSecret)
+			} else {
+				form.Del("client_secret")
+			}
+		default:
+			return nil, "", ErrOAuthConfiguration
+		}
+	}
+	body := form.Encode()
+	clone.Body = io.NopCloser(strings.NewReader(body))
+	clone.ContentLength = int64(len(body))
+	clone.GetBody = nil
+	return clone, form.Get("resource"), nil
 }
 
 func (t *authBoundTransport) matchesAuthorization(value string) bool {

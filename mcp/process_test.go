@@ -33,13 +33,21 @@ func TestManagedProcessFixture(t *testing.T) {
 		}
 		_ = session.Wait()
 		os.Exit(0)
-	case "tree_parent":
+	case "tree_parent", "tree_parent_exit":
 		cmd := exec.Command(os.Args[0], "-test.run=^TestManagedProcessFixture$")
 		cmd.Env = append(os.Environ(), "PI_GO_MCP_HELPER=tree_child")
+		if os.Getenv("PI_GO_MCP_HELPER") == "tree_parent_exit" {
+			cmd.Stderr = os.Stderr
+		}
 		if err := cmd.Start(); err != nil {
 			os.Exit(2)
 		}
 		fmt.Fprintln(os.Stdout, cmd.Process.Pid)
+		if os.Getenv("PI_GO_MCP_HELPER") == "tree_parent_exit" {
+			var stop [1]byte
+			_, _ = os.Stdin.Read(stop[:])
+			os.Exit(0)
+		}
 		for {
 			time.Sleep(time.Hour)
 		}
@@ -90,7 +98,9 @@ func TestManagerManagedStdio(t *testing.T) {
 	}
 }
 
-func TestManagedProcessOwnsWholeTree(t *testing.T) {
+// Windows owns descendants with a Job Object. Unix owns its assigned process
+// group: these trusted fixtures keep all descendants in that group.
+func TestManagedProcessOwnsSupportedDescendants(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	p, err := startManagedProcess(ctx, processFixtureConfig("tree_parent"), 128)
@@ -131,6 +141,53 @@ func TestManagedProcessOwnsWholeTree(t *testing.T) {
 	}
 	if alive {
 		t.Fatalf("managed descendant escaped cleanup: %d", child)
+	}
+}
+
+func TestManagedProcessOwnerExitDoesNotWaitForInheritedStderr(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	p, err := startManagedProcess(ctx, processFixtureConfig("tree_parent_exit"), 128)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.close()
+	line := make(chan string, 1)
+	go func() { value, _ := bufio.NewReader(p.stdout).ReadString('\n'); line <- value }()
+	var child int
+	select {
+	case value := <-line:
+		child, err = strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			t.Fatalf("child PID: %q %v", value, err)
+		}
+	case <-ctx.Done():
+		t.Fatal("managed child did not start")
+	}
+	childAlive := captureFixtureProcess(t, child)
+	if _, err := p.stdin.Write([]byte{'x'}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-p.done:
+	case <-ctx.Done():
+		t.Fatal("inherited stderr concealed the server's exit")
+	}
+	if p.waitErr != nil {
+		t.Fatalf("owner exit: %v", p.waitErr)
+	}
+	if !childAlive() {
+		t.Fatal("child exited before the inherited-pipe check")
+	}
+	if err := p.close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for childAlive() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if childAlive() {
+		t.Fatal("supported descendant survived cleanup after owner exit")
 	}
 }
 

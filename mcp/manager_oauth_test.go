@@ -308,6 +308,12 @@ func TestManagerOAuthIdentityChangeCannotPublishOldEpoch(t *testing.T) {
 	if m.Scope() != newScope {
 		t.Fatalf("obsolete login overwrote current identity: %+v", m.Scope())
 	}
+	oldKey := f.key()
+	oldKey.Server = "fixture"
+	oldState, err := m.Servers()[0].OAuth.Store.Load(t.Context(), oldKey)
+	if err != nil || oldState.Version != 0 || oldState.Credential != nil {
+		t.Fatalf("obsolete login committed credentials before checking scope: version=%d err=%v", oldState.Version, err)
+	}
 	state, err := m.OAuthState(t.Context(), "fixture")
 	if err != nil || state.Authenticated || state.CredentialVersion != 0 {
 		t.Fatalf("old login leaked credentials into another account: %+v %v", state, err)

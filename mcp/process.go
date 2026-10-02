@@ -10,15 +10,19 @@ import (
 )
 
 type managedProcess struct {
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	stdout   io.ReadCloser
-	control  *processControl
-	done     chan struct{}
-	once     sync.Once
-	stopMu   sync.Mutex
-	stop     func() bool
-	closeErr error
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	stdout     io.ReadCloser
+	stderr     io.ReadCloser
+	stderrDone chan struct{}
+	stderrErr  error // published by closing stderrDone
+	waitErr    error // published by closing done
+	control    *processControl
+	done       chan struct{}
+	once       sync.Once
+	stopMu     sync.Mutex
+	stop       func() bool
+	closeErr   error
 }
 
 // SDK IOTransport and process teardown share these same owned pipes. A single
@@ -89,38 +93,45 @@ func startManagedProcess(ctx context.Context, s ServerConfig, stderrLimit int) (
 	cmd := exec.Command(s.Command, s.Args...)
 	cmd.Dir = s.Dir
 	cmd.Env = append(os.Environ(), s.Env...)
-	cmd.Stderr = &boundedStderr{limit: stderrLimit}
 	control, err := prepareProcess(cmd)
 	if err != nil {
 		return nil, err
 	}
+	stderr, stderrWriter, err := os.Pipe()
+	if err != nil {
+		return nil, errors.Join(err, control.close())
+	}
+	cmd.Stderr = stderrWriter
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		control.close()
-		return nil, err
+		return nil, errors.Join(err, stderr.Close(), stderrWriter.Close(), control.close())
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		stdin.Close()
-		control.close()
-		return nil, err
+		return nil, errors.Join(err, stdin.Close(), stderr.Close(), stderrWriter.Close(), control.close())
 	}
 	if err := cmd.Start(); err != nil {
-		stdin.Close()
-		stdout.Close()
-		control.close()
-		return nil, err
+		return nil, errors.Join(err, stdin.Close(), stdout.Close(), stderr.Close(), stderrWriter.Close(), control.close())
 	}
-	p := &managedProcess{cmd: cmd, stdin: &processWritePipe{WriteCloser: stdin}, stdout: &processReadPipe{ReadCloser: stdout}, control: control, done: make(chan struct{})}
 	if err := control.attach(cmd.Process); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		stdin.Close()
-		stdout.Close()
-		control.close()
-		return nil, err
+		killErr := cmd.Process.Kill()
+		waitErr := cmd.Wait()
+		return nil, errors.Join(err, killErr, waitErr, stdin.Close(), stdout.Close(), stderr.Close(), stderrWriter.Close(), control.close())
 	}
-	go func() { _ = cmd.Wait(); close(p.done) }()
+	p := &managedProcess{cmd: cmd, stdin: &processWritePipe{WriteCloser: stdin}, stdout: &processReadPipe{ReadCloser: stdout}, stderr: &processReadPipe{ReadCloser: stderr}, control: control, done: make(chan struct{}), stderrDone: make(chan struct{})}
+	// Drain separately from exec.Cmd.Wait: an inherited stderr pipe must not
+	// conceal the owned server's exit until its descendants also exit.
+	go func() {
+		_, p.stderrErr = io.Copy(&boundedStderr{limit: stderrLimit}, stderr)
+		if errors.Is(p.stderrErr, os.ErrClosed) {
+			p.stderrErr = nil
+		}
+		close(p.stderrDone)
+	}()
+	go func() { p.waitErr = cmd.Wait(); close(p.done) }()
+	if err := stderrWriter.Close(); err != nil {
+		return nil, errors.Join(err, p.close())
+	}
 	p.stopMu.Lock()
 	p.stop = context.AfterFunc(ctx, func() { _ = p.close() })
 	p.stopMu.Unlock()
@@ -140,7 +151,9 @@ func (p *managedProcess) close() error {
 		if errors.Is(killErr, os.ErrProcessDone) {
 			killErr = nil
 		}
-		p.closeErr = errors.Join(stdinErr, stdoutErr, killErr, p.control.close())
+		stderrErr := p.stderr.Close()
+		<-p.stderrDone
+		p.closeErr = errors.Join(stdinErr, stdoutErr, stderrErr, p.stderrErr, killErr, p.control.close())
 		<-p.done
 	})
 	return p.closeErr

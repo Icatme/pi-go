@@ -43,6 +43,15 @@ func beforeCallError(code agent.ToolFailureCode, reason string, err error) error
 	}
 }
 
+func permissionError(err error) error {
+	code, reason := agent.ToolFailurePolicyDenied, "permission_revoked"
+	var failure *agent.ToolExecutionError
+	if errors.As(err, &failure) && failure.Code != "" {
+		code, reason = failure.Code, failure.Reason
+	}
+	return beforeCallError(code, reason, err)
+}
+
 func callError(err error) error {
 	code := agent.ToolFailureCode("transport")
 	var protocol *jsonrpc.Error
@@ -99,12 +108,6 @@ func trackedCallError(err error, info agent.ToolExecutionInfo) error {
 	var denied *managed.DispatchDeniedError
 	if errors.As(err, &denied) {
 		typed.Code, typed.Reason = agent.ToolFailurePolicyDenied, "permission_revoked"
-		if errors.Is(denied.Err, context.Canceled) {
-			typed.Code = agent.ToolFailureCanceled
-		}
-		if errors.Is(denied.Err, context.DeadlineExceeded) {
-			typed.Code = agent.ToolFailureDeadline
-		}
 	}
 	if errors.Is(err, managed.ErrAuthRequired) {
 		typed.Code = agent.ToolFailurePolicyDenied
@@ -117,6 +120,19 @@ func trackedCallError(err error, info agent.ToolExecutionInfo) error {
 	if errors.Is(err, managed.ErrHidden) || errors.Is(err, managed.ErrClosed) {
 		typed.Code = agent.ToolFailurePolicyDenied
 		typed.Reason = "connection_unavailable"
+	}
+	if denied != nil {
+		// Preserve the trusted check's reason, but always retain the transport's
+		// authoritative facts rather than execution claims from that callback.
+		var failure *agent.ToolExecutionError
+		if errors.As(denied.Err, &failure) && failure.Code != "" {
+			typed.Code, typed.Reason = failure.Code, failure.Reason
+		}
+		if errors.Is(denied.Err, context.Canceled) {
+			typed.Code = agent.ToolFailureCanceled
+		} else if errors.Is(denied.Err, context.DeadlineExceeded) {
+			typed.Code = agent.ToolFailureDeadline
+		}
 	}
 	if info.Remote == agent.ToolRemoteNotDispatched {
 		typed.Message = "mcptools: tool request was not dispatched; check host connection, authentication and permission"

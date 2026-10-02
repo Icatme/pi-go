@@ -291,32 +291,50 @@ func (m *Manager) changeCredentials(ctx context.Context, name string, clear bool
 		return err
 	}
 	defer o.Close()
+	var retired map[string]*connectionSlot
+	o.commit = func(commitCtx context.Context, version uint64, credential *OAuthCredential) (uint64, error) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if m.closed || m.config.Scope != scope || m.slots[name] != slot {
+			return 0, ErrStale
+		}
+		if err := commitCtx.Err(); err != nil {
+			return 0, err
+		}
+		if scope.AuthEpoch == ^uint64(0) {
+			return 0, errors.New("mcp: identity epoch exhausted")
+		}
+		// Existing executors do not acquire m.mu before physical handoff. Stop
+		// them before CAS, including the interval after a store commits but has
+		// not returned. Cancellation never waits or invokes host callbacks here.
+		retired = make(map[string]*connectionSlot, len(m.slots))
+		for currentName, current := range m.slots {
+			retired[currentName] = current
+			m.retired[current] = struct{}{}
+			if current.cancel != nil {
+				current.cancel()
+			}
+		}
+		nextVersion, storeErr := o.store.CompareAndSwap(commitCtx, o.key, version, credential)
+		if storeErr != nil && nextVersion == 0 {
+			return 0, storeErr
+		}
+		// A nonzero version also reports publication when cleanup subsequently
+		// fails. Retire that epoch while retaining the original storage cause.
+		nextScope := scope
+		nextScope.AuthEpoch++
+		var replaceErr error
+		retired, replaceErr = m.replaceScopeLocked(nextScope)
+		return nextVersion, errors.Join(storeErr, replaceErr)
+	}
 	if clear {
 		err = o.Clear(ctx)
 	} else {
 		err = o.Authenticate(ctx)
 	}
-	if err != nil {
-		return err
-	}
-	m.mu.Lock()
-	unchanged := !m.closed && m.config.Scope == scope && m.slots[name] == slot
-	if !unchanged {
-		m.mu.Unlock()
-		return ErrStale
-	}
-	if scope.AuthEpoch == ^uint64(0) {
-		m.mu.Unlock()
-		return errors.New("mcp: identity epoch exhausted")
-	}
-	scope.AuthEpoch++
-	old, err := m.replaceScopeLocked(scope)
-	m.mu.Unlock()
-	if err != nil {
-		return err
-	}
 	var errs []error
-	for _, s := range old {
+	errs = append(errs, err)
+	for _, s := range retired {
 		errs = append(errs, m.retire(s))
 	}
 	return errors.Join(errs...)

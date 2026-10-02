@@ -34,27 +34,29 @@ type Catalog struct {
 }
 
 type Connection struct {
-	config     ServerConfig
-	scope      Scope
-	generation uint64
-	limits     Limits
-	session    *sdk.ClientSession
-	observer   *Observer
-	oauth      *OAuth
-	process    *managedProcess
-	ctx        context.Context
-	cancel     context.CancelFunc
-	closed     atomic.Bool
-	stale      atomic.Bool
-	closeOnce  sync.Once
-	closeDone  chan struct{}
-	closeErr   error
-	authMu     sync.Mutex
-	authState  OAuthState
-	revision   atomic.Uint64
-	refreshMu  sync.Mutex
-	mu         sync.RWMutex
-	catalog    *Catalog
+	config      ServerConfig
+	scope       Scope
+	generation  uint64
+	limits      Limits
+	session     *sdk.ClientSession
+	sessionDone chan struct{}
+	sessionErr  error // published by closing sessionDone
+	observer    *Observer
+	oauth       *OAuth
+	process     *managedProcess
+	ctx         context.Context
+	cancel      context.CancelFunc
+	closed      atomic.Bool
+	stale       atomic.Bool
+	closeOnce   sync.Once
+	closeDone   chan struct{}
+	closeErr    error
+	authMu      sync.Mutex
+	authState   OAuthState
+	revision    atomic.Uint64
+	refreshMu   sync.Mutex
+	mu          sync.RWMutex
+	catalog     *Catalog
 }
 
 type headerTransport struct {
@@ -79,7 +81,7 @@ func (h headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func connect(ctx context.Context, s ServerConfig, scope Scope, generation uint64, cfg Config) (*Connection, error) {
 	life, cancel := context.WithCancel(ctx)
-	c := &Connection{config: s, scope: scope, generation: generation, limits: cfg.Limits, ctx: life, cancel: cancel, observer: NewObserver(cfg.Limits.Wire), closeDone: make(chan struct{})}
+	c := &Connection{config: s, scope: scope, generation: generation, limits: cfg.Limits, ctx: life, cancel: cancel, observer: NewObserver(cfg.Limits.Wire), closeDone: make(chan struct{}), sessionDone: make(chan struct{})}
 	c.revision.Store(1)
 	client := sdk.NewClient(&sdk.Implementation{Name: "pi-go", Version: "1"}, &sdk.ClientOptions{
 		Capabilities: &sdk.ClientCapabilities{}, MultiRoundTrip: &sdk.MultiRoundTripOptions{Disabled: true},
@@ -147,6 +149,17 @@ func connect(ctx context.Context, s ServerConfig, scope Scope, generation uint64
 	}
 	c.session = session
 	c.mu.Unlock()
+	go func() {
+		c.sessionErr = session.Wait()
+		close(c.sessionDone)
+		_ = c.Close()
+	}()
+	if c.process != nil {
+		go func() {
+			<-c.process.done
+			_ = c.Close()
+		}()
+	}
 	return c, nil
 }
 
@@ -167,6 +180,23 @@ func (c *Connection) Config() ServerConfig {
 func (c *Connection) available() error {
 	if c.stale.Load() {
 		return ErrStale
+	}
+	var processEnded bool
+	var processErr error
+	if c.process != nil {
+		select {
+		case <-c.process.done:
+			processEnded, processErr = true, c.process.waitErr
+		default:
+		}
+	}
+	select {
+	case <-c.sessionDone:
+		return errors.Join(ErrClosed, processErr, c.sessionErr)
+	default:
+	}
+	if processEnded {
+		return errors.Join(ErrClosed, processErr)
 	}
 	if c.closed.Load() {
 		return ErrClosed

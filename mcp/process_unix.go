@@ -18,6 +18,8 @@ func prepareProcess(cmd *exec.Cmd) (*processControl, error) {
 func (*processControl) attach(*os.Process) error { return nil }
 func (*processControl) close() error             { return nil }
 func (*processControl) kill(p *os.Process) error {
+	// The trusted server contract forbids escaping this group. Portable Unix
+	// process groups are lifecycle ownership, not arbitrary descendant containment.
 	err := syscall.Kill(-p.Pid, syscall.SIGKILL)
 	if errors.Is(err, syscall.ESRCH) {
 		return nil

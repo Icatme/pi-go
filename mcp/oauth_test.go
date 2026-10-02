@@ -321,7 +321,7 @@ func TestOAuthRestoredScopesAndRefreshPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token.AccessToken != "refreshed-access" || stored.Credential.Token.RefreshToken != "rotated-refresh" || stored.Version != version+1 || f.refreshes.Load() != 1 {
+	if token.AccessToken != "refreshed-access" || stored.Credential.Token.RefreshToken != "rotated-refresh" || stored.Credential.RefreshPending || stored.Version != version+2 || f.refreshes.Load() != 1 {
 		t.Fatalf("refresh not persisted: token=%q version=%d refreshes=%d", token.AccessToken, stored.Version, f.refreshes.Load())
 	}
 	if changes.Load() != 3 || !reflect.DeepEqual(stored.Credential.Scopes, wantScopes) {
@@ -356,7 +356,7 @@ func TestOAuthEmptyGrantedScopesAndCanceledLogin(t *testing.T) {
 	}
 }
 
-func TestOAuthCanceledRefreshDoesNotPublishOrRetry(t *testing.T) {
+func TestOAuthCanceledRefreshPersistsClaimWithoutPublishingTokenOrRetry(t *testing.T) {
 	f := newOAuthFixture(t)
 	entered := make(chan struct{})
 	finished := make(chan struct{})
@@ -421,14 +421,22 @@ func TestOAuthCanceledRefreshDoesNotPublishOrRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Version != version || o.State().Authenticated {
-		t.Fatalf("canceled refresh published credentials: version=%d state=%+v", stored.Version, o.State())
+	if stored.Version != version+1 || stored.Credential == nil || !stored.Credential.RefreshPending || stored.Credential.Token.AccessToken != snapshot.Credential.Token.AccessToken || stored.Credential.Token.RefreshToken != snapshot.Credential.Token.RefreshToken || o.State().Authenticated {
+		t.Fatalf("canceled refresh lost claim or published a token: version=%d state=%+v", stored.Version, o.State())
 	}
 	if _, err := o.TokenSource(t.Context()); !errors.Is(err, ErrAuthRequired) {
 		t.Fatalf("ambiguous refresh allowed a retry: %v", err)
 	}
 	if f.refreshes.Load() != 1 {
 		t.Fatalf("refresh repeated: %d", f.refreshes.Load())
+	}
+	restored, err := NewOAuth(t.Context(), f.key(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { restored.Close() })
+	if _, err := restored.TokenSource(t.Context()); !errors.Is(err, ErrAuthRequired) || restored.State().Authenticated || f.refreshes.Load() != 1 {
+		t.Fatalf("canceled refresh claim did not survive reconstruction: state=%+v err=%v", restored.State(), err)
 	}
 }
 
@@ -471,6 +479,11 @@ func TestOAuthRefreshFailureCannotAutoDetectRetryOrExposeSecrets(t *testing.T) {
 	}
 	if _, err := source.Token(); !errors.Is(err, ErrAuthRequired) || strings.Contains(err.Error(), "secret-response-body") {
 		t.Fatalf("refresh failure error classification/redaction: %v", err)
+	} else {
+		var cause *oauth2.RetrieveError
+		if !errors.As(err, &cause) || !strings.Contains(string(cause.Body), "secret-response-body") {
+			t.Fatal("refresh failure discarded the private token endpoint cause")
+		}
 	}
 	if f.refreshes.Load() != 1 || o.State().Authenticated {
 		t.Fatalf("ambiguous refresh retried or remained usable: refreshes=%d state=%+v", f.refreshes.Load(), o.State())

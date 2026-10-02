@@ -59,9 +59,14 @@ type OAuthCredential struct {
 	ClientID     string          `json:"clientId"`
 	ClientSecret string          `json:"clientSecret,omitempty"`
 	Endpoint     oauth2.Endpoint `json:"endpoint"`
+	Resource     string          `json:"resource"`
 	RedirectURL  string          `json:"redirectUrl"`
 	Scopes       []string        `json:"scopes"`
 	Token        *oauth2.Token   `json:"token"`
+	// RefreshPending is durably claimed before sending a refresh token. Only a
+	// successful CAS of that result, or explicit Authenticate, can clear it.
+	// A restored pending credential must never send its refresh token again.
+	RefreshPending bool `json:"refreshPending,omitempty"`
 }
 
 // CredentialSnapshot preserves a version even for a deleted entry. A missing
@@ -74,6 +79,8 @@ type CredentialSnapshot struct {
 // CredentialStore must atomically compare the version and publish the complete
 // new value. Passing nil writes a tombstone. Implementations must copy values,
 // honor cancellation and keep secrets private. There is no implicit home store.
+// CompareAndSwap returns the published next version even if subsequent cleanup
+// fails; a zero version with an error means no value was published.
 type CredentialStore interface {
 	Load(context.Context, AuthKey) (CredentialSnapshot, error)
 	CompareAndSwap(context.Context, AuthKey, uint64, *OAuthCredential) (uint64, error)

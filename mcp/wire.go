@@ -86,7 +86,7 @@ type wirePending struct {
 // DispatchRecord contains bounded execution facts, never arguments, results,
 // credentials or headers. Attempts counts accepted byte-boundary handoffs;
 // it does not prove socket delivery or whether a remote operation executed.
-// ResultType is set only after the SDK returned a trusted tool/read/prompt result.
+// ResultType is set only after the SDK returned a trusted successful result.
 type DispatchRecord struct {
 	LogicalID        string
 	RPCID            string
@@ -215,11 +215,9 @@ func (o *Observer) Middleware() sdk.Middleware {
 				return result, errors.Join(callErr, slot.err)
 			}
 			if slot.trace != nil && result != nil && !(reflect.ValueOf(result).Kind() == reflect.Pointer && reflect.ValueOf(result).IsNil()) {
-				if res, ok := result.(interface{ NeedsInput() bool }); ok {
-					slot.trace.value.ResultType = "complete"
-					if res.NeedsInput() {
-						slot.trace.value.ResultType = "input_required"
-					}
+				slot.trace.value.ResultType = "complete"
+				if res, ok := result.(interface{ NeedsInput() bool }); ok && res.NeedsInput() {
+					slot.trace.value.ResultType = "input_required"
 				}
 			}
 			if o.closed {

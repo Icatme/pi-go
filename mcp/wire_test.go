@@ -645,7 +645,8 @@ func TestWireLateListAfterNotificationCannotRepopulateSDKCache(t *testing.T) {
 			observer, session := newWireFixture(t, kind, server, &sdk.ClientOptions{ToolListChangedHandler: func(context.Context, *sdk.ToolListChangedRequest) { notified <- struct{}{} }})
 			t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 			done := make(chan error, 1)
-			go func() { _, err := session.ListTools(context.Background(), nil); done <- err }()
+			ctx, snapshot := observer.Track(t.Context())
+			go func() { _, err := session.ListTools(ctx, nil); done <- err }()
 			select {
 			case <-entered:
 			case <-time.After(3 * time.Second):
@@ -667,6 +668,9 @@ func TestWireLateListAfterNotificationCannotRepopulateSDKCache(t *testing.T) {
 				}
 			case <-time.After(3 * time.Second):
 				t.Fatal("old list response did not finish")
+			}
+			if record := snapshot(); record.Attempts != 1 || !record.ResponseReceived || record.RPCError || record.ResultType != "complete" {
+				t.Fatalf("trusted successful list lost completion after local rejection: %#v", record)
 			}
 			fresh, err := session.ListTools(context.Background(), nil)
 			if err != nil || fresh.NextCursor == "" || lists.Load() != 2 {

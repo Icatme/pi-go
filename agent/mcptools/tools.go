@@ -230,7 +230,7 @@ func discover(ctx context.Context, session ToolClient, options Options, catalog 
 				}
 				if execution.CheckPermission != nil {
 					if err := execution.CheckPermission(callCtx); err != nil {
-						return agent.ToolResult{}, beforeCallError("policy_denied", "permission_revoked", err)
+						return agent.ToolResult{}, permissionError(err)
 					}
 				}
 				params := &mcp.CallToolParams{Name: name, Arguments: arguments}

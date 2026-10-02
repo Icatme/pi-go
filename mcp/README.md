@@ -26,8 +26,13 @@ the first matching wildcard rule wins. Listing is never permission to execute.
 For stdio, set `Command`, argument-vector `Args`, optional `Dir`/`Env` and
 `Trusted: true`; there is no shell command interpolation. Windows uses a hidden
 process and a Job Object, attaching the process before its first thread resumes.
-Unix uses a process group. Shutdown terminates the owned process tree and waits
-for actual exit. Stderr is privately drained with a bounded retention buffer.
+Unix owns the assigned process group, not every possible descendant. A trusted
+stdio server and its descendants must stay in that group: `setsid`, `setpgid`
+or daemonization that escapes it is unsupported. Such servers require host
+containment (for example a container or cgroup) instead of this stdio launcher.
+Shutdown terminates the supported Job Object/process group and waits for the
+owned server's actual exit. Stderr is privately drained with a bounded retention
+buffer; inherited stderr handles cannot conceal that server's exit.
 HTTP endpoints require HTTPS or loopback HTTP. Redirects are disabled, MCP
 multi-round-trip execution is disabled, and the SDK owns protocol negotiation.
 The pinned SDK negotiates its supported current protocol with legacy peers.
@@ -39,6 +44,9 @@ caches cannot migrate between identities or authorization epochs. `SetExposure`
 also retires the affected session. Connections captured by old executors cannot
 dispatch after retirement. `Close(ctx)` can time out while cleanup continues;
 another `Close` waits for the same cleanup and returns its result.
+Unexpected SDK-session or owned-server exit also retires the connection and its
+cached catalog. `Ready`/`Connect` report the closed session without restarting it;
+only explicit `Reconnect` starts a new generation.
 
 Header values and HTTP transports are trusted host configuration. Static
 credentials must belong to that configuration: changing their account requires
@@ -88,9 +96,25 @@ Credential keys bind server, URL, host identity, issuer and client configuration
 Resolved dynamic clients and scopes are retained across restoration. Refresh
 uses the previously successful client authentication style and cannot probe a
 second token POST; failed or canceled refresh requires explicit authentication.
+Before sending a refresh token, the store atomically publishes `RefreshPending`.
+Restoring that credential or racing another OAuth instance cannot send it again;
+only a successful result CAS or explicit authentication clears the claim. A
+successful refresh advances `CredentialVersion` twice (claim and completion).
+Token requests retain the SDK-validated MCP resource indicator, and restored
+DCR clients retain their registered client authentication method.
 Scope/revocation changes retire a live connection before another handoff.
 `OAuthState` returns a credential version and granted scopes without secrets;
 `ClearCredentials` performs versioned logout and retires the old epoch.
+The credential CAS and Manager's epoch replacement share one publication
+boundary. Existing sessions are canceled before CAS; even a failed CAS cannot
+restore them, and their SDK sessions are closed outside the Manager lock. Login
+network traffic and host callbacks also run outside that lock.
+
+This unreleased credential structure now requires `Resource`. A test/development
+record written by the earlier branch without it is rejected, including by
+Manager login/logout entry points. The host must use the saved `AuthKey` and
+current store version to CAS that record to a tombstone, then authenticate
+explicitly; there is no inferred-resource migration.
 
 The default credential store is shared for the server within this Manager.
 Persistence is opt-in via `NewFileCredentialStore(absolutePath)` in an existing

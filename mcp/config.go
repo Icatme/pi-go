@@ -47,6 +47,8 @@ type ServerConfig struct {
 	Env         []string
 	Dir         string
 	// Trusted explicitly authorizes this application-provided process command.
+	// On Unix, the command and all owned descendants must stay in the assigned
+	// process group. Daemonizing with setsid/setpgid requires host containment.
 	Trusted bool
 	Timeout time.Duration
 	OAuth   *OAuthOptions
