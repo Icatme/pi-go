@@ -888,3 +888,48 @@
   iterations; the complete MCP test binary also passes on native WSL2 Linux.
   All changed/new Go files pass formatting checks. No dependency/WASM upgrade,
   live-provider request, UI acceptance, release, tag or automatic merge.
+
+## 2026-10-02: Second review fixes for MCP PR16, PR17 and PR18
+
+- Bound dynamic pre-VM directory, invalid-catalog and final-permission failures
+  with the effective source/configured diagnostic budget. Preserve private Go
+  causes, failure classification and zero-dispatch facts, including resolver
+  panic and cancellation. Replace the unreleased SourceLimits tuple with
+  SourceLimits{Timeout, OutputBytes}; the generic child resolution contract adds
+  FailureTextLimitBytes without introducing MCP/JavaScript into the Agent core.
+- Fence terminal OAuth publication with synchronous connection stale/cancel
+  before any refreshed token is visible. Keep external callbacks reentrant and
+  lock-free, SDK Close asynchronous, and durable refresh claims unchanged.
+  Separate mixed registration configuration keys from the SDK-resolved client;
+  persist and restore actual CIMD fallback clients and authentication methods
+  without re-registering or changing identity when AS capabilities change.
+  Earlier mixed-strategy development keys require explicit login under the new
+  derived key; no guessed migration or compatibility wrapper is introduced.
+- Retain unsent RPC ID reservations through approval, and replace the maximum
+  retired-ID watermark with bounded exact numeric ranges. Delayed requests
+  remain valid, while actual replay and responses to unsent slots stay rejected.
+  Each MaxTombstones bound applies to recent IDs and compact ranges separately;
+  range/string exhaustion fails closed instead of losing replay protection.
+- Return real unsent stdio rejection errors while cancelling only the logical
+  SDK child context. Clear the unsent frame so later and concurrent calls on
+  the same session work; partial/physical write failures remain terminal, with
+  no fabricated send success, retry or automatic reconnect.
+- Revalidate search identity, connection generation and catalog after final
+  approval and before selection publication. Server/tool hiding and directory
+  notifications reject old metadata without consuming the selection budget;
+  fresh searches retain transcript-branch isolation.
+- Root-cause macOS reconnect EPERM in XNU's zombie-only group signal handling.
+  Inspect the exact process group only after EPERM; exclusively zombie/absent
+  members mean cleanup is complete, while live members and inspection failures
+  preserve the error. Add a native Darwin zombie-group regression and retain
+  the existing supported descendant and reconnect contracts.
+- Permanent regressions reproduce the reviewed OAuth defects on the old
+  implementation and pass on the repair. Root/examples ordinary and full race
+  suites, vet, build, module verification, formatting and diff checks pass on
+  Windows Go1.26.4; the final MCP source also passes a separate full ordinary
+  and race run after the final writer cancellation fix. Native WSL2 Linux passes
+  the complete freshly compiled MCP binary. Both Darwin architectures compile;
+  native Darwin execution is delegated to the existing five-platform CI matrix.
+  Newly compiled local examples return 50 open issues, titles 3/6/9, the guide
+  and hiddenAbsent=true. No dependency/WASM upgrade, UI/live-provider acceptance,
+  release, tag or merge is performed. Keep all three existing PRs layered.

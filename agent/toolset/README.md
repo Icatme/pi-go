@@ -47,6 +47,10 @@ sandbox `searchTools` still searches the whole allowed catalog. Search output
 carries names and short descriptions; subsequent model requests
 receive current declarations for selected tools. SDK connections, executable
 functions, schema validators and tool authority are never restored from history.
+Search rechecks the captured identity, connection generation and catalog after
+the final permission callback, before publishing metadata or recording a
+selection. Exposure changes or directory invalidation during approval reject
+the stale search result.
 `codemode.SearchTools` exposes the same metadata-only search to other Go hosts;
 callers must filter unauthorized summaries before using it.
 

@@ -65,6 +65,23 @@ type entry struct {
 	exposure managed.Exposure
 }
 
+type directorySnapshot struct {
+	scope    managed.Scope
+	catalogs map[*managed.Connection]managed.Catalog
+}
+
+func (snapshot directorySnapshot) check(manager *managed.Manager) error {
+	for connection, catalog := range snapshot.catalogs {
+		if !connection.IsCurrent(catalog) {
+			return managed.ErrStale
+		}
+	}
+	if manager.Scope() != snapshot.scope {
+		return managed.ErrStale
+	}
+	return nil
+}
+
 // New performs validation only. Indirect MCP servers are connected when a
 // script or tool_search requests their catalog; direct declarations wait for
 // the servers required by their direct policy.
@@ -156,11 +173,11 @@ func (t *Toolset) Resolve(ctx context.Context, snapshot agent.AgentSnapshot) ([]
 	defer cancel()
 	scope := t.manager.Scope()
 	selected := t.selected(snapshot, scope)
-	values, _, actualScope, err := t.directory(ctx, false, "", selected)
+	values, _, frozen, err := t.directory(ctx, false, "", selected)
 	if err != nil {
 		return nil, directoryError(err)
 	}
-	if actualScope != scope {
+	if frozen.scope != scope {
 		return nil, directoryError(managed.ErrStale)
 	}
 	out := make([]agent.ToolDefinition, 0, len(values)+2)
@@ -180,6 +197,9 @@ func (t *Toolset) Resolve(ctx context.Context, snapshot agent.AgentSnapshot) ([]
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	out = append(out, t.code, t.search)
 	if err := ctx.Err(); err != nil {
+		return nil, directoryError(err)
+	}
+	if err := frozen.check(t.manager); err != nil {
 		return nil, directoryError(err)
 	}
 	return out, nil
@@ -229,10 +249,10 @@ func (t *Toolset) selected(snapshot agent.AgentSnapshot, scope managed.Scope) ma
 	return out
 }
 
-func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string, selected map[string]bool) ([]entry, []codemode.Namespace, managed.Scope, error) {
+func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string, selected map[string]bool) ([]entry, []codemode.Namespace, directorySnapshot, error) {
 	scope := t.manager.Scope()
 	values := make([]entry, 0, len(t.options.Native)+3)
-	snapshots := make(map[*managed.Connection]managed.Catalog)
+	frozen := directorySnapshot{scope: scope, catalogs: make(map[*managed.Connection]managed.Catalog)}
 	namespaces := append([]codemode.Namespace(nil), t.options.Code.Namespaces...)
 	for _, binding := range t.options.Native {
 		if namespace == "" || binding.Namespace == namespace {
@@ -241,7 +261,7 @@ func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string
 	}
 	resources, err := mcpresources.Definitions(t.manager, t.options.Resources)
 	if err != nil {
-		return nil, nil, scope, err
+		return nil, nil, frozen, err
 	}
 	for _, resource := range resources {
 		if namespace == "" || namespace == "mcp_resources" {
@@ -263,7 +283,7 @@ func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string
 			}
 		}
 		if err != nil {
-			return nil, nil, scope, err
+			return nil, nil, frozen, err
 		}
 		// Policy and schemas must belong to the same connection generation. The
 		// manager's earlier enumeration may have changed while another server
@@ -274,7 +294,7 @@ func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string
 			if err == nil {
 				err = managed.ErrStale
 			}
-			return nil, nil, scope, err
+			return nil, nil, frozen, err
 		}
 		wanted := make([]string, 0, len(catalog.Tools))
 		for _, tool := range catalog.Tools {
@@ -287,9 +307,14 @@ func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string
 		}
 		definitions, err := mcptools.FromCatalog(connection, catalog.Tools, mcptools.Options{Names: wanted})
 		if err != nil {
-			return nil, nil, scope, err
+			return nil, nil, frozen, err
 		}
-		snapshots[connection] = catalog
+		// Keep only the identity/version facts needed to validate publication.
+		// Search selections retain names, never catalogs or executor closures.
+		frozen.catalogs[connection] = managed.Catalog{
+			Server: catalog.Server, Scope: catalog.Scope, Generation: catalog.Generation,
+			Revision: catalog.Revision, SourceDigest: catalog.SourceDigest,
+		}
 		for _, definition := range definitions {
 			definition.Revision = fmt.Sprintf("%s/%d/%d", scopeRevision(scope), catalog.Generation, catalog.Revision)
 			definition = guardCatalog(definition, connection, catalog)
@@ -298,17 +323,12 @@ func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string
 		namespaces = append(namespaces, codemode.Namespace{Name: server.Name, Description: catalog.Description, Instructions: catalog.Instructions})
 	}
 	if len(values) > 256 {
-		return nil, nil, scope, errors.New("toolset: visible directory exceeds 256 tools; restrict the search namespace or host policy")
+		return nil, nil, frozen, errors.New("toolset: visible directory exceeds 256 tools; restrict the search namespace or host policy")
 	}
-	for connection, catalog := range snapshots {
-		if !connection.IsCurrent(catalog) {
-			return nil, nil, scope, managed.ErrStale
-		}
+	if err := frozen.check(t.manager); err != nil {
+		return nil, nil, frozen, err
 	}
-	if t.manager.Scope() != scope {
-		return nil, nil, scope, managed.ErrStale
-	}
-	return values, namespaces, scope, nil
+	return values, namespaces, frozen, nil
 }
 
 func guardCatalog(definition agent.ToolDefinition, connection *managed.Connection, catalog managed.Catalog) agent.ToolDefinition {

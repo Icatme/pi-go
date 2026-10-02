@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,6 +16,76 @@ import (
 	managed "github.com/Icatme/pi-go/mcp"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+func TestSearchRechecksDirectoryAfterFinalPermission(t *testing.T) {
+	for _, change := range []string{"hide_server", "hide_selected_tool", "directory_notification"} {
+		t.Run(change, func(t *testing.T) {
+			f := newFixture(t, managed.Codemode, nil)
+			ts, err := New(f.manager, f.sandbox, Options{MaxSelectionRecords: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tools, err := ts.Resolve(t.Context(), agent.AgentSnapshot{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			search := findTool(t, tools, "tool_search")
+			scope := f.manager.Scope()
+			var checks atomic.Int32
+			out := agent.RunToolCall(t.Context(), agent.ToolCall{ID: "search", Name: search.Name, ParsedArgs: map[string]any{
+				"query": "hidden", "namespace": "issues", "limit": 1,
+			}}, agent.RunToolCallOptions{Tools: tools, CheckToolPermission: func(ctx context.Context, _ agent.BeforeToolCallContext) error {
+				if checks.Add(1) != 3 {
+					return nil
+				}
+				switch change {
+				case "hide_server":
+					return f.manager.SetExposure("issues", managed.Hidden, nil)
+				case "hide_selected_tool":
+					return f.manager.SetExposure("issues", managed.Codemode, []managed.ToolRule{{Pattern: "hidden_issue", Exposure: managed.Hidden}})
+				default:
+					connection, err := f.manager.Ready("issues")
+					if err != nil {
+						return err
+					}
+					catalog, err := connection.Refresh(ctx)
+					if err != nil {
+						return err
+					}
+					return changeFixtureDirectory(ctx, f, connection, catalog)
+				}
+			}})
+			if checks.Load() != 3 || f.manager.Scope() != scope || !errors.Is(out.Err, managed.ErrStale) || out.Execution.Remote != agent.ToolRemoteNotDispatched || f.writes.Load() != 0 {
+				t.Fatalf("publication accepted a changed catalog: checks=%d scope=%+v writes=%d outcome=%+v", checks.Load(), f.manager.Scope(), f.writes.Load(), out)
+			}
+			text := resultText(out.Result)
+			if strings.Contains(text, "hidden_issue") || strings.Contains(text, "SECRET_") || out.Result.Details != nil {
+				t.Fatalf("rejected search published metadata/selection: %s details=%+v", text, out.Result.Details)
+			}
+			ts.mu.Lock()
+			records := len(ts.loaded)
+			ts.mu.Unlock()
+			if records != 0 {
+				t.Fatal("rejected publication consumed selection record budget")
+			}
+			if err := f.manager.SetExposure("issues", managed.Codemode, nil); err != nil {
+				t.Fatal(err)
+			}
+			// A fresh search can still use the bounded record budget. Restoring
+			// this successful record remains limited to its transcript branch.
+			selected := loadBySearch(t, ts, "hidden")
+			branch, err := ts.Resolve(t.Context(), agent.AgentSnapshot{Messages: []agent.Message{selected}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			findTool(t, branch, "mcp__issues__hidden_issue")
+			other, err := ts.Resolve(t.Context(), agent.AgentSnapshot{})
+			if err != nil || strings.Contains(toolNames(other), "hidden_issue") {
+				t.Fatalf("selection crossed transcript branches: tools=%s err=%v", toolNames(other), err)
+			}
+		})
+	}
+}
 
 func changeFixtureDirectory(ctx context.Context, f *fixture, connection *managed.Connection, frozen managed.Catalog) error {
 	f.server.AddTool(&sdk.Tool{Name: "direct_issue", InputSchema: map[string]any{

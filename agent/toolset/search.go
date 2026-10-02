@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"strconv"
 
 	"github.com/Icatme/pi-go/agent"
@@ -56,7 +55,7 @@ func (t *Toolset) searchTool() agent.ToolDefinition {
 					return agent.ToolResult{}, directoryError(err)
 				}
 			}
-			values, _, scope, err := t.directory(ctx, true, namespace, nil)
+			values, _, frozen, err := t.directory(ctx, true, namespace, nil)
 			if err != nil {
 				return agent.ToolResult{}, directoryError(err)
 			}
@@ -93,8 +92,11 @@ func (t *Toolset) searchTool() agent.ToolDefinition {
 					return agent.ToolResult{}, directoryError(err)
 				}
 			}
-			if t.manager.Scope() != scope {
-				return agent.ToolResult{}, directoryError(errors.New("toolset: identity changed during search"))
+			// Approval can wait while exposure or directory notifications retire
+			// this connection. Recheck the captured generation after approval,
+			// before publishing names/descriptions or creating a selection.
+			if err := frozen.check(t.manager); err != nil {
+				return agent.ToolResult{}, directoryError(err)
 			}
 			if len(names) == 0 {
 				return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: "No allowed tools matched. Try another topic or namespace."}}}, nil
@@ -105,15 +107,19 @@ func (t *Toolset) searchTool() agent.ToolDefinition {
 			}
 			id := hex.EncodeToString(token[:])
 			t.mu.Lock()
-			if t.scope != scope {
-				t.scope = scope
+			if err := frozen.check(t.manager); err != nil {
+				t.mu.Unlock()
+				return agent.ToolResult{}, directoryError(err)
+			}
+			if t.scope != frozen.scope {
+				t.scope = frozen.scope
 				t.loaded = make(map[string]loadedSelection)
 			}
 			if len(t.loaded) >= t.options.MaxSelectionRecords {
 				t.mu.Unlock()
 				return agent.ToolResult{}, &agent.ToolExecutionError{Code: agent.ToolFailureResource, Message: "Tool selection record limit exceeded; use a new Toolset for the next conversation"}
 			}
-			t.loaded[id] = loadedSelection{scope: scope, names: append([]string(nil), names...)}
+			t.loaded[id] = loadedSelection{scope: frozen.scope, names: append([]string(nil), names...)}
 			t.mu.Unlock()
 			return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: "Loaded matching tools for later calls:\n" + string(body)}}, Details: selectionReport{SelectionID: id, Names: names}}, nil
 		},
