@@ -620,6 +620,15 @@ func authNormalizeKey(key AuthKey, config auth.AuthorizationCodeHandlerConfig, m
 	if methods > 1 {
 		// Bind every fallback choice, discovery source and redirect to the
 		// resource/issuer tuple. The actual selected client remains separate.
+		// A host-managed secret is mutable authentication material, not client
+		// identity. Retain the authentication method but exclude its value so
+		// secret rotation does not orphan the persisted refresh credential.
+		preregistered := config.PreregisteredClient
+		if preregistered != nil && preregistered.ClientSecretAuth != nil {
+			value := *preregistered
+			value.ClientSecretAuth = &oauthex.ClientSecretAuth{}
+			preregistered = &value
+		}
 		binding := struct {
 			CIMD          *auth.ClientIDMetadataDocumentConfig  `json:"cimd,omitempty"`
 			Preregistered *oauthex.ClientCredentials            `json:"preregistered,omitempty"`
@@ -628,7 +637,7 @@ func authNormalizeKey(key AuthKey, config auth.AuthorizationCodeHandlerConfig, m
 			MetadataURL   string                                `json:"metadataUrl"`
 			Resource      string                                `json:"resource"`
 			Issuer        string                                `json:"issuer"`
-		}{config.ClientIDMetadataDocumentConfig, config.PreregisteredClient, config.DynamicClientRegistrationConfig, config.RedirectURL, metadataURL, key.URL, key.Issuer}
+		}{config.ClientIDMetadataDocumentConfig, preregistered, config.DynamicClientRegistrationConfig, config.RedirectURL, metadataURL, key.URL, key.Issuer}
 		data, err := json.Marshal(binding)
 		if err != nil {
 			return key, ErrOAuthConfiguration
