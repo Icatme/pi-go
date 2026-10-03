@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Icatme/pi-go/internal/jsontext"
 )
 
 // ============================================================================
@@ -76,6 +78,7 @@ type openAIResponsesResponseItem struct {
 	Status           string                               `json:"status,omitempty"`
 	CallID           string                               `json:"call_id,omitempty"`
 	Name             string                               `json:"name,omitempty"`
+	Namespace        string                               `json:"namespace,omitempty"`
 	Arguments        string                               `json:"arguments,omitempty"`
 	Input            *string                              `json:"input,omitempty"`
 	Summary          []openAIResponsesReasoningSummary    `json:"summary,omitempty"`
@@ -415,6 +418,13 @@ func processOpenAIResponsesStreamEventWithProvider(
 	if strings.TrimSpace(data) == "" || strings.TrimSpace(data) == "[DONE]" {
 		return false, nil
 	}
+	if len(state.CustomTools) > 0 {
+		// Source text must not be silently changed by encoding/json's Unicode
+		// replacement behavior. Transport readers already bound each frame.
+		if err := jsontext.ValidateUnicode([]byte(data)); err != nil {
+			return false, err
+		}
+	}
 
 	var event map[string]any
 	if err := json.Unmarshal([]byte(data), &event); err != nil {
@@ -447,6 +457,11 @@ func processOpenAIResponsesStreamEventWithProvider(
 		}
 		if item.Type == "custom_tool_call" {
 			return false, processOpenAIResponsesCustomItem(response, stream, state, event, item, false)
+		}
+		if item.Type == "function_call" {
+			if err := validateOpenAIResponsesFunctionItem(state, item); err != nil {
+				return false, err
+			}
 		}
 		startOpenAIResponsesStreamItem(response, stream, state, item)
 		if item.Type == "function_call" {
@@ -520,11 +535,11 @@ func processOpenAIResponsesStreamEventWithProvider(
 		if err != nil {
 			return false, err
 		}
+		if call != nil && call.InputProperty != "" {
+			return false, fmt.Errorf("OpenAI Responses function delta targets custom input")
+		}
 		if call == nil || call.Completed {
 			return false, nil
-		}
-		if call.InputProperty != "" {
-			return false, fmt.Errorf("OpenAI Responses function delta targets custom input")
 		}
 		delta, _ := event["delta"].(string)
 		call.JSON += delta
@@ -542,11 +557,11 @@ func processOpenAIResponsesStreamEventWithProvider(
 		if err != nil {
 			return false, err
 		}
+		if call != nil && call.InputProperty != "" {
+			return false, fmt.Errorf("OpenAI Responses function done targets custom input")
+		}
 		if call == nil || call.Completed {
 			return false, nil
-		}
-		if call.InputProperty != "" {
-			return false, fmt.Errorf("OpenAI Responses function done targets custom input")
 		}
 		arguments, _ := event["arguments"].(string)
 		if arguments != "" {
@@ -671,7 +686,7 @@ func registerOpenAIResponsesToolOutputIndex(state *openAIResponsesStreamingState
 	if !ok {
 		return nil
 	}
-	if index < 0 || index != math.Trunc(index) {
+	if index < 0 || index > math.MaxInt32 || index != math.Trunc(index) {
 		return fmt.Errorf("OpenAI Responses invalid tool output_index: %v", index)
 	}
 	key := openAIResponsesItemKey(item)
@@ -703,7 +718,7 @@ func resolveOpenAIResponsesToolCall(state *openAIResponsesStreamingState, event 
 		}
 	}
 	if index, ok := event["output_index"].(float64); ok {
-		if index < 0 || index != math.Trunc(index) {
+		if index < 0 || index > math.MaxInt32 || index != math.Trunc(index) {
 			return nil, fmt.Errorf("OpenAI Responses invalid tool output_index: %v", index)
 		}
 		indexedCall := state.ToolCalls[state.ToolCallOutputKeys[int(index)]]
@@ -955,6 +970,11 @@ func finalizeOpenAIResponsesStreamItem(
 	state *openAIResponsesStreamingState,
 	item openAIResponsesResponseItem,
 ) error {
+	if item.Type == "function_call" {
+		if err := validateOpenAIResponsesFunctionItem(state, item); err != nil {
+			return err
+		}
+	}
 	itemKey := openAIResponsesItemKey(item)
 	switch item.Type {
 	case "message":

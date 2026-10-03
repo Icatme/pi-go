@@ -15,6 +15,9 @@ const (
 )
 
 func processOpenAIResponsesCustomItem(response *AssistantMessage, stream *AssistantMessageEventStream, state *openAIResponsesStreamingState, event map[string]any, item openAIResponsesResponseItem, done bool) error {
+	if item.Namespace != "" {
+		return fmt.Errorf("OpenAI Responses custom tool namespaces are not enabled")
+	}
 	property := state.CustomTools[item.Name]
 	if property == "" {
 		return fmt.Errorf("OpenAI Responses undeclared custom tool %q", item.Name)
@@ -33,6 +36,17 @@ func processOpenAIResponsesCustomItem(response *AssistantMessage, stream *Assist
 	for otherKey, other := range state.ToolCalls {
 		if otherKey != key && (other.ItemID == item.ID || other.CallID == item.CallID) {
 			return fmt.Errorf("OpenAI Responses conflicting custom tool identity")
+		}
+	}
+	if event != nil {
+		index, ok := event["output_index"].(float64)
+		if !ok {
+			return fmt.Errorf("OpenAI Responses custom item requires output_index")
+		}
+		for previousIndex, previousKey := range state.ToolCallOutputKeys {
+			if previousKey == key && float64(previousIndex) != index {
+				return fmt.Errorf("OpenAI Responses custom item changed output_index")
+			}
 		}
 	}
 	if err := registerOpenAIResponsesToolOutputIndex(state, event, item); err != nil {
@@ -62,6 +76,18 @@ func processOpenAIResponsesCustomItem(response *AssistantMessage, stream *Assist
 		block := response.Content[call.ContentIndex].(ToolCall)
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallEnd, ContentIndex: call.ContentIndex, ToolCall: block, Partial: *response})
 		state.FinalizedItemKeys[key] = true
+	}
+	return nil
+}
+
+func validateOpenAIResponsesFunctionItem(state *openAIResponsesStreamingState, item openAIResponsesResponseItem) error {
+	if state.CustomTools[item.Name] != "" {
+		return fmt.Errorf("OpenAI Responses native custom declaration %q returned a function call", item.Name)
+	}
+	for _, other := range state.ToolCalls {
+		if other.InputProperty != "" && (other.ItemID == item.ID || other.CallID == item.CallID) {
+			return fmt.Errorf("OpenAI Responses function call conflicts with custom call identity")
+		}
 	}
 	return nil
 }

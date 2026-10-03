@@ -71,6 +71,7 @@ func TestResponsesCustomStreamAcrossTransports(t *testing.T) {
 		{"delta after input done", []map[string]any{customEvent("added", ""), customInputEvent("done", "a"), customInputEvent("delta", "b"), customTerminal()}, nil, true},
 		{"conflicting terminal", []map[string]any{customEvent("done", "abc"), customTerminal(customItem("ctc_a", "call_a", "code", "abd"))}, nil, true},
 		{"undeclared tool", []map[string]any{customTerminal(customItem("ctc_a", "call_a", "unknown", "abc"))}, nil, true},
+		{"undeclared namespace", []map[string]any{customTerminal(map[string]any{"type": "custom_tool_call", "id": "ctc_a", "call_id": "call_a", "name": "code", "namespace": "unknown", "input": "abc"})}, nil, true},
 		{"invalid item ID", []map[string]any{customTerminal(customItem("fc_a", "call_a", "code", "abc"))}, nil, true},
 		{"invalid identity", []map[string]any{customEvent("added", ""), {"type": "response.custom_tool_call_input.delta", "item_id": "ctc_wrong", "output_index": 0, "delta": "bad"}, customTerminal()}, nil, true},
 		{"unknown index", []map[string]any{customEvent("added", ""), {"type": "response.custom_tool_call_input.delta", "item_id": "ctc_a", "output_index": 1, "delta": "bad"}, customTerminal()}, nil, true},
@@ -78,6 +79,9 @@ func TestResponsesCustomStreamAcrossTransports(t *testing.T) {
 		{"missing input", []map[string]any{{"type": "response.output_item.done", "output_index": 0, "item": map[string]any{"type": "custom_tool_call", "id": "ctc_a", "call_id": "call_a", "name": "code"}}, customTerminal()}, nil, true},
 		{"unfinished item status", []map[string]any{{"type": "response.output_item.done", "output_index": 0, "item": map[string]any{"type": "custom_tool_call", "id": "ctc_a", "call_id": "call_a", "name": "code", "input": "x", "status": "incomplete"}}, customTerminal()}, nil, true},
 		{"function event cannot alter custom input", []map[string]any{customEvent("added", ""), {"type": "response.function_call_arguments.delta", "item_id": "ctc_a", "output_index": 0, "delta": "{}"}, customTerminal()}, nil, true},
+		{"item cannot move index", []map[string]any{customEvent("added", ""), {"type": "response.output_item.done", "output_index": 9, "item": customItem("ctc_a", "call_a", "code", "a")}, customTerminal()}, nil, true},
+		{"huge index", []map[string]any{{"type": "response.output_item.added", "output_index": 1e100, "item": customItem("ctc_a", "call_a", "code", "")}, customTerminal()}, nil, true},
+		{"native declaration cannot return a function", []map[string]any{responsesToolEvent("response.output_item.done", "fc_a", "call_a", "code", `{"code":"abc"}`, 0), customTerminal()}, nil, true},
 		{"interleaved custom calls", []map[string]any{customEvent("added", ""), {"type": "response.output_item.added", "output_index": 1, "item": customItem("ctc_b", "call_b", "code", "B")}, customInputEvent("delta", "A"), {"type": "response.output_item.done", "output_index": 1, "item": customItem("ctc_b", "call_b", "code", "BB")}, customEvent("done", "AA"), customTerminal()}, []string{"AA", "BB"}, false},
 	} {
 		for _, transport := range []string{"responses-sse", "codex-sse", "codex-websocket"} {
@@ -305,16 +309,23 @@ func TestResponsesCustomResourceBounds(t *testing.T) {
 }
 
 func TestResponsesCustomMalformedWire(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, buildOpenAICodexSSE(customEvent("added", "partial"))+"data: {broken\n\n")
-	}))
-	defer server.Close()
-	model := customFixtureModel("responses-sse", server.URL)
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	result := CompleteSimple(model, Context{Tools: []Tool{samplingTool("text", "require")}}, SimpleStreamOptions{APIKey: "fixture", RequestContext: ctx})
-	if result.StopReason != StopReasonError {
-		t.Fatalf("malformed stream accepted: %+v", result)
+	for _, malformed := range []string{"{broken", `{"type":"response.custom_tool_call_input.done","item_id":"ctc_a","output_index":0,"input":"partial\ud800"}`} {
+		t.Run(malformed, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, buildOpenAICodexSSE(customEvent("added", "partial"))+"data: "+malformed+"\n\n"+buildOpenAICodexSSE(customEvent("done", "partial\ufffd"), customTerminal()))
+			}))
+			defer server.Close()
+			model := customFixtureModel("responses-sse", server.URL)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			result := CompleteSimple(model, Context{Tools: []Tool{samplingTool("text", "require")}}, SimpleStreamOptions{APIKey: "fixture", RequestContext: ctx})
+			if result.StopReason != StopReasonError {
+				t.Fatalf("malformed stream accepted: %+v", result)
+			}
+			if strings.Contains(malformed, `\ud800`) && !strings.Contains(result.ErrorMessage, "invalid_unicode") {
+				t.Fatalf("Unicode replacement was not rejected: %+v", result)
+			}
+		})
 	}
 }

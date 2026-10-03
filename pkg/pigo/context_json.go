@@ -16,10 +16,11 @@ type contextJSON struct {
 }
 
 type toolJSON struct {
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	Parameters   any    `json:"parameters,omitempty"`
-	OutputSchema any    `json:"outputSchema,omitempty"`
+	ConstrainedSampling *ToolConstrainedSampling `json:"constrainedSampling,omitempty"`
+	Name                string                   `json:"name"`
+	Description         string                   `json:"description,omitempty"`
+	Parameters          any                      `json:"parameters,omitempty"`
+	OutputSchema        any                      `json:"outputSchema,omitempty"`
 }
 
 type messageJSON struct {
@@ -120,10 +121,11 @@ func (context Context) MarshalJSON() ([]byte, error) {
 
 	for _, tool := range context.Tools {
 		wire.Tools = append(wire.Tools, toolJSON{
-			Name:         tool.Name,
-			Description:  tool.Description,
-			Parameters:   cloneAny(tool.Parameters),
-			OutputSchema: cloneAny(tool.OutputSchema),
+			Name:                tool.Name,
+			Description:         tool.Description,
+			Parameters:          cloneAny(tool.Parameters),
+			OutputSchema:        cloneAny(tool.OutputSchema),
+			ConstrainedSampling: tool.ConstrainedSampling.Clone(),
 		})
 	}
 	for _, tool := range context.HostedTools {
@@ -155,10 +157,11 @@ func (context *Context) UnmarshalJSON(payload []byte) error {
 	context.Tools = make([]Tool, 0, len(wire.Tools))
 	for _, tool := range wire.Tools {
 		context.Tools = append(context.Tools, Tool{
-			Name:         tool.Name,
-			Description:  tool.Description,
-			Parameters:   cloneAny(tool.Parameters),
-			OutputSchema: cloneAny(tool.OutputSchema),
+			Name:                tool.Name,
+			Description:         tool.Description,
+			Parameters:          cloneAny(tool.Parameters),
+			OutputSchema:        cloneAny(tool.OutputSchema),
+			ConstrainedSampling: tool.ConstrainedSampling.Clone(),
 		})
 	}
 
@@ -189,7 +192,7 @@ func marshalMessageJSON(message Message) (messageJSON, error) {
 		}
 		tools := make([]toolJSON, 0, len(typed.ToolsAdded))
 		for _, tool := range typed.ToolsAdded {
-			tools = append(tools, toolJSON{Name: tool.Name, Description: tool.Description, Parameters: cloneAny(tool.Parameters), OutputSchema: cloneAny(tool.OutputSchema)})
+			tools = append(tools, toolJSON{Name: tool.Name, Description: tool.Description, Parameters: cloneAny(tool.Parameters), OutputSchema: cloneAny(tool.OutputSchema), ConstrainedSampling: tool.ConstrainedSampling.Clone()})
 		}
 		return messageJSON{
 			Role: "system", Content: content, Timestamp: typed.Timestamp.Format(timeLayoutJSON),
@@ -263,7 +266,7 @@ func unmarshalMessageJSON(encoded messageJSON) (Message, error) {
 		}
 		tools := make([]Tool, 0, len(encoded.ToolsAdded))
 		for _, tool := range encoded.ToolsAdded {
-			tools = append(tools, Tool{Name: tool.Name, Description: tool.Description, Parameters: cloneAny(tool.Parameters), OutputSchema: cloneAny(tool.OutputSchema)})
+			tools = append(tools, Tool{Name: tool.Name, Description: tool.Description, Parameters: cloneAny(tool.Parameters), OutputSchema: cloneAny(tool.OutputSchema), ConstrainedSampling: tool.ConstrainedSampling.Clone()})
 		}
 		return SystemMessage{
 			Content: content, Timestamp: timestamp, Sections: cloneSystemSections(encoded.Sections),

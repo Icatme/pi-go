@@ -161,6 +161,12 @@ func buildModelCapabilitySnapshot(module ProviderModule, model Model) ModelCapab
 	resolveReasoningLevelCapabilities(&capabilities, model)
 	resolveSamplingReasoningCapabilities(&capabilities, model)
 	normalizeModelCapabilities(&capabilities)
+	if capabilities.Tools == CapabilityUnsupported {
+		capabilities.CustomTools = CapabilityUnsupported
+	}
+	if capabilities.CustomTools != CapabilitySupported {
+		capabilities.GrammarTools = capabilities.CustomTools
+	}
 
 	responseFormats := responseFormatCapabilitiesFromFacts(module.Capabilities, model)
 	if runtimeStreaming != CapabilitySupported {

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Icatme/pi-go/internal/jsontext"
 )
 
 // ToolConstrainedSampling opts a single-string object tool into a native custom
@@ -50,6 +52,11 @@ func ResolveToolSampling(model Model, tool Tool) (ToolSamplingDecision, error) {
 	fail := func(message string) (ToolSamplingDecision, error) {
 		return decision, fmt.Errorf("tool %q constrained sampling: %s", tool.Name, message)
 	}
+	if tool.Name == "" || len(tool.Name) > 64 || strings.IndexFunc(tool.Name, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-')
+	}) >= 0 {
+		return fail("custom name must contain 1 to 64 letters, digits, underscores or hyphens")
+	}
 	if config.Mode != "" && config.Mode != "prefer" && config.Mode != "require" {
 		return fail("mode must be prefer or require")
 	}
@@ -91,6 +98,9 @@ func isOpenAIResponsesAPI(api API) bool {
 
 func toolSamplingInputProperty(parameters any) (string, error) {
 	fail := fmt.Errorf("parameters must be an object with exactly one required string property")
+	if err := jsontext.ValidateStrings(parameters); err != nil {
+		return "", err
+	}
 	data, err := json.Marshal(parameters)
 	if err != nil {
 		return "", fmt.Errorf("invalid parameters: %w", err)
@@ -118,7 +128,12 @@ func toolSamplingInputProperty(parameters any) (string, error) {
 func resolveContextToolSampling(model Model, ctx Context) (map[string]string, error) {
 	custom := make(map[string]string)
 	tools := currentContextTools(ctx)
+	seen := make(map[string]bool)
 	for _, tool := range tools {
+		if configured, exists := seen[tool.Name]; exists && (configured || tool.ConstrainedSampling != nil) {
+			return nil, fmt.Errorf("ambiguous sampling declaration for tool %q", tool.Name)
+		}
+		seen[tool.Name] = tool.ConstrainedSampling != nil
 		decision, err := ResolveToolSampling(model, tool)
 		if err != nil {
 			return nil, err

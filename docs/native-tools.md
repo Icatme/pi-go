@@ -63,6 +63,10 @@ must still finalize the call. Terminal-only responses work. Identical repeated
 completion is idempotent; nonmonotonic input, conflicting completion, ambiguous
 identity, unknown custom tools and unfinished calls fail the response. An error,
 cancellation or length stop cannot dispatch partial tool input in Agent.
+Output indices remain bound to one call, and native declarations cannot return
+function calls. Namespaced custom output is rejected until N3 enables that
+separate protocol. Invalid UTF-8 or unpaired surrogate escapes fail before JSON
+decoding can change source text.
 
 Calls retain `call_id|ctc_item_id`. Replay chooses the current tool representation
 and pairs output by call ID. Item IDs are kept only for the same provider, API,

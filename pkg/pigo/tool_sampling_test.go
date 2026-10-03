@@ -1,6 +1,7 @@
 package pigo
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -83,6 +84,7 @@ func TestToolSamplingDoesNotInheritProviderFacts(t *testing.T) {
 
 func TestToolSamplingRejectsMalformedDeclarationsAndBounds(t *testing.T) {
 	for _, modify := range []func(*Tool){
+		func(tool *Tool) { tool.Name = "invalid name" },
 		func(tool *Tool) { tool.ConstrainedSampling.Type = "json_schema" },
 		func(tool *Tool) { tool.ConstrainedSampling.Mode = "required" },
 		func(tool *Tool) { tool.ConstrainedSampling.Syntax = "pcre" },
@@ -90,6 +92,9 @@ func TestToolSamplingRejectsMalformedDeclarationsAndBounds(t *testing.T) {
 		func(tool *Tool) { tool.ConstrainedSampling.Definition = strings.Repeat("x", MaxToolGrammarBytes+1) },
 		func(tool *Tool) { tool.ConstrainedSampling.Definition = string([]byte{0xff}) },
 		func(tool *Tool) { tool.Parameters = nil },
+		func(tool *Tool) {
+			tool.Parameters = json.RawMessage(`{"type":"object","properties":{"\ud800":{"type":"string"}},"required":["\ud800"]}`)
+		},
 		func(tool *Tool) {
 			tool.Parameters = json.RawMessage(`{"type":"object","properties":{"code":{"type":"number"}},"required":["code"]}`)
 		},
@@ -120,5 +125,62 @@ func TestToolSamplingTranscriptCloneAndRedefinition(t *testing.T) {
 	changes := GetToolStateChanges([]Tool{tool}, []Tool{declaration})
 	if len(changes.ToolsAdded) != 1 || len(changes.ToolsRemoved) != 1 {
 		t.Fatalf("changes=%+v", changes)
+	}
+}
+
+func TestToolSamplingRejectsBeforeAuthorizationAndPayload(t *testing.T) {
+	var authCalls, payloadCalls, httpCalls int
+	provider := Provider("test-n2-auth-preflight")
+	RegisterProviderModule(ProviderModule{Provider: provider, Models: map[string]Model{"fixture": {API: "openai-responses"}}, Auth: ProviderAuth{
+		ResolveAuthorization: func(Provider, AuthConfig, *http.Client, context.Context) (string, error) {
+			authCalls++
+			return "fixture", nil
+		},
+	}})
+	model := *GetModel(provider, "fixture")
+	result := Complete(model, Context{Tools: []Tool{samplingTool("grammar", "require")}}, ProviderStreamOptions{
+		OnPayload:  func(payload any, model Model) any { payloadCalls++; return payload },
+		HTTPClient: &http.Client{Transport: samplingRoundTripper(func(*http.Request) (*http.Response, error) { httpCalls++; return nil, nil })},
+	})
+	if result.StopReason != StopReasonError || authCalls != 0 || payloadCalls != 0 || httpCalls != 0 {
+		t.Fatalf("result=%+v auth=%d payload=%d http=%d", result, authCalls, payloadCalls, httpCalls)
+	}
+}
+
+func TestToolSamplingRejectsInvalidReplayBeforeRequest(t *testing.T) {
+	model := *GetModel("openai", "gpt-6-astra")
+	for _, args := range []map[string]any{{}, {"code": 42}, {"code": "x", "extra": true}, {"code": strings.Repeat("x", MaxCustomToolInputBytes+1)}} {
+		requests := 0
+		ctx := Context{Tools: []Tool{samplingTool("text", "require")}, Messages: []Message{AssistantMessage{Provider: model.Provider, Model: model.ID, API: model.API, StopReason: StopReasonToolUse, Content: []ContentBlock{ToolCall{ID: "call_a|ctc_a", Name: "code", Arguments: args}}}}}
+		result := CompleteSimple(model, ctx, SimpleStreamOptions{APIKey: "fixture", HTTPClient: &http.Client{Transport: samplingRoundTripper(func(*http.Request) (*http.Response, error) { requests++; return nil, nil })}})
+		if result.StopReason != StopReasonError || !strings.Contains(result.ErrorMessage, "replay") || requests != 0 {
+			t.Fatalf("result=%+v requests=%d", result, requests)
+		}
+	}
+}
+
+func TestToolSamplingRegexAndContextRoundTrip(t *testing.T) {
+	model := *GetModel("openai", "gpt-6-astra")
+	tool := samplingTool("grammar", "")
+	tool.Name = "code_"
+	tool.ConstrainedSampling.Syntax, tool.ConstrainedSampling.Definition = "regex", `[a-z]+`
+	wire := convertOpenAIResponsesTools(model, []Tool{tool})[0]
+	format := wire["format"].(map[string]any)
+	if format["syntax"] != "regex" || format["definition"] != `[a-z]+` {
+		t.Fatalf("wire=%v", wire)
+	}
+	for _, original := range []Context{{Tools: []Tool{tool}}, {Messages: []Message{*CreateInitialSystemMessage("fixture", []Tool{tool})}}} {
+		data, err := SerializeContext(original)
+		if err != nil {
+			t.Fatal(err)
+		}
+		restored, err := DeserializeContext(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tools := currentContextTools(restored)
+		if len(tools) != 1 || !DeclarationsEqual(tool, tools[0]) {
+			t.Fatalf("lost sampling metadata: %s", data)
+		}
 	}
 }

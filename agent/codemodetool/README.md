@@ -13,6 +13,11 @@ codeTool, err := codemodetool.New(sandbox, []codemodetool.Binding{
 // Handle err, then add only codeTool to agent.AgentDefinition.Tools.
 ```
 
+`Options.ConstrainedSampling` optionally requests native custom text or a Lark/
+regex grammar on an explicitly supported model. Both `New` and `NewDynamic`
+still execute the same `{"code": source}` argument object. Nil preserves ordinary
+function tools. See [native input configuration, fallback and limits](../../docs/native-tools.md).
+
 Ordinary short MCP names map to `mcp__server__tool`. Namespace names longer than
 24 bytes, requiring sanitization, or containing the `__` separator use a capped
 readable namespace plus a 12-hex identity hash. Tool names exceeding the remaining
