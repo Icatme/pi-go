@@ -252,6 +252,8 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 		executionContext.ChildSequential = children.limits.MaxParallel == 1
 		executionContext.Invocation = toolInvocationFromContext(ctx)
 	}
+	state := newToolState(ctx, prepared)
+	executionContext.State = state
 	if prepared.onEntered != nil {
 		prepared.onEntered()
 	}
@@ -358,9 +360,14 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 			setOutcomeFailure(&outcome, err, ToolFailureResultRejected, prepared.failureResultLimit())
 		}
 	}
+	if state != nil && outcome.err == nil && ctx.Err() != nil {
+		// A canceled finalization must not publish success while dropping its state.
+		setOutcomeFailure(&outcome, ctx.Err(), ToolFailureCanceled, prepared.failureResultLimit())
+	}
 	if outcome.err != nil {
 		outcome.isError = true
 	}
+	state.finish(execErr == nil && !result.IsError && outcome.err == nil && !outcome.isError && ctx.Err() == nil)
 	outcome.result.IsError = outcome.isError
 	outcome.result.Execution = cloneToolExecutionInfo(&outcome.execution)
 	outcome.result.Failure = cloneToolFailure(outcome.failure)

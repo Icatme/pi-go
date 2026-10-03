@@ -64,6 +64,9 @@ func (binding Binding) NamespacePrefix() string {
 // Options limits this container invocation. Zero values use bounded defaults.
 // ChildLimits applies to the Agent's complete basic ledger and optional details.
 type Options struct {
+	// StateNamespace is a stable host binding name, required for journaled runs.
+	// Change it when replacing the binding with an unrelated tool environment.
+	StateNamespace  string
 	storeKey        *byte
 	Name            string
 	Description     string
@@ -95,6 +98,9 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 	}
 	if !identifier(options.Name) || len(options.Name) > 64 {
 		return agent.ToolDefinition{}, errors.New("codemodetool: code tool name must be a JavaScript identifier of at most 64 bytes")
+	}
+	if len(options.StateNamespace) > 128 || !utf8.ValidString(options.StateNamespace) {
+		return agent.ToolDefinition{}, errors.New("codemodetool: invalid state namespace")
 	}
 	if options.Timeout < 0 || options.MaxOutputTokens < 0 {
 		return agent.ToolDefinition{}, errors.New("codemodetool: invalid timeout or output limit")
@@ -176,7 +182,7 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 		options.Description = "Run an async JavaScript body; await tools.<name>(args) or use Promise.all. " +
 			"Discover with ALL_TOOLS, searchTools(query,{namespace?,limit?}), describeTool(name), describeNamespace(name). " +
 			"Descriptions explain input and resolved values. Check availability with \"name\" in tools. " +
-			"Globals: text/return and console.* emit bounded output; image emits inline images; store/load keep small invocation state; exit succeeds. " +
+			"Globals: text/return and console.* emit bounded output; image emits inline images; store/load keep small host-scoped JSON values; exit succeeds. " +
 			"Allowed namespaces: " + available + ". No filesystem, network or timers except through allowed tools."
 	}
 	// A non-zero-size allocation gives this binding a private comparable identity.
@@ -203,13 +209,30 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 			if !ok || len(code) > 64<<10 {
 				return agent.ToolResult{}, errors.New("codemodetool: invalid or oversized code")
 			}
-			resource, err := execution.Invocation.LoadOrCreate(storeKey, func() (any, error) { return codemode.NewStore(1 << 20) })
-			if err != nil {
-				return agent.ToolResult{}, &agent.ToolExecutionError{Code: agent.ToolFailureResource, Message: "Codemode invocation store is unavailable", Err: err}
+			var store *codemode.Store
+			var err error
+			if execution.State != nil {
+				if options.StateNamespace == "" {
+					return agent.ToolResult{}, errors.New("codemodetool: journaled execution requires a host state namespace")
+				}
+				var raw json.RawMessage
+				raw, err = execution.State.Load(options.StateNamespace)
+				if err == nil {
+					store, err = codemode.RestoreStore(1<<20, raw)
+				}
+			} else {
+				var resource any
+				resource, err = execution.Invocation.LoadOrCreate(storeKey, func() (any, error) { return codemode.NewStore(1 << 20) })
+				if err == nil {
+					var ok bool
+					store, ok = resource.(*codemode.Store)
+					if !ok {
+						err = errors.New("invalid invocation store")
+					}
+				}
 			}
-			store, ok := resource.(*codemode.Store)
-			if !ok {
-				return agent.ToolResult{}, errors.New("codemodetool: invalid invocation store")
+			if err != nil {
+				return agent.ToolResult{}, &agent.ToolExecutionError{Code: agent.ToolFailureResource, Message: "Codemode store is unavailable", Err: err}
 			}
 			tools := append([]codemode.Tool(nil), templates...)
 			for i := range tools {
@@ -270,6 +293,15 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 				code, reason := scriptFailure(err)
 				return mapped, &agent.ToolExecutionError{Code: code, Reason: reason, Message: boundedText(presentation, result.OutputReservedBytes), Err: err,
 					Execution: agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotApplicable}}
+			}
+			if execution.State != nil {
+				raw, stageErr := store.Export()
+				if stageErr == nil {
+					stageErr = execution.State.Stage(options.StateNamespace, raw)
+				}
+				if stageErr != nil {
+					return mapped, &agent.ToolExecutionError{Code: agent.ToolFailureResource, Message: "Codemode state could not be staged", Err: stageErr, Execution: agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotApplicable}}
+				}
 			}
 			return mapped, nil
 		},

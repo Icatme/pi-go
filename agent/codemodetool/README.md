@@ -72,12 +72,19 @@ authoritative execution facts, and `Sandbox.Calls` describes bridge execution.
 Reports retain partial output and accepted calls on script failure. They do not
 contain leaf argument bodies, raw responses, or schemas.
 
-`store` and `load` use a private bounded store for successive code calls of this
-binding in one Agent invocation. A script stages its changes and commits only
-after successful completion; failed or canceled scripts discard them. A new
-Agent Run has a fresh store even when its session ID is the same. Concurrent
-revision conflicts return `store_conflict` without replaying earlier tool effects.
-This is in-memory invocation state; it provides no durable branch storage.
+Without a run journal, `store` and `load` use a private bounded store for
+successive code calls of this binding in one Agent invocation. A new Agent Run
+has a fresh store even when its session ID is the same.
+
+For durable branch state, use [session.PrepareRun](../session/README.md) and set
+`Options.StateNamespace` to a stable host binding name. A journaled call with
+no namespace fails before running its script. Each call restores a disposable
+store, stages its versioned data and lets the Agent accept it after the parent
+after hook and final result validator. Final results and accepted state share
+one session transaction. Failed/canceled scripts or rejected final results do
+not publish state; already executed child effects remain in the recovery ledger.
+Conflicts and uncertain execution are not replayed. Change the namespace when
+replacing an unrelated tool environment, and take identity/epoch from the host.
 
 `Options.Timeout == 0` uses the caller context and configured sandbox limit.
 No binding-specific deadline is introduced. Script header options may only

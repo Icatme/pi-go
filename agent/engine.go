@@ -16,6 +16,7 @@ import (
 
 // LoopHooks customize runtime behavior between turns.
 type LoopHooks struct {
+	Journal             RunJournal
 	ResolveDefinition   func(context.Context, AgentDefinition, AgentSnapshot) (AgentDefinition, error)
 	GetSteeringMessages func(context.Context) ([]Message, error)
 	GetFollowUpMessages func(context.Context) ([]Message, error)
@@ -97,7 +98,7 @@ func (e *Engine) RunWithHooks(ctx context.Context, definition AgentDefinition, s
 
 	next := cloneSnapshotPtr(snapshot)
 	definition = initializeThinkingState(definition, next)
-	initializeSystemTranscript(definition, next)
+	initializeSystemTranscript(definition, next, hooks.Journal != nil)
 	runtimeState := &loopRuntimeState{}
 	var newMessages []Message
 	started := false
@@ -154,7 +155,6 @@ func (e *Engine) ContinueWithHooks(ctx context.Context, definition AgentDefiniti
 
 	next := cloneSnapshotPtr(snapshot)
 	definition = initializeThinkingState(definition, next)
-	initializeSystemTranscript(definition, next)
 	if hasPendingToolState(next) {
 		return nil, ErrPendingToolCallsRequireResume
 	}
@@ -164,6 +164,7 @@ func (e *Engine) ContinueWithHooks(ctx context.Context, definition AgentDefiniti
 	if tail := next.Messages[len(next.Messages)-1]; tail.Role == RoleAssistant {
 		return nil, ErrCannotContinueFromAssistant
 	}
+	initializeSystemTranscript(definition, next, hooks.Journal != nil)
 
 	runtimeState := &loopRuntimeState{}
 	var newMessages []Message
@@ -203,6 +204,9 @@ func (e *Engine) ContinueWithHooks(ctx context.Context, definition AgentDefiniti
 // snapshot without appending a duplicate assistant message. The batch is
 // resolved and preflighted again against the current definition and hooks.
 func (e *Engine) ResumePendingToolCallsWithHooks(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink, hooks LoopHooks) (out *AgentSnapshot, err error) {
+	if hooks.Journal != nil {
+		return snapshot, errors.New("run journal: pending calls require host reconciliation; automatic resume is unsupported")
+	}
 	ctx = newToolInvocationContext(ctx)
 	if hooks.ToolGate == nil {
 		return nil, ErrToolGateRequired
@@ -214,7 +218,7 @@ func (e *Engine) ResumePendingToolCallsWithHooks(ctx context.Context, definition
 
 	next := cloneSnapshotPtr(snapshot)
 	definition = initializeThinkingState(definition, next)
-	initializeSystemTranscript(definition, next)
+	initializeSystemTranscript(definition, next, hooks.Journal != nil)
 	assistant, err := validatePendingToolBatch(*next)
 	if err != nil {
 		return nil, err
@@ -536,6 +540,7 @@ func isToolCallsSuspended(err error) bool {
 }
 
 func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink, hooks LoopHooks, pendingMessages []Message, initialNewMessages []Message, runtimeState *loopRuntimeState, executionState loopExecutionState) (next *AgentSnapshot, newMessages []Message, err error) {
+	ctx = withJournal(ctx, hooks.Journal)
 	firstTurn := executionState.firstTurn
 	turn := executionState.turn
 	if turn <= 0 {
@@ -679,6 +684,10 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 				return snapshot, newMessages, prepareErr
 			}
 
+			if err := recordJournal(ctx, transcript, false); err != nil {
+				snapshot.Error = err.Error()
+				return snapshot, newMessages, err
+			}
 			assistantMessage, tools, err := e.generateAssistant(ctx, resolvedDefinition, snapshot, requestTools, emit)
 			if err != nil {
 				snapshot.Error = err.Error()
@@ -695,6 +704,10 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 				toolBatch := e.failUnexecutedToolCalls(snapshot, assistantMessage.ToolCalls, reason, emit)
 				newMessages = append(newMessages, cloneMessages(toolBatch.messages)...)
 				transcript = append(transcript, cloneMessages(toolBatch.messages)...)
+				if err := recordJournal(context.WithoutCancel(ctx), transcript, false); err != nil {
+					snapshot.Error = err.Error()
+					return snapshot, newMessages, err
+				}
 				_, finishErr := finishAgentTurn(ctx, resolvedDefinition, AgentTurnContext{
 					Message: cloneMessage(assistantMessage), ToolResults: cloneMessages(toolBatch.messages),
 					Context: buildAgentContext(resolvedDefinition, *snapshot, tools), NewMessages: cloneMessages(newMessages),
@@ -705,6 +718,14 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 					return snapshot, newMessages, finishErr
 				}
 				return snapshot, newMessages, nil
+			}
+
+			// Once a message is observed, retain it even if cancellation arrives
+			// as the stream closes. Tool preflight will finalize calls as canceled
+			// without dispatching them, using the ordinary execution path.
+			if err := recordJournal(context.WithoutCancel(ctx), transcript, len(assistantMessage.ToolCalls) > 0); err != nil {
+				snapshot.Error = err.Error()
+				return snapshot, newMessages, err
 			}
 
 			var toolBatch executedToolBatch
@@ -718,6 +739,11 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 			if isToolCallsSuspended(err) {
 				setPendingToolControlState(snapshot, turn, assistantMessage)
 				snapshot.Error = ""
+				return snapshot, newMessages, err
+			}
+			if commitErr := recordJournal(context.WithoutCancel(ctx), transcript, false); commitErr != nil {
+				err = errors.Join(err, commitErr)
+				snapshot.Error = err.Error()
 				return snapshot, newMessages, err
 			}
 			turnContext := AgentTurnContext{
@@ -1005,10 +1031,18 @@ func (e *Engine) executeToolCallsGated(ctx context.Context, definition AgentDefi
 
 	prepared := make([]preparedToolCall, 0, len(assistant.ToolCalls))
 	suspended := make([]SuspendedToolCall, 0)
+	scope, _ := ctx.Value(journalKey{}).(*journalScope)
+	journaled := scope != nil && scope.journal != nil
 	for _, original := range assistant.ToolCalls {
 		item, suspension, err := e.prepareGatedToolCall(ctx, definition, assistant, currentContext, toolMap, original, gate)
 		if err != nil {
-			return executedToolBatch{}, err
+			if !journaled || ctx.Err() == nil {
+				return executedToolBatch{}, err
+			}
+			// A canceled approval wait may report ctx.Err as its gate error.
+			// No tool has entered during this batch's preflight; settle the
+			// rejected call along with any previously suspended siblings.
+			item = preparedFailure(original, nil, err, ToolFailureCanceled)
 		}
 		prepared = append(prepared, item)
 		if suspension != nil {
@@ -1019,10 +1053,12 @@ func (e *Engine) executeToolCallsGated(ctx context.Context, definition AgentDefi
 			})
 		}
 	}
-	if ctx.Err() != nil {
+	if ctx.Err() != nil && !journaled {
 		return executedToolBatch{}, ctx.Err()
 	}
-	if len(suspended) > 0 {
+	// A journal must settle every canceled call before clearing durable intent.
+	// Unjournaled preflight retains its existing no-result cancellation contract.
+	if len(suspended) > 0 && ctx.Err() == nil {
 		clearPending = false
 		return executedToolBatch{}, &ToolCallsSuspendedError{Calls: suspended}
 	}
