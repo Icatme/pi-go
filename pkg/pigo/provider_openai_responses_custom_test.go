@@ -188,7 +188,7 @@ func TestResponsesCustomReplayAndFunctionFallback(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wire := convertOpenAIResponsesMessages(custom, test.target, ctx, true)
+			wire := convertOpenAIResponsesMessages(nil, custom, test.target, ctx, true)
 			var call, output map[string]any
 			for _, item := range wire {
 				if item["name"] == "code" {
@@ -222,7 +222,7 @@ func TestResponsesCustomReplayAndFunctionFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wire := convertOpenAIResponsesMessages(custom, model, ctx, true)
+	wire := convertOpenAIResponsesMessages(nil, custom, model, ctx, true)
 	for _, item := range wire {
 		if item["type"] == "custom_tool_call" && item["id"] != nil {
 			t.Fatalf("function ID on custom replay: %v", item)
@@ -234,7 +234,7 @@ func TestResponsesCustomReplayAndFunctionFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wire = convertOpenAIResponsesMessages(custom, model, ctx, true)
+	wire = convertOpenAIResponsesMessages(nil, custom, model, ctx, true)
 	for _, item := range wire {
 		if item["type"] == "custom_tool_call" || item["type"] == "custom_tool_call_output" {
 			t.Fatalf("retired custom replay: %v", wire)

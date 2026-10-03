@@ -36,7 +36,22 @@ func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptio
 	}
 
 	go func() {
-		requestBody := buildOpenAIResponsesRequest(customTools, model, ctx, options)
+		requestBody, err := buildOpenAIResponsesRequest(customTools, model, ctx, options)
+		if err != nil {
+			response.StopReason = StopReasonError
+			response.ErrorMessage = err.Error()
+			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
+			stream.finish(response)
+			return
+		}
+		// Capture the selected declaration representation before payload hooks.
+		anchorsTools := false
+		for _, item := range requestBody.Input {
+			if item["type"] == "additional_tools" {
+				anchorsTools = true
+				break
+			}
+		}
 		payload := any(requestBody)
 		if options.OnPayload != nil {
 			if next := options.OnPayload(payload, model); next != nil {
@@ -89,7 +104,7 @@ func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptio
 			httpClient = http.DefaultClient
 		}
 
-		if err := streamOpenAIResponsesSSE(model, requestContext, httpClient, options, bodyBytes, apiKey, &response, stream, customTools); err != nil {
+		if err := streamOpenAIResponsesSSE(model, requestContext, httpClient, options, bodyBytes, apiKey, &response, stream, customTools, anchorsTools); err != nil {
 			applyRequestError(&response, err)
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
@@ -106,8 +121,12 @@ func streamSimpleOpenAIResponses(model Model, ctx Context, options SimpleStreamO
 	return streamOpenAIResponses(model, ctx, BuildProviderStreamOptions(model, options))
 }
 
-func buildOpenAIResponsesRequest(customTools map[string]string, model Model, ctx Context, options ProviderStreamOptions) openAIResponsesRequest {
+func buildOpenAIResponsesRequest(customTools map[string]string, model Model, ctx Context, options ProviderStreamOptions) (openAIResponsesRequest, error) {
+	toolPlan := resolveOpenAIResponsesToolPlan(customTools, model, ctx)
 	resolvedOptions := resolveOpenAIResponsesProviderOptions(model, options)
+	if toolPlan.RequiresFullHistory && strings.TrimSpace(resolvedOptions.PreviousResponseID) != "" {
+		return openAIResponsesRequest{}, fmt.Errorf("OpenAI Responses dynamic tool declarations require full history without previous_response_id")
+	}
 	compat := resolveOpenAIResponsesCompat(model)
 	parallelToolCalls := true
 	if resolvedOptions.ParallelToolCalls != nil {
@@ -118,8 +137,8 @@ func buildOpenAIResponsesRequest(customTools map[string]string, model Model, ctx
 		Model:             model.ID,
 		Store:             false,
 		Stream:            true,
-		Input:             convertOpenAIResponsesMessages(customTools, model, ctx, true),
-		Tools:             convertOpenAIResponsesTools(customTools, currentContextTools(ctx)),
+		Input:             convertOpenAIResponsesMessages(toolPlan, customTools, model, ctx, true),
+		Tools:             convertOpenAIResponsesTools(customTools, toolPlan.RequestTools),
 		ToolChoice:        resolveOpenAIResponsesToolChoice(resolvedOptions.ToolChoice),
 		ParallelToolCalls: &parallelToolCalls,
 		Include:           []string{"reasoning.encrypted_content"},
@@ -176,7 +195,7 @@ func buildOpenAIResponsesRequest(customTools map[string]string, model Model, ctx
 		}
 	}
 
-	return requestBody
+	return requestBody, nil
 }
 
 func resolveOpenAIResponsesToolChoice(toolChoice string) string {
@@ -245,6 +264,7 @@ func streamOpenAIResponsesSSE(
 	response *AssistantMessage,
 	stream *AssistantMessageEventStream,
 	customTools map[string]string,
+	anchorsTools bool,
 ) error {
 	clientOptions := []openaioption.RequestOption{
 		openaioption.WithAPIKey(apiKey),
@@ -326,6 +346,7 @@ func streamOpenAIResponsesSSE(
 
 		state := openAIResponsesStreamingState{
 			CustomTools:          customTools,
+			AnchorsTools:         anchorsTools,
 			CurrentTextIndex:     -1,
 			CurrentThinkingIndex: -1,
 			FinalizedItemKeys:    map[string]bool{},
@@ -349,6 +370,7 @@ func streamOpenAIResponsesSSE(
 		if err != nil {
 			if !isProviderStreamEventCallbackError(err) &&
 				!state.CustomOutputSeen &&
+				!state.AnchoredOutputSeen &&
 				len(response.Content) == 0 &&
 				len(response.HostedToolExecutions) == 0 &&
 				!response.UsageReported &&

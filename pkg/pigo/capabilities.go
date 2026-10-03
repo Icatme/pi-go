@@ -26,8 +26,11 @@ type ModelCapabilities struct {
 	Tools     CapabilitySupport `json:"tools"`
 	// Native custom input and Lark/regex grammars are model-only facts. API and
 	// provider defaults never grant these capabilities to an entire catalog.
-	CustomTools                CapabilitySupport    `json:"custom_tools"`
-	GrammarTools               CapabilitySupport    `json:"grammar_tools"`
+	CustomTools  CapabilitySupport `json:"custom_tools"`
+	GrammarTools CapabilitySupport `json:"grammar_tools"`
+	// ToolAdditions permits position-anchored function declarations on Responses.
+	// Like custom tools, it is granted only by exact registered model facts.
+	ToolAdditions              CapabilitySupport    `json:"tool_additions"`
 	StrictTools                CapabilitySupport    `json:"strict_tools"`
 	ToolChoice                 CapabilitySupport    `json:"tool_choice"`
 	Reasoning                  CapabilitySupport    `json:"reasoning"`
@@ -120,6 +123,10 @@ func buildModelCapabilitySnapshot(module ProviderModule, model Model) ModelCapab
 	capabilities = mergeModelCapabilities(capabilities, model.Capabilities)
 	capabilities.CustomTools = model.Capabilities.CustomTools
 	capabilities.GrammarTools = model.Capabilities.GrammarTools
+	capabilities.ToolAdditions = model.Capabilities.ToolAdditions
+	if model.API != "openai-responses" {
+		capabilities.ToolAdditions = CapabilityUnsupported
+	}
 	if !isOpenAIResponsesAPI(model.API) {
 		capabilities.CustomTools = CapabilityUnsupported
 		capabilities.GrammarTools = CapabilityUnsupported
@@ -139,6 +146,7 @@ func buildModelCapabilitySnapshot(module ProviderModule, model Model) ModelCapab
 		capabilities.CustomTools = CapabilityUnsupported
 		capabilities.GrammarTools = CapabilityUnsupported
 		capabilities.StrictTools = CapabilityUnsupported
+		capabilities.ToolAdditions = CapabilityUnsupported
 		capabilities.ToolChoice = CapabilityUnsupported
 		capabilities.Reasoning = CapabilityUnsupported
 		capabilities.ReasoningLevels = CapabilityUnsupported
@@ -163,6 +171,7 @@ func buildModelCapabilitySnapshot(module ProviderModule, model Model) ModelCapab
 	normalizeModelCapabilities(&capabilities)
 	if capabilities.Tools == CapabilityUnsupported {
 		capabilities.CustomTools = CapabilityUnsupported
+		capabilities.ToolAdditions = CapabilityUnsupported
 	}
 	if capabilities.CustomTools != CapabilitySupported {
 		capabilities.GrammarTools = capabilities.CustomTools
@@ -309,6 +318,9 @@ func mergeModelCapabilities(base, override ModelCapabilities) ModelCapabilities 
 	if override.GrammarTools != "" {
 		merged.GrammarTools = override.GrammarTools
 	}
+	if override.ToolAdditions != "" {
+		merged.ToolAdditions = override.ToolAdditions
+	}
 	if override.StrictTools != "" {
 		merged.StrictTools = override.StrictTools
 	}
@@ -350,6 +362,7 @@ func normalizeModelCapabilities(capabilities *ModelCapabilities) {
 	capabilities.Tools = normalizeCapabilitySupport(capabilities.Tools)
 	capabilities.CustomTools = normalizeCapabilitySupport(capabilities.CustomTools)
 	capabilities.GrammarTools = normalizeCapabilitySupport(capabilities.GrammarTools)
+	capabilities.ToolAdditions = normalizeCapabilitySupport(capabilities.ToolAdditions)
 	capabilities.StrictTools = normalizeCapabilitySupport(capabilities.StrictTools)
 	capabilities.ToolChoice = normalizeCapabilitySupport(capabilities.ToolChoice)
 	capabilities.Reasoning = normalizeCapabilitySupport(capabilities.Reasoning)

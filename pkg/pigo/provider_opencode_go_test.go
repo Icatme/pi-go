@@ -158,7 +158,7 @@ func TestOpenCodeGoProviderCatalogAndProtocolRouting(t *testing.T) {
 	if options.Reasoning != ThinkingLevelMax {
 		t.Fatalf("expected Luna max reasoning to survive provider dispatch, got %q", options.Reasoning)
 	}
-	request := buildOpenAIResponsesRequest(nil, *luna, Context{}, options)
+	request := mustBuildOpenAIResponsesRequest(t, nil, *luna, Context{}, options)
 	if request.Reasoning == nil || request.Reasoning.Effort != "max" {
 		t.Fatalf("expected Luna max reasoning on the Responses wire, got %+v", request.Reasoning)
 	}

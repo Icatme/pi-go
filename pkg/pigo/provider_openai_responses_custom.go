@@ -22,8 +22,13 @@ func markOpenAIResponsesCustomOutput(state *openAIResponsesStreamingState, event
 		state.CustomOutputSeen = true
 	}
 	mark := func(item any) {
-		if value, ok := item.(map[string]any); ok && value["type"] == "custom_tool_call" {
-			state.CustomOutputSeen = true
+		if value, ok := item.(map[string]any); ok {
+			if value["type"] == "custom_tool_call" {
+				state.CustomOutputSeen = true
+			}
+			if state.AnchorsTools && value["type"] == "function_call" {
+				state.AnchoredOutputSeen = true
+			}
 		}
 	}
 	mark(event["item"])
@@ -103,6 +108,13 @@ func processOpenAIResponsesCustomItem(response *AssistantMessage, stream *Assist
 }
 
 func validateOpenAIResponsesFunctionItem(state *openAIResponsesStreamingState, item openAIResponsesResponseItem) error {
+	// The public tool surface is flat. A namespaced short name must never
+	// silently execute an unrelated local function with the same short name.
+	if state.AnchorsTools {
+		if err := validateOpenAIResponsesAnchoredFunction(state, item); err != nil {
+			return err
+		}
+	}
 	if state.CustomTools[item.Name] != "" {
 		state.CustomOutputSeen = true
 		return fmt.Errorf("OpenAI Responses native custom declaration %q returned a function call", item.Name)

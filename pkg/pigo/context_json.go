@@ -87,6 +87,7 @@ type contentBlockJSON struct {
 	MIMEType          string         `json:"mimeType,omitempty"`
 	ID                string         `json:"id,omitempty"`
 	Name              string         `json:"name,omitempty"`
+	Namespace         string         `json:"namespace,omitempty"`
 	Arguments         map[string]any `json:"arguments,omitempty"`
 	ThoughtSignature  string         `json:"thoughtSignature,omitempty"`
 }
@@ -469,6 +470,7 @@ func marshalContentBlocksJSON(blocks []ContentBlock) (json.RawMessage, error) {
 				Type:             "toolCall",
 				ID:               typed.ID,
 				Name:             typed.Name,
+				Namespace:        typed.Namespace,
 				Arguments:        cloneMap(typed.Arguments),
 				ThoughtSignature: typed.ThoughtSignature,
 			})
@@ -513,6 +515,7 @@ func unmarshalContentBlocksJSON(payload json.RawMessage) ([]ContentBlock, error)
 			blocks = append(blocks, ToolCall{
 				ID:               block.ID,
 				Name:             block.Name,
+				Namespace:        block.Namespace,
 				Arguments:        cloneMap(block.Arguments),
 				ThoughtSignature: block.ThoughtSignature,
 			})

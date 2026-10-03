@@ -62,7 +62,7 @@ func TestBuildOpenAIResponsesRequestSerializesSamplingAndParallelToolCalls(t *te
 	}
 
 	t.Run("defaults", func(t *testing.T) {
-		request := buildOpenAIResponsesRequest(nil, *model, Context{}, ProviderStreamOptions{})
+		request := mustBuildOpenAIResponsesRequest(t, nil, *model, Context{}, ProviderStreamOptions{})
 		payload, err := json.Marshal(request)
 		if err != nil {
 			t.Fatalf("marshal default Responses request: %v", err)
@@ -90,7 +90,7 @@ func TestBuildOpenAIResponsesRequestSerializesSamplingAndParallelToolCalls(t *te
 		if err := validateOpenAIResponsesSamplingOptions(*model, options); err != nil {
 			t.Fatalf("validate GPT-5.6 sampling at high reasoning: %v", err)
 		}
-		request := buildOpenAIResponsesRequest(nil, *model, Context{}, options)
+		request := mustBuildOpenAIResponsesRequest(t, nil, *model, Context{}, options)
 		payload, err := json.Marshal(request)
 		if err != nil {
 			t.Fatalf("marshal explicit Responses request: %v", err)
@@ -169,7 +169,7 @@ func TestOpenAIResponsesSamplingMatchesExactModelReasoningConstraints(t *testing
 					t.Fatalf("validate sampling: %v", err)
 				}
 				if test.options.Reasoning == ThinkingLevel(ModelThinkingLevelOff) {
-					request := buildOpenAIResponsesRequest(nil, *model, Context{}, resolved)
+					request := mustBuildOpenAIResponsesRequest(t, nil, *model, Context{}, resolved)
 					if request.Reasoning == nil || request.Reasoning.Effort != "none" {
 						t.Fatalf("explicit off reasoning payload = %+v", request.Reasoning)
 					}

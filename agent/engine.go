@@ -450,6 +450,7 @@ func pendingToolBindingDigest(assistant Message, turn int) (string, error) {
 		ID               string `json:"id"`
 		OriginalID       string `json:"original_id"`
 		Name             string `json:"name"`
+		Namespace        string `json:"namespace,omitempty"`
 		RawPresent       bool   `json:"raw_present"`
 		Arguments        string `json:"arguments"`
 		ParsedArgs       string `json:"parsed_args"`
@@ -470,6 +471,7 @@ func pendingToolBindingDigest(assistant Message, turn int) (string, error) {
 			ID:               call.ID,
 			OriginalID:       call.OriginalID,
 			Name:             call.Name,
+			Namespace:        call.Namespace,
 			RawPresent:       len(call.Arguments) > 0,
 			Arguments:        canonicalArguments,
 			ParsedArgs:       parsedArgs,
@@ -1448,6 +1450,7 @@ func cloneToolCall(call ToolCall) ToolCall {
 		ID:               call.ID,
 		OriginalID:       call.OriginalID,
 		Name:             call.Name,
+		Namespace:        call.Namespace,
 		Arguments:        arguments,
 		ParsedArgs:       cloneStringAnyMap(call.ParsedArgs),
 		ThoughtSignature: call.ThoughtSignature,

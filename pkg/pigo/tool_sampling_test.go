@@ -208,7 +208,7 @@ func TestToolSamplingRequestKeepsResolvedRepresentation(t *testing.T) {
 	if !providerRegistry.Replace(provider, &module) {
 		t.Fatal("replace fixture catalog")
 	}
-	for _, request := range []openAIResponsesRequest{buildOpenAIResponsesRequest(plan, model, ctx, ProviderStreamOptions{}), buildOpenAICodexRequest(plan, model, ctx, ProviderStreamOptions{})} {
+	for _, request := range []openAIResponsesRequest{mustBuildOpenAIResponsesRequest(t, plan, model, ctx, ProviderStreamOptions{}), buildOpenAICodexRequest(plan, model, ctx, ProviderStreamOptions{})} {
 		if request.Tools[0]["type"] != "custom" {
 			t.Fatalf("declaration changed: %v", request.Tools)
 		}

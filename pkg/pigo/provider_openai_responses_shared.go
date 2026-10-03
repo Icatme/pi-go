@@ -130,6 +130,8 @@ type openAIResponsesStreamingState struct {
 	ToolCalls              map[string]*openAIResponsesToolCallState
 	ToolCallOutputKeys     map[int]string
 	CustomTools            map[string]string
+	AnchorsTools           bool
+	AnchoredOutputSeen     bool
 	CustomInputBytes       int
 	CustomCalls            int
 	CustomOutputSeen       bool
@@ -142,6 +144,7 @@ type openAIResponsesToolCallState struct {
 	JSON          string
 	Completed     bool
 	Name          string
+	Namespace     string
 	InputProperty string
 	Input         string
 	InputStarted  bool
@@ -152,15 +155,25 @@ type openAIResponsesToolCallState struct {
 // Shared message conversion
 // ============================================================================
 
-func convertOpenAIResponsesMessages(custom map[string]string, model Model, ctx Context, includeSystemPrompt bool) []map[string]any {
+func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom map[string]string, model Model, ctx Context, includeSystemPrompt bool) []map[string]any {
 	transcript := ResolveTranscript(NormalizeContext(ctx), supportsTranscriptSystemMessages(model))
 	transformed := TransformMessages(transcript.Messages, model, NormalizeOpenAIResponsesToolCallID)
 	input := make([]map[string]any, 0, len(transformed)+1)
 	customCallIDs := make(map[string]bool)
+	anchoredNames := make(map[string]bool)
 
 	for index, message := range transformed {
 		switch typed := message.(type) {
 		case SystemMessage:
+			if index > 0 && toolPlan != nil && toolPlan.Anchor && len(typed.ToolsAdded) > 0 {
+				input = append(input, map[string]any{
+					"type": "additional_tools", "role": "developer",
+					"tools": convertOpenAIResponsesTools(custom, typed.ToolsAdded),
+				})
+				for _, tool := range typed.ToolsAdded {
+					anchoredNames[tool.Name] = true
+				}
+			}
 			if index == 0 && !includeSystemPrompt {
 				continue
 			}
@@ -256,6 +269,9 @@ func convertOpenAIResponsesMessages(custom map[string]string, model Model, ctx C
 						"arguments": mustJSON(block.Arguments),
 					}
 					prefix := "fc_"
+					if anchoredNames[block.Name] && block.Namespace == block.Name && typed.Provider == model.Provider && typed.API == model.API && typed.Model == model.ID {
+						functionCall["namespace"] = block.Namespace
+					}
 					if property := custom[block.Name]; property != "" {
 						functionCall["type"] = "custom_tool_call"
 						functionCall["input"] = block.Arguments[property]
@@ -263,7 +279,8 @@ func convertOpenAIResponsesMessages(custom map[string]string, model Model, ctx C
 						customCallIDs[callID] = true
 						prefix = "ctc_"
 					}
-					if strings.HasPrefix(itemID, prefix) && typed.Provider == model.Provider && typed.API == model.API && typed.Model == model.ID {
+					sameNamespace := block.Namespace == "" || functionCall["namespace"] == block.Namespace
+					if sameNamespace && strings.HasPrefix(itemID, prefix) && typed.Provider == model.Provider && typed.API == model.API && typed.Model == model.ID {
 						functionCall["id"] = itemID
 					}
 					input = append(input, functionCall)
@@ -760,6 +777,11 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 	}
 
 	for _, item := range terminal.Output {
+		if state.AnchorsTools && item.Type == "function_call" {
+			if err := validateOpenAIResponsesFunctionItem(state, item); err != nil {
+				return err
+			}
+		}
 		if item.Type == "custom_tool_call" {
 			if err := processOpenAIResponsesCustomItem(response, stream, state, nil, item, true); err != nil {
 				return err
@@ -870,6 +892,7 @@ func emitOpenAIResponsesItemLifecycle(response *AssistantMessage, stream *Assist
 			response.Content = append(response.Content, ToolCall{
 				ID:               typed.ID,
 				Name:             typed.Name,
+				Namespace:        typed.Namespace,
 				Arguments:        map[string]any{},
 				ThoughtSignature: typed.ThoughtSignature,
 			})
@@ -920,10 +943,12 @@ func startOpenAIResponsesStreamItem(
 		response.Content = append(response.Content, ToolCall{
 			ID:        combineOpenAIResponsesToolCallID(item.CallID, item.ID),
 			Name:      item.Name,
+			Namespace: item.Namespace,
 			Arguments: parseStreamingJSONObject(item.Arguments),
 		})
 		state.ToolCalls[itemKey] = &openAIResponsesToolCallState{
 			ContentIndex: contentIndex, ItemID: item.ID, CallID: item.CallID, JSON: item.Arguments,
+			Name: item.Name, Namespace: item.Namespace,
 		}
 		stream.push(AssistantMessageEvent{
 			Type:         AssistantMessageEventToolCallStart,
@@ -1069,6 +1094,7 @@ func finalizeOpenAIResponsesStreamItem(
 		block.Arguments = arguments
 		block.ID = combineOpenAIResponsesToolCallID(item.CallID, item.ID)
 		block.Name = item.Name
+		block.Namespace = item.Namespace
 		response.Content[call.ContentIndex] = block
 		call.Completed = true
 		call.JSON = ""
@@ -1181,6 +1207,7 @@ func parseOpenAIResponsesResponseOutput(items []openAIResponsesResponseItem) []C
 			blocks = append(blocks, ToolCall{
 				ID:        id,
 				Name:      item.Name,
+				Namespace: item.Namespace,
 				Arguments: arguments,
 			})
 		}

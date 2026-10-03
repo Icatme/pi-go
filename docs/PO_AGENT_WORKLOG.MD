@@ -1276,3 +1276,78 @@
   build checks pass again. The earlier draft head `63ed143` passed all six CI
   jobs in run 37119336354, including five native platforms; the new commit must
   receive its own CI result before that evidence is treated as final.
+
+## 2026-10-03: N3 design checkpoint after N2 acceptance
+
+- N2 exact head `28f7ade22d1080fa892321ed686e752441664ee4` passed independent
+  cloud review with no confirmed findings and all six jobs in CI run
+  37119799205. PR #22 remains unmerged. Remote master is still `6ab184a8`.
+- Create `codex/n3-tool-anchors` from that head. Select only the Responses
+  `additional_tools` protocol and exact OpenAI `gpt-6-astra` model, with official
+  sources and replay/fallback boundaries in `dynamic-tool-anchors.md`.
+- Reuse system-message tool changes and the existing Agent resolver. Anchor
+  additions only; removal/redefinition, unsupported models or unsupported
+  native additions fold to the current tool list before dispatch. Prefix
+  stability is a serialization property, not measured provider-cache behavior.
+- This checkpoint changes documentation only. N3 implementation and validation
+  are pending. No live provider calls, dependency or release changes.
+
+## 2026-10-03: N3 implementation checkpoint
+
+- Add exact model-only ToolAdditions capability and additive-only Responses
+  request planning. Initial declarations and input prefixes remain stable;
+  deletions/redeclarations, unsupported targets, dynamic native custom tools and
+  native resource bounds fold to the current list before sending.
+- Carry namespace replay metadata through pigo, Agent, JSON, cloning and pending
+  call binding. Only anchored requests enable the new namespace checks; other
+  Responses/Codex function paths retain their prior behavior. Foreign namespaces
+  and changed namespace/name identities fail, including conflicting terminal
+  items. Malformed anchored output cannot reopen the retry window.
+- A focused replay test first failed on dropped namespace metadata. A loopback
+  test also reproduced foreign namespaces being accepted as a local short name.
+  Both now pass. Real Agent execution additionally reproduced existing empty
+  argument objects being cloned into null; preserve empty pigo maps so no-argument
+  functions still reach their existing object-schema validator as objects.
+- Focused pigo/Agent tests pass, including five actual Agent resolver/execution/
+  restoration scenarios and seven stream/HTTP boundary scenarios. Dynamic
+  native-model history plus previous_response_id fails before payload/auth/HTTP;
+  server-side tool revocation is not guessed. Full root/examples checks and
+  independent review are the next gates.
+- Existing Actions filters do not cover a PR based on codex/n2-native-grammar
+  or pushes to this N3 branch. CI is not claimed; the workflow is unchanged.
+
+## 2026-10-03: N3 draft and local validation handoff
+
+- Draft PR #23 targets codex/n2-native-grammar, exact N2 base 28f7ade, and carries
+  only the N3 delta. Independent N3 review is pending; no PR is merged.
+- Root and examples full `go test -count=1 -race ./...`, `go vet ./...`,
+  `go build ./...`, `go mod verify` and `go mod tidy -diff` passed on cloud Linux
+  Go 1.26.2 with live tests disabled. Module files remain unchanged.
+- Final diff review reproduced a changed terminal call_id under the same item
+  ID being treated as a second invocation. Reject item/call identity reuse in
+  anchored responses and bound generated function calls to 128. Both added
+  regressions first failed, then passed; pigo and Agent full race/vet and root
+  build passed again after the fix. Nine stream/HTTP cases now cover the native
+  boundary. Dropping incompatible namespace metadata also drops its provider
+  item ID; affected native/custom/sampling race cases, vet and root build pass.
+- Actions API confirms no PR workflow runs for the pushed implementation head;
+  existing base/push filters explain the absence. Native multi-platform CI and
+  live-provider/cache acceptance are not claimed. Final scope and evidence are
+  recorded in dynamic-tool-anchors.md.
+
+## 2026-10-03: N3 independent-review P2 repair
+
+- Reproduce the review finding at exact head ca890265: explicitly disabling
+  SupportsMidConvoSystemMessages returns from tool planning before setting the
+  exact native model's full-history requirement. Add/remove/redefine and
+  remove-and-replace histories incorrectly accept previous_response_id; four
+  new cases failed and reached a fake HTTP transport once each.
+- Determine the registered native capability and dynamic-history requirement
+  before selecting folded system-message fallback. The eight true/false flag
+  matrix cases now reject stateful dynamic replay before payload/HTTP, while
+  stateless folded requests and static-tool previous-response replay remain
+  valid. A registered local authorization fixture additionally proves zero
+  authorization, payload and HTTP calls on rejection.
+- Focused regressions and full pigo/Agent race tests pass. Root vet/build and
+  examples full race/vet/build also pass after this correction. No real provider
+  call, merge or release occurred; the repaired head awaits independent recheck.
