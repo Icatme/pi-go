@@ -3,7 +3,7 @@ module github.com/Icatme/pi-go/examples
 go 1.26.2
 
 require (
-	github.com/Icatme/pi-go v0.12.0
+	github.com/Icatme/pi-go v0.12.1
 	github.com/mattermost/mattermost/server/public v0.2.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	golang.org/x/net v0.46.0

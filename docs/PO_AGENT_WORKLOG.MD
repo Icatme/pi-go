@@ -1033,3 +1033,22 @@
   pass on Windows Go1.26.4. Validation is limited to MCP and local SDK fixtures;
   no dependency or public API change. The user subsequently authorized committing
   this repair and pushing master to GitHub; no release is requested.
+
+## 2026-10-03: Publish v0.12.1 maintenance release
+
+- The user requested a patch release for the fixes since v0.12.0. Advance the
+  package version and examples dependency to 0.12.1, including all eight fix/test
+  commits in PR19, PR20 and the expired-token reconnect repair on master.
+- Release notes cover SDK-aligned wire decoding and cache isolation, result
+  validator panic containment, OAuth callback retirement, stable client identity
+  through secret rotation, refresh cancellation and stateful reconnect. Document
+  the one-time explicit login for old mixed-strategy confidential-client keys.
+- Root and examples all-package race tests, vet, module verification and tidy
+  checks pass on Windows Go1.26.4 with workspace mode and live tests disabled.
+  Tidy initially reported only checkout CRLF in go.sum; normalize those working
+  file line endings without changing dependency versions or checksums. The
+  implementation at 3517a6c also passed the complete five-platform native CI.
+- Publish an annotated v0.12.1 tag and formal GitHub Release from the clean version
+  commit, with Windows amd64, Linux amd64/arm64 and macOS amd64/arm64 CLI archives
+  plus SHA256SUMS.txt. Verify embedded revisions, Unix executable modes, downloaded
+  hashes and public Go-module resolution. No provider live test or API change.
