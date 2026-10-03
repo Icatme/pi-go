@@ -1276,3 +1276,18 @@
   build checks pass again. The earlier draft head `63ed143` passed all six CI
   jobs in run 37119336354, including five native platforms; the new commit must
   receive its own CI result before that evidence is treated as final.
+
+## 2026-10-03: N3 design checkpoint after N2 acceptance
+
+- N2 exact head `28f7ade22d1080fa892321ed686e752441664ee4` passed independent
+  cloud review with no confirmed findings and all six jobs in CI run
+  37119799205. PR #22 remains unmerged. Remote master is still `6ab184a8`.
+- Create `codex/n3-tool-anchors` from that head. Select only the Responses
+  `additional_tools` protocol and exact OpenAI `gpt-6-astra` model, with official
+  sources and replay/fallback boundaries in `dynamic-tool-anchors.md`.
+- Reuse system-message tool changes and the existing Agent resolver. Anchor
+  additions only; removal/redefinition, unsupported models or unsupported
+  native additions fold to the current tool list before dispatch. Prefix
+  stability is a serialization property, not measured provider-cache behavior.
+- This checkpoint changes documentation only. N3 implementation and validation
+  are pending. No live provider calls, dependency or release changes.

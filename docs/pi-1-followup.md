@@ -216,6 +216,11 @@ exact initial capability evidence and local validation limits are in
 [Native custom tool inputs](native-tools.md). N3 remains a separate, sequential
 PR after the N2 draft is complete. No live-provider acceptance is implied.
 
+N2 at `28f7ade22d1080fa892321ed686e752441664ee4` has passed independent review
+and all six CI jobs in run 37119799205. N3 is now tracked separately on
+`codex/n3-tool-anchors`, stacked on the unmerged N2 branch; its initial boundary
+and source evidence are in [Native dynamic tool declarations](dynamic-tool-anchors.md).
+
 | 顺位 | 编号 | 决定与理由 | 交付边界及准入/验收门槛 |
 | --- | --- | --- | --- |
 | 第二轮 1 | N2：原生 grammar 工具 | 计划跟进。收益是直接传递代码及 provider 约束；现有 Codemode 不依赖它才能工作 | `pkg/pigo` capability、声明编码、custom call delta/done/终态、`ctc_` ID、回放及 Agent/Codemode 接线一起交付。用单字符串属性映射回现有参数对象；缺 capability 时发送前明确选择普通 function 表示或拒绝强制 grammar，不能收到 400 再重发 |
