@@ -21,7 +21,9 @@ The example checks this sequence:
 3. A script uses `Promise.all` for three issue pages, filters 150 rows in the VM,
    emits three titles and reads a bounded text resource through
    `tools.read_mcp_resource`.
-4. The hidden delete tool is absent from declarations, discovery and execution.
+4. Save the small filtered result and a resource reference in the trusted session,
+   add a complete second turn, and compact the first conversation window.
+5. The hidden delete tool is absent from declarations, discovery and execution.
    Large fixture bodies stay outside model messages. Exactly three tool calls
    and one resource read occur; the application prints one final JSON line.
 
@@ -39,3 +41,23 @@ the sandbox, manager and loopback HTTP server have bounded cleanup. Its owned
 HTTP transport closes idle connections after the manager, before server shutdown.
 Replace the model fixture with a configured provider to exercise actual script generation;
 this local run proves the execution plumbing, not live model behavior.
+
+To keep the session and resume in a **second process**:
+
+```powershell
+./mcp-managed.exe -session ./managed-session.jsonl -phase save
+./mcp-managed.exe -session ./managed-session.jsonl -phase resume
+```
+
+`save` creates a new JSONL v2 file and refuses to overwrite an existing file.
+`resume` reopens it with the same host identity/epoch, restores the tool selection
+through `RunBinding.TrustedScope`, rebuilds executors from a new MCP connection,
+and reads the saved JSON after compaction. It does not fetch the three issue
+pages again. It reauthorizes and reads the saved resource URI; the output includes
+`"resumed":true`. The tests run both phases in separate compiled test processes.
+Without `-session`, the default save phase uses a temporary file.
+
+See the [session contract](../../agent/session/README.md) for JSONL v2's explicit
+format break, atomic commits, locks, bounds and interrupted-call handling. A
+session ID alone is insufficient provenance. Current hidden/permission rules
+still apply, and no credentials or executable closures are saved.

@@ -156,6 +156,11 @@ leaf allowlist; importing the packages creates no connections. The
 [binding guide](agent/codemodetool/README.md) describes error facts, permission
 checks, and the `ToolExecutorFunc` signature change.
 
+The [managed session example](examples/mcp-managed/README.md) also demonstrates
+JSONL v2 branch transactions, compaction and separate-process resume of Codemode
+state and trusted tool selections. [Session integration](agent/session/README.md)
+documents the Storage API/format break and interrupted-execution contract.
+
 ## Account Quota Queries
 
 Account balances and usage windows are an optional provider capability,

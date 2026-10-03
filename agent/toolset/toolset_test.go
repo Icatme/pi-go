@@ -463,3 +463,29 @@ func TestResumeExceptionalAliasesConnectOnlyTheirOriginalNamespace(t *testing.T)
 		})
 	}
 }
+
+func TestTrustedRestorationCannotOverrideCurrentHiddenPolicy(t *testing.T) {
+	f := newFixture(t, managed.Codemode, mixedRules())
+	scope := f.manager.Scope()
+	ts, err := New(f.manager, f.sandbox, Options{SnapshotScope: func(agent.AgentSnapshot) (managed.Scope, bool) { return scope, true }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := agent.AgentSnapshot{Messages: []agent.Message{agent.NewSystemMessage(agent.SystemMessagePayload{ToolsAdded: []agent.ToolDeclaration{{Name: "mcp__issues__deferred_issue", Description: "old schema"}}})}}
+	tools, err := ts.Resolve(t.Context(), saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := findTool(t, tools, "mcp__issues__deferred_issue")
+	if err := f.manager.SetExposure("issues", managed.Hidden, nil); err != nil {
+		t.Fatal(err)
+	}
+	tools, err = ts.Resolve(t.Context(), saved)
+	if err != nil || strings.Contains(toolNames(tools), "mcp__issues__") {
+		t.Fatalf("trusted history bypassed current policy: %s %v", toolNames(tools), err)
+	}
+	out := agent.RunToolCall(t.Context(), agent.ToolCall{ID: "stale", Name: stale.Name, ParsedArgs: map[string]any{}}, agent.RunToolCallOptions{Tools: []agent.ToolDefinition{stale}})
+	if out.Err == nil || f.writes.Load() != 0 {
+		t.Fatalf("restored executor dispatched after hiding: %+v", out)
+	}
+}
