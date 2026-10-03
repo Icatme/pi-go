@@ -8,10 +8,10 @@ with host-owned application UI, identity, permissions and network policy.
 Status checked on 2026-10-03: items 1–6 below are merged and included in
 `v0.12.1` / `master@dcdcf9b740190f20ace5d8bbad7a9670fe2eafd1`.
 The next implementation sequence is defined in [接下来的跟进计划](#接下来的跟进计划2026-10-03).
-First-round N0a/N0b/N1a–N1c are implemented on the review branch
-`codex/mcp-local-review-20261003`. Local review and tests are recorded below;
-the changed five-platform native CI must be checked on this branch's exact HEAD.
-These changes are not included in the released v0.12.1 commit above.
+First-round N0a/N0b/N1a–N1c are merged through [PR #21](https://github.com/Icatme/pi-go/pull/21)
+and included in v0.13.0. The repaired implementation at
+`992c767534ef51fbac5db3b211de5b6650653cfa` passed all six CI jobs, including
+the five-platform native matrix; local review and regression evidence follow below.
 
 | Order | Follow-up | Implemented surface | Acceptance |
 | --- | --- | --- | --- |
@@ -71,8 +71,7 @@ It makes no model-provider request and starts no OAuth UI.
   Text and supported images remain bounded. The client does not execute HTML or
   fetch linked assets; artifacts retain scope/server/URI/MIME/hash bindings.
 
-The released v0.12.1 scope excludes durable Codemode branch/store transactions;
-the current first-round review branch implements them. Classifier/image model
+v0.13.0 adds durable Codemode branch/store transactions. Classifier/image model
 APIs, broader grammar/provider-auth expansion and
 interactive nested continuation remain outside this round. Live-provider verification
 and frontend UI acceptance are separate from the local fixtures and native CI.
@@ -144,29 +143,32 @@ cover the application entry path.
 | 5 | N1c / M | 工具选择、可信 scope 与 compaction 集成：`agent/toolset`、session 集成和 `examples/mcp-managed` | N1b | 重启、切分支、压缩、重连后恢复合法选择；hidden/撤权/换账号不能恢复执行权；只从新目录创建 executor；展示完整两次进程启动闭环 |
 
 N0a 与 N0b 可分别作为小修复交付，不依赖持久化完成。N1a、N1b、N1c 按顺序评审，
-### 第一轮实施状态（2026-10-03，独立审核分支）
+### 第一轮实施状态（2026-10-03，已合并，v0.13.0）
 
-| 单元 | 当前状态 | 本地证据 / 余项 |
+| 单元 | 当前状态 | 验证证据 / 限制 |
 | --- | --- | --- |
-| N0a | 已实现，本地通过 | 端口占用保留网络根因并停止发布 URL/打开浏览器；登录前、OnAuth、等待及手工输入取消；真实 loopback 回调、手工码与错误 state 测试 |
-| N0b | 已实现，本地通过 | capacity 进入既有有界重试；HTTP/流内首次输出前、MaxRetries=0、配额和输出后禁重试 |
-| N1a | 已实现，本地通过 | ReadBranch/CompareAppend；lane Seq 防 ABA；文件句柄独占；编译后子进程覆盖锁释放和六个写入/退出阶段；JSONL v2 拒绝 v1，不自动迁移 |
-| N1b | 已实现，本地通过 | 通用 RunJournal + Session.PrepareRun；最终结果/状态原子提交；hook/validator/取消不保存；远端成功后落盘失败或进程死亡保留 pending 并阻止重跑 |
-| N1c | 已实现，本地通过；原生 CI 待跑 | 可信 identity/epoch/branch token、fork/move/compaction；两进程 save/resume 重建选择和重新读取资源；当前 hidden/撤权规则继续生效 |
+| N0a | 已合并，本地与 CI 通过 | 端口占用保留网络根因并停止发布 URL/打开浏览器；登录前、OnAuth、等待及手工输入取消；真实 loopback 回调、手工码与错误 state 测试 |
+| N0b | 已合并，本地与 CI 通过 | capacity 进入既有有界重试；HTTP/流内首次输出前、MaxRetries=0、配额和输出后禁重试 |
+| N1a | 已合并，五平台原生 CI 通过 | ReadBranch/CompareAppend；lane Seq 防 ABA；文件句柄独占；编译后子进程覆盖锁释放和六个写入/退出阶段；JSONL v2 拒绝 v1，不自动迁移 |
+| N1b | 已合并，五平台原生 CI 通过 | 通用 RunJournal + Session.PrepareRun；最终结果/状态原子提交；hook/validator/取消不保存；远端成功后落盘失败或进程死亡保留 pending 并阻止重跑 |
+| N1c | 已合并，五平台原生 CI 通过 | 可信 identity/epoch/branch token、fork/move/compaction；两进程 save/resume 重建选择和重新读取资源；当前 hidden/撤权规则继续生效 |
 
-根模块和 examples 全量测试、相关模块 race、vet、build、go mod verify 已完成本地验证。
-Linux amd64/arm64 与 macOS amd64/arm64 的 session/Codemode 包也已通过交叉编译。
-平台矩阵已加入 session 故障/锁测试和 managed 示例重启回归；需核对审核分支实际 HEAD
-对应的 CI，不能沿用 v0.12.1 的旧 CI 结果宣称本次五平台原生验证完成。没有真实 provider 请求或 UI 验收。
+根模块和 examples 全量 race 测试、vet、build、go mod verify 与 tidy 检查已完成本地验证。
+最终审批错误修复后重跑受影响的 agent/session/checkpoint/Codemode race 回归。
+[修复后实际 HEAD 的六项 CI](https://github.com/Icatme/pi-go/actions/runs/37108407584) 全部通过，
+覆盖 Windows amd64、Linux amd64/arm64、macOS amd64/arm64 的 session 故障/锁测试、
+Codemode/MCP race 和 managed 示例跨进程恢复。没有真实 provider 请求、UI 验收或断电测试。
 公开入口、限制和破坏性变化见 [Session 集成说明](../agent/session/README.md)。
-N1 的本地闭环已交付，发布门槛仍保留本次五平台原生 CI；下一功能顺序保持 N2 → N3。
+N1 的实现与五平台验收已完成，随 v0.13.0 交付；下一功能顺序保持 N2 → N3。
 
 独立审核保留已有实现，并补充两个先失败后通过的回归：普通对话后首次引入系统提示或
 静态工具不得改写 journal 前缀；OAuth 降级提示回调触发取消后不得继续手工输入。
-另明确测试 v1 日志拒绝后字节保持不变。原开发工作区通过哈希快照隔离，审核修改仅在
-独立分支进行；提交推送不代表合并、发布或真实 provider 验收。
+另明确测试 v1 日志拒绝后字节保持不变。独立分支保留并审核已有实现；合并更新原工作区前，
+旧的未提交版本已存入命名备份 stash。PR #21 已合并，发布与真实 provider 验收分别记录。
 自动审核的四项发现也均经回归复现并修复：基础子调用记录单独持久化；状态限额按转义后
 编码检查；取消后的 assistant/tool 配对完成定稿；批次去重和父链使用存储规范化后的 ID。
+最终复审还复现并修复普通审批服务错误留下未配对调用的问题：整批调用明确记录为未执行，
+此前允许或暂停的兄弟调用也不派发，保留原始错误并允许后续 Run 正常继续。
 
 每个单元必须可编译、可测试；N1a 仅代表存储合同完成，直到 N1c 验收结束才将
 “Codemode 分支持久化”标记完成。功能引起公开 API 或日志格式变化时明确记录，

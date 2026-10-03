@@ -1195,3 +1195,27 @@
   before merging; the previous PR CI cannot certify this new correction.
 - Prepare v0.13.0 as a minor release because session Storage and JSONL v2 change
   the public contract. Keep dependencies and live-provider/UI testing unchanged.
+
+## 2026-10-03: Merge PR #21 and prepare v0.13.0
+
+- Merge the repaired PR head 992c767534ef51fbac5db3b211de5b6650653cfa only after
+  all six jobs pass in both PR CI run 37108407584 and push run 37108404659.
+  Native Windows amd64, Linux amd64/arm64 and macOS amd64/arm64 cover the new
+  session fault/lock tests, Codemode/MCP race and managed process restart.
+- Fast-forward local master to merge 1ad122443b98381681422b5ca6ff31cbba0cdf7c.
+  Retain the named pre-update stash as a recovery copy. Bump pigo.Version and
+  the examples module requirement to v0.13.0; no third-party dependency changes.
+  Update the follow-up table to record N0a/N0b/N1a-N1c as merged and verified.
+- Root/examples module verification and tidy checks pass. Windows checkout
+  CRLF in go.sum was normalized only while checking tidy, then restored after
+  confirming checksum contents match HEAD. Repeat focused version/CLI tests
+  and example compilation for release preparation; final master CI remains
+  a publication gate for the exact release commit.
+- Publish an annotated v0.13.0 tag and formal GitHub Release from a clean source
+  commit, with five CGO-disabled CLI archives and SHA256SUMS.txt. Require matching
+  embedded source revisions, clean-tree build flags, archive members, Unix
+  executable modes and Windows CLI version; verify uploaded downloads before
+  closeout. Keep release evidence with the ignored local dist artifacts.
+- Release notes explicitly identify the Storage API and JSONL v2 break, absence
+  of automatic history migration, and host reconciliation for interrupted tool
+  effects. No live provider request, OAuth UI or power-loss acceptance is claimed.
