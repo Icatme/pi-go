@@ -1351,3 +1351,30 @@
 - Focused regressions and full pigo/Agent race tests pass. Root vet/build and
   examples full race/vet/build also pass after this correction. No real provider
   call, merge or release occurred; the repaired head awaits independent recheck.
+
+## 2026-10-03: v1.0.1 focused compatibility follow-up
+
+- Fresh remote master is c29b4d502abb4ceb98c464db9918e0b8f7263615: N2/N3 are
+  merged via #22/#23 after independent review, and post-merge CI run 37126745895
+  passed all six jobs. No open PR or newer competing implementation was found.
+- Upstream latest stable is v1.0.1 at a7229ddc21810d6245105978033b7df645ecc2f7.
+  Compare its actual source with Go instead of redoing journal, branches,
+  grammar, additional_tools, capacity retries or Codemode output limits.
+- Prioritize the existing IsContextOverflow host API's missing gateway error
+  forms; keep bounded HTTP error-body reading as a separate follow-up candidate.
+  Four narrowly scoped expressions cover LiteLLM/OpenAI-compatible maximum
+  context lengths, Poolside, Together and DS4. Do not add automatic compaction,
+  retries, credentials, models or dependencies. Qwen's input-range message is
+  ambiguous with empty input and is intentionally not classified as overflow.
+- Before repair, all seven new explicit-error examples and fourteen local HTTP
+  Completions/Responses cases failed. Regressions also preserve case-insensitive
+  matching, rate/throttle exclusions, error-only classification and rejection
+  of unrelated or ambiguous text. No live provider request is used.
+- Focused overflow race tests and root/examples full `go test -count=1 -race
+  ./...`, `go vet ./...`, `go build ./...`, `go mod verify` and `go mod tidy
+  -diff` passed on cloud Linux Go 1.26.2. No module file changed. Independent
+  read-only review found no correctness or regression issue and separately
+  passed the focused race tests and diff check. Push/PR CI is recorded on the
+  draft PR; no native-platform or live-provider result is inferred from local
+  Linux tests. No release, merge or downstream dependency change is authorized
+  in this follow-up.
