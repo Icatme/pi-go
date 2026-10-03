@@ -1052,3 +1052,124 @@
   commit, with Windows amd64, Linux amd64/arm64 and macOS amd64/arm64 CLI archives
   plus SHA256SUMS.txt. Verify embedded revisions, Unix executable modes, downloaded
   hashes and public Go-module resolution. No provider live test or API change.
+
+## 2026-10-03: Analyze and order the next Pi 1.0 follow-up
+
+- Compare v0.12.1/master dcdcf9b with exact upstream Pi v1.0.0 a13d35a and screen
+  the 25 later commits through a276dabe. Record shipped items 1–6 and the next
+  implementation sequence in docs/pi-1-followup.md; point the historical design
+  and documentation index at that current plan.
+- Identify the actual persistence gaps: invocation-only Codemode state, no
+  conditional branch batch in session Storage, repository-local writer claims,
+  and no shared finalization boundary for store writes and accepted tool results.
+  Reuse lane sequence and existing trusted tool restoration instead of duplicating
+  stores, runtime loops or loaded-tool authority. Require crash/unknown-effect
+  handling without script replay, and retain the checkpoint restrictions.
+- Schedule narrow applicability regressions for the existing Codex callback-bind
+  fallback and the missing capacity-error phrase before the storage -> Codemode
+  state -> tool-selection/compaction sequence. These are source-grounded candidate
+  defects, not newly reproduced failures. Separate grammar from dynamic tool
+  anchoring; defer broader OAuth, images, classifiers and interactive continuation
+  behind concrete host/provider requirements.
+- Recheck current CI evidence and MCP SDK/wazero/x/sys maintenance. No dependency
+  change, source-code change, test execution, live provider call or UI acceptance
+  is part of this planning update. Validate document links, plan consistency and
+  git diff whitespace; do not create implementation chats or publish changes.
+
+## 2026-10-03: Implement Pi 1.0 first-round follow-up (N0a/N0b/N1a–N1c)
+
+- Baseline: master dcdcf9b740190f20ace5d8bbad7a9670fe2eafd1 / v0.12.1.
+  Execute the user's approved first round; preserve the earlier planning edits.
+  No dependency/version update, commit, push, tag or release.
+- Reproduce callback-bind/cancellation and capacity classification failures before
+  fixing them. Codex login stops before URL/browser presentation when binding
+  fails, retains the network cause, and never prompts after cancellation.
+  Verify loopback callback, ordinary manual code, mismatched state, cancellation
+  before login/on auth/while waiting/during prompting. Capacity errors use the
+  existing retry budget only before output; zero-retry and quota rules remain.
+- Add Storage.ReadBranch/CompareAppend with session/lane/Seq/head CAS and one
+  physical JSONL v2 batch. Preserve unrelated-lane commits and reject head ABA.
+  Writable handles lock the actual file before replay/repair, using existing
+  x/sys (Windows reserved byte lock / Unix flock). Failed writes poison the
+  handle. Version 1 is rejected, never silently migrated. The Storage interface
+  and JSONL header change are intentional API/format breaks.
+- Add the generic Agent RunJournal and sequential top-level ToolState capability.
+  Agent imports no session/MCP/Codemode implementation. Session.PrepareRun owns
+  canonical transcript and exact-version commits while invoking the existing
+  Runner. Save tool intent before dispatch; atomically save final results,
+  runtime-owned child facts and accepted state after parent hooks/validation.
+  Canceled finalization records failure rather than success with discarded state.
+  Failed commit stops the next model turn; Wait retains observed results.
+- Codemode durable mode requires an explicit host StateNamespace, restores a
+  disposable bounded store and stages only data. Versioned envelopes preserve
+  original JSON value lexemes, including escaped Unicode/HTML and Number limits.
+  Retain invocation-only behavior when no journal is installed. Check identity
+  and auth epoch on every load/commit, including reads from accepted batch state.
+- Restore from the actual branch, outside compaction's model window. Fork/move
+  remains isolated; a fresh host provenance token drives existing toolset
+  restoration, which rebuilds current executors and honors hidden/revoked rules.
+  A pending intent returns ErrInterrupted; no retry, automatic script replay,
+  JS stack restoration or expanded checkpoint support is introduced.
+- Expand examples/mcp-managed to save/compact then resume in a second process,
+  using a fresh MCP connection, saved small JSON, restored selection and a
+  reauthorized resource reference. Default mode uses a temporary session.
+  Update package/example docs and the current follow-up plan.
+- Local verification (Windows amd64, Go 1.26.4, GOWORK=off): root and examples
+  full tests; race for agent/... (including session/checkpoint/toolset),
+  codemode/..., internal/cli and pkg/pigo; managed-example race including the
+  separate-process save/resume test; root/examples vet, build and module verify.
+  Focused checks were repeated after final state-envelope/cancellation fixes.
+- Process tests cover writer aliases/competing handles/process death, batch
+  failure before write/partial/no-newline/flush/sync/applied, and death after a
+  side effect but before finalization. Hook/validator/cancel/sync failure tests
+  retain child facts without committing rejected state. Full root and examples
+  module files/checksums are unchanged.
+- Linux amd64/arm64 and macOS amd64/arm64 session/Codemode packages cross-compile.
+  Extend the existing five-native-platform CI matrix with session race/fault
+  tests and the managed restart regression; it has NOT run for this unpushed
+  working tree. Local process tests do not simulate power loss. No live model
+  provider request, OAuth browser UI or computer-use acceptance was performed.
+
+## 2026-10-03: Review and preserve the existing local first-round work
+
+- Review the existing 26 tracked changes and 11 new files against dcdcf9b in
+  an independent clone on codex/mcp-local-review-20261003. Verify all source
+  file hashes before and after copying; leave the original development tree
+  untouched because other Codex processes may still be active. The implementation
+  above predates this review; this pass adds focused corrections and regression
+  evidence, not a replacement implementation.
+- Reproduce and fix a journal prefix conflict when a later run first introduces
+  a system prompt or static tools after plain conversation. Journaled initialization
+  now appends the system declaration; ordinary runtime initialization is unchanged.
+- Reproduce and fix cancellation inside the OAuth fallback-presentation callback:
+  check cancellation before entering the manual prompt. Add a complete JSONL v1
+  fixture and verify rejected headers leave the original bytes untouched.
+- Reproduce all four findings from the automated full review, then fix the
+  ownership boundaries: persist the basic child ledger outside message JSON;
+  enforce state limits after JSON escaping; finalize aborted assistant/tool
+  pairs despite cancellation (also at stream completion); and validate batch
+  duplicates/parent links using the normalized IDs that storage applies.
+  Exercise rejected and successful calls after JSONL close/reopen, per-value
+  and total escaped-state limits, and both memory and JSONL transaction stores.
+  Optional child output/error details remain excluded from durable runtime records.
+- Follow-up review adds regressions for gated cancellation, including a suspended
+  sibling, assistant-ended Continue with newly introduced system context, and
+  separately invalid UTF-8 tool/namespace strings whose concatenation is valid.
+  Settle canceled gated calls without dispatch, validate the original Continue
+  tail, and check both state-key strings independently before committing.
+- The final targeted review identified approval waits that return cancellation
+  as a gate error. Reproduce the failure in sequential and parallel execution,
+  then settle that journaled preflight through rejected outcomes as well. Keep
+  the existing unjournaled gate-error/cancellation behavior. Per the user's
+  closeout instruction, validate this last correction with tests and direct
+  control-flow review instead of starting another automated review process.
+- Verify root/examples full tests, vet, build and module integrity on Windows amd64
+  with Go 1.26.4. Run race tests for agent/..., codemode/..., mcp, internal/cli and
+  pkg/pigo, plus the managed example's separate-process restoration. Repeat the
+  affected agent and CLI race tests after the fixes. Compile and run both MCP
+  executables, including explicit managed save/resume processes.
+- Keep dependency and release versions unchanged. Check changed paths and added
+  content for credentials, private keys, personal home paths and unrelated files.
+  User authorization covers focused commits and pushing this independent branch;
+  it does not include merging or publishing a release. Native multi-platform CI
+  must be checked against the pushed HEAD. No live provider or OAuth UI test.
