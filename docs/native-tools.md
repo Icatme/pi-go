@@ -23,6 +23,9 @@ native capability is unknown or unsupported. `Mode: "require"` fails before
 authorization, payload hooks or network activity. Hosts can inspect
 `pigo.ResolveToolSampling(model, tool)` before calling the model. There is no
 HTTP-400 fallback or automatic resend with a different tool representation.
+Declaration encoding, history and decoding share the same resolved mapping for
+each request; subsequent catalog changes affect the next request. Even malformed
+custom output ends the existing pre-output retry window.
 Malformed configuration or schema fails in either mode, including on an
 unsupported model.
 

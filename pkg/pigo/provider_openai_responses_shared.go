@@ -132,6 +132,7 @@ type openAIResponsesStreamingState struct {
 	CustomTools            map[string]string
 	CustomInputBytes       int
 	CustomCalls            int
+	CustomOutputSeen       bool
 }
 
 type openAIResponsesToolCallState struct {
@@ -151,11 +152,10 @@ type openAIResponsesToolCallState struct {
 // Shared message conversion
 // ============================================================================
 
-func convertOpenAIResponsesMessages(model Model, ctx Context, includeSystemPrompt bool) []map[string]any {
+func convertOpenAIResponsesMessages(custom map[string]string, model Model, ctx Context, includeSystemPrompt bool) []map[string]any {
 	transcript := ResolveTranscript(NormalizeContext(ctx), supportsTranscriptSystemMessages(model))
 	transformed := TransformMessages(transcript.Messages, model, NormalizeOpenAIResponsesToolCallID)
 	input := make([]map[string]any, 0, len(transformed)+1)
-	custom, _ := resolveContextToolSampling(model, ctx) // validated before dispatch
 	customCallIDs := make(map[string]bool)
 
 	for index, message := range transformed {
@@ -286,15 +286,14 @@ func convertOpenAIResponsesMessages(model Model, ctx Context, includeSystemPromp
 	return input
 }
 
-func convertOpenAIResponsesTools(model Model, tools []Tool) []map[string]any {
+func convertOpenAIResponsesTools(custom map[string]string, tools []Tool) []map[string]any {
 	if len(tools) == 0 {
 		return nil
 	}
 
 	result := make([]map[string]any, 0, len(tools))
 	for _, tool := range tools {
-		decision, _ := ResolveToolSampling(model, tool) // validated before dispatch
-		if decision.Representation == "custom" {
+		if custom[tool.Name] != "" {
 			config := tool.ConstrainedSampling
 			format := map[string]any{"type": config.Type}
 			if config.Type == "grammar" {
@@ -430,6 +429,7 @@ func processOpenAIResponsesStreamEventWithProvider(
 	if err := json.Unmarshal([]byte(data), &event); err != nil {
 		return false, err
 	}
+	markOpenAIResponsesCustomOutput(state, event)
 	if state.FinalizedItemKeys == nil {
 		state.FinalizedItemKeys = map[string]bool{}
 	}

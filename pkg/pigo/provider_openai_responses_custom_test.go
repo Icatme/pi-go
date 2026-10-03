@@ -71,6 +71,7 @@ func TestResponsesCustomStreamAcrossTransports(t *testing.T) {
 		{"delta after input done", []map[string]any{customEvent("added", ""), customInputEvent("done", "a"), customInputEvent("delta", "b"), customTerminal()}, nil, true},
 		{"conflicting terminal", []map[string]any{customEvent("done", "abc"), customTerminal(customItem("ctc_a", "call_a", "code", "abd"))}, nil, true},
 		{"undeclared tool", []map[string]any{customTerminal(customItem("ctc_a", "call_a", "unknown", "abc"))}, nil, true},
+		{"malformed output cannot trigger capacity retry", []map[string]any{customTerminal(customItem("ctc_a", "call_a", "model is at capacity", "abc"))}, nil, true},
 		{"undeclared namespace", []map[string]any{customTerminal(map[string]any{"type": "custom_tool_call", "id": "ctc_a", "call_id": "call_a", "name": "code", "namespace": "unknown", "input": "abc"})}, nil, true},
 		{"invalid item ID", []map[string]any{customTerminal(customItem("fc_a", "call_a", "code", "abc"))}, nil, true},
 		{"invalid identity", []map[string]any{customEvent("added", ""), {"type": "response.custom_tool_call_input.delta", "item_id": "ctc_wrong", "output_index": 0, "delta": "bad"}, customTerminal()}, nil, true},
@@ -183,7 +184,11 @@ func TestResponsesCustomReplayAndFunctionFallback(t *testing.T) {
 		{"unsupported codex", *GetModel("openai-codex", "gpt-6-astra"), false, ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			wire := convertOpenAIResponsesMessages(test.target, ctx, true)
+			custom, err := resolveContextToolSampling(test.target, ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wire := convertOpenAIResponsesMessages(custom, test.target, ctx, true)
 			var call, output map[string]any
 			for _, item := range wire {
 				if item["name"] == "code" {
@@ -213,7 +218,11 @@ func TestResponsesCustomReplayAndFunctionFallback(t *testing.T) {
 	assistant.Content[0] = ToolCall{ID: "call_a|fc_a", Name: "code", Arguments: map[string]any{"code": "text(1)"}}
 	ctx.Messages[0] = assistant
 	ctx.Messages[1] = ToolResultMessage{ToolCallID: "call_a|fc_a", ToolName: "code", Content: []ContentBlock{TextContent{Text: "ok"}}}
-	wire := convertOpenAIResponsesMessages(model, ctx, true)
+	custom, err := resolveContextToolSampling(model, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := convertOpenAIResponsesMessages(custom, model, ctx, true)
 	for _, item := range wire {
 		if item["type"] == "custom_tool_call" && item["id"] != nil {
 			t.Fatalf("function ID on custom replay: %v", item)
@@ -221,7 +230,11 @@ func TestResponsesCustomReplayAndFunctionFallback(t *testing.T) {
 	}
 	// A removed declaration replays as an ordinary function, paired by call ID.
 	ctx.Tools = nil
-	wire = convertOpenAIResponsesMessages(model, ctx, true)
+	custom, err = resolveContextToolSampling(model, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire = convertOpenAIResponsesMessages(custom, model, ctx, true)
 	for _, item := range wire {
 		if item["type"] == "custom_tool_call" || item["type"] == "custom_tool_call_output" {
 			t.Fatalf("retired custom replay: %v", wire)

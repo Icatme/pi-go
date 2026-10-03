@@ -129,7 +129,7 @@ func streamOpenAICodexSSE(
 			return nil
 		},
 		CanRetryStreamError: func() bool {
-			return len(response.Content) == 0 && len(response.HostedToolExecutions) == 0 && !response.UsageReported
+			return !state.CustomOutputSeen && len(response.Content) == 0 && len(response.HostedToolExecutions) == 0 && !response.UsageReported
 		},
 		OnStreamRetry: func() {
 			*response = cloneAssistantMessage(baselineResponse)

@@ -86,9 +86,9 @@ func TestOctoberOpenAIThinkingAndCostCatalog(t *testing.T) {
 				options := BuildProviderStreamOptions(*model, SimpleStreamOptions{Reasoning: ThinkingLevelMax})
 				var request openAIResponsesRequest
 				if provider == "openai-codex" {
-					request = buildOpenAICodexRequest(*model, Context{}, options)
+					request = buildOpenAICodexRequest(nil, *model, Context{}, options)
 				} else {
-					request = buildOpenAIResponsesRequest(*model, Context{}, options)
+					request = buildOpenAIResponsesRequest(nil, *model, Context{}, options)
 					compat := model.Compat.(*OpenAIResponsesCompat)
 					if compat.SupportsExplicitPromptCacheMode == nil || !*compat.SupportsExplicitPromptCacheMode {
 						t.Fatal("missing explicit prompt cache capability")

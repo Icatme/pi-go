@@ -24,7 +24,7 @@ func TestToolSamplingExactCapabilityAndPreflight(t *testing.T) {
 		if err != nil || decision.Representation != "custom" || decision.InputProperty != "code" {
 			t.Fatalf("decision=%+v err=%v", decision, err)
 		}
-		wire := convertOpenAIResponsesTools(model, []Tool{tool})[0]
+		wire := convertOpenAIResponsesTools(map[string]string{tool.Name: decision.InputProperty}, []Tool{tool})[0]
 		if wire["type"] != "custom" || wire["parameters"] != nil || wire["strict"] != nil {
 			t.Fatalf("wire=%v", wire)
 		}
@@ -43,7 +43,7 @@ func TestToolSamplingExactCapabilityAndPreflight(t *testing.T) {
 			if err != nil || decision.Representation != "function" {
 				t.Fatalf("%s/%s decision=%v err=%v", other.Provider, other.ID, decision, err)
 			}
-			if wire := convertOpenAIResponsesTools(other, []Tool{tool})[0]; wire["type"] != "function" || wire["parameters"] == nil {
+			if wire := convertOpenAIResponsesTools(nil, []Tool{tool})[0]; wire["type"] != "function" || wire["parameters"] == nil {
 				t.Fatalf("fallback=%v", wire)
 			}
 			tool.ConstrainedSampling.Mode = "require"
@@ -164,7 +164,11 @@ func TestToolSamplingRegexAndContextRoundTrip(t *testing.T) {
 	tool := samplingTool("grammar", "")
 	tool.Name = "code_"
 	tool.ConstrainedSampling.Syntax, tool.ConstrainedSampling.Definition = "regex", `[a-z]+`
-	wire := convertOpenAIResponsesTools(model, []Tool{tool})[0]
+	decision, err := ResolveToolSampling(model, tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := convertOpenAIResponsesTools(map[string]string{tool.Name: decision.InputProperty}, []Tool{tool})[0]
 	format := wire["format"].(map[string]any)
 	if format["syntax"] != "regex" || format["definition"] != `[a-z]+` {
 		t.Fatalf("wire=%v", wire)
@@ -182,5 +186,43 @@ func TestToolSamplingRegexAndContextRoundTrip(t *testing.T) {
 		if len(tools) != 1 || !DeclarationsEqual(tool, tools[0]) {
 			t.Fatalf("lost sampling metadata: %s", data)
 		}
+	}
+}
+
+func TestToolSamplingRequestKeepsResolvedRepresentation(t *testing.T) {
+	provider := Provider("test-n2-sampling-snapshot")
+	module := normalizeProviderModule(provider, ProviderModule{Provider: provider, Models: map[string]Model{"fixture": {API: "openai-responses", Capabilities: ModelCapabilities{CustomTools: CapabilitySupported, GrammarTools: CapabilitySupported}}}})
+	RegisterProviderModule(module)
+	model := *GetModel(provider, "fixture")
+	tool := samplingTool("grammar", "require")
+	ctx := Context{Tools: []Tool{tool}, Messages: []Message{AssistantMessage{Provider: provider, Model: model.ID, API: model.API, StopReason: StopReasonToolUse, Content: []ContentBlock{ToolCall{ID: "call_a|ctc_a", Name: "code", Arguments: map[string]any{"code": "abc"}}}}}}
+	plan, err := resolveContextToolSampling(model, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A catalog refresh affects the next request, not the representation chosen
+	// for this request's declaration, history and stream decoder.
+	changed := module.Models[model.ID]
+	changed.Capabilities = ModelCapabilities{CustomTools: CapabilityUnsupported, GrammarTools: CapabilityUnsupported}
+	module.Models = map[string]Model{model.ID: changed}
+	if !providerRegistry.Replace(provider, &module) {
+		t.Fatal("replace fixture catalog")
+	}
+	for _, request := range []openAIResponsesRequest{buildOpenAIResponsesRequest(plan, model, ctx, ProviderStreamOptions{}), buildOpenAICodexRequest(plan, model, ctx, ProviderStreamOptions{})} {
+		if request.Tools[0]["type"] != "custom" {
+			t.Fatalf("declaration changed: %v", request.Tools)
+		}
+		found := false
+		for _, item := range request.Input {
+			if item["type"] == "custom_tool_call" && item["input"] == "abc" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("history changed: %v", request.Input)
+		}
+	}
+	if _, err := resolveContextToolSampling(model, ctx); err == nil {
+		t.Fatal("next request ignored revoked capability")
 	}
 }

@@ -14,6 +14,28 @@ const (
 	maxCustomResponseCalls  = 128
 )
 
+// Malformed custom output is still output. Do not let model-controlled names
+// or statuses containing a retry phrase cause the request to be sent again.
+func markOpenAIResponsesCustomOutput(state *openAIResponsesStreamingState, event map[string]any) {
+	kind, _ := event["type"].(string)
+	if strings.HasPrefix(kind, "response.custom_tool_call_input.") {
+		state.CustomOutputSeen = true
+	}
+	mark := func(item any) {
+		if value, ok := item.(map[string]any); ok && value["type"] == "custom_tool_call" {
+			state.CustomOutputSeen = true
+		}
+	}
+	mark(event["item"])
+	if response, ok := event["response"].(map[string]any); ok {
+		if output, ok := response["output"].([]any); ok {
+			for _, item := range output {
+				mark(item)
+			}
+		}
+	}
+}
+
 func processOpenAIResponsesCustomItem(response *AssistantMessage, stream *AssistantMessageEventStream, state *openAIResponsesStreamingState, event map[string]any, item openAIResponsesResponseItem, done bool) error {
 	if item.Namespace != "" {
 		return fmt.Errorf("OpenAI Responses custom tool namespaces are not enabled")
@@ -82,6 +104,7 @@ func processOpenAIResponsesCustomItem(response *AssistantMessage, stream *Assist
 
 func validateOpenAIResponsesFunctionItem(state *openAIResponsesStreamingState, item openAIResponsesResponseItem) error {
 	if state.CustomTools[item.Name] != "" {
+		state.CustomOutputSeen = true
 		return fmt.Errorf("OpenAI Responses native custom declaration %q returned a function call", item.Name)
 	}
 	for _, other := range state.ToolCalls {

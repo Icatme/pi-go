@@ -1264,3 +1264,15 @@
   metadata and downstream pins are unchanged. Independent second-reviewer
   acceptance and the draft PR's native CI remain separate gates; N3 has not
   started and does not share this implementation branch.
+
+- Final retry review reproduced malformed terminal custom output named
+  `model is at capacity` causing three Responses SSE requests/four Codex SSE
+  requests. Record custom output before validation and close the pre-output
+  retry window; both now make one request. Declaration/history encoders and
+  decoder also consume one resolved mapping, with a catalog-refresh regression
+  ensuring new requests observe revoked capability without changing an already
+  selected representation. Draft PR: https://github.com/Icatme/pi-go/pull/22.
+- After those final retry/mapping changes, root and examples full race, vet and
+  build checks pass again. The earlier draft head `63ed143` passed all six CI
+  jobs in run 37119336354, including five native platforms; the new commit must
+  receive its own CI result before that evidence is treated as final.

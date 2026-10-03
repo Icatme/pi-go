@@ -20,7 +20,7 @@ func TestOpenAICodexOffReasoningUsesModelWireMapping(t *testing.T) {
 				model := Model{API: "openai-codex-responses", Provider: "openai-codex", ID: "fixture", Reasoning: test.reasoning, ThinkingLevelMap: test.levelMap}
 				options := BuildProviderStreamOptions(model, SimpleStreamOptions{Reasoning: requested})
 				options = NormalizeProviderStreamOptions(model, options)
-				request := buildOpenAICodexRequest(model, Context{}, options)
+				request := buildOpenAICodexRequest(nil, model, Context{}, options)
 				if test.want == "" {
 					if request.Reasoning != nil {
 						t.Fatalf("unsupported off must be omitted, got %+v", request.Reasoning)

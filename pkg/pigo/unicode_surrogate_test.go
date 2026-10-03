@@ -13,7 +13,7 @@ func TestOpenAICodexRequestMarshalsEmojiAndUnpairedSurrogateToolResultText(t *te
 	}
 
 	toolCallID := "call_unicode|fc_unicode"
-	request := buildOpenAICodexRequest(*model, Context{
+	request := buildOpenAICodexRequest(nil, *model, Context{
 		Messages: []Message{
 			UserMessage{Content: "Use the test tool."},
 			AssistantMessage{

@@ -26,7 +26,7 @@ func streamOpenAICodex(model Model, ctx Context, options ProviderStreamOptions) 
 	}
 
 	go func() {
-		requestBody := buildOpenAICodexRequest(model, ctx, options)
+		requestBody := buildOpenAICodexRequest(customTools, model, ctx, options)
 		payload := any(requestBody)
 		if options.OnPayload != nil {
 			if next := options.OnPayload(payload, model); next != nil {
@@ -93,7 +93,7 @@ func streamSimpleOpenAICodex(model Model, ctx Context, options SimpleStreamOptio
 	return streamOpenAICodex(model, ctx, BuildProviderStreamOptions(model, options))
 }
 
-func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOptions) openAIResponsesRequest {
+func buildOpenAICodexRequest(customTools map[string]string, model Model, ctx Context, options ProviderStreamOptions) openAIResponsesRequest {
 	resolvedOptions := resolveOpenAICodexProviderOptions(model, options)
 	parallelToolCalls := true
 
@@ -111,8 +111,8 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 		Store:             false,
 		Stream:            true,
 		Instructions:      instructions,
-		Input:             convertOpenAIResponsesMessages(model, ctx, false),
-		Tools:             convertOpenAIResponsesTools(model, currentContextTools(ctx)),
+		Input:             convertOpenAIResponsesMessages(customTools, model, ctx, false),
+		Tools:             convertOpenAIResponsesTools(customTools, currentContextTools(ctx)),
 		ToolChoice:        resolveOpenAICodexToolChoice(resolvedOptions.ToolChoice),
 		ParallelToolCalls: &parallelToolCalls,
 		Include:           []string{"reasoning.encrypted_content"},

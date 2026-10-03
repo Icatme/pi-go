@@ -36,7 +36,7 @@ func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptio
 	}
 
 	go func() {
-		requestBody := buildOpenAIResponsesRequest(model, ctx, options)
+		requestBody := buildOpenAIResponsesRequest(customTools, model, ctx, options)
 		payload := any(requestBody)
 		if options.OnPayload != nil {
 			if next := options.OnPayload(payload, model); next != nil {
@@ -106,7 +106,7 @@ func streamSimpleOpenAIResponses(model Model, ctx Context, options SimpleStreamO
 	return streamOpenAIResponses(model, ctx, BuildProviderStreamOptions(model, options))
 }
 
-func buildOpenAIResponsesRequest(model Model, ctx Context, options ProviderStreamOptions) openAIResponsesRequest {
+func buildOpenAIResponsesRequest(customTools map[string]string, model Model, ctx Context, options ProviderStreamOptions) openAIResponsesRequest {
 	resolvedOptions := resolveOpenAIResponsesProviderOptions(model, options)
 	compat := resolveOpenAIResponsesCompat(model)
 	parallelToolCalls := true
@@ -118,8 +118,8 @@ func buildOpenAIResponsesRequest(model Model, ctx Context, options ProviderStrea
 		Model:             model.ID,
 		Store:             false,
 		Stream:            true,
-		Input:             convertOpenAIResponsesMessages(model, ctx, true),
-		Tools:             convertOpenAIResponsesTools(model, currentContextTools(ctx)),
+		Input:             convertOpenAIResponsesMessages(customTools, model, ctx, true),
+		Tools:             convertOpenAIResponsesTools(customTools, currentContextTools(ctx)),
 		ToolChoice:        resolveOpenAIResponsesToolChoice(resolvedOptions.ToolChoice),
 		ParallelToolCalls: &parallelToolCalls,
 		Include:           []string{"reasoning.encrypted_content"},
@@ -348,6 +348,7 @@ func streamOpenAIResponsesSSE(
 		_ = httpResponse.Body.Close()
 		if err != nil {
 			if !isProviderStreamEventCallbackError(err) &&
+				!state.CustomOutputSeen &&
 				len(response.Content) == 0 &&
 				len(response.HostedToolExecutions) == 0 &&
 				!response.UsageReported &&
