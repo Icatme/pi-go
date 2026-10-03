@@ -1,6 +1,9 @@
 package pigo
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // These bound the additional native input surface, not the existing top-level
 // function declarations or the entire request's memory use.
@@ -9,12 +12,34 @@ const (
 	maxToolAnchors       = 128
 	maxToolAnchorBytes   = 1 << 20
 	maxAnchoredToolBytes = 64 << 10
+	maxAnchoredToolCalls = 128
 )
 
 type openAIResponsesToolPlan struct {
 	RequestTools        []Tool
 	Anchor              bool
 	RequiresFullHistory bool
+}
+
+func validateOpenAIResponsesAnchoredFunction(state *openAIResponsesStreamingState, item openAIResponsesResponseItem) error {
+	if item.Namespace != "" && item.Namespace != item.Name {
+		return fmt.Errorf("OpenAI Responses function call has an unsupported namespace")
+	}
+	if state.ToolCalls[openAIResponsesItemKey(item)] == nil && len(state.ToolCalls)-state.CustomCalls >= maxAnchoredToolCalls {
+		return fmt.Errorf("OpenAI Responses anchored function call limit exceeded")
+	}
+	for _, previous := range state.ToolCalls {
+		if previous.InputProperty != "" {
+			continue // custom/function collisions are checked by the shared validator
+		}
+		if (item.ID != "" && previous.ItemID == item.ID) || (item.CallID != "" && previous.CallID == item.CallID) {
+			if previous.ItemID != item.ID || previous.CallID != item.CallID ||
+				(previous.Name != "" && (previous.Name != item.Name || previous.Namespace != item.Namespace)) {
+				return fmt.Errorf("OpenAI Responses function call changed identity, name or namespace")
+			}
+		}
+	}
+	return nil
 }
 
 // additional_tools is additive only. A removal or redeclaration must use the

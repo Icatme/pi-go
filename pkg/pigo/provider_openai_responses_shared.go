@@ -279,7 +279,8 @@ func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom ma
 						customCallIDs[callID] = true
 						prefix = "ctc_"
 					}
-					if strings.HasPrefix(itemID, prefix) && typed.Provider == model.Provider && typed.API == model.API && typed.Model == model.ID {
+					sameNamespace := block.Namespace == "" || functionCall["namespace"] == block.Namespace
+					if sameNamespace && strings.HasPrefix(itemID, prefix) && typed.Provider == model.Provider && typed.API == model.API && typed.Model == model.ID {
 						functionCall["id"] = itemID
 					}
 					input = append(input, functionCall)

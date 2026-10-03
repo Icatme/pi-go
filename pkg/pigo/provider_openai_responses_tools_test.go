@@ -22,7 +22,7 @@ func TestResponsesToolAnchorsCanStartAfterConversation(t *testing.T) {
 }
 
 func TestResponsesAnchoredFunctionStreamBoundaries(t *testing.T) {
-	for _, mode := range []string{"incremental", "namespace changes", "conflicting terminal", "partial", "cancel", "malformed capacity output", "http 400"} {
+	for _, mode := range []string{"incremental", "namespace changes", "conflicting terminal", "changed call identity", "call count bound", "partial", "cancel", "malformed capacity output", "http 400"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -35,6 +35,14 @@ func TestResponsesAnchoredFunctionStreamBoundaries(t *testing.T) {
 				}
 				item := map[string]any{"type": "function_call", "id": "fc_lookup", "call_id": "call_lookup", "name": "lookup", "namespace": "lookup", "arguments": "{}", "status": "completed"}
 				w.Header().Set("Content-Type", "text/event-stream")
+				if mode == "call count bound" {
+					items := make([]map[string]any, 0, 129)
+					for i := 0; i < 129; i++ {
+						items = append(items, map[string]any{"type": "function_call", "id": fmt.Sprintf("fc_%d", i), "call_id": fmt.Sprintf("call_%d", i), "name": "lookup", "namespace": "lookup", "arguments": "{}", "status": "completed"})
+					}
+					fmt.Fprint(w, buildOpenAICodexSSE(customTerminal(items...)))
+					return
+				}
 				if mode == "malformed capacity output" {
 					item["status"], item["name"], item["namespace"] = "model is at capacity", "lookup", "lookup"
 					fmt.Fprint(w, buildOpenAICodexSSE(customTerminal(item)))
@@ -56,6 +64,9 @@ func TestResponsesAnchoredFunctionStreamBoundaries(t *testing.T) {
 				if mode == "conflicting terminal" {
 					item["namespace"] = "other"
 				}
+				if mode == "changed call identity" {
+					item["call_id"] = "call_changed"
+				}
 				fmt.Fprint(w, buildOpenAICodexSSE(customTerminal(item)))
 			}))
 			defer server.Close()
@@ -68,7 +79,7 @@ func TestResponsesAnchoredFunctionStreamBoundaries(t *testing.T) {
 				return nil
 			}})
 			if (result.StopReason == StopReasonToolUse) != (mode == "incremental") || requests.Load() != 1 {
-				t.Fatalf("requests=%d result=%+v", requests.Load(), result)
+				t.Fatalf("requests=%d reason=%s calls=%d error=%s", requests.Load(), result.StopReason, len(result.Content), result.ErrorMessage)
 			}
 		})
 	}
@@ -299,6 +310,9 @@ func TestResponsesToolAnchorNamespaceReplay(t *testing.T) {
 					found = true
 					if (item["namespace"] == "lookup") != (mode == "native") || item["call_id"] != "call_lookup" {
 						t.Fatalf("mode=%s call=%v", mode, item)
+					}
+					if (item["id"] == "fc_lookup") != (mode == "native") {
+						t.Fatalf("incompatible namespace kept provider item identity: mode=%s call=%v", mode, item)
 					}
 				}
 			}

@@ -110,12 +110,10 @@ func processOpenAIResponsesCustomItem(response *AssistantMessage, stream *Assist
 func validateOpenAIResponsesFunctionItem(state *openAIResponsesStreamingState, item openAIResponsesResponseItem) error {
 	// The public tool surface is flat. A namespaced short name must never
 	// silently execute an unrelated local function with the same short name.
-	if state.AnchorsTools && item.Namespace != "" && item.Namespace != item.Name {
-		return fmt.Errorf("OpenAI Responses function call has an unsupported namespace")
-	}
-	if previous := state.ToolCalls[openAIResponsesItemKey(item)]; state.AnchorsTools && previous != nil && previous.Name != "" &&
-		(previous.Name != item.Name || previous.Namespace != item.Namespace) {
-		return fmt.Errorf("OpenAI Responses function call changed name or namespace")
+	if state.AnchorsTools {
+		if err := validateOpenAIResponsesAnchoredFunction(state, item); err != nil {
+			return err
+		}
 	}
 	if state.CustomTools[item.Name] != "" {
 		state.CustomOutputSeen = true

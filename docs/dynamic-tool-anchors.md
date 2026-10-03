@@ -44,12 +44,15 @@ Anchoring is limited to 128 addition items, 256 added functions, 64 KiB per
 encoded function and 1 MiB aggregate encoded functions. Exceeding these native
 plan limits selects the existing top-level declaration representation. These
 limits do not claim to bound an entire request's size or heap use.
+An anchored response also limits function calls to 128 and rejects reused item
+or call identities. Native custom calls retain their separate N2 bounds.
 
 Append-only additions must keep the already serialized input prefix and initial
 tool list stable. Removal/redefinition intentionally changes that prefix; no
 cache-hit promise is made. Namespace replay is tied to the selected declaration
 plan and exact provider/API/model. A model switch or folded fallback drops
-incompatible namespace metadata while retaining calls, results and call IDs.
+incompatible namespace metadata and provider item IDs while retaining calls,
+results and call IDs.
 The transcript remains the only source of tool state, including after JSON
 round trips and Agent/session restoration.
 
@@ -64,10 +67,18 @@ first, then root/examples tests, race, vet and build. No paid provider request,
 new credential, dependency upgrade, merge, release or downstream pin change is
 part of this work.
 
-The implementation and focused local regressions are complete. Five real Agent
+The implementation and local regressions are complete. Five real Agent
 scenarios cover resolver changes, execution, namespace rejection and snapshot
 restoration without repeated execution. Provider fixtures cover declaration
 position, serialized prefix, fallback, catalog refresh, bounds, namespace replay,
 cancellation, partial/conflicting streams and HTTP 400 without representation
-retry. Full repository checks and independent review remain pending at this
-implementation checkpoint; no live acceptance is implied.
+retry. Root and examples full race, vet, build, module verification and tidy
+checks passed on cloud Linux Go 1.26.2. After final identity/bounds fixes, pigo
+and Agent full race/vet plus root build passed again; the final namespace/item-ID
+replay adjustment passed affected native/custom/sampling race cases, vet and
+root build. No dependency files changed.
+
+The draft [PR #23](https://github.com/Icatme/pi-go/pull/23) targets the unmerged
+N2 branch. Existing Actions filters do not cover this stacked base or N3 push
+branch, so no N3 CI run is claimed. Independent N3 review remains pending.
+Live model acceptance and provider-cache behavior remain unverified.

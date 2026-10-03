@@ -1315,3 +1315,22 @@
   independent review are the next gates.
 - Existing Actions filters do not cover a PR based on codex/n2-native-grammar
   or pushes to this N3 branch. CI is not claimed; the workflow is unchanged.
+
+## 2026-10-03: N3 draft and local validation handoff
+
+- Draft PR #23 targets codex/n2-native-grammar, exact N2 base 28f7ade, and carries
+  only the N3 delta. Independent N3 review is pending; no PR is merged.
+- Root and examples full `go test -count=1 -race ./...`, `go vet ./...`,
+  `go build ./...`, `go mod verify` and `go mod tidy -diff` passed on cloud Linux
+  Go 1.26.2 with live tests disabled. Module files remain unchanged.
+- Final diff review reproduced a changed terminal call_id under the same item
+  ID being treated as a second invocation. Reject item/call identity reuse in
+  anchored responses and bound generated function calls to 128. Both added
+  regressions first failed, then passed; pigo and Agent full race/vet and root
+  build passed again after the fix. Nine stream/HTTP cases now cover the native
+  boundary. Dropping incompatible namespace metadata also drops its provider
+  item ID; affected native/custom/sampling race cases, vet and root build pass.
+- Actions API confirms no PR workflow runs for the pushed implementation head;
+  existing base/push filters explain the absence. Native multi-platform CI and
+  live-provider/cache acceptance are not claimed. Final scope and evidence are
+  recorded in dynamic-tool-anchors.md.
