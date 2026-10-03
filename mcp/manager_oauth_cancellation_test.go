@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"runtime"
 	"sync"
@@ -236,12 +238,18 @@ func newStatefulOAuthManager(t *testing.T) (*managerOAuthFixture, *Manager, *ato
 	challenge := f.server.Config.Handler
 	deletes := new(atomic.Int32)
 	f.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/mcp" && r.Header.Get("Authorization") == "Bearer initial-access" {
+		if r.URL.Path == "/mcp" {
+			authorized := r.Header.Get("Authorization") == "Bearer initial-access" || r.Header.Get("Authorization") == "Bearer refreshed-access"
 			if r.Method == http.MethodDelete {
 				deletes.Add(1)
+				if !authorized {
+					t.Error("session DELETE sent without a usable access token")
+				}
 			}
-			handler.ServeHTTP(w, r)
-			return
+			if authorized {
+				handler.ServeHTTP(w, r)
+				return
+			}
 		}
 		challenge.ServeHTTP(w, r)
 	})
@@ -257,7 +265,7 @@ func newStatefulOAuthManager(t *testing.T) (*managerOAuthFixture, *Manager, *ato
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		// Interrupted refreshes intentionally leave no usable cleanup token.
-		if err := m.Close(ctx); err != nil && !errors.Is(err, ErrAuthRequired) && !errors.Is(err, context.Canceled) {
+		if err := m.Close(ctx); err != nil && !errors.Is(err, ErrAuthRequired) {
 			t.Errorf("stateful manager close: %v", err)
 		}
 	})
@@ -326,10 +334,111 @@ func TestManagerOAuthStatefulCloseDoesNotStartRefresh(t *testing.T) {
 	before := c.oauth.State().CredentialVersion
 	closed := make(chan error, 1)
 	go func() { closed <- c.Close() }()
-	if err := awaitOAuthCancellationResult(t, closed, "expired stateful session close"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("expired cleanup token did not observe cancellation: %v", err)
+	if err := awaitOAuthCancellationResult(t, closed, "expired stateful session close"); err != nil {
+		t.Fatalf("skipping DELETE with an expired token failed local teardown: %v", err)
 	}
 	if f.refreshes.Load() != 0 || deletes.Load() != 0 || c.oauth.State().CredentialVersion != before {
 		t.Fatal("already canceled connection claimed or sent a new refresh")
+	}
+}
+
+func TestManagerOAuthStatefulReconnectExpiredToken(t *testing.T) {
+	for _, persistedExpired := range []bool{false, true} {
+		name := "cached_expired"
+		if persistedExpired {
+			name = "cached_and_persisted_expired"
+		}
+		t.Run(name, func(t *testing.T) {
+			f, m, deletes := newStatefulOAuthManager(t)
+			c := authenticateAndConnect(t, m)
+			f.refresh = func(w http.ResponseWriter, _ *http.Request) {
+				select {
+				case <-c.closeDone:
+				default:
+					t.Error("refresh started before the old session finished closing")
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "refreshed-access", "refresh_token": "rotated-refresh", "token_type": "Bearer", "expires_in": 3600})
+			}
+			expireConnectionToken(t, c)
+			if persistedExpired {
+				// Simulate expiry in both the live token source and durable store.
+				c.oauth.mu.RLock()
+				expired := cloneCredentialSnapshot(c.oauth.snapshot)
+				c.oauth.mu.RUnlock()
+				version, err := c.oauth.store.CompareAndSwap(t.Context(), c.oauth.Key(), expired.Version, expired.Credential)
+				if err != nil {
+					t.Fatal(err)
+				}
+				c.oauth.mu.Lock()
+				c.oauth.snapshot.Version = version
+				c.oauth.mu.Unlock()
+			}
+			before := c.oauth.State().CredentialVersion
+			next, err := m.Reconnect(t.Context(), "fixture")
+			if err != nil {
+				t.Fatalf("reconnect rejected a renewable credential: %v", err)
+			}
+			if next == c || next.Generation() <= c.Generation() || next.session.ID() == "" || next.session.ID() == c.session.ID() {
+				t.Fatal("reconnect did not establish a new stateful session")
+			}
+			if ready, err := m.Ready("fixture"); err != nil || ready != next {
+				t.Fatalf("replacement connection was not ready: %v", err)
+			}
+			awaitOAuthCancellation(t, c.closeDone, "expired session close")
+			wantRefreshes := int32(0)
+			if persistedExpired {
+				wantRefreshes = 1
+			}
+			if deletes.Load() != 0 || f.refreshes.Load() != wantRefreshes || f.exchanges.Load() != 1 || c.oauth.State().CredentialVersion != before {
+				t.Fatalf("retirement sent DELETE or changed credentials: deletes=%d refreshes=%d exchanges=%d", deletes.Load(), f.refreshes.Load(), f.exchanges.Load())
+			}
+			stored, err := next.oauth.store.Load(t.Context(), next.oauth.Key())
+			if err != nil || stored.Credential == nil || stored.Credential.RefreshPending || stored.Version != before+2*uint64(wantRefreshes) {
+				t.Fatalf("replacement did not preserve or refresh the credential: version=%d err=%v", stored.Version, err)
+			}
+			if _, record, err := c.CallToolTracked(t.Context(), &sdk.CallToolParams{Name: "write"}); err == nil || record.Attempts != 0 || f.toolCalls.Load() != 0 {
+				t.Fatalf("expired retired session dispatched a tool: record=%+v err=%v", record, err)
+			}
+			if _, record, err := next.CallToolTracked(t.Context(), &sdk.CallToolParams{Name: "write"}); err != nil || record.Attempts != 1 || f.toolCalls.Load() != 1 {
+				t.Fatalf("replacement session could not execute a tool: record=%+v err=%v", record, err)
+			}
+		})
+	}
+}
+
+func TestManagerOAuthStatefulReconnectPreservesDeleteFailure(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		cause error
+	}{
+		{"canceled", context.Canceled},
+		{"deadline", context.DeadlineExceeded},
+		{"transport", io.ErrUnexpectedEOF},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f, m, _ := newStatefulOAuthManager(t)
+			var deleteAttempts atomic.Int32
+			m.config.HTTPClient = &http.Client{Transport: managerTransportFunc(func(r *http.Request) (*http.Response, error) {
+				if r.Method == http.MethodDelete {
+					deleteAttempts.Add(1)
+					return nil, test.cause
+				}
+				return http.DefaultTransport.RoundTrip(r)
+			})}
+			c := authenticateAndConnect(t, m)
+			if next, err := m.Reconnect(t.Context(), "fixture"); !errors.Is(err, test.cause) || next != nil {
+				t.Fatalf("reconnect hid a real DELETE failure: %v", err)
+			}
+			awaitOAuthCancellation(t, c.closeDone, "failed DELETE teardown")
+			if err := c.Close(); !errors.Is(err, test.cause) {
+				t.Fatalf("repeated Close lost the DELETE cause: %v", err)
+			}
+			if deleteAttempts.Load() != 1 || f.refreshes.Load() != 0 {
+				t.Fatalf("failed teardown retried: deletes=%d refreshes=%d", deleteAttempts.Load(), f.refreshes.Load())
+			}
+			if _, err := m.Ready("fixture"); !errors.Is(err, ErrNotReady) {
+				t.Fatalf("failed teardown started a replacement session: %v", err)
+			}
+		})
 	}
 }

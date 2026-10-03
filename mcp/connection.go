@@ -536,7 +536,14 @@ func (c *Connection) Close() error {
 		c.mu.RUnlock()
 		var errs []error
 		if session != nil {
-			errs = append(errs, session.Close())
+			err := session.Close()
+			// The SDK skips DELETE when a retired OAuth source refuses to start
+			// a refresh. Only that exact pre-claim outcome is normal teardown;
+			// retain interrupted refreshes and actual DELETE/transport failures,
+			// including context cancellation from the host's HTTP client.
+			if _, skipped := err.(*authRetiredRefreshError); !skipped {
+				errs = append(errs, err)
+			}
 		}
 		if c.process != nil {
 			errs = append(errs, c.process.close())

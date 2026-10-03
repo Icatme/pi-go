@@ -1012,3 +1012,24 @@
   amd64/arm64 CLI archives with README.md and SHA256SUMS.txt. Verify embedded VCS
   identity, executable archive modes, downloaded asset hashes, annotated tag and
   published Go-module resolution before reporting publication complete.
+
+## 2026-10-03: Preserve stateful OAuth reconnect after access-token expiry
+
+- Reproduce PR20's regression: retiring a stateful session with an expired access
+  token returned context cancellation from the SDK's DELETE preparation, so
+  Manager.Reconnect stopped before establishing its replacement despite a usable
+  refresh credential. Both cached-only and persisted-expiry regressions fail on
+  the original implementation and pass after the repair.
+- Distinguish retirement before any refresh claim or token request with a private
+  error type. Connection.Close recognizes only that exact skipped-DELETE outcome
+  as normal local teardown. Old sessions never refresh; the replacement refreshes
+  an expired persisted credential once, after old-session teardown completes.
+- Preserve actual DELETE cancellation, deadlines and transport failures, including
+  on repeated Close. Interrupted refreshes retain their durable pending claim and
+  require explicit authentication; retired connections still cannot dispatch tools.
+- Update the OAuth lifecycle documentation and stateful fixture to check physical
+  DELETE attempts and accept rotated access tokens. Focused lifecycle regressions,
+  all MCP tests with the race detector, go vet ./mcp, formatting and diff checks
+  pass on Windows Go1.26.4. Validation is limited to MCP and local SDK fixtures;
+  no dependency or public API change. The user subsequently authorized committing
+  this repair and pushing master to GitHub; no release is requested.

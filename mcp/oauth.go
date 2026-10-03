@@ -47,6 +47,18 @@ func (*OAuthRefreshError) Error() string {
 func (e *OAuthRefreshError) Unwrap() error      { return e.cause }
 func (*OAuthRefreshError) Is(target error) bool { return target == ErrAuthRequired }
 
+// authRetiredRefreshError means retirement prevented a refresh before any
+// credential claim or token request. The SDK propagates it from session DELETE;
+// Connection.Close treats that skipped cleanup as normal local termination.
+// Preserve cancellation for other token callers without classifying a failed
+// or interrupted refresh as skippable cleanup.
+type authRetiredRefreshError struct{ cause error }
+
+func (*authRetiredRefreshError) Error() string {
+	return "MCP OAuth refresh skipped for retired connection"
+}
+func (e *authRetiredRefreshError) Unwrap() error { return e.cause }
+
 // OAuthState is safe for host lifecycle decisions; it contains no credentials.
 // CredentialVersion changes after login, clear, and each durable refresh claim
 // or completion. A successful refresh advances the version twice.
@@ -424,7 +436,7 @@ func (o *OAuth) token(ctx context.Context) (*oauth2.Token, error) {
 		// AfterFunc runs asynchronously even for an already-canceled owner.
 		// Do not claim or send a refresh while that callback is still queued.
 		if err := o.refreshLife.Err(); err != nil {
-			return nil, err
+			return nil, &authRetiredRefreshError{cause: err}
 		}
 		ctx = refreshCtx
 	}

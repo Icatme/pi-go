@@ -117,8 +117,11 @@ Scope/revocation changes retire a live connection before another handoff.
 Connection retirement cancels an in-flight token refresh, including during
 connection setup, before waiting for SDK teardown. A still-valid cached access
 token remains available for the SDK's bounded stateful-session DELETE; teardown
-never starts a new refresh. If refresh was interrupted, its durable pending
-claim remains and explicit authentication is required before reuse.
+never starts a new refresh. If only the access token has expired, teardown skips
+DELETE without failing local close or explicit reconnect; a new connection can
+refresh the unclaimed credential. Actual DELETE transport failures remain errors.
+If refresh was interrupted, its durable pending claim remains and explicit
+authentication is required before reuse.
 The internal retirement fence completes before refreshed tokens become visible;
 external `OnChange` callbacks still run after publication without internal locks.
 `OAuthState` returns a credential version and granted scopes without secrets;
