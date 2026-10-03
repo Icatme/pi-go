@@ -118,6 +118,7 @@ func normalizeThinkingContent(ctx transformContext, messages []Message) []Messag
 				nextContent = append(nextContent, ToolCall{
 					ID:               content.ID,
 					Name:             content.Name,
+					Namespace:        content.Namespace,
 					Arguments:        cloneMap(content.Arguments),
 					ThoughtSignature: content.ThoughtSignature,
 				})
@@ -160,11 +161,13 @@ func normalizeToolCallIDs(ctx transformContext, messages []Message) []Message {
 					nextToolCall := ToolCall{
 						ID:               content.ID,
 						Name:             content.Name,
+						Namespace:        content.Namespace,
 						Arguments:        cloneMap(content.Arguments),
 						ThoughtSignature: content.ThoughtSignature,
 					}
 					if !isSameModel {
 						nextToolCall.ThoughtSignature = ""
+						nextToolCall.Namespace = ""
 					}
 					if !isSameModel && ctx.normalizeToolCallID != nil {
 						normalizedID := ctx.normalizeToolCallID(content.ID, ctx.model, typed)

@@ -21,9 +21,9 @@ the request's top-level `tools` array; later `SystemMessage.ToolsAdded` entries
 become `additional_tools` items at those system messages. Native custom/grammar
 additions use the existing current-tool-list fallback; initial custom tools can
 coexist with later ordinary function additions. No synthetic tool-search calls
-or namespace declarations are introduced. A flat function's returned namespace
-can only identify that same function; unrelated namespaces must not resolve to
-a local function with the same short name.
+or namespace declarations are introduced. In an anchored request, a flat
+function's returned namespace can only identify that same function; unrelated
+namespaces must not resolve to a local function with the same short name.
 
 ## Replay and fallback boundary
 
@@ -33,6 +33,17 @@ tool list before dispatch, with no anchored additions. Unknown models, Codex,
 other APIs, disabled mid-conversation system support, unsupported additions and
 native-plan resource bounds select the same fallback. No HTTP-error-driven
 representation retry is added.
+
+On the selected native-capable model, dynamic history must be supplied in full.
+Combining it with `previous_response_id` is rejected before payload hooks,
+authorization or network activity, including when removal selects folded
+declarations. This avoids relying on unverified removal of tools from inherited
+server-side history. Static-tool requests keep the existing option behavior.
+
+Anchoring is limited to 128 addition items, 256 added functions, 64 KiB per
+encoded function and 1 MiB aggregate encoded functions. Exceeding these native
+plan limits selects the existing top-level declaration representation. These
+limits do not claim to bound an entire request's size or heap use.
 
 Append-only additions must keep the already serialized input prefix and initial
 tool list stable. Removal/redefinition intentionally changes that prefix; no
@@ -53,4 +64,10 @@ first, then root/examples tests, race, vet and build. No paid provider request,
 new credential, dependency upgrade, merge, release or downstream pin change is
 part of this work.
 
-Implementation and verification are pending at this design checkpoint.
+The implementation and focused local regressions are complete. Five real Agent
+scenarios cover resolver changes, execution, namespace rejection and snapshot
+restoration without repeated execution. Provider fixtures cover declaration
+position, serialized prefix, fallback, catalog refresh, bounds, namespace replay,
+cancellation, partial/conflicting streams and HTTP 400 without representation
+retry. Full repository checks and independent review remain pending at this
+implementation checkpoint; no live acceptance is implied.

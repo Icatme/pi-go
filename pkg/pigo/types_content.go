@@ -27,8 +27,10 @@ type ImageContent struct {
 func (ImageContent) isContentBlock() {}
 
 type ToolCall struct {
-	ID               string
-	Name             string
+	ID   string
+	Name string
+	// Namespace is provider replay metadata, not a local tool routing key.
+	Namespace        string
 	Arguments        map[string]any
 	ThoughtSignature string
 }

@@ -760,7 +760,9 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				ThinkingLevelMap: openAIGPT6ThinkingLevelMap("gpt-6-astra", false),
 				// Exact model used in the official custom text/Lark/regex examples.
 				// See docs/native-tools.md; no provider-wide grammar inference.
-				Capabilities:  ModelCapabilities{Temperature: CapabilityUnsupported, TopP: CapabilityUnsupported, CustomTools: CapabilitySupported, GrammarTools: CapabilitySupported},
+				// Tool additions: exact Tool search support and additional_tools
+				// protocol sources are recorded in docs/dynamic-tool-anchors.md.
+				Capabilities:  ModelCapabilities{Temperature: CapabilityUnsupported, TopP: CapabilityUnsupported, CustomTools: CapabilitySupported, GrammarTools: CapabilitySupported, ToolAdditions: CapabilitySupported},
 				Input:         []InputType{InputText, InputImage},
 				ContextWindow: 272000,
 				MaxTokens:     128000,

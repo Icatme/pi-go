@@ -111,7 +111,7 @@ func buildOpenAICodexRequest(customTools map[string]string, model Model, ctx Con
 		Store:             false,
 		Stream:            true,
 		Instructions:      instructions,
-		Input:             convertOpenAIResponsesMessages(customTools, model, ctx, false),
+		Input:             convertOpenAIResponsesMessages(nil, customTools, model, ctx, false),
 		Tools:             convertOpenAIResponsesTools(customTools, currentContextTools(ctx)),
 		ToolChoice:        resolveOpenAICodexToolChoice(resolvedOptions.ToolChoice),
 		ParallelToolCalls: &parallelToolCalls,

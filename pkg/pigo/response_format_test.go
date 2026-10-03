@@ -57,7 +57,7 @@ func TestOpenAIResponsesMapsJSONSchema(t *testing.T) {
 	if err := ValidateResponseFormat(model, format); err != nil {
 		t.Fatal(err)
 	}
-	request := buildOpenAIResponsesRequest(nil, model, Context{}, ProviderStreamOptions{ResponseFormat: format})
+	request := mustBuildOpenAIResponsesRequest(t, nil, model, Context{}, ProviderStreamOptions{ResponseFormat: format})
 	if request.Text == nil || request.Text.Format == nil {
 		t.Fatal("missing text.format")
 	}

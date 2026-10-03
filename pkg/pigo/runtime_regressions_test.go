@@ -47,7 +47,7 @@ func TestConvertOpenAICodexMessagesInsertsMissingToolResultBeforeNextUserTurn(t 
 		t.Fatal("expected codex model")
 	}
 
-	input := convertOpenAIResponsesMessages(nil, *model, Context{
+	input := convertOpenAIResponsesMessages(nil, nil, *model, Context{
 		Messages: []Message{
 			UserMessage{Content: "calculate"},
 			AssistantMessage{
@@ -110,7 +110,7 @@ func TestConvertOpenAICodexMessagesSkipsEmptyTurnsAndPreservesFollowup(t *testin
 		t.Fatal("expected codex model")
 	}
 
-	input := convertOpenAIResponsesMessages(nil, *model, Context{
+	input := convertOpenAIResponsesMessages(nil, nil, *model, Context{
 		Messages: []Message{
 			UserMessage{Content: []ContentBlock{}},
 			AssistantMessage{
@@ -179,7 +179,7 @@ func TestOpenAICodexRequestMarshalsWithInvalidToolResultText(t *testing.T) {
 	request := openAIResponsesRequest{
 		Model:  model.ID,
 		Stream: true,
-		Input: convertOpenAIResponsesMessages(nil, *model, Context{
+		Input: convertOpenAIResponsesMessages(nil, nil, *model, Context{
 			Messages: []Message{
 				AssistantMessage{
 					Content: []ContentBlock{

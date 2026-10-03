@@ -1291,3 +1291,27 @@
   stability is a serialization property, not measured provider-cache behavior.
 - This checkpoint changes documentation only. N3 implementation and validation
   are pending. No live provider calls, dependency or release changes.
+
+## 2026-10-03: N3 implementation checkpoint
+
+- Add exact model-only ToolAdditions capability and additive-only Responses
+  request planning. Initial declarations and input prefixes remain stable;
+  deletions/redeclarations, unsupported targets, dynamic native custom tools and
+  native resource bounds fold to the current list before sending.
+- Carry namespace replay metadata through pigo, Agent, JSON, cloning and pending
+  call binding. Only anchored requests enable the new namespace checks; other
+  Responses/Codex function paths retain their prior behavior. Foreign namespaces
+  and changed namespace/name identities fail, including conflicting terminal
+  items. Malformed anchored output cannot reopen the retry window.
+- A focused replay test first failed on dropped namespace metadata. A loopback
+  test also reproduced foreign namespaces being accepted as a local short name.
+  Both now pass. Real Agent execution additionally reproduced existing empty
+  argument objects being cloned into null; preserve empty pigo maps so no-argument
+  functions still reach their existing object-schema validator as objects.
+- Focused pigo/Agent tests pass, including five actual Agent resolver/execution/
+  restoration scenarios and seven stream/HTTP boundary scenarios. Dynamic
+  native-model history plus previous_response_id fails before payload/auth/HTTP;
+  server-side tool revocation is not guessed. Full root/examples checks and
+  independent review are the next gates.
+- Existing Actions filters do not cover a PR based on codex/n2-native-grammar
+  or pushes to this N3 branch. CI is not claimed; the workflow is unchanged.

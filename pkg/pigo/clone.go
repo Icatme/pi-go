@@ -89,6 +89,7 @@ func cloneBlocks(blocks []ContentBlock) []ContentBlock {
 			out = append(out, ToolCall{
 				ID:               value.ID,
 				Name:             value.Name,
+				Namespace:        value.Namespace,
 				Arguments:        cloneMap(value.Arguments),
 				ThoughtSignature: value.ThoughtSignature,
 			})
@@ -154,7 +155,7 @@ func cloneMessages(messages []Message) []Message {
 }
 
 func cloneMap(values map[string]any) map[string]any {
-	if len(values) == 0 {
+	if values == nil {
 		return nil
 	}
 	out := make(map[string]any, len(values))

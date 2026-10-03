@@ -198,7 +198,7 @@ func TestTranscriptOpenAIRequestNativeAndCollapsedSystems(t *testing.T) {
 					}
 					toolName = request.Tools[0].Function.Name
 				} else {
-					request := buildOpenAIResponsesRequest(nil, model, ctx, ProviderStreamOptions{})
+					request := mustBuildOpenAIResponsesRequest(t, nil, model, ctx, ProviderStreamOptions{})
 					if api == "openai-codex-responses" {
 						request = buildOpenAICodexRequest(nil, model, ctx, ProviderStreamOptions{})
 						instructions = request.Instructions
