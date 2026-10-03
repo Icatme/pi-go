@@ -144,7 +144,7 @@ func memoryStorageFromRecord(record memoryRecord) (*MemoryStorage, error) {
 }
 
 // JSONLRepository stores each session at root/<id>.jsonl. Writer claims are
-// scoped to one repository instance; they are not cross-process file locks.
+// retained by storage file handles and exclude writers in other processes too.
 type JSONLRepository struct {
 	mu      sync.Mutex
 	root    string

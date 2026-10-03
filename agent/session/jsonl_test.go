@@ -206,8 +206,9 @@ func TestReadJSONLHeaderDoesNotOpenOrValidateBody(t *testing.T) {
 func TestJSONLRejectsMalformedOrUnterminatedHeader(t *testing.T) {
 	for _, content := range [][]byte{
 		[]byte(`{"kind":"session","version":1,"id":"missing-newline","created_at":1}`),
-		[]byte("{\"kind\":\"session\",\"version\":2,\"id\":\"wrong-version\",\"created_at\":1}\n"),
-		[]byte("{\"kind\":\"session\",\"version\":1,\"id\":\"unknown-field\",\"created_at\":1,\"extra\":true}\n"),
+		[]byte("{\"kind\":\"session\",\"version\":1,\"id\":\"legacy-version\",\"created_at\":1}\n"),
+		[]byte("{\"kind\":\"session\",\"version\":99,\"id\":\"wrong-version\",\"created_at\":1}\n"),
+		[]byte("{\"kind\":\"session\",\"version\":2,\"id\":\"unknown-field\",\"created_at\":1,\"extra\":true}\n"),
 	} {
 		path := filepath.Join(t.TempDir(), "invalid.jsonl")
 		if err := os.WriteFile(path, content, 0o600); err != nil {
@@ -218,6 +219,9 @@ func TestJSONLRejectsMalformedOrUnterminatedHeader(t *testing.T) {
 		}
 		if _, err := OpenJSONLStorage(path); errorCode(err) != ErrorCorruptLog {
 			t.Fatalf("OpenJSONLStorage(%q) error=%v, code=%q", content, err, errorCode(err))
+		}
+		if after, err := os.ReadFile(path); err != nil || !bytes.Equal(after, content) {
+			t.Fatalf("rejected session header was modified: %v", err)
 		}
 	}
 }
