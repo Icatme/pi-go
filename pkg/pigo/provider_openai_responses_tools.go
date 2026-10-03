@@ -48,7 +48,7 @@ func validateOpenAIResponsesAnchoredFunction(state *openAIResponsesStreamingStat
 func resolveOpenAIResponsesToolPlan(custom map[string]string, model Model, ctx Context) *openAIResponsesToolPlan {
 	transcript := NormalizeContext(ctx)
 	plan := &openAIResponsesToolPlan{RequestTools: GetCurrentTools(transcript.Messages)}
-	if model.API != "openai-responses" || !supportsTranscriptSystemMessages(model) {
+	if model.API != "openai-responses" {
 		return plan
 	}
 	facts, ok := LookupModelCapabilities(model.Provider, model.ID)
@@ -60,6 +60,11 @@ func resolveOpenAIResponsesToolPlan(custom map[string]string, model Model, ctx C
 			plan.RequiresFullHistory = true
 			break
 		}
+	}
+	// Folding mid-conversation system messages changes the wire representation,
+	// not whether inherited server state may contain an obsolete tool set.
+	if !supportsTranscriptSystemMessages(model) {
+		return plan
 	}
 	seen := make(map[string]bool)
 	anchors, additions, bytes := 0, 0, 0

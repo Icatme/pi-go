@@ -39,6 +39,8 @@ Combining it with `previous_response_id` is rejected before payload hooks,
 authorization or network activity, including when removal selects folded
 declarations. This avoids relying on unverified removal of tools from inherited
 server-side history. Static-tool requests keep the existing option behavior.
+Disabling `SupportsMidConvoSystemMessages` only selects the folded wire
+representation; it does not relax the native model's full-history requirement.
 
 Anchoring is limited to 128 addition items, 256 added functions, 64 KiB per
 encoded function and 1 MiB aggregate encoded functions. Exceeding these native
@@ -80,5 +82,8 @@ root build. No dependency files changed.
 
 The draft [PR #23](https://github.com/Icatme/pi-go/pull/23) targets the unmerged
 N2 branch. Existing Actions filters do not cover this stacked base or N3 push
-branch, so no N3 CI run is claimed. Independent N3 review remains pending.
+branch, so no N3 CI run is claimed. Independent review found a full-history guard
+bypass when mid-conversation systems were disabled; it was reproduced and
+repaired with a table regression and zero-side-effect authorization fixture.
+The repaired head awaits independent recheck.
 Live model acceptance and provider-cache behavior remain unverified.

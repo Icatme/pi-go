@@ -95,23 +95,78 @@ func mustBuildOpenAIResponsesRequest(t *testing.T, custom map[string]string, mod
 }
 
 func TestResponsesToolAnchorsRejectStatefulReplayBeforeDispatch(t *testing.T) {
-	model := *GetModel("openai", "gpt-6-astra")
-	ctx := anchorContext()
-	for _, remove := range []bool{false, true} {
-		if remove {
-			ctx.Messages = append(ctx.Messages, SystemMessage{ToolsRemoved: []ToolReference{{Name: "lookup"}}})
-		}
-		payloads, requests := 0, 0
-		client := &http.Client{Transport: samplingRoundTripper(func(*http.Request) (*http.Response, error) { requests++; return nil, fmt.Errorf("unexpected request") })}
-		result := Complete(model, ctx, ProviderStreamOptions{PreviousResponseID: "fixture_previous", HTTPClient: client, OnPayload: func(any, Model) any { payloads++; return nil }})
-		if result.StopReason != StopReasonError || !strings.Contains(result.ErrorMessage, "full history") || requests != 0 || payloads != 0 {
-			t.Fatalf("result=%+v requests=%d payloads=%d", result, requests, payloads)
+	for _, midSystem := range []bool{true, false} {
+		for _, change := range []string{"add", "remove", "redefine", "remove and replace"} {
+			t.Run(fmt.Sprintf("mid_system_%t/%s", midSystem, change), func(t *testing.T) {
+				model := *GetModel("openai", "gpt-6-astra")
+				model.Compat = &OpenAIResponsesCompat{SupportsMidConvoSystemMessages: &midSystem}
+				ctx := anchorContext()
+				switch change {
+				case "remove":
+					ctx.Messages = append(ctx.Messages, SystemMessage{ToolsRemoved: []ToolReference{{Name: "lookup"}}})
+				case "redefine", "remove and replace":
+					tool := anchorFunction("lookup")
+					tool.Description = "changed schema revision"
+					update := SystemMessage{ToolsAdded: []Tool{tool}}
+					if change == "remove and replace" {
+						update.ToolsRemoved = []ToolReference{{Name: "lookup"}}
+					}
+					ctx.Messages = append(ctx.Messages, update)
+				}
+				options := ProviderStreamOptions{PreviousResponseID: "prior_with_lookup"}
+				if request, err := buildOpenAIResponsesRequest(nil, model, ctx, options); err == nil || !strings.Contains(err.Error(), "full history") {
+					t.Errorf("stateful dynamic replay accepted: previous=%q tools=%v err=%v", request.PreviousResponseID, request.Tools, err)
+				}
+				payloads, requests := 0, 0
+				options.APIKey = "fixture"
+				options.HTTPClient = &http.Client{Transport: samplingRoundTripper(func(*http.Request) (*http.Response, error) { requests++; return nil, fmt.Errorf("unexpected request") })}
+				options.OnPayload = func(any, Model) any { payloads++; return nil }
+				result := Complete(model, ctx, options)
+				if result.StopReason != StopReasonError || !strings.Contains(result.ErrorMessage, "full history") || requests != 0 || payloads != 0 {
+					t.Errorf("result=%+v requests=%d payloads=%d", result, requests, payloads)
+				}
+				// Disabling mid-conversation systems still permits the documented
+				// stateless fallback; it must not permit inherited server state.
+				if !midSystem {
+					request := mustBuildOpenAIResponsesRequest(t, nil, model, ctx, ProviderStreamOptions{})
+					if countToolAnchors(request.Input) != 0 || !reflect.DeepEqual(request.Tools, convertOpenAIResponsesTools(nil, currentContextTools(ctx))) {
+						t.Fatal(request)
+					}
+				}
+				static := Context{Tools: []Tool{anchorFunction("initial")}}
+				request := mustBuildOpenAIResponsesRequest(t, nil, model, static, ProviderStreamOptions{PreviousResponseID: "prior_static"})
+				if request.PreviousResponseID != "prior_static" {
+					t.Fatal("static replay option changed")
+				}
+			})
 		}
 	}
 }
 
 func anchorFunction(name string) Tool {
 	return Tool{Name: name, Description: "Synthetic local lookup", Parameters: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}
+}
+
+func TestResponsesToolAnchorsNoMidSystemRejectsBeforeAuthorization(t *testing.T) {
+	provider := Provider("test-n3-no-mid-system-auth")
+	disabled := false
+	authCalls, payloadCalls, httpCalls := 0, 0, 0
+	RegisterProviderModule(ProviderModule{Provider: provider, Models: map[string]Model{"fixture": {
+		API: "openai-responses", Compat: &OpenAIResponsesCompat{SupportsMidConvoSystemMessages: &disabled},
+		Capabilities: ModelCapabilities{ToolAdditions: CapabilitySupported},
+	}}, Auth: ProviderAuth{ResolveAuthorization: func(Provider, AuthConfig, *http.Client, context.Context) (string, error) {
+		authCalls++
+		return "fixture", nil
+	}}})
+	model := *GetModel(provider, "fixture")
+	result := Complete(model, anchorContext(), ProviderStreamOptions{
+		PreviousResponseID: "prior_with_lookup",
+		OnPayload:          func(any, Model) any { payloadCalls++; return nil },
+		HTTPClient:         &http.Client{Transport: samplingRoundTripper(func(*http.Request) (*http.Response, error) { httpCalls++; return nil, fmt.Errorf("unexpected request") })},
+	})
+	if result.StopReason != StopReasonError || !strings.Contains(result.ErrorMessage, "full history") || authCalls != 0 || payloadCalls != 0 || httpCalls != 0 {
+		t.Fatalf("reason=%s error=%s auth=%d payload=%d http=%d", result.StopReason, result.ErrorMessage, authCalls, payloadCalls, httpCalls)
+	}
 }
 
 func anchorContext() Context {

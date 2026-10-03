@@ -1334,3 +1334,20 @@
   existing base/push filters explain the absence. Native multi-platform CI and
   live-provider/cache acceptance are not claimed. Final scope and evidence are
   recorded in dynamic-tool-anchors.md.
+
+## 2026-10-03: N3 independent-review P2 repair
+
+- Reproduce the review finding at exact head ca890265: explicitly disabling
+  SupportsMidConvoSystemMessages returns from tool planning before setting the
+  exact native model's full-history requirement. Add/remove/redefine and
+  remove-and-replace histories incorrectly accept previous_response_id; four
+  new cases failed and reached a fake HTTP transport once each.
+- Determine the registered native capability and dynamic-history requirement
+  before selecting folded system-message fallback. The eight true/false flag
+  matrix cases now reject stateful dynamic replay before payload/HTTP, while
+  stateless folded requests and static-tool previous-response replay remain
+  valid. A registered local authorization fixture additionally proves zero
+  authorization, payload and HTTP calls on rejection.
+- Focused regressions and full pigo/Agent race tests pass. Root vet/build and
+  examples full race/vet/build also pass after this correction. No real provider
+  call, merge or release occurred; the repaired head awaits independent recheck.
