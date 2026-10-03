@@ -1315,6 +1315,7 @@ func shouldRetryOpenAIResponsesRequest(status int, message string) bool {
 	return strings.Contains(lower, "rate limit") ||
 		strings.Contains(lower, "ratelimit") ||
 		strings.Contains(lower, "overloaded") ||
+		strings.Contains(lower, "model is at capacity") ||
 		strings.Contains(lower, "currently experiencing high demand") ||
 		strings.Contains(lower, "service unavailable") ||
 		strings.Contains(lower, "upstream connect") ||

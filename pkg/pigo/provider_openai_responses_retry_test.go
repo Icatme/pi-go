@@ -23,6 +23,14 @@ func TestOpenAITransientHTTPRetryBounds(t *testing.T) {
 			{name: "Cloudflare recovers", status: 520, maxRetries: 1, wantAttempts: 2, wantStop: StopReasonStop},
 			{name: "Azure capacity recovers", status: 400, body: `{"error":{"message":"The system is currently experiencing high demand"}}`,
 				maxRetries: 1, wantAttempts: 2, wantStop: StopReasonStop},
+			{name: "model capacity recovers", status: 400, body: `{"error":{"message":"Selected model is at capacity"}}`,
+				maxRetries: 1, wantAttempts: 2, wantStop: StopReasonStop},
+			{name: "model capacity zero retries", status: 400, body: `{"error":{"message":"Selected model is at capacity"}}`,
+				maxRetries: 0, wantAttempts: 1, wantStop: StopReasonError},
+			{name: "model capacity bounded", status: 400, body: `{"error":{"message":"Selected model is at capacity"}}`,
+				maxRetries: 2, keepFailing: true, wantAttempts: 3, wantStop: StopReasonError},
+			{name: "model capacity quota terminal", status: 400, body: `{"error":{"code":"insufficient_quota","message":"Selected model is at capacity"}}`,
+				maxRetries: 2, wantAttempts: 1, wantStop: StopReasonError},
 			{name: "zero retries", status: 520, maxRetries: 0, wantAttempts: 1, wantStop: StopReasonError},
 			{name: "bounded attempts", status: 520, maxRetries: 2, keepFailing: true, wantAttempts: 3, wantStop: StopReasonError},
 			{name: "quota remains terminal", status: 520, body: `{"error":{"code":"insufficient_quota","message":"The system is currently experiencing high demand"}}`,
@@ -60,58 +68,59 @@ func TestOpenAITransientHTTPRetryBounds(t *testing.T) {
 }
 
 func TestOpenAIHighDemandStreamRetryBoundary(t *testing.T) {
-	const message = "The system is currently experiencing high demand"
-	for _, output := range []bool{false, true} {
-		t.Run(fmt.Sprintf("output=%v", output), func(t *testing.T) {
-			var attempts atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "text/event-stream")
-				if attempts.Add(1) > 1 {
+	for _, message := range []string{"The system is currently experiencing high demand", "Selected model is at capacity"} {
+		for _, output := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/output=%v", message, output), func(t *testing.T) {
+				var attempts atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "text/event-stream")
+					if attempts.Add(1) > 1 {
+						fmt.Fprint(w, buildOpenAICodexSSE(map[string]any{
+							"type": "response.completed", "response": map[string]any{"id": "resp_retried", "status": "completed"},
+						}))
+						return
+					}
+					if output {
+						fmt.Fprint(w, buildOpenAICodexSSE(map[string]any{
+							"type": "response.output_item.done", "item": map[string]any{
+								"type": "message", "id": "msg_partial", "content": []map[string]any{{"type": "output_text", "text": "partial"}},
+							},
+						}))
+					}
 					fmt.Fprint(w, buildOpenAICodexSSE(map[string]any{
-						"type": "response.completed", "response": map[string]any{"id": "resp_retried", "status": "completed"},
-					}))
-					return
-				}
-				if output {
-					fmt.Fprint(w, buildOpenAICodexSSE(map[string]any{
-						"type": "response.output_item.done", "item": map[string]any{
-							"type": "message", "id": "msg_partial", "content": []map[string]any{{"type": "output_text", "text": "partial"}},
+						"type": "response.failed", "response": map[string]any{
+							"id": "resp_failed", "status": "failed", "error": map[string]any{"message": message},
 						},
 					}))
-				}
-				fmt.Fprint(w, buildOpenAICodexSSE(map[string]any{
-					"type": "response.failed", "response": map[string]any{
-						"id": "resp_failed", "status": "failed", "error": map[string]any{"message": message},
-					},
 				}))
-			}))
-			defer server.Close()
-			model := Model{ID: "fixture", API: "openai-responses", Provider: "openai", BaseURL: server.URL, MaxTokens: 256}
-			stream := StreamSimple(model, Context{}, SimpleStreamOptions{APIKey: "fixture", MaxRetries: 1, MaxRetryDelay: 1})
-			var starts, errors int
-			for event := range stream.Events() {
-				if event.Type == AssistantMessageEventStart {
-					starts++
+				defer server.Close()
+				model := Model{ID: "fixture", API: "openai-responses", Provider: "openai", BaseURL: server.URL, MaxTokens: 256}
+				stream := StreamSimple(model, Context{}, SimpleStreamOptions{APIKey: "fixture", MaxRetries: 1, MaxRetryDelay: 1})
+				var starts, errors int
+				for event := range stream.Events() {
+					if event.Type == AssistantMessageEventStart {
+						starts++
+					}
+					if event.Type == AssistantMessageEventError {
+						errors++
+					}
 				}
-				if event.Type == AssistantMessageEventError {
-					errors++
+				result := stream.Result()
+				if starts != 1 {
+					t.Fatalf("start events = %d, want 1", starts)
 				}
-			}
-			result := stream.Result()
-			if starts != 1 {
-				t.Fatalf("start events = %d, want 1", starts)
-			}
-			if output {
-				if attempts.Load() != 1 || errors != 1 || result.StopReason != StopReasonError || result.ErrorMessage != message {
-					t.Fatalf("failure after output retried or lost: attempts=%d errors=%d result=%+v", attempts.Load(), errors, result)
+				if output {
+					if attempts.Load() != 1 || errors != 1 || result.StopReason != StopReasonError || result.ErrorMessage != message {
+						t.Fatalf("failure after output retried or lost: attempts=%d errors=%d result=%+v", attempts.Load(), errors, result)
+					}
+					if len(result.Content) != 1 || result.Content[0].(TextContent).Text != "partial" {
+						t.Fatalf("partial output lost: %+v", result.Content)
+					}
+				} else if attempts.Load() != 2 || errors != 0 || result.StopReason != StopReasonStop {
+					t.Fatalf("failure before output did not recover: attempts=%d errors=%d result=%+v", attempts.Load(), errors, result)
 				}
-				if len(result.Content) != 1 || result.Content[0].(TextContent).Text != "partial" {
-					t.Fatalf("partial output lost: %+v", result.Content)
-				}
-			} else if attempts.Load() != 2 || errors != 0 || result.StopReason != StopReasonStop {
-				t.Fatalf("failure before output did not recover: attempts=%d errors=%d result=%+v", attempts.Load(), errors, result)
-			}
-		})
+			})
+		}
 	}
 }
 
