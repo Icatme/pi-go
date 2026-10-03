@@ -64,18 +64,21 @@ func (p *openAICodexOAuthProvider) Name() string {
 }
 
 func (p *openAICodexOAuthProvider) Login(ctx context.Context, callbacks oauthLoginCallbacks) (storedOAuthCredentials, error) {
+	if err := ctx.Err(); err != nil {
+		return storedOAuthCredentials{}, err
+	}
 	flow, err := createOpenAICodexAuthorizationFlow()
 	if err != nil {
 		return storedOAuthCredentials{}, err
 	}
 
 	server, err := startOpenAICodexCallbackServer(flow.State)
-	serverReady := err == nil
-	if err != nil && callbacks.OnOutput != nil {
-		callbacks.OnOutput("Local callback server unavailable. Falling back to manual code paste.\n")
+	if err != nil {
+		return storedOAuthCredentials{}, fmt.Errorf("listen for OpenAI OAuth callback on %s: %w", openAICodexCallbackAddress, err)
 	}
-	if server != nil {
-		defer server.Close()
+	defer server.Close()
+	if err := ctx.Err(); err != nil {
+		return storedOAuthCredentials{}, err
 	}
 
 	if callbacks.OnAuth != nil {
@@ -85,21 +88,31 @@ func (p *openAICodexOAuthProvider) Login(ctx context.Context, callbacks oauthLog
 		})
 	}
 
+	if err := ctx.Err(); err != nil {
+		return storedOAuthCredentials{}, err
+	}
 	if err := p.openBrowser(flow.URL); err != nil && callbacks.OnOutput != nil {
 		callbacks.OnOutput("Failed to open browser automatically. Open the URL above manually.\n")
 	}
 
 	var code string
-	if serverReady && server != nil {
-		if callbacks.OnOutput != nil {
-			callbacks.OnOutput("Waiting for browser callback...\n")
-		}
-		code, err = server.WaitForCode(ctx, openAICodexCallbackTimeout)
-		if err != nil && callbacks.OnOutput != nil {
-			callbacks.OnOutput("Browser callback did not complete in time. Falling back to manual code paste.\n")
-		}
+	if err := ctx.Err(); err != nil {
+		return storedOAuthCredentials{}, err
+	}
+	if callbacks.OnOutput != nil {
+		callbacks.OnOutput("Waiting for browser callback...\n")
+	}
+	code, err = server.WaitForCode(ctx, openAICodexCallbackTimeout)
+	if ctx.Err() != nil {
+		return storedOAuthCredentials{}, ctx.Err()
+	}
+	if err != nil && callbacks.OnOutput != nil {
+		callbacks.OnOutput("Browser callback did not complete in time. Falling back to manual code paste.\n")
 	}
 	if strings.TrimSpace(code) == "" {
+		if err := ctx.Err(); err != nil {
+			return storedOAuthCredentials{}, err
+		}
 		if callbacks.OnPrompt == nil {
 			return storedOAuthCredentials{}, errors.New("missing prompt handler for manual authorization code input")
 		}
@@ -109,9 +122,15 @@ func (p *openAICodexOAuthProvider) Login(ctx context.Context, callbacks oauthLog
 		if promptErr != nil {
 			return storedOAuthCredentials{}, promptErr
 		}
-		parsedCode, _, parseErr := parseAuthorizationInput(input)
+		if err := ctx.Err(); err != nil {
+			return storedOAuthCredentials{}, err
+		}
+		parsedCode, state, parseErr := parseAuthorizationInput(input)
 		if parseErr != nil {
 			return storedOAuthCredentials{}, parseErr
+		}
+		if state != "" && state != flow.State {
+			return storedOAuthCredentials{}, errors.New("OAuth state mismatch")
 		}
 		code = parsedCode
 	}
