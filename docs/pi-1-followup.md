@@ -246,13 +246,20 @@ N4–N7 不阻塞下一轮交付，满足表中准入条件后再确定独立实
 
 | 优先级 | 缺口与依据 | 本轮边界 |
 | --- | --- | --- |
-| 1，实施 | 上游 [overflow 分类](https://github.com/earendil-works/pi/blob/v1.0.1/packages/ai/src/utils/overflow.ts) 和 [测试](https://github.com/earendil-works/pi/blob/v1.0.1/packages/ai/test/overflow.test.ts) 已覆盖 LiteLLM/OpenAI 兼容网关、Together、Poolside、DS4 的明确上下文超限文本；Go `IsContextOverflow` 漏判 | 补四条匹配规则，保留限流排除和 stop reason 边界，验证两条本地 HTTP 路径。仅帮助宿主分类，不自动压缩或重发请求；模型 context window 未知时也能识别明确错误 |
-| 2，后续候选 | `pkg/pigo/http_stream_client.go` 的非 2xx 错误体仍用无界 `io.ReadAll` | 单独确定错误体字节预算、截断诊断和取消合同，再用大响应/中断 fixture 验证；不与分类补丁混合 |
+| 1，草稿 PR #24 已验证 | 上游 [overflow 分类](https://github.com/earendil-works/pi/blob/v1.0.1/packages/ai/src/utils/overflow.ts) 和 [测试](https://github.com/earendil-works/pi/blob/v1.0.1/packages/ai/test/overflow.test.ts) 已覆盖 LiteLLM/OpenAI 兼容网关、Together、Poolside、DS4 的明确上下文超限文本；Go `IsContextOverflow` 漏判 | 已补四条匹配规则，保留限流排除和 stop reason 边界，两条本地 HTTP 路径、独立复核及六项 CI 通过。仅帮助宿主分类，不自动压缩或重发请求；模型 context window 未知时也能识别明确错误 |
+| 2，核查结束，无需实现 | 追踪完整调用链后确认共享 HTTP 错误体已经受限：`providerHTTPClient` 在 adapter/SDK 读取前安装统一 transport，默认最多读取 64 KiB + 1 字节、保留 64 KiB 并关闭原始 body | 撤回此前仅依据下游 `io.ReadAll` 提出的候选。宿主自定义限额、截断观察、读取失败、取消、重定向及连接复用已有实现和 race 回归；不再叠加第二套读取器 |
 
 上游 Qwen 的 `Range of input length should be ...` 同时可能表示空输入，本轮不将其
 直接判为上下文溢出。容量重试、Codemode 输出限额、登录取消、journal 和 N2/N3
 已完成，不按上游发布日志重复开发。其余 v1.0.1 改动主要属于 CLI 分发、TUI、
 额外 provider 或宿主 MCP 配置，不为同步版本扩大库的范围。
+
+错误体限额的调用覆盖：`Stream`/`StreamSimple`（及其 `Complete` 入口）统一包装
+HTTP client；共享 `HTTPStreamClient` 也会包装直接调用，覆盖 Completions 与 Codex
+SSE。非成功响应的 `io.ReadAll` 消费的是已受限的 body。`HTTPObservation` 记录
+截断标记和受格式/长度约束的错误标识；原始错误文本与 error chain 仍是不可信内容，
+该合同不是正文自动脱敏。现有实现、测试见 `pkg/pigo/provider_http*.go`；本次核查
+没有改动运行时代码。
 
 ### 上游发布后补丁的处理决定
 

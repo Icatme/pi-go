@@ -1361,7 +1361,8 @@
   Compare its actual source with Go instead of redoing journal, branches,
   grammar, additional_tools, capacity retries or Codemode output limits.
 - Prioritize the existing IsContextOverflow host API's missing gateway error
-  forms; keep bounded HTTP error-body reading as a separate follow-up candidate.
+  forms; initially list HTTP error-body bounds for follow-up, then withdraw
+  that candidate after the complete transport audit recorded below.
   Four narrowly scoped expressions cover LiteLLM/OpenAI-compatible maximum
   context lengths, Poolside, Together and DS4. Do not add automatic compaction,
   retries, credentials, models or dependencies. Qwen's input-range message is
@@ -1378,3 +1379,33 @@
   draft PR; no native-platform or live-provider result is inferred from local
   Linux tests. No release, merge or downstream dependency change is authorized
   in this follow-up.
+
+## 2026-10-03: shared HTTP error-body candidate closed after audit
+
+- The proposed resource defect is not present. `HTTPStreamClient.postStream`
+  first calls `providerHTTPClient`; `Stream` and `StreamSimple` also install
+  that transport before provider dispatch. The shared path covers direct
+  PostStream consumers, OpenAI-compatible Completions and Codex SSE; public
+  Complete entry points and the Responses SDK are already tested as bounded.
+- `providerHTTPTransport.RoundTrip` reads at most the configured limit plus one,
+  defaults to 64 KiB, closes the source and replays only a bounded prefix.
+  Existing wrapped clients retain their host-configured policy. Redirect bodies
+  remain lazy and bounded. Downstream `io.ReadAll` does not imply an unbounded
+  upstream read here; the earlier candidate missed this layer.
+- Existing HTTP/shared-stream/SDK/redirect race tests pass, including source
+  byte counts and Close, truncation metadata, original read failures,
+  cancellation, connection reuse and untouched successful streams. A temporary
+  local overlay additionally exercises the shared PostStream entry directly:
+  default retains 65536 bytes after reading 65537; an explicit 32-byte policy
+  retains 32 after reading 33; both close the original body and make one request.
+  A synthetic tail beyond the limit never reaches the reported error.
+- Observation identifiers reject overlong or invalid characters. Raw error text
+  and error chains intentionally retain provider content; this is not a promise
+  of automatic body redaction. All fixtures are synthetic and local.
+- Read-error preservation is verified at the transport/SDK boundary; the shared
+  PostStream parser still discards the error returned while reading that bounded
+  body. This audit does not claim universal end-to-end error-chain preservation.
+- Withdraw the candidate and correct the plan in PR #24. No additional runtime
+  implementation or separate feature PR is needed. Independent read-only audit
+  found no relevant bound bypass, reviewed the corrected documentation and
+  passed `git diff --check`.
