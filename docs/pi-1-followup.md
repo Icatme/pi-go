@@ -211,6 +211,11 @@ N1 的实现与五平台验收已完成，随 v0.13.0 交付；下一功能顺�
 
 ### 第二轮与条件候选
 
+N2 implementation is tracked on `codex/n2-native-grammar`; the reviewed contract,
+exact initial capability evidence and local validation limits are in
+[Native custom tool inputs](native-tools.md). N3 remains a separate, sequential
+PR after the N2 draft is complete. No live-provider acceptance is implied.
+
 | 顺位 | 编号 | 决定与理由 | 交付边界及准入/验收门槛 |
 | --- | --- | --- | --- |
 | 第二轮 1 | N2：原生 grammar 工具 | 计划跟进。收益是直接传递代码及 provider 约束；现有 Codemode 不依赖它才能工作 | `pkg/pigo` capability、声明编码、custom call delta/done/终态、`ctc_` ID、回放及 Agent/Codemode 接线一起交付。用单字符串属性映射回现有参数对象；缺 capability 时发送前明确选择普通 function 表示或拒绝强制 grammar，不能收到 400 再重发 |

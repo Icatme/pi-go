@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Icatme/pi-go/agent"
+	"github.com/Icatme/pi-go/pkg/pigo"
 )
 
 func TestSystemTranscriptSnapshotsAreDetached(t *testing.T) {
@@ -15,9 +16,10 @@ func TestSystemTranscriptSnapshotsAreDetached(t *testing.T) {
 		Content:  "base prompt",
 		Sections: map[string]*string{"policy": &section, "deleted": nil},
 		ToolsAdded: []agent.ToolDeclaration{{
-			Name:         "lookup",
-			Parameters:   map[string]any{"properties": map[string]any{"query": map[string]any{"type": "string"}}},
-			OutputSchema: map[string]any{"properties": map[string]any{"result": map[string]any{"type": "string"}}},
+			ConstrainedSampling: &pigo.ToolConstrainedSampling{Type: "grammar", Syntax: "regex", Definition: "[a-z]+"},
+			Name:                "lookup",
+			Parameters:          map[string]any{"properties": map[string]any{"query": map[string]any{"type": "string"}}},
+			OutputSchema:        map[string]any{"properties": map[string]any{"result": map[string]any{"type": "string"}}},
 		}},
 		ToolsRemoved: []agent.ToolReference{{Name: "retired"}},
 	})
@@ -32,6 +34,7 @@ func TestSystemTranscriptSnapshotsAreDetached(t *testing.T) {
 	*first.Messages[0].System.Sections["policy"] = "mutated section"
 	first.Messages[0].System.ToolsAdded[0].Parameters["properties"].(map[string]any)["query"].(map[string]any)["type"] = "number"
 	first.Messages[0].System.ToolsAdded[0].OutputSchema["properties"].(map[string]any)["result"].(map[string]any)["type"] = "number"
+	first.Messages[0].System.ToolsAdded[0].ConstrainedSampling.Definition = "mutated"
 	first.Messages[0].System.ToolsRemoved[0].Name = "mutated removal"
 	again, err := state.Context(MainLane)
 	if err != nil {

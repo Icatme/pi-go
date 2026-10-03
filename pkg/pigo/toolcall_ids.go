@@ -22,7 +22,7 @@ func NormalizeSimpleToolCallID(id string) string {
 }
 
 func NormalizeOpenAIResponsesToolCallID(id string, targetModel Model, source AssistantMessage) string {
-	if targetModel.Provider != "openai-codex" {
+	if !isOpenAIResponsesAPI(targetModel.API) {
 		return NormalizeSimpleToolCallID(id)
 	}
 
@@ -39,7 +39,7 @@ func NormalizeOpenAIResponsesToolCallID(id string, targetModel Model, source Ass
 		normalizedItemID = "fc_" + ShortHash(itemID)
 	} else {
 		normalizedItemID = NormalizeSimpleToolCallID(itemID)
-		if !strings.HasPrefix(normalizedItemID, "fc_") {
+		if !strings.HasPrefix(normalizedItemID, "fc_") && !strings.HasPrefix(normalizedItemID, "ctc_") {
 			normalizedItemID = NormalizeSimpleToolCallID("fc_" + normalizedItemID)
 		}
 	}

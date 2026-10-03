@@ -125,7 +125,7 @@ func convertSystemMessageToPigo(message Message) pigo.SystemMessage {
 	payload := cloneSystemPayload(message.System)
 	tools := make([]pigo.Tool, len(payload.ToolsAdded))
 	for i, tool := range payload.ToolsAdded {
-		tools[i] = pigo.Tool{Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters, OutputSchema: tool.OutputSchema}
+		tools[i] = pigo.Tool{Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters, OutputSchema: tool.OutputSchema, ConstrainedSampling: tool.ConstrainedSampling.Clone()}
 	}
 	removed := make([]pigo.ToolReference, len(payload.ToolsRemoved))
 	for i, tool := range payload.ToolsRemoved {
@@ -318,10 +318,11 @@ func convertToolsToPigo(tools []ToolDefinition) []pigo.Tool {
 	converted := make([]pigo.Tool, 0, len(tools))
 	for _, tool := range tools {
 		converted = append(converted, pigo.Tool{
-			Name:         tool.Name,
-			Description:  tool.Description,
-			Parameters:   cloneStringAnyMap(tool.Parameters),
-			OutputSchema: cloneStringAnyMap(tool.OutputSchema),
+			Name:                tool.Name,
+			Description:         tool.Description,
+			Parameters:          cloneStringAnyMap(tool.Parameters),
+			OutputSchema:        cloneStringAnyMap(tool.OutputSchema),
+			ConstrainedSampling: tool.ConstrainedSampling.Clone(),
 		})
 	}
 	return converted

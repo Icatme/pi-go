@@ -45,6 +45,7 @@ func streamOpenAICodexWithTransport(
 	accountID string,
 	response *AssistantMessage,
 	stream *AssistantMessageEventStream,
+	customTools map[string]string,
 ) error {
 	httpClient := options.HTTPClient
 	if httpClient == nil {
@@ -63,7 +64,7 @@ func streamOpenAICodexWithTransport(
 
 	if transport != TransportSSE {
 		websocketStarted := false
-		err := streamOpenAICodexWebSocket(model, options, bodyBytes, apiKey, accountID, response, stream, func() {
+		err := streamOpenAICodexWebSocket(model, options, bodyBytes, apiKey, accountID, response, stream, customTools, func() {
 			websocketStarted = true
 		})
 		if err == nil {
@@ -77,7 +78,7 @@ func streamOpenAICodexWithTransport(
 		}
 	}
 
-	return streamOpenAICodexSSE(model, requestContext, httpClient, options, bodyBytes, apiKey, accountID, response, stream)
+	return streamOpenAICodexSSE(model, requestContext, httpClient, options, bodyBytes, apiKey, accountID, response, stream, customTools)
 }
 
 func streamOpenAICodexSSE(
@@ -90,6 +91,7 @@ func streamOpenAICodexSSE(
 	accountID string,
 	response *AssistantMessage,
 	stream *AssistantMessageEventStream,
+	customTools map[string]string,
 ) error {
 	client := HTTPStreamClient{
 		HTTPClient:     httpClient,
@@ -98,6 +100,7 @@ func streamOpenAICodexSSE(
 		MaxRetryDelay:  time.Duration(options.MaxRetryDelay) * time.Millisecond,
 	}
 	state := openAIResponsesStreamingState{
+		CustomTools:          customTools,
 		CurrentTextIndex:     -1,
 		CurrentThinkingIndex: -1,
 		FinalizedItemKeys:    map[string]bool{},
@@ -126,11 +129,12 @@ func streamOpenAICodexSSE(
 			return nil
 		},
 		CanRetryStreamError: func() bool {
-			return len(response.Content) == 0 && len(response.HostedToolExecutions) == 0 && !response.UsageReported
+			return !state.CustomOutputSeen && len(response.Content) == 0 && len(response.HostedToolExecutions) == 0 && !response.UsageReported
 		},
 		OnStreamRetry: func() {
 			*response = cloneAssistantMessage(baselineResponse)
 			state = openAIResponsesStreamingState{
+				CustomTools:          customTools,
 				CurrentTextIndex:     -1,
 				CurrentThinkingIndex: -1,
 				FinalizedItemKeys:    map[string]bool{},
@@ -184,6 +188,7 @@ func streamOpenAICodexWebSocket(
 	accountID string,
 	response *AssistantMessage,
 	stream *AssistantMessageEventStream,
+	customTools map[string]string,
 	onStart func(),
 ) error {
 	requestID := options.SessionID
@@ -263,6 +268,7 @@ func streamOpenAICodexWebSocket(
 	})
 
 	state := openAIResponsesStreamingState{
+		CustomTools:          customTools,
 		CurrentTextIndex:     -1,
 		CurrentThinkingIndex: -1,
 		FinalizedItemKeys:    map[string]bool{},

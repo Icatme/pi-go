@@ -404,6 +404,7 @@ func aliasTool(binding codemodetool.Binding) agent.ToolDefinition {
 }
 
 func detachedTool(tool agent.ToolDefinition) (agent.ToolDefinition, error) {
+	tool.ConstrainedSampling = tool.ConstrainedSampling.Clone()
 	if err := jsontext.ValidateStrings([]string{tool.Name, tool.Description, tool.Label, tool.Revision}); err != nil {
 		return tool, err
 	}

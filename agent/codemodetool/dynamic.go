@@ -32,6 +32,7 @@ func (err *dynamicResolverPanic) Unwrap() error {
 // storing mutable executors in history. The Agent freezes the resolved children
 // before entering the script. Ordinary New remains a static allowlist binding.
 func NewDynamic(sandbox *codemode.Sandbox, resolver BindingResolver, options Options) (agent.ToolDefinition, error) {
+	options.ConstrainedSampling = options.ConstrainedSampling.Clone()
 	if resolver == nil {
 		return agent.ToolDefinition{}, errors.New("codemodetool: binding resolver is required")
 	}

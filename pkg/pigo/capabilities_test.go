@@ -264,7 +264,7 @@ func TestOpenAIGPT56ReasoningPayloadMatchesCapabilitySnapshot(t *testing.T) {
 
 			for _, test := range tests {
 				t.Run(string(test.requested), func(t *testing.T) {
-					request := buildOpenAIResponsesRequest(*model, Context{}, ProviderStreamOptions{
+					request := buildOpenAIResponsesRequest(nil, *model, Context{}, ProviderStreamOptions{
 						Reasoning: ThinkingLevel(test.requested),
 					})
 					if request.Reasoning == nil || request.Reasoning.Effort != test.wantEffort {

@@ -9,6 +9,10 @@ import (
 )
 
 func streamOpenAICodex(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	customTools, err := resolveContextToolSampling(model, ctx)
+	if err != nil {
+		return streamAPIUnavailable(model, err.Error())
+	}
 	options = resolveOpenAICodexProviderOptions(model, NormalizeProviderStreamOptions(model, options)).toProviderStreamOptions(model)
 	stream := newAssistantMessageEventStream()
 	stream.setObserver(options.Observer, model)
@@ -22,7 +26,7 @@ func streamOpenAICodex(model Model, ctx Context, options ProviderStreamOptions) 
 	}
 
 	go func() {
-		requestBody := buildOpenAICodexRequest(model, ctx, options)
+		requestBody := buildOpenAICodexRequest(customTools, model, ctx, options)
 		payload := any(requestBody)
 		if options.OnPayload != nil {
 			if next := options.OnPayload(payload, model); next != nil {
@@ -72,7 +76,7 @@ func streamOpenAICodex(model Model, ctx Context, options ProviderStreamOptions) 
 			return
 		}
 
-		if err := streamOpenAICodexWithTransport(model, options, bodyBytes, apiKey, accountID, &response, stream); err != nil {
+		if err := streamOpenAICodexWithTransport(model, options, bodyBytes, apiKey, accountID, &response, stream, customTools); err != nil {
 			applyRequestError(&response, err)
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
@@ -89,7 +93,7 @@ func streamSimpleOpenAICodex(model Model, ctx Context, options SimpleStreamOptio
 	return streamOpenAICodex(model, ctx, BuildProviderStreamOptions(model, options))
 }
 
-func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOptions) openAIResponsesRequest {
+func buildOpenAICodexRequest(customTools map[string]string, model Model, ctx Context, options ProviderStreamOptions) openAIResponsesRequest {
 	resolvedOptions := resolveOpenAICodexProviderOptions(model, options)
 	parallelToolCalls := true
 
@@ -107,8 +111,8 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 		Store:             false,
 		Stream:            true,
 		Instructions:      instructions,
-		Input:             convertOpenAIResponsesMessages(model, ctx, false),
-		Tools:             convertOpenAIResponsesTools(currentContextTools(ctx)),
+		Input:             convertOpenAIResponsesMessages(customTools, model, ctx, false),
+		Tools:             convertOpenAIResponsesTools(customTools, currentContextTools(ctx)),
 		ToolChoice:        resolveOpenAICodexToolChoice(resolvedOptions.ToolChoice),
 		ParallelToolCalls: &parallelToolCalls,
 		Include:           []string{"reasoning.encrypted_content"},

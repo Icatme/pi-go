@@ -318,6 +318,7 @@ func cloneMessage(message agent.Message) agent.Message {
 			system.ToolsAdded[index] = tool
 			system.ToolsAdded[index].Parameters = cloneStringAnyMap(tool.Parameters)
 			system.ToolsAdded[index].OutputSchema = cloneStringAnyMap(tool.OutputSchema)
+			system.ToolsAdded[index].ConstrainedSampling = tool.ConstrainedSampling.Clone()
 		}
 		system.ToolsRemoved = append([]agent.ToolReference(nil), message.System.ToolsRemoved...)
 		cloned.System = &system

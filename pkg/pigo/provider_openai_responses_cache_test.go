@@ -31,7 +31,7 @@ func TestOpenAIResponsesCachePayloadUsesExplicitModelCapabilities(t *testing.T) 
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			model := Model{API: "openai-responses", Provider: "gateway", ID: "gpt-5.6-sol", Compat: test.compat}
-			request := buildOpenAIResponsesRequest(model, Context{}, ProviderStreamOptions{SessionID: "session-1", CacheRetention: test.retention})
+			request := buildOpenAIResponsesRequest(nil, model, Context{}, ProviderStreamOptions{SessionID: "session-1", CacheRetention: test.retention})
 			if request.PromptCacheRetention != test.wantRetention {
 				t.Fatalf("prompt_cache_retention = %q, want %q", request.PromptCacheRetention, test.wantRetention)
 			}
@@ -66,7 +66,7 @@ func TestOpenAIResponsesMaxOutputTokensCapability(t *testing.T) {
 	yes, no := true, false
 	for _, allowed := range []*bool{nil, &yes, &no} {
 		model := Model{API: "openai-responses", Compat: &OpenAIResponsesCompat{SupportsMaxOutputTokens: allowed}}
-		request := buildOpenAIResponsesRequest(model, Context{}, ProviderStreamOptions{MaxTokens: 1024})
+		request := buildOpenAIResponsesRequest(nil, model, Context{}, ProviderStreamOptions{MaxTokens: 1024})
 		want := 1024
 		if allowed != nil && !*allowed {
 			want = 0

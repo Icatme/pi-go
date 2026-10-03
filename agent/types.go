@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"time"
+
+	"github.com/Icatme/pi-go/pkg/pigo"
 )
 
 // MessageRole identifies the semantic role of a message in the conversation.
@@ -399,14 +401,15 @@ type ToolExecutorFunc func(context.Context, ToolExecutionContext) (ToolResult, e
 
 // ToolDefinition defines a tool available to the agent runtime.
 type ToolDefinition struct {
-	Name           string                      `json:"name"`
-	Revision       string                      `json:"revision,omitempty"`
-	Label          string                      `json:"label,omitempty"`
-	Description    string                      `json:"description,omitempty"`
-	Parameters     map[string]any              `json:"parameters,omitempty"`
-	OutputSchema   map[string]any              `json:"output_schema,omitempty"`
-	ExecutionMode  ToolExecutionMode           `json:"execution_mode,omitempty"`
-	ParseArguments func(ToolCall) (any, error) `json:"-"`
+	ConstrainedSampling *pigo.ToolConstrainedSampling `json:"constrained_sampling,omitempty"`
+	Name                string                        `json:"name"`
+	Revision            string                        `json:"revision,omitempty"`
+	Label               string                        `json:"label,omitempty"`
+	Description         string                        `json:"description,omitempty"`
+	Parameters          map[string]any                `json:"parameters,omitempty"`
+	OutputSchema        map[string]any                `json:"output_schema,omitempty"`
+	ExecutionMode       ToolExecutionMode             `json:"execution_mode,omitempty"`
+	ParseArguments      func(ToolCall) (any, error)   `json:"-"`
 	// ValidateResult checks the effective, after-hook result before publication.
 	// It opts into stricter boundaries without changing ordinary OutputSchema semantics.
 	ValidateResult func(ToolResult) error `json:"-"`

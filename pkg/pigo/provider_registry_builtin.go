@@ -758,13 +758,15 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 				BaseURL:          "https://api.openai.com",
 				Reasoning:        true,
 				ThinkingLevelMap: openAIGPT6ThinkingLevelMap("gpt-6-astra", false),
-				Capabilities:     ModelCapabilities{Temperature: CapabilityUnsupported, TopP: CapabilityUnsupported},
-				Input:            []InputType{InputText, InputImage},
-				ContextWindow:    272000,
-				MaxTokens:        128000,
-				Cost:             UsageCost{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5},
-				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25}}},
-				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode, SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
+				// Exact model used in the official custom text/Lark/regex examples.
+				// See docs/native-tools.md; no provider-wide grammar inference.
+				Capabilities:  ModelCapabilities{Temperature: CapabilityUnsupported, TopP: CapabilityUnsupported, CustomTools: CapabilitySupported, GrammarTools: CapabilitySupported},
+				Input:         []InputType{InputText, InputImage},
+				ContextWindow: 272000,
+				MaxTokens:     128000,
+				Cost:          UsageCost{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5},
+				CostTiers:     []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25}}},
+				Compat:        &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode, SupportsMidConvoSystemMessages: &supportsMidConvoSystemMessages},
 			},
 
 			"gpt-5.6-sol": {

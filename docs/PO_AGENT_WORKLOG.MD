@@ -1219,3 +1219,60 @@
 - Release notes explicitly identify the Storage API and JSONL v2 break, absence
   of automatic history migration, and host reconciliation for interrupted tool
   effects. No live provider request, OAuth UI or power-loss acceptance is claimed.
+
+## 2026-10-03: N2 native custom inputs, first checkpoint
+
+- Fetch confirms `origin/master` remains `6ab184a8e411644206a83cba0a68a8328d18b536`
+  (v0.13.0), including PR #21; no newer implementation is duplicated. Root and
+  Agent instructions were read. This checkout has no `.agents/skills` directory.
+- Add opt-in text/grammar sampling with explicit prefer/require policy, exact
+  model-only capabilities, pre-request rejection/fallback and single-string
+  argument mapping. Only OpenAI `gpt-6-astra` is enabled from current official
+  examples; Codex and sibling IDs remain unknown. Sources: `docs/native-tools.md`.
+- Responses custom declaration, delta/done/terminal, ctc IDs and replay are wired
+  through SSE and the shared Codex WebSocket codec; Agent/Codemode keep their
+  object arguments. Bounded input, completion consistency and identity checks
+  reject unsafe partial streams. Metadata is cloned and retained in transcripts.
+- Go 1.26.2 on cloud Linux: existing pigo and Agent tests pass. New native
+  capability, fallback, replay, cancellation, malformed stream and resource
+  tests pass, including 21 cases across all three local transports. A public Go
+  proxy 403 for the pinned encoding module was resolved by direct source fetch
+  of the same version; no dependency version changed. Full validation and the
+  separate review pass are still pending at this checkpoint.
+
+## 2026-10-03: N2 execution, replay and local validation checkpoint
+
+- Add eight actual Agent/Codemode loopback scenarios: native execution and next
+  request replay, leaf failure, partial stream, cancellation, source limit,
+  ordinary function compatibility, unsupported-model fallback and dynamic
+  Codemode binding. Session snapshots detach the added sampling metadata.
+- Separate diff review found index rebinding and a native declaration accepting
+  function output. New regressions failed on all three transports before repair;
+  calls now retain their index and cannot change their declared wire type.
+  Reject unknown namespaces and invalid Unicode instead of changing code while
+  decoding. Ordinary function calls retain their existing path.
+- A new serialization round-trip regression failed because the dedicated pigo
+  Context codec omitted sampling. Fix all top-level and system-message encoder
+  and decoder paths; the regression now passes. Require-mode tests additionally
+  prove zero authorization, payload-hook and HTTP calls on unsupported models.
+- Local Linux Go 1.26.2: root and examples `go test -count=1 -race ./...`,
+  `go vet ./...`, `go build ./...`, `go mod verify` and `go mod tidy -diff` pass.
+  After the serialization/namespace corrections, pigo, Agent, Codemode adapter
+  and session race tests pass again; affected vet/root build pass. Compiled
+  `mcp-codemode` and `mcp-managed` local fixtures both run successfully.
+- Only synthetic local provider fixtures ran. Dependency versions, release
+  metadata and downstream pins are unchanged. Independent second-reviewer
+  acceptance and the draft PR's native CI remain separate gates; N3 has not
+  started and does not share this implementation branch.
+
+- Final retry review reproduced malformed terminal custom output named
+  `model is at capacity` causing three Responses SSE requests/four Codex SSE
+  requests. Record custom output before validation and close the pre-output
+  retry window; both now make one request. Declaration/history encoders and
+  decoder also consume one resolved mapping, with a catalog-refresh regression
+  ensuring new requests observe revoked capability without changing an already
+  selected representation. Draft PR: https://github.com/Icatme/pi-go/pull/22.
+- After those final retry/mapping changes, root and examples full race, vet and
+  build checks pass again. The earlier draft head `63ed143` passed all six CI
+  jobs in run 37119336354, including five native platforms; the new commit must
+  receive its own CI result before that evidence is treated as final.

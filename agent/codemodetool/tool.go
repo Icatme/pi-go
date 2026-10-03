@@ -18,6 +18,7 @@ import (
 	"github.com/Icatme/pi-go/agent"
 	"github.com/Icatme/pi-go/codemode"
 	"github.com/Icatme/pi-go/internal/jsontext"
+	"github.com/Icatme/pi-go/pkg/pigo"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
@@ -64,6 +65,9 @@ func (binding Binding) NamespacePrefix() string {
 // Options limits this container invocation. Zero values use bounded defaults.
 // ChildLimits applies to the Agent's complete basic ledger and optional details.
 type Options struct {
+	// ConstrainedSampling optionally sends source as native custom input on an
+	// explicitly supported model. The executor still receives {"code": source}.
+	ConstrainedSampling *pigo.ToolConstrainedSampling
 	// StateNamespace is a stable host binding name, required for journaled runs.
 	// Change it when replacing the binding with an unrelated tool environment.
 	StateNamespace  string
@@ -192,7 +196,8 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 		storeKey = new(byte)
 	}
 	return agent.ToolDefinition{
-		Name: options.Name, Description: options.Description,
+		ConstrainedSampling: options.ConstrainedSampling.Clone(),
+		Name:                options.Name, Description: options.Description,
 		Parameters:    map[string]any{"type": "object", "properties": map[string]any{"code": map[string]any{"type": "string", "maxLength": 65536}}, "required": []string{"code"}, "additionalProperties": false},
 		ExecutionMode: agent.ToolExecutionSequential, ChildTools: definitions, ChildLimits: options.ChildLimits,
 		Execute: func(ctx context.Context, execution agent.ToolExecutionContext) (agent.ToolResult, error) {
@@ -388,6 +393,7 @@ func schemaJSON(value map[string]any) (json.RawMessage, error) {
 
 func freezeLeaf(original agent.ToolDefinition, name string, projection Projection) (agent.ToolDefinition, error) {
 	frozen := original
+	frozen.ConstrainedSampling = original.ConstrainedSampling.Clone()
 	frozen.Name = name
 	clone := func(value map[string]any) (map[string]any, error) {
 		if value == nil {

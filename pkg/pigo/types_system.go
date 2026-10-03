@@ -48,6 +48,7 @@ func cloneTools(tools []Tool) []Tool {
 		cloned[index] = tool
 		cloned[index].Parameters = cloneAny(tool.Parameters)
 		cloned[index].OutputSchema = cloneAny(tool.OutputSchema)
+		cloned[index].ConstrainedSampling = tool.ConstrainedSampling.Clone()
 	}
 	return cloned
 }
