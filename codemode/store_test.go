@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -121,5 +122,62 @@ func TestStoreUTF16ValueUnitsSeparateFromUTF8Quota(t *testing.T) {
 		if err != nil || textOutput(r) != tc.want {
 			t.Fatalf("store units %s: %+v %v", tc.value, r, err)
 		}
+	}
+}
+
+func TestStoreRestoreRejectsInvalidAndBoundedData(t *testing.T) {
+	for _, raw := range []string{`null`, `[]`, `{"version":2,"values":{}}`, `{"version":1,"values":{"":"1"}}`, `{"version":1,"values":{"x":"1","x":"2"}}`, `{"version":1,"values":{"x":"9007199254740993"}}`, `{"version":1,"values":{"x":"\"\\ud800\""}}`, `{"version":1,"values":{"x":1}}`} {
+		if _, err := RestoreStore(1<<20, []byte(raw)); err == nil {
+			t.Fatalf("invalid saved state accepted: %s", raw)
+		}
+	}
+	values := make(map[string]string)
+	for i := range 257 {
+		values[fmt.Sprint(i)] = "0"
+	}
+	raw, _ := json.Marshal(struct {
+		Version int               `json:"version"`
+		Values  map[string]string `json:"values"`
+	}{1, values})
+	if _, err := RestoreStore(1<<20, raw); err == nil {
+		t.Fatal("257 store keys restored")
+	}
+	if _, err := RestoreStore(4, []byte(`{"version":1,"values":{}}`)); err == nil {
+		t.Fatal("oversized snapshot restored")
+	}
+	store, err := RestoreStore(1024, []byte(`{"version":1,"values":{"n":"2","obj":"{\"value\":\"😀\"}"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err = store.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreStore(1024, raw); err != nil {
+		t.Fatal(err)
+	}
+	raw[0] = '!'
+	if _, err := store.Export(); err != nil {
+		t.Fatal("export shared storage")
+	}
+}
+
+func TestStoreSnapshotEscapingPreservesPerValueLimits(t *testing.T) {
+	s := sandboxForTest(t, DefaultConfig())
+	store, _ := NewStore(1 << 20)
+	if _, err := s.Run(t.Context(), `store("html","&".repeat(120000));store("unicode","\u2028".repeat(1000))`, RunOptions{Store: store}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := store.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := RestoreStore(1<<20, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.Run(t.Context(), `return load("html").length===120000 && load("unicode").length===1000`, RunOptions{Store: restored})
+	if err != nil || textOutput(result) != "true" {
+		t.Fatalf("escaped snapshot lost value limits: %+v %v", result, err)
 	}
 }
