@@ -10,7 +10,7 @@ import (
 
 const (
 	// CurrentFormatVersion is the only JSONL format version accepted by this package.
-	CurrentFormatVersion = 1
+	CurrentFormatVersion = 2
 	// MainLane is present in every session and initially points at the root.
 	MainLane = "main"
 )
@@ -108,6 +108,8 @@ type LogItem struct {
 // Storage is an append-only session log. Read methods return detached values
 // that callers may mutate safely.
 type Storage interface {
+	ReadBranch(lane string) (BranchSnapshot, error)
+	CompareAppend(expected BranchVersion, entries []NewEntry) (BranchVersion, []Entry, error)
 	Header() Header
 	Lanes() []LanePointer
 	CreateLane(lane, at string) error
@@ -130,6 +132,8 @@ const (
 	ErrorAlreadyExists ErrorCode = "already_exists"
 	ErrorCorruptLog    ErrorCode = "corrupt_log"
 	ErrorStorage       ErrorCode = "storage"
+	ErrorConflict      ErrorCode = "conflict"
+	ErrorBusy          ErrorCode = "busy"
 )
 
 // Error is returned for all validated session failures.

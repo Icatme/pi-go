@@ -57,7 +57,7 @@ jobs:
             go.sum
             examples/go.sum
       - name: Sandbox and common execution contract
-        run: go test -mod=readonly -count=1 -race ./codemode/... ./mcp ./agent ./agent/mcptools ./agent/mcpresources ./agent/codemodetool ./agent/toolset
+        run: go test -mod=readonly -count=1 -race ./codemode/... ./mcp ./agent ./agent/mcptools ./agent/mcpresources ./agent/codemodetool ./agent/toolset ./agent/session
       - name: Compile local MCP example
         working-directory: examples
         run: go build -mod=readonly -o mcp-codemode-example.exe ./mcp-codemode
@@ -72,3 +72,7 @@ jobs:
         working-directory: examples
         shell: bash
         run: ./mcp-managed-example.exe
+
+      - name: Managed session restart and compaction
+        working-directory: examples
+        run: go test -mod=readonly -count=1 -race ./mcp-managed

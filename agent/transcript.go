@@ -189,7 +189,7 @@ func toolStateChanges(messages []Message, tools []ToolDefinition) SystemMessageP
 	return update
 }
 
-func initializeSystemTranscript(definition AgentDefinition, snapshot *AgentSnapshot) {
+func initializeSystemTranscript(definition AgentDefinition, snapshot *AgentSnapshot, appendOnly bool) {
 	if GetCurrentSystemMessage(snapshot.Messages) != nil {
 		snapshot.SystemPrompt = GetCurrentSystemPrompt(snapshot.Messages)
 		return
@@ -203,6 +203,12 @@ func initializeSystemTranscript(definition AgentDefinition, snapshot *AgentSnaps
 	}
 	head := NewSystemMessage(SystemMessagePayload{Content: prompt, ToolsAdded: toolDeclarations(definition.Tools)})
 	head.Timestamp = time.Time{}
-	snapshot.Messages = append([]Message{head}, snapshot.Messages...)
+	if appendOnly {
+		// A journal owns the existing prefix. Introducing system context on a
+		// later run must append a declaration instead of rewriting that prefix.
+		snapshot.Messages = append(snapshot.Messages, head)
+	} else {
+		snapshot.Messages = append([]Message{head}, snapshot.Messages...)
+	}
 	snapshot.SystemPrompt = GetCurrentSystemPrompt(snapshot.Messages)
 }

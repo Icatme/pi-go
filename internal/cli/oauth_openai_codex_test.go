@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseAuthorizationInput(t *testing.T) {
@@ -27,11 +28,13 @@ func TestOpenAICodexLoginManualFallback(t *testing.T) {
 	previousAuthorizeURL := openAICodexAuthorizeURL
 	previousRedirectURL := openAICodexRedirectURL
 	previousCallbackAddress := openAICodexCallbackAddress
+	previousTimeout := openAICodexCallbackTimeout
 	defer func() {
 		openAICodexTokenURL = previousTokenURL
 		openAICodexAuthorizeURL = previousAuthorizeURL
 		openAICodexRedirectURL = previousRedirectURL
 		openAICodexCallbackAddress = previousCallbackAddress
+		openAICodexCallbackTimeout = previousTimeout
 	}()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +62,8 @@ func TestOpenAICodexLoginManualFallback(t *testing.T) {
 	openAICodexTokenURL = server.URL + "/oauth/token"
 	openAICodexAuthorizeURL = "https://auth.example.com/oauth/authorize"
 	openAICodexRedirectURL = "http://localhost:1455/auth/callback"
-	openAICodexCallbackAddress = "bad-address"
+	openAICodexCallbackAddress = "127.0.0.1:0"
+	openAICodexCallbackTimeout = time.Nanosecond
 
 	provider := newOpenAICodexOAuthProvider()
 	var authURL string

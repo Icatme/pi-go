@@ -169,7 +169,7 @@ func TestJSONLRepositoryListReadsOnlyHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJSONLRepository: %v", err)
 	}
-	content := "{\"kind\":\"session\",\"version\":1,\"id\":\"header-only\",\"created_at\":1}\nnot-json\n"
+	content := "{\"kind\":\"session\",\"version\":2,\"id\":\"header-only\",\"created_at\":1}\nnot-json\n"
 	if err := os.WriteFile(filepath.Join(repository.root, "header-only.jsonl"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write JSONL fixture: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestJSONLRepositoryOpenRejectsSymlink(t *testing.T) {
 		t.Fatalf("NewJSONLRepository: %v", err)
 	}
 	outside := filepath.Join(parent, "outside.jsonl")
-	content := "{\"kind\":\"session\",\"version\":1,\"id\":\"linked\",\"created_at\":1}\n"
+	content := "{\"kind\":\"session\",\"version\":2,\"id\":\"linked\",\"created_at\":1}\n"
 	if err := os.WriteFile(outside, []byte(content), 0o600); err != nil {
 		t.Fatalf("write outside file: %v", err)
 	}

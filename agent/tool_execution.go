@@ -91,6 +91,8 @@ func (e *ToolExecutionError) Unwrap() error { return e.Err }
 type ToolPermissionHook func(context.Context, BeforeToolCallContext) error
 
 type ToolExecutionContext struct {
+	// State stages journaled data; nil for child or non-sequential tools.
+	State           *ToolState
 	ToolCall        ToolCall
 	Args            any
 	Context         AgentContext

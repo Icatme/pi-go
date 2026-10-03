@@ -7,15 +7,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/Icatme/pi-go/agent"
+	"github.com/Icatme/pi-go/agent/codemodetool"
+	"github.com/Icatme/pi-go/agent/session"
 	"github.com/Icatme/pi-go/agent/toolset"
 	"github.com/Icatme/pi-go/codemode"
 	managed "github.com/Icatme/pi-go/mcp"
@@ -23,13 +27,32 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	path := flag.String("session", "", "JSONL v2 session path (empty uses a temporary session)")
+	phase := flag.String("phase", "save", "save or resume")
+	flag.Parse()
+	if err := runWorkflow(*path, *phase); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run() (runErr error) {
+func run() error { return runWorkflow("", "save") }
+
+func runWorkflow(path, phase string) (runErr error) {
+	if phase != "save" && phase != "resume" {
+		return errors.New("phase must be save or resume")
+	}
+	if path == "" {
+		if phase == "resume" {
+			return errors.New("resume requires a saved session path")
+		}
+		dir, err := os.MkdirTemp("", "pigo-managed-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(dir)
+		path = filepath.Join(dir, "session.jsonl")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	var toolCalls, resourceCalls atomic.Int32
@@ -125,17 +148,41 @@ func run() (runErr error) {
 			runErr = errors.Join(runErr, fmt.Errorf("close Codemode sandbox: %w", err))
 		}
 	}()
+	var storage *session.JSONLStorage
+	if phase == "save" {
+		storage, err = session.CreateJSONLStorage(path, session.Header{ID: "managed-example"})
+	} else {
+		storage, err = session.OpenJSONLStorage(path)
+	}
+	if err != nil {
+		return err
+	}
+	durable, err := session.New(storage, session.Options{})
+	if err != nil {
+		_ = storage.Close()
+		return err
+	}
+	defer func() { runErr = errors.Join(runErr, durable.Close()) }()
+	options := session.RuntimeOptions{Scope: func() session.RuntimeScope {
+		current := manager.Scope()
+		return session.RuntimeScope{Identity: current.Identity, AuthEpoch: current.AuthEpoch}
+	}}
+	binding, err := durable.PrepareRun(session.MainLane, options)
+	if err != nil {
+		return err
+	}
 	tools, err := toolset.New(manager, sandbox, toolset.Options{
+		Code: codemodetool.Options{StateNamespace: "local-issues-v1"},
 		SnapshotScope: func(snapshot agent.AgentSnapshot) (managed.Scope, bool) {
-			// A real host reads this from trusted session/branch metadata.
-			return scope, snapshot.SessionID == "managed-example"
+			stored, ok := binding.TrustedScope(snapshot)
+			return managed.Scope{Identity: stored.Identity, AuthEpoch: stored.AuthEpoch}, ok
 		},
 	})
 	if err != nil {
 		return err
 	}
 	runner, err := agent.NewRunner(agent.AgentDefinition{
-		SessionID: "managed-example", Model: &fixtureModel{}, ToolResolver: tools.Resolve, MaxTurns: 4,
+		SessionID: "managed-example", Model: &fixtureModel{resume: phase == "resume"}, ToolResolver: tools.Resolve, MaxTurns: 4,
 		CheckToolPermission: func(_ context.Context, before agent.BeforeToolCallContext) error {
 			switch before.ToolCall.Name {
 			case "code", "tool_search", "mcp__fixture__list_issues", "read_mcp_resource", "list_mcp_resources", "list_mcp_resource_templates":
@@ -148,15 +195,59 @@ func run() (runErr error) {
 	if err != nil {
 		return err
 	}
-	stream := runner.Query(ctx, "Find the first three open issue titles and read the local workflow guide.")
+	stream, err := binding.Run(ctx, runner, []agent.Message{agent.NewUserTextMessage("Find the first three open issue titles and read the local workflow guide.")})
+	if err != nil {
+		return err
+	}
 	for range stream.Events() {
 	}
 	snapshot, err := stream.Wait()
 	if err != nil {
 		return err
 	}
-	if toolCalls.Load() != 3 || resourceCalls.Load() != 1 {
+	expectedTools := int32(3)
+	if phase == "resume" {
+		expectedTools = 0
+	}
+	if toolCalls.Load() != expectedTools || resourceCalls.Load() != 1 {
 		return fmt.Errorf("unexpected dispatch counts: tools=%d resources=%d", toolCalls.Load(), resourceCalls.Load())
+	}
+	if phase == "save" {
+		// Add a second complete turn, then compact away the first model window.
+		// State and provenance stay in the branch log, outside the summary.
+		binding, err = durable.PrepareRun(session.MainLane, options)
+		if err != nil {
+			return err
+		}
+		ack, err := binding.Run(ctx, runner, []agent.Message{agent.NewUserTextMessage("Acknowledge the saved result.")})
+		if err != nil {
+			return err
+		}
+		for range ack.Events() {
+		}
+		if _, err = ack.Wait(); err != nil {
+			return err
+		}
+		branch, err := durable.ReadBranch(session.MainLane)
+		if err != nil {
+			return err
+		}
+		plan, err := session.PrepareCompaction(branch.Entries, session.CompactionOptions{})
+		if err != nil {
+			return err
+		}
+		if plan == nil {
+			return errors.New("expected a complete-turn compaction")
+		}
+		data, err := session.Compact(ctx, *plan, func(context.Context, session.SummaryRequest) (session.SummaryResult, error) {
+			return session.SummaryResult{Summary: "Filtered issue titles and a resource reference were saved."}, nil
+		})
+		if err != nil {
+			return err
+		}
+		if _, _, err = durable.CompareAppend(branch.Version, []session.NewEntry{{Type: session.EntryTypeCompaction, Compaction: &data}}); err != nil {
+			return err
+		}
 	}
 	for _, message := range snapshot.Messages {
 		if message.Role == agent.RoleTool && message.ToolResult != nil && message.ToolResult.ToolName == "code" {
@@ -170,7 +261,10 @@ func run() (runErr error) {
 	return errors.New("managed example produced no code result")
 }
 
-type fixtureModel struct{ turn int }
+type fixtureModel struct {
+	turn   int
+	resume bool
+}
 
 func (m *fixtureModel) Stream(_ context.Context, request agent.ModelRequest) (agent.AssistantStream, error) {
 	m.turn++
@@ -196,24 +290,33 @@ func (m *fixtureModel) Stream(_ context.Context, request agent.ModelRequest) (ag
 	}
 	message := agent.NewTextMessage(agent.RoleAssistant, "The filtered result is ready.")
 	message.StopReason = agent.StopReasonStop
-	switch m.turn {
-	case 1:
-		if strings.Contains(string(declarations), "list_issues") {
-			return nil, errors.New("indirect MCP schema was preloaded before search")
-		}
-		message = toolCall("search-issues", "tool_search", map[string]any{"query": "issues", "namespace": "fixture", "limit": 1})
-	case 2:
+	if m.resume && m.turn == 1 {
 		if !strings.Contains(string(declarations), "mcp__fixture__list_issues") {
-			return nil, errors.New("search did not load the deferred current declaration")
+			return nil, errors.New("trusted selection was not restored after compaction and restart")
 		}
-		// This fixture stands in for generated code; swap only Model for a real
-		// provider to exercise natural language -> script generation.
-		code := `if ("mcp__fixture__delete_issue" in tools || await describeTool("mcp__fixture__delete_issue") !== undefined) throw Error("hidden tool visible");
+		message = toolCall("resume-state", "code", map[string]any{"code": `const saved=load("open");if(!saved||saved.count!==50) throw Error("saved state missing");const ref=load("guideRef");const guide=await tools.read_mcp_resource(ref);text({resumed:true,openCount:saved.count,titles:saved.titles,guide:guide.contents[0].text});`})
+	} else if !m.resume {
+		switch m.turn {
+		case 1:
+			if strings.Contains(string(declarations), "list_issues") {
+				return nil, errors.New("indirect MCP schema was preloaded before search")
+			}
+			message = toolCall("search-issues", "tool_search", map[string]any{"query": "issues", "namespace": "fixture", "limit": 1})
+		case 2:
+			if !strings.Contains(string(declarations), "mcp__fixture__list_issues") {
+				return nil, errors.New("search did not load the deferred current declaration")
+			}
+			// This fixture stands in for generated code; swap only Model for a real
+			// provider to exercise natural language -> script generation.
+			code := `if ("mcp__fixture__delete_issue" in tools || await describeTool("mcp__fixture__delete_issue") !== undefined) throw Error("hidden tool visible");
 const pages = await Promise.all([0,1,2].map(page => tools.mcp__fixture__list_issues({page})));
 const open = pages.flatMap(page => page.structuredContent.issues).filter(issue => issue.open);
 const guide = await tools.read_mcp_resource({server:"fixture",uri:"fixture://guide"});
+store("open",{count:open.length,titles:open.slice(0,3).map(issue => issue.title)});
+store("guideRef",{server:"fixture",uri:"fixture://guide"});
 text({openCount:open.length,titles:open.slice(0,3).map(issue => issue.title),guide:guide.contents[0].text,hiddenAbsent:true});`
-		message = toolCall("summarize-issues", "code", map[string]any{"code": code})
+			message = toolCall("summarize-issues", "code", map[string]any{"code": code})
+		}
 	}
 	events := make(chan agent.AssistantEvent, 1)
 	events <- agent.AssistantEvent{Type: agent.AssistantEventDone, Message: message}

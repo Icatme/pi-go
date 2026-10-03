@@ -38,6 +38,10 @@ func CreateJSONLStorage(path string, header Header) (*JSONLStorage, error) {
 		}
 		return nil, sessionError(ErrorStorage, fmt.Sprintf("create session file %s", path), err)
 	}
+	if err := lockSessionFile(file); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
 	storage := &JSONLStorage{
 		path:     path,
 		file:     file,
@@ -72,6 +76,10 @@ func OpenJSONLStorage(path string) (*JSONLStorage, error) {
 // Repositories use it only after verifying the handle still identifies the
 // regular file inspected inside their root, before replay may repair a tail.
 func openJSONLStorageFile(path string, file *os.File) (*JSONLStorage, error) {
+	if err := lockSessionFile(file); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
 	header, state, err := loadJSONL(file, path)
 	if err != nil {
 		_ = file.Close()
@@ -297,8 +305,8 @@ func loadJSONL(file *os.File, path string) (Header, *logState, error) {
 			if len(line) == 0 {
 				break
 			}
-			var item LogItem
-			decodeErr := decodeStrictJSON(line, &item)
+			var item any
+			decodeErr := json.Unmarshal(line, &item)
 			if isJSONSyntaxError(decodeErr) {
 				if err := file.Truncate(validEnd); err != nil {
 					return Header{}, nil, sessionError(ErrorStorage, fmt.Sprintf("truncate torn session tail %s", path), err)
@@ -320,11 +328,7 @@ func loadJSONL(file *os.File, path string) (Header, *logState, error) {
 		if len(line) == 0 {
 			return Header{}, nil, corruptLine(path, lineNumber, "empty line", nil)
 		}
-		var item LogItem
-		if err := decodeStrictJSON(line, &item); err != nil {
-			return Header{}, nil, corruptLine(path, lineNumber, "malformed log item", err)
-		}
-		if err := state.apply(item); err != nil {
+		if err := state.readLine(line); err != nil {
 			return Header{}, nil, corruptLine(path, lineNumber, "invalid log item", err)
 		}
 		validEnd += int64(len(line) + 1)

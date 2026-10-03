@@ -8,7 +8,7 @@ Current layout:
 - `../pkg/pigo`: exported library package
 - `../README.md`: root project overview
 - `../AGENTS.md`: repo working rules for agents
-- `pi-1-followup.md`: implementation and acceptance of the first six Pi 1.0 follow-ups
+- `pi-1-followup.md`: shipped Pi 1.0 scope, local first-round progress and the remaining follow-up plan
 
 Operational notes:
 

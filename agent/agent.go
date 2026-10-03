@@ -86,7 +86,7 @@ func newAgent(definition AgentDefinition, baseSnapshot AgentSnapshot, opts ...Ag
 		agent.engine = NewEngine()
 	}
 	agent.definition = initializeThinkingState(agent.definition, &agent.snapshot)
-	initializeSystemTranscript(agent.definition, &agent.snapshot)
+	initializeSystemTranscript(agent.definition, &agent.snapshot, false)
 	agent.activeDefinition = agent.definition
 	agent.refreshStateLocked()
 	return agent, nil
