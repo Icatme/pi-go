@@ -9,6 +9,10 @@ import (
 )
 
 func streamOpenAICodex(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	customTools, err := resolveContextToolSampling(model, ctx)
+	if err != nil {
+		return streamAPIUnavailable(model, err.Error())
+	}
 	options = resolveOpenAICodexProviderOptions(model, NormalizeProviderStreamOptions(model, options)).toProviderStreamOptions(model)
 	stream := newAssistantMessageEventStream()
 	stream.setObserver(options.Observer, model)
@@ -72,7 +76,7 @@ func streamOpenAICodex(model Model, ctx Context, options ProviderStreamOptions) 
 			return
 		}
 
-		if err := streamOpenAICodexWithTransport(model, options, bodyBytes, apiKey, accountID, &response, stream); err != nil {
+		if err := streamOpenAICodexWithTransport(model, options, bodyBytes, apiKey, accountID, &response, stream, customTools); err != nil {
 			applyRequestError(&response, err)
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
@@ -108,7 +112,7 @@ func buildOpenAICodexRequest(model Model, ctx Context, options ProviderStreamOpt
 		Stream:            true,
 		Instructions:      instructions,
 		Input:             convertOpenAIResponsesMessages(model, ctx, false),
-		Tools:             convertOpenAIResponsesTools(currentContextTools(ctx)),
+		Tools:             convertOpenAIResponsesTools(model, currentContextTools(ctx)),
 		ToolChoice:        resolveOpenAICodexToolChoice(resolvedOptions.ToolChoice),
 		ParallelToolCalls: &parallelToolCalls,
 		Include:           []string{"reasoning.encrypted_content"},

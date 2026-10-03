@@ -15,11 +15,12 @@ type HostedToolExecution struct {
 }
 
 type Tool struct {
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description,omitempty"`
-	Parameters   any                    `json:"parameters,omitempty"`
-	OutputSchema any                    `json:"outputSchema,omitempty"`
-	Validator    ToolArgumentsValidator `json:"-"`
+	Name                string                   `json:"name"`
+	Description         string                   `json:"description,omitempty"`
+	Parameters          any                      `json:"parameters,omitempty"`
+	OutputSchema        any                      `json:"outputSchema,omitempty"`
+	Validator           ToolArgumentsValidator   `json:"-"`
+	ConstrainedSampling *ToolConstrainedSampling `json:"constrainedSampling,omitempty"`
 }
 
 type ToolReference struct {

@@ -270,6 +270,7 @@ func cloneToolDefinitions(tools []core.ToolDefinition) []core.ToolDefinition {
 
 func cloneToolDefinition(tool core.ToolDefinition) core.ToolDefinition {
 	cloned := tool
+	cloned.ConstrainedSampling = tool.ConstrainedSampling.Clone()
 	if tool.Parameters != nil {
 		cloned.Parameters = cloneStringAnyMap(tool.Parameters)
 	}

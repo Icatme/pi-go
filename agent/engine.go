@@ -1645,11 +1645,13 @@ func cloneTools(tools []ToolDefinition) []ToolDefinition {
 		cloned[i] = tool
 		cloned[i].Parameters = cloneStringAnyMap(tool.Parameters)
 		cloned[i].OutputSchema = cloneStringAnyMap(tool.OutputSchema)
+		cloned[i].ConstrainedSampling = tool.ConstrainedSampling.Clone()
 		if tool.ChildTools != nil {
 			cloned[i].ChildTools = append([]ToolDefinition{}, tool.ChildTools...)
 			for j, child := range tool.ChildTools {
 				cloned[i].ChildTools[j].Parameters = cloneStringAnyMap(child.Parameters)
 				cloned[i].ChildTools[j].OutputSchema = cloneStringAnyMap(child.OutputSchema)
+				cloned[i].ChildTools[j].ConstrainedSampling = child.ConstrainedSampling.Clone()
 			}
 		}
 	}

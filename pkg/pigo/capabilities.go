@@ -22,8 +22,12 @@ const (
 // reasoning model, sampling support is only actionable at the listed reasoning
 // levels; a supported sampling field without such a list normalizes to unknown.
 type ModelCapabilities struct {
-	Streaming                  CapabilitySupport    `json:"streaming"`
-	Tools                      CapabilitySupport    `json:"tools"`
+	Streaming CapabilitySupport `json:"streaming"`
+	Tools     CapabilitySupport `json:"tools"`
+	// Native custom input and Lark/regex grammars are model-only facts. API and
+	// provider defaults never grant these capabilities to an entire catalog.
+	CustomTools                CapabilitySupport    `json:"custom_tools"`
+	GrammarTools               CapabilitySupport    `json:"grammar_tools"`
 	StrictTools                CapabilitySupport    `json:"strict_tools"`
 	ToolChoice                 CapabilitySupport    `json:"tool_choice"`
 	Reasoning                  CapabilitySupport    `json:"reasoning"`
@@ -114,6 +118,12 @@ func buildModelCapabilitySnapshot(module ProviderModule, model Model) ModelCapab
 	}
 	capabilities = mergeModelCapabilities(capabilities, module.ModelCapabilities)
 	capabilities = mergeModelCapabilities(capabilities, model.Capabilities)
+	capabilities.CustomTools = model.Capabilities.CustomTools
+	capabilities.GrammarTools = model.Capabilities.GrammarTools
+	if !isOpenAIResponsesAPI(model.API) {
+		capabilities.CustomTools = CapabilityUnsupported
+		capabilities.GrammarTools = CapabilityUnsupported
+	}
 
 	runtimeStreaming := CapabilityUnsupported
 	if apiModule != nil && apiModule.Stream != nil {
@@ -126,6 +136,8 @@ func buildModelCapabilitySnapshot(module ProviderModule, model Model) ModelCapab
 	}
 	if runtimeStreaming != CapabilitySupported {
 		capabilities.Tools = CapabilityUnsupported
+		capabilities.CustomTools = CapabilityUnsupported
+		capabilities.GrammarTools = CapabilityUnsupported
 		capabilities.StrictTools = CapabilityUnsupported
 		capabilities.ToolChoice = CapabilityUnsupported
 		capabilities.Reasoning = CapabilityUnsupported
@@ -285,6 +297,12 @@ func mergeModelCapabilities(base, override ModelCapabilities) ModelCapabilities 
 	if override.Tools != "" {
 		merged.Tools = override.Tools
 	}
+	if override.CustomTools != "" {
+		merged.CustomTools = override.CustomTools
+	}
+	if override.GrammarTools != "" {
+		merged.GrammarTools = override.GrammarTools
+	}
 	if override.StrictTools != "" {
 		merged.StrictTools = override.StrictTools
 	}
@@ -324,6 +342,8 @@ func mergeModelCapabilities(base, override ModelCapabilities) ModelCapabilities 
 func normalizeModelCapabilities(capabilities *ModelCapabilities) {
 	capabilities.Streaming = normalizeCapabilitySupport(capabilities.Streaming)
 	capabilities.Tools = normalizeCapabilitySupport(capabilities.Tools)
+	capabilities.CustomTools = normalizeCapabilitySupport(capabilities.CustomTools)
+	capabilities.GrammarTools = normalizeCapabilitySupport(capabilities.GrammarTools)
 	capabilities.StrictTools = normalizeCapabilitySupport(capabilities.StrictTools)
 	capabilities.ToolChoice = normalizeCapabilitySupport(capabilities.ToolChoice)
 	capabilities.Reasoning = normalizeCapabilitySupport(capabilities.Reasoning)

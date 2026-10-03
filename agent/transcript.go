@@ -6,14 +6,17 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Icatme/pi-go/pkg/pigo"
 )
 
 // ToolDeclaration persists only the interface visible to the model.
 type ToolDeclaration struct {
-	Name         string         `json:"name"`
-	Description  string         `json:"description,omitempty"`
-	Parameters   map[string]any `json:"parameters,omitempty"`
-	OutputSchema map[string]any `json:"output_schema,omitempty"`
+	ConstrainedSampling *pigo.ToolConstrainedSampling `json:"constrained_sampling,omitempty"`
+	Name                string                        `json:"name"`
+	Description         string                        `json:"description,omitempty"`
+	Parameters          map[string]any                `json:"parameters,omitempty"`
+	OutputSchema        map[string]any                `json:"output_schema,omitempty"`
 }
 
 type ToolReference struct {
@@ -54,6 +57,7 @@ func cloneSystemPayload(payload *SystemMessagePayload) *SystemMessagePayload {
 		cloned.ToolsAdded[i] = tool
 		cloned.ToolsAdded[i].Parameters = cloneStringAnyMap(tool.Parameters)
 		cloned.ToolsAdded[i].OutputSchema = cloneStringAnyMap(tool.OutputSchema)
+		cloned.ToolsAdded[i].ConstrainedSampling = tool.ConstrainedSampling.Clone()
 	}
 	cloned.ToolsRemoved = append([]ToolReference(nil), payload.ToolsRemoved...)
 	return &cloned
@@ -150,7 +154,7 @@ func GetCurrentSystemPrompt(messages []Message) string {
 func toolDeclarations(tools []ToolDefinition) []ToolDeclaration {
 	result := make([]ToolDeclaration, len(tools))
 	for i, tool := range tools {
-		result[i] = ToolDeclaration{Name: tool.Name, Description: tool.Description, Parameters: cloneStringAnyMap(tool.Parameters), OutputSchema: cloneStringAnyMap(tool.OutputSchema)}
+		result[i] = ToolDeclaration{Name: tool.Name, Description: tool.Description, Parameters: cloneStringAnyMap(tool.Parameters), OutputSchema: cloneStringAnyMap(tool.OutputSchema), ConstrainedSampling: tool.ConstrainedSampling.Clone()}
 	}
 	return result
 }

@@ -77,6 +77,7 @@ type openAIResponsesResponseItem struct {
 	CallID           string                               `json:"call_id,omitempty"`
 	Name             string                               `json:"name,omitempty"`
 	Arguments        string                               `json:"arguments,omitempty"`
+	Input            *string                              `json:"input,omitempty"`
 	Summary          []openAIResponsesReasoningSummary    `json:"summary,omitempty"`
 	Content          []openAIResponsesResponseContentPart `json:"content,omitempty"`
 	EncryptedContent string                               `json:"encrypted_content,omitempty"`
@@ -125,14 +126,22 @@ type openAIResponsesStreamingState struct {
 	FinalizedItemKeys      map[string]bool
 	ToolCalls              map[string]*openAIResponsesToolCallState
 	ToolCallOutputKeys     map[int]string
+	CustomTools            map[string]string
+	CustomInputBytes       int
+	CustomCalls            int
 }
 
 type openAIResponsesToolCallState struct {
-	ContentIndex int
-	ItemID       string
-	CallID       string
-	JSON         string
-	Completed    bool
+	ContentIndex  int
+	ItemID        string
+	CallID        string
+	JSON          string
+	Completed     bool
+	Name          string
+	InputProperty string
+	Input         string
+	InputStarted  bool
+	InputClosed   bool
 }
 
 // ============================================================================
@@ -143,6 +152,8 @@ func convertOpenAIResponsesMessages(model Model, ctx Context, includeSystemPromp
 	transcript := ResolveTranscript(NormalizeContext(ctx), supportsTranscriptSystemMessages(model))
 	transformed := TransformMessages(transcript.Messages, model, NormalizeOpenAIResponsesToolCallID)
 	input := make([]map[string]any, 0, len(transformed)+1)
+	custom, _ := resolveContextToolSampling(model, ctx) // validated before dispatch
+	customCallIDs := make(map[string]bool)
 
 	for index, message := range transformed {
 		switch typed := message.(type) {
@@ -241,7 +252,15 @@ func convertOpenAIResponsesMessages(model Model, ctx Context, includeSystemPromp
 						"name":      block.Name,
 						"arguments": mustJSON(block.Arguments),
 					}
-					if itemID != "" && typed.Provider == model.Provider && typed.API == model.API && typed.Model == model.ID {
+					prefix := "fc_"
+					if property := custom[block.Name]; property != "" {
+						functionCall["type"] = "custom_tool_call"
+						functionCall["input"] = block.Arguments[property]
+						delete(functionCall, "arguments")
+						customCallIDs[callID] = true
+						prefix = "ctc_"
+					}
+					if strings.HasPrefix(itemID, prefix) && typed.Provider == model.Provider && typed.API == model.API && typed.Model == model.ID {
 						functionCall["id"] = itemID
 					}
 					input = append(input, functionCall)
@@ -249,8 +268,12 @@ func convertOpenAIResponsesMessages(model Model, ctx Context, includeSystemPromp
 			}
 		case ToolResultMessage:
 			callID, _ := splitToolCallID(typed.ToolCallID)
+			kind := "function_call_output"
+			if customCallIDs[callID] {
+				kind = "custom_tool_call_output"
+			}
 			input = append(input, map[string]any{
-				"type":    "function_call_output",
+				"type":    kind,
 				"call_id": callID,
 				"output":  buildOpenAIResponsesToolResultOutput(typed.Content, model),
 			})
@@ -260,13 +283,23 @@ func convertOpenAIResponsesMessages(model Model, ctx Context, includeSystemPromp
 	return input
 }
 
-func convertOpenAIResponsesTools(tools []Tool) []map[string]any {
+func convertOpenAIResponsesTools(model Model, tools []Tool) []map[string]any {
 	if len(tools) == 0 {
 		return nil
 	}
 
 	result := make([]map[string]any, 0, len(tools))
 	for _, tool := range tools {
+		decision, _ := ResolveToolSampling(model, tool) // validated before dispatch
+		if decision.Representation == "custom" {
+			config := tool.ConstrainedSampling
+			format := map[string]any{"type": config.Type}
+			if config.Type == "grammar" {
+				format["syntax"], format["definition"] = config.Syntax, config.Definition
+			}
+			result = append(result, map[string]any{"type": "custom", "name": tool.Name, "description": tool.Description, "format": format})
+			continue
+		}
 		parameters := tool.Parameters
 		if parameters == nil {
 			parameters = map[string]any{
@@ -412,6 +445,9 @@ func processOpenAIResponsesStreamEventWithProvider(
 		if err := json.Unmarshal(itemBytes, &item); err != nil {
 			return false, err
 		}
+		if item.Type == "custom_tool_call" {
+			return false, processOpenAIResponsesCustomItem(response, stream, state, event, item, false)
+		}
 		startOpenAIResponsesStreamItem(response, stream, state, item)
 		if item.Type == "function_call" {
 			if err := registerOpenAIResponsesToolOutputIndex(state, event, item); err != nil {
@@ -477,6 +513,8 @@ func processOpenAIResponsesStreamEventWithProvider(
 				Partial:      *response,
 			})
 		}
+	case "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done":
+		return false, processOpenAIResponsesCustomInput(response, stream, state, event, eventType)
 	case "response.function_call_arguments.delta":
 		call, err := resolveOpenAIResponsesToolCall(state, event)
 		if err != nil {
@@ -484,6 +522,9 @@ func processOpenAIResponsesStreamEventWithProvider(
 		}
 		if call == nil || call.Completed {
 			return false, nil
+		}
+		if call.InputProperty != "" {
+			return false, fmt.Errorf("OpenAI Responses function delta targets custom input")
 		}
 		delta, _ := event["delta"].(string)
 		call.JSON += delta
@@ -503,6 +544,9 @@ func processOpenAIResponsesStreamEventWithProvider(
 		}
 		if call == nil || call.Completed {
 			return false, nil
+		}
+		if call.InputProperty != "" {
+			return false, fmt.Errorf("OpenAI Responses function done targets custom input")
 		}
 		arguments, _ := event["arguments"].(string)
 		if arguments != "" {
@@ -535,6 +579,9 @@ func processOpenAIResponsesStreamEventWithProvider(
 		var item openAIResponsesResponseItem
 		if err := json.Unmarshal(itemBytes, &item); err != nil {
 			return false, err
+		}
+		if item.Type == "custom_tool_call" {
+			return false, processOpenAIResponsesCustomItem(response, stream, state, event, item, true)
 		}
 		if item.Type == "function_call" {
 			if err := registerOpenAIResponsesToolOutputIndex(state, event, item); err != nil {
@@ -698,6 +745,12 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 	}
 
 	for _, item := range terminal.Output {
+		if item.Type == "custom_tool_call" {
+			if err := processOpenAIResponsesCustomItem(response, stream, state, nil, item, true); err != nil {
+				return err
+			}
+			continue
+		}
 		itemKey := openAIResponsesItemKey(item)
 		if itemKey != "" && state != nil && state.FinalizedItemKeys[itemKey] {
 			continue
@@ -747,6 +800,8 @@ func openAIResponsesItemKey(item openAIResponsesResponseItem) string {
 		return "reasoning|" + mustJSON(item.Summary)
 	case "function_call":
 		return "function_call|" + item.CallID + "|" + item.ID
+	case "custom_tool_call":
+		return "custom_tool_call|" + item.CallID + "|" + item.ID
 	default:
 		return ""
 	}

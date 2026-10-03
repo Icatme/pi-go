@@ -16,6 +16,10 @@ import (
 )
 
 func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	customTools, err := resolveContextToolSampling(model, ctx)
+	if err != nil {
+		return streamAPIUnavailable(model, err.Error())
+	}
 	options = resolveOpenAIResponsesProviderOptions(model, NormalizeProviderStreamOptions(model, options)).toProviderStreamOptions(model)
 	if err := validateOpenAIResponsesSamplingOptions(model, options); err != nil {
 		return streamAPIUnavailable(model, err.Error())
@@ -85,7 +89,7 @@ func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptio
 			httpClient = http.DefaultClient
 		}
 
-		if err := streamOpenAIResponsesSSE(model, requestContext, httpClient, options, bodyBytes, apiKey, &response, stream); err != nil {
+		if err := streamOpenAIResponsesSSE(model, requestContext, httpClient, options, bodyBytes, apiKey, &response, stream, customTools); err != nil {
 			applyRequestError(&response, err)
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
@@ -115,7 +119,7 @@ func buildOpenAIResponsesRequest(model Model, ctx Context, options ProviderStrea
 		Store:             false,
 		Stream:            true,
 		Input:             convertOpenAIResponsesMessages(model, ctx, true),
-		Tools:             convertOpenAIResponsesTools(currentContextTools(ctx)),
+		Tools:             convertOpenAIResponsesTools(model, currentContextTools(ctx)),
 		ToolChoice:        resolveOpenAIResponsesToolChoice(resolvedOptions.ToolChoice),
 		ParallelToolCalls: &parallelToolCalls,
 		Include:           []string{"reasoning.encrypted_content"},
@@ -240,6 +244,7 @@ func streamOpenAIResponsesSSE(
 	apiKey string,
 	response *AssistantMessage,
 	stream *AssistantMessageEventStream,
+	customTools map[string]string,
 ) error {
 	clientOptions := []openaioption.RequestOption{
 		openaioption.WithAPIKey(apiKey),
@@ -320,6 +325,7 @@ func streamOpenAIResponsesSSE(
 		}
 
 		state := openAIResponsesStreamingState{
+			CustomTools:          customTools,
 			CurrentTextIndex:     -1,
 			CurrentThinkingIndex: -1,
 			FinalizedItemKeys:    map[string]bool{},
