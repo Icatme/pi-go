@@ -115,6 +115,10 @@ func connect(ctx context.Context, s ServerConfig, scope Scope, generation uint64
 				return nil, err
 			}
 			c.oauth = o
+			// The SDK detaches token requests from their caller's context. Stop
+			// refreshes with connection life, including during session setup,
+			// but retain valid cached tokens for authenticated session DELETE.
+			o.refreshLife = life
 			c.authState = o.State()
 			o.onPublish = c.authChanged
 			if options.OnChange != nil {

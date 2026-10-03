@@ -96,6 +96,9 @@ type OAuth struct {
 	snapshot CredentialSnapshot
 	invalid  bool
 	closed   bool
+	// Set by a Connection before use. Retirement cancels refresh I/O, while
+	// valid cached tokens remain available for the SDK's session DELETE.
+	refreshLife context.Context
 	// Only the owning Connection installs this hook, before using the source.
 	// It fences terminal auth state while mu and gate still hide new tokens;
 	// it must not reenter OAuth, invoke host callbacks, or wait for Close.
@@ -414,6 +417,17 @@ func (o *OAuth) token(ctx context.Context) (*oauth2.Token, error) {
 		changed = &state
 		return nil, ErrAuthRequired
 	}
+	if o.refreshLife != nil {
+		refreshCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(o.refreshLife, cancel)
+		defer func() { stop(); cancel() }()
+		// AfterFunc runs asynchronously even for an already-canceled owner.
+		// Do not claim or send a refresh while that callback is still queued.
+		if err := o.refreshLife.Err(); err != nil {
+			return nil, err
+		}
+		ctx = refreshCtx
+	}
 	// Claim before any physical refresh POST. CAS makes independent OAuth
 	// objects and processes contend before sending, rather than discovering a
 	// conflict only after both have consumed the same remote refresh token.
@@ -620,6 +634,15 @@ func authNormalizeKey(key AuthKey, config auth.AuthorizationCodeHandlerConfig, m
 	if methods > 1 {
 		// Bind every fallback choice, discovery source and redirect to the
 		// resource/issuer tuple. The actual selected client remains separate.
+		// A host-managed secret is mutable authentication material, not client
+		// identity. Retain the authentication method but exclude its value so
+		// secret rotation does not orphan the persisted refresh credential.
+		preregistered := config.PreregisteredClient
+		if preregistered != nil && preregistered.ClientSecretAuth != nil {
+			value := *preregistered
+			value.ClientSecretAuth = &oauthex.ClientSecretAuth{}
+			preregistered = &value
+		}
 		binding := struct {
 			CIMD          *auth.ClientIDMetadataDocumentConfig  `json:"cimd,omitempty"`
 			Preregistered *oauthex.ClientCredentials            `json:"preregistered,omitempty"`
@@ -628,7 +651,7 @@ func authNormalizeKey(key AuthKey, config auth.AuthorizationCodeHandlerConfig, m
 			MetadataURL   string                                `json:"metadataUrl"`
 			Resource      string                                `json:"resource"`
 			Issuer        string                                `json:"issuer"`
-		}{config.ClientIDMetadataDocumentConfig, config.PreregisteredClient, config.DynamicClientRegistrationConfig, config.RedirectURL, metadataURL, key.URL, key.Issuer}
+		}{config.ClientIDMetadataDocumentConfig, preregistered, config.DynamicClientRegistrationConfig, config.RedirectURL, metadataURL, key.URL, key.Issuer}
 		data, err := json.Marshal(binding)
 		if err != nil {
 			return key, ErrOAuthConfiguration

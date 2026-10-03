@@ -114,6 +114,11 @@ successful refresh advances `CredentialVersion` twice (claim and completion).
 Token requests retain the SDK-validated MCP resource indicator, and restored
 DCR clients retain their registered client authentication method.
 Scope/revocation changes retire a live connection before another handoff.
+Connection retirement cancels an in-flight token refresh, including during
+connection setup, before waiting for SDK teardown. A still-valid cached access
+token remains available for the SDK's bounded stateful-session DELETE; teardown
+never starts a new refresh. If refresh was interrupted, its durable pending
+claim remains and explicit authentication is required before reuse.
 The internal retirement fence completes before refreshed tokens become visible;
 external `OnChange` callbacks still run after publication without internal locks.
 `OAuthState` returns a credential version and granted scopes without secrets;
@@ -131,11 +136,21 @@ explicitly; there is no inferred-resource migration.
 
 When multiple registration strategies are configured, the derived client key
 hashes all strategies, discovery override, redirect, resource and issuer. The
+preregistered client's authentication method is included, but its mutable secret
+value is excluded. Rotating that secret preserves the key; restored preregistered
+clients use the currently configured secret for code exchanges and refreshes.
+Client identity, account, issuer, resource and registration-policy changes remain
+isolated. The
 credential separately stores the client actually selected by the SDK, including
 a preregistered or DCR fallback when the AS does not support CIMD. Restoration
 reuses that client and its authentication method instead of selecting or
 registering again. Earlier development keys for mixed strategies are not
 migrated; omit `AuthKey.ClientID` to derive the new key and authenticate explicitly.
+This also applies once on upgrade to mixed-strategy confidential-client keys
+that previously included the secret. Those old entries are left untouched and
+are not copied into the new key: cross-key copying could bypass refresh claims.
+Single-strategy and mixed-strategy public-client keys are unchanged. Subsequent
+secret rotations on the new key do not require reauthorization.
 
 The default credential store is shared for the server within this Manager.
 Persistence is opt-in via `NewFileCredentialStore(absolutePath)` in an existing
