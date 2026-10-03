@@ -1173,3 +1173,25 @@
   User authorization covers focused commits and pushing this independent branch;
   it does not include merging or publishing a release. Native multi-platform CI
   must be checked against the pushed HEAD. No live provider or OAuth UI test.
+
+## 2026-10-03: Final review of PR #21 before merge and v0.13.0
+
+- Fetch remote master/tags and confirm #21 at 5d6452104df61276a84281094dd137b45437effd
+  is the only open PR; #19/#20 are already in v0.12.1. Preserve the older dirty
+  checkout in the named before-pr21-update-20261003-first-round-local-backup
+  stash, then review the exact remote implementation on a local release branch.
+  The user now explicitly authorizes updating, fixing, merging and publishing.
+- Reproduce one remaining journal failure: a non-cancellation approval service
+  error leaves the whole batch unexecuted but without matching tool results,
+  so the next PrepareRun rejects the session as interrupted. Four regressions
+  fail before repair (sequential/parallel, prior allow/suspend decisions).
+- On journaled preflight failure, stop requesting approvals, reject every call
+  as not-started/not-dispatched, preserve the original error for Wait and commit
+  the complete failed turn. Do not dispatch previously allowed siblings, replay
+  scripts or change ordinary unjournaled gate-error behavior.
+- Root/examples all-package race tests, vet, builds and module verification pass
+  on the reviewed baseline. Agent/session/checkpoint/Codemode race tests pass
+  after this repair. Check the repaired exact HEAD's five-platform native CI
+  before merging; the previous PR CI cannot certify this new correction.
+- Prepare v0.13.0 as a minor release because session Storage and JSONL v2 change
+  the public contract. Keep dependencies and live-provider/UI testing unchanged.

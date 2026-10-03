@@ -662,3 +662,67 @@ func TestRuntimeRejectsIndividuallyInvalidStateKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeApprovalFailureFinalizesUnexecutedBatch(t *testing.T) {
+	for _, previous := range []agent.ToolGateAction{agent.ToolGateActionAllow, agent.ToolGateActionSuspend} {
+		for _, mode := range []agent.ToolExecutionMode{agent.ToolExecutionSequential, agent.ToolExecutionParallel} {
+			t.Run(string(previous)+"/"+string(mode), func(t *testing.T) {
+				storage, _ := NewMemoryStorage(Header{ID: "approval-failure"})
+				s, _ := New(storage, Options{})
+				defer s.Close()
+				binding, err := s.PrepareRun(MainLane, runtimeOptions())
+				if err != nil {
+					t.Fatal(err)
+				}
+				requests, executions, approvals := 0, 0, 0
+				cause := errors.New("approval service unavailable")
+				runner, err := agent.NewRunner(agent.AgentDefinition{ToolExecution: mode,
+					Tools: []agent.ToolDefinition{{Name: "write", Execute: func(context.Context, agent.ToolExecutionContext) (agent.ToolResult, error) {
+						executions++
+						return agent.ToolResult{}, nil
+					}}},
+					Model: agent.StreamFunc(func(context.Context, agent.ModelRequest) (agent.AssistantStream, error) {
+						requests++
+						return runtimeReply(agent.Message{Role: agent.RoleAssistant, StopReason: agent.StopReasonToolUse, ToolCalls: []agent.ToolCall{{ID: "a", Name: "write", Arguments: json.RawMessage(`{}`)}, {ID: "b", Name: "write", Arguments: json.RawMessage(`{}`)}, {ID: "c", Name: "write", Arguments: json.RawMessage(`{}`)}}}), nil
+					}),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				stream := runner.RunWithHooks(t.Context(), binding.snapshot, []agent.Message{agent.NewUserTextMessage("write")}, agent.LoopHooks{Journal: binding, ToolGate: func(context.Context, agent.BeforeToolCallContext) (agent.ToolGateResult, error) {
+					approvals++
+					if approvals == 1 {
+						return agent.ToolGateResult{Action: previous}, nil
+					}
+					return agent.ToolGateResult{}, cause
+				}})
+				for range stream.Events() {
+				}
+				snapshot, err := stream.Wait()
+				if !errors.Is(err, cause) || executions != 0 || requests != 1 || approvals != 2 {
+					t.Fatalf("err=%v executions=%d requests=%d approvals=%d", err, executions, requests, approvals)
+				}
+				if _, err := completeTurnStarts(snapshot.Messages); err != nil {
+					t.Fatalf("known unexecuted batch left unmatched: %v", err)
+				}
+				restored, err := s.PrepareRun(MainLane, runtimeOptions())
+				if err != nil {
+					t.Fatalf("approval outage permanently interrupted session: %v", err)
+				}
+				results := 0
+				for _, message := range restored.snapshot.Messages {
+					if message.ToolResult != nil {
+						results++
+						result := message.ToolResult
+						if !result.IsError || result.Execution == nil || result.Execution.Local != agent.ToolLocalNotStarted || result.Execution.Remote != agent.ToolRemoteNotDispatched {
+							t.Fatalf("incorrect rejection facts: %+v", result)
+						}
+					}
+				}
+				if results != 3 {
+					t.Fatalf("results=%d", results)
+				}
+			})
+		}
+	}
+}

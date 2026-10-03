@@ -78,6 +78,9 @@ JSON. Optional output summaries and error details are omitted; call identities,
 run IDs, execution status and failure codes remain available for reconciliation.
 Canceled assistant messages and their unexecuted tool results are finalized
 together, including cancellation at stream completion, without dispatching tools.
+An approval-preflight service error likewise settles the entire unexecuted batch,
+including allowed or suspended siblings, while returning its original cause to
+the host and stopping the run. A later explicit run can use the session again.
 
 Events report execution observations; they are **not commit receipts**. On a
 commit failure the loop stops before another model request, while `Wait` returns

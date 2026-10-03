@@ -1033,11 +1033,25 @@ func (e *Engine) executeToolCallsGated(ctx context.Context, definition AgentDefi
 	suspended := make([]SuspendedToolCall, 0)
 	scope, _ := ctx.Value(journalKey{}).(*journalScope)
 	journaled := scope != nil && scope.journal != nil
+	var preflightErr error
 	for _, original := range assistant.ToolCalls {
 		item, suspension, err := e.prepareGatedToolCall(ctx, definition, assistant, currentContext, toolMap, original, gate)
 		if err != nil {
-			if !journaled || ctx.Err() == nil {
+			if !journaled {
 				return executedToolBatch{}, err
+			}
+			if ctx.Err() == nil {
+				// Preflight runs before any executor. A failed approval service
+				// must stop the whole batch, including allowed/suspended siblings,
+				// while settling their known not-dispatched results in the journal.
+				preflightErr = err
+				prepared = make([]preparedToolCall, 0, len(assistant.ToolCalls))
+				for _, call := range assistant.ToolCalls {
+					failure := &ToolExecutionError{Code: ToolFailureHook, Message: "Tool batch was not executed because approval preflight failed", Err: err}
+					prepared = append(prepared, preparedFailure(call, nil, failure, ToolFailureHook))
+				}
+				suspended = nil
+				break
 			}
 			// A canceled approval wait may report ctx.Err as its gate error.
 			// No tool has entered during this batch's preflight; settle the
@@ -1103,10 +1117,7 @@ func (e *Engine) executeToolCallsGated(ctx context.Context, definition AgentDefi
 		messages:  toolMessages,
 		terminate: shouldTerminateToolBatch(outcomes),
 	}
-	if err != nil {
-		return batch, err
-	}
-	return batch, ctx.Err()
+	return batch, errors.Join(preflightErr, err, ctx.Err())
 }
 
 func pendingToolCallsForAssistant(assistant Message) []PendingToolCall {
