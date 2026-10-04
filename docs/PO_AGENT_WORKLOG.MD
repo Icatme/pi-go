@@ -1445,3 +1445,45 @@
 - No live provider, race run, separate examples-module verification or UI check
   this stage. No commit, push, tag, merge or downstream dependency update.
   P2 tool execution finalization remains outside this stage pending coordination.
+
+
+## 2026-10-04: tool outcome preparation and validation (stage 2)
+
+- Following coordination approval, preserved the reviewed stage-1 tree
+  `bc5266daa8efcd9ad3e187f52033fc09d672e4d7` as two local commits:
+  `3ab2c632e74856f9b62d574cbe41e576c94733c3` contains only the transplanted
+  history-filtering defect fix and its regressions;
+  `5a91d8a72f42449f1eab089a9829c43b92aca8b8` contains only the approved
+  behavior-preserving Responses context refactor. The latter is the P2 parent.
+  The prior worklog's uncommitted status describes the stage-1 review handoff.
+- Kept the same isolated worktree and `codex/responses-context-stage1` branch.
+  Original `V:/gitdownload/pi-go` stays on `03237e67c284f9d4d8ef55478e5a95f7524da7c5`;
+  all three original dirty-file SHA-256 hashes remain unchanged.
+- Extracted two private helpers in `agent/tool_lifecycle.go`:
+  `toolOutcomeFromExecution` captures executor facts, error classification,
+  bounded initial result and pre-hook JSON validation;
+  `validateToolOutcome` checks the effective hook result, business failure,
+  child output schema and host result validator. They use existing value types.
+  This separates result policy from lifecycle coordination without a new state
+  container, compatibility wrapper or generic framework.
+- Kept permission checks, child scope ownership/close, update admission/wait,
+  AfterToolCall, cancellation, state.finish, scope reports and final events in
+  executePreparedTool, in their original order. Raw execution success remains
+  independent of hook-adjusted success. Textual inlining of both helper bodies
+  exactly reproduces the parent executePreparedTool body. Independent read-only
+  review found no actionable semantic or aliasing issue; no performance claim.
+- Added one behavior regression,
+  `TestToolFinalizationRequiresRawAndEffectiveSuccessForState`, using RunToolCall,
+  State.Stage and recordJournal: success accepts state; a hook clearing a raw
+  business failure cannot accept state; a hook introducing business failure
+  also rejects state. All three cases pass both before extraction (parent source
+  via read-only Go overlay) and after extraction. No tests mirror the helpers.
+- Validation passed on Windows Go 1.26.4 with `GOWORK=off`, `PIGO_LIVE_TEST=0`:
+  - Parent baseline `go test ./agent -count=1 -timeout=120s`.
+  - `go test ./agent -run '^(TestExecution(OutcomePreservesErrorPartialAndRemoteFacts|HookFailureRedactsRawOutputAndKeepsErrorChain)|TestGenericErrorPreservesTrustedRemoteFacts|TestExplicitResultValidatorRunsAfterHooksForDirectBusinessErrors|TestAfterHookBusinessFailureTracksEffectiveIsError|TestHostChildReportSurvivesParentHookFailure|TestLeafCannotSupplyForgedChildReport|TestExecutorPanic.*|TestAfterHookPanicCompletesChildAndKeepsExecutionFacts|TestResultValidatorPanicReturnsDirectFailureWithExecutionFacts|TestChild(AfterHookIsAuthoritativeAndOutputSchemaChecked|ScopeCloseRetainsActiveFactsAndSuppressesLateEvents|ErrorPartialResultRespectsConfiguredBudget|EndEventRespectsConfiguredSummaryBudget)|TestGeneratedChildFailureTextRespectsResultBudget|TestEngine(ProgressGateSerializesSettlement|IgnoresToolUpdatesAfterExecutionSettles|ToolResultDetailsAreIsolatedAcrossHooksEventsAndTranscript)|TestJournalStateLifetimeRejectionAndRevocation)$' -count=1`.
+  - `go test ./agent/session -run '^TestRuntimeFinalizationRejectsStateAndRetainsChildFacts$' -count=1`.
+  - `go test ./agent -run '^TestToolFinalizationRequiresRawAndEffectiveSuccessForState$' -count=1`, also against the parent overlay.
+  - `go test ./... -count=1 -timeout=120s`, `go build ./...`, `go vet ./agent/...`, `git diff --check`.
+- Local review delivery only. No push/tag/merge/release, downstream changes,
+  new dependencies, live provider calls, race run, separate examples-module
+  verification or UI checks. Stop at the coordination review point.

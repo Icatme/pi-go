@@ -268,6 +268,60 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 	acceptUpdates = false
 	updateMu.Unlock()
 	updates.Wait()
+	outcome := toolOutcomeFromExecution(prepared, result, execErr)
+	if definition.AfterToolCall != nil {
+		override, hookErr := executeAfterToolHook(ctx, definition.AfterToolCall, AfterToolCallContext{AssistantMessage: cloneMessage(assistant),
+			ToolCall: cloneToolCall(prepared.call), Args: cloneAny(prepared.args), Context: cloneAgentContext(prepared.context),
+			Result: cloneToolResult(outcome.result), IsError: outcome.isError, Err: outcome.err,
+			Execution: *cloneToolExecutionInfo(&outcome.execution), Failure: cloneToolFailure(outcome.failure), ParentToolCallID: prepared.parentID})
+		if hookErr != nil {
+			if prepared.child {
+				hookErr = safeChildError(hookErr, ToolFailureHook, "Child tool output hook failed; output withheld")
+			}
+			// Preserve the execution chain, but discard all unprocessed output.
+			setOutcomeFailure(&outcome, hookErr, ToolFailureHook, prepared.failureResultLimit())
+		} else {
+			if override.Result != nil {
+				candidate := effectiveResultCandidate(outcome.result, *override.Result)
+				if prepared.child && !valueFitsBudget(candidate, prepared.toolResultLimit()) {
+					setOutcomeFailure(&outcome, errors.New("after-tool child result exceeds byte limit"), ToolFailureResource, prepared.failureResultLimit())
+				} else {
+					outcome.result = mergeToolResult(outcome.result, *override.Result)
+					outcome.isError = outcome.isError || override.Result.IsError
+				}
+			}
+			if override.IsError != nil {
+				outcome.isError = *override.IsError
+			}
+			if override.Terminate != nil {
+				outcome.result.Terminate = *override.Terminate
+			}
+		}
+	}
+	outcome = validateToolOutcome(prepared, outcome)
+	if state != nil && outcome.err == nil && ctx.Err() != nil {
+		// A canceled finalization must not publish success while dropping its state.
+		setOutcomeFailure(&outcome, ctx.Err(), ToolFailureCanceled, prepared.failureResultLimit())
+	}
+	if outcome.err != nil {
+		outcome.isError = true
+	}
+	state.finish(execErr == nil && !result.IsError && outcome.err == nil && !outcome.isError && ctx.Err() == nil)
+	outcome.result.IsError = outcome.isError
+	outcome.result.Execution = cloneToolExecutionInfo(&outcome.execution)
+	outcome.result.Failure = cloneToolFailure(outcome.failure)
+	outcome.result.ChildCalls = nil
+	if children != nil {
+		report := children.Report()
+		outcome.result.ChildCalls = &report
+	}
+	emitToolOutcome(emit, prepared, outcome)
+	return outcome, nil
+}
+
+// toolOutcomeFromExecution captures executor facts before the after-tool hook.
+// Raw execution success remains separate for the caller's state acceptance gate.
+func toolOutcomeFromExecution(prepared preparedToolCall, result ToolResult, execErr error) toolOutcome {
 	outcome := toolOutcome{call: prepared.call, args: cloneAny(prepared.args), execution: ToolExecutionInfo{Local: ToolLocalReturned, Remote: ToolRemoteNotApplicable}}
 	if result.Execution != nil {
 		outcome.execution = *cloneToolExecutionInfo(result.Execution)
@@ -306,35 +360,12 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 	if len(outcome.result.StructuredContent) > 0 && !json.Valid(outcome.result.StructuredContent) {
 		setOutcomeFailure(&outcome, errors.New("tool returned invalid structured content JSON"), ToolFailureResultRejected, prepared.failureResultLimit())
 	}
-	if definition.AfterToolCall != nil {
-		override, hookErr := executeAfterToolHook(ctx, definition.AfterToolCall, AfterToolCallContext{AssistantMessage: cloneMessage(assistant),
-			ToolCall: cloneToolCall(prepared.call), Args: cloneAny(prepared.args), Context: cloneAgentContext(prepared.context),
-			Result: cloneToolResult(outcome.result), IsError: outcome.isError, Err: outcome.err,
-			Execution: *cloneToolExecutionInfo(&outcome.execution), Failure: cloneToolFailure(outcome.failure), ParentToolCallID: prepared.parentID})
-		if hookErr != nil {
-			if prepared.child {
-				hookErr = safeChildError(hookErr, ToolFailureHook, "Child tool output hook failed; output withheld")
-			}
-			// Preserve the execution chain, but discard all unprocessed output.
-			setOutcomeFailure(&outcome, hookErr, ToolFailureHook, prepared.failureResultLimit())
-		} else {
-			if override.Result != nil {
-				candidate := effectiveResultCandidate(outcome.result, *override.Result)
-				if prepared.child && !valueFitsBudget(candidate, prepared.toolResultLimit()) {
-					setOutcomeFailure(&outcome, errors.New("after-tool child result exceeds byte limit"), ToolFailureResource, prepared.failureResultLimit())
-				} else {
-					outcome.result = mergeToolResult(outcome.result, *override.Result)
-					outcome.isError = outcome.isError || override.Result.IsError
-				}
-			}
-			if override.IsError != nil {
-				outcome.isError = *override.IsError
-			}
-			if override.Terminate != nil {
-				outcome.result.Terminate = *override.Terminate
-			}
-		}
-	}
+	return outcome
+}
+
+// validateToolOutcome checks the effective hook result without changing the
+// execution facts or accepting state. Finalization remains with the caller.
+func validateToolOutcome(prepared preparedToolCall, outcome toolOutcome) toolOutcome {
 	if len(outcome.result.StructuredContent) > 0 && !json.Valid(outcome.result.StructuredContent) {
 		setOutcomeFailure(&outcome, errors.New("after-tool hook returned invalid structured content JSON"), ToolFailureResultRejected, prepared.failureResultLimit())
 	}
@@ -360,24 +391,7 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 			setOutcomeFailure(&outcome, err, ToolFailureResultRejected, prepared.failureResultLimit())
 		}
 	}
-	if state != nil && outcome.err == nil && ctx.Err() != nil {
-		// A canceled finalization must not publish success while dropping its state.
-		setOutcomeFailure(&outcome, ctx.Err(), ToolFailureCanceled, prepared.failureResultLimit())
-	}
-	if outcome.err != nil {
-		outcome.isError = true
-	}
-	state.finish(execErr == nil && !result.IsError && outcome.err == nil && !outcome.isError && ctx.Err() == nil)
-	outcome.result.IsError = outcome.isError
-	outcome.result.Execution = cloneToolExecutionInfo(&outcome.execution)
-	outcome.result.Failure = cloneToolFailure(outcome.failure)
-	outcome.result.ChildCalls = nil
-	if children != nil {
-		report := children.Report()
-		outcome.result.ChildCalls = &report
-	}
-	emitToolOutcome(emit, prepared, outcome)
-	return outcome, nil
+	return outcome
 }
 
 func safeChildError(err error, code ToolFailureCode, message string) error {
