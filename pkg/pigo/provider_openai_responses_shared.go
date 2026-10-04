@@ -157,6 +157,9 @@ type openAIResponsesToolCallState struct {
 
 func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom map[string]string, model Model, ctx Context, includeSystemPrompt bool) []map[string]any {
 	transcript := ResolveTranscript(NormalizeContext(ctx), supportsTranscriptSystemMessages(model))
+	// Filtering failed assistant messages must not turn a later system update
+	// into the initial system message used by the tool plan and instructions.
+	hadInitialSystem := GetInitialSystemMessage(transcript.Messages) != nil
 	transformed := TransformMessages(transcript.Messages, model, NormalizeOpenAIResponsesToolCallID)
 	input := make([]map[string]any, 0, len(transformed)+1)
 	customCallIDs := make(map[string]bool)
@@ -165,7 +168,8 @@ func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom ma
 	for index, message := range transformed {
 		switch typed := message.(type) {
 		case SystemMessage:
-			if index > 0 && toolPlan != nil && toolPlan.Anchor && len(typed.ToolsAdded) > 0 {
+			isInitialSystem := hadInitialSystem && index == 0
+			if !isInitialSystem && toolPlan != nil && toolPlan.Anchor && len(typed.ToolsAdded) > 0 {
 				input = append(input, map[string]any{
 					"type": "additional_tools", "role": "developer",
 					"tools": convertOpenAIResponsesTools(custom, typed.ToolsAdded),
@@ -174,11 +178,11 @@ func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom ma
 					anchoredNames[tool.Name] = true
 				}
 			}
-			if index == 0 && !includeSystemPrompt {
+			if isInitialSystem && !includeSystemPrompt {
 				continue
 			}
 			text := RenderSystemMessageUpdate(typed)
-			if index == 0 {
+			if isInitialSystem {
 				text = GetSystemMessageText(typed)
 			}
 			if text != "" {
