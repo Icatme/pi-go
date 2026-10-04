@@ -44,9 +44,9 @@ func validateOpenAIResponsesAnchoredFunction(state *openAIResponsesStreamingStat
 
 // additional_tools is additive only. A removal or redeclaration must use the
 // current tool list, rather than inventing a provider removal/replacement item.
+// Read normalized system updates before protocol-specific folding or filtering.
 // Resolve once before payload hooks/auth; both request fields consume this plan.
-func resolveOpenAIResponsesToolPlan(custom map[string]string, model Model, ctx Context) *openAIResponsesToolPlan {
-	transcript := NormalizeContext(ctx)
+func resolveOpenAIResponsesToolPlan(custom map[string]string, model Model, transcript TranscriptContext) *openAIResponsesToolPlan {
 	plan := &openAIResponsesToolPlan{RequestTools: GetCurrentTools(transcript.Messages)}
 	if model.API != "openai-responses" {
 		return plan

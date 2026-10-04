@@ -13,7 +13,7 @@ func TestConvertOpenAICodexMessagesSkipsEmptyStringAndWhitespaceUserMessages(t *
 		t.Fatal("expected codex model")
 	}
 
-	input := convertOpenAIResponsesMessages(nil, nil, *model, Context{
+	input := convertOpenAIResponsesMessages(nil, nil, *model, TranscriptContext{
 		Messages: []Message{
 			UserMessage{Content: ""},
 			UserMessage{Content: "   \n\t  "},

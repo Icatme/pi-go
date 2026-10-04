@@ -1428,3 +1428,81 @@
 - Focused anchor/system regressions, root `go test -race ./... -count=1`,
   `go vet ./...` and independent read-only review passed on Windows Go 1.26.4.
   No live provider call, dependency change, commit or push was made.
+
+
+## 2026-10-04: Responses request context preparation (stage 1)
+
+- Isolated worktree: `C:/Users/icatm/.codex/worktrees/responses-context-stage1/pi-go`,
+  branch `codex/responses-context-stage1`, base/HEAD
+  `03237e67c284f9d4d8ef55478e5a95f7524da7c5`; local uncommitted review only.
+- Prerequisite: precisely transplanted only the existing `hadInitialSystem` fix
+  and its two regressions from the dirty `V:/gitdownload/pi-go` workspace owned
+  by chat `01a10555-6b07-73b3-bbe6-3c2db33672af`. Its worklog was not copied.
+  Preserve this prerequisite separately from the behavior-preserving refactor.
+  Original three dirty files were verified byte-for-byte unchanged.
+- The builders previously repeated context normalization, while tool planning
+  needs pre-folding system updates and wire encoding needs resolved history.
+  Responses now normalizes once, plans tools before ResolveTranscript, then
+  sends the resolved transcript to the converter. Codex normalizes once, uses
+  that transcript for current tools, and shares one resolved transcript between
+  instructions and input. The converter still records initial-system identity
+  before TransformMessages filters failed history.
+- Added no fields, public API, compatibility wrapper, dependencies or generalized
+  preparation pipeline. Capability lookup and hook/auth ordering are unchanged.
+  Updated private converter/plan test callers; no agent runtime source changes.
+- New `TestResponsesRequestContextStages` covers 16 combinations of Responses/
+  Codex, native/collapsed systems, no initial system/tools-only initial system,
+  and error/aborted history, including declaration order and caller immutability.
+  It passes on both this refactor and a read-only overlay of the original
+  implementation with the prerequisite fix, proving existing wire behavior.
+- Validation passed on Windows Go 1.26.4 with `GOWORK=off`:
+  - `go test ./pkg/pigo -run 'TestResponses(ToolAnchors|SystemUpdatesSurvive|ToolAnchorPlan)' -count=1` before refactoring.
+  - `go test ./pkg/pigo -run '^(TestResponsesToolAnchor.*|TestResponsesSystemUpdatesSurviveFailedHistoryFiltering|TestResponsesAnchoredFunctionStreamBoundaries|TestTranscriptOpenAIRequestNativeAndCollapsedSystems|TestToolSampling.*|TestConvertOpenAICodexMessages.*|TestCompleteSimpleOpenAICodex(BuildsRequestAndParsesText|NormalizesForeignToolCallIDsInRequest|PassesPreviousResponseID|OmitsEmptyPreviousResponseID)|TestResponsesCustomReplayAndFunctionFallback|TestOpenAIResponsesPreservesTerminalReasoningReplayFields)$' -count=1 -timeout=120s`.
+  - `go build ./...`, `go vet ./pkg/pigo`, and `PIGO_LIVE_TEST=0 go test ./... -count=1 -timeout=120s`.
+  - `go test ./pkg/pigo -run '^TestResponsesRequestContextStages$' -count=1`, also with `-overlay C:/Users/icatm/AppData/Local/Temp/pi-go-responses-context-stage1-original-overlay.json`.
+  - `git diff --check`; independent read-only review found no actionable issues.
+- No live provider, race run, separate examples-module verification or UI check
+  this stage. No commit, push, tag, merge or downstream dependency update.
+  P2 tool execution finalization remains outside this stage pending coordination.
+
+
+## 2026-10-04: tool outcome preparation and validation (stage 2)
+
+- Following coordination approval, preserved the reviewed stage-1 tree
+  `bc5266daa8efcd9ad3e187f52033fc09d672e4d7` as two local commits:
+  `3ab2c632e74856f9b62d574cbe41e576c94733c3` contains only the transplanted
+  history-filtering defect fix and its regressions;
+  `5a91d8a72f42449f1eab089a9829c43b92aca8b8` contains only the approved
+  behavior-preserving Responses context refactor. The latter is the P2 parent.
+  The prior worklog's uncommitted status describes the stage-1 review handoff.
+- Kept the same isolated worktree and `codex/responses-context-stage1` branch.
+  Original `V:/gitdownload/pi-go` stays on `03237e67c284f9d4d8ef55478e5a95f7524da7c5`;
+  all three original dirty-file SHA-256 hashes remain unchanged.
+- Extracted two private helpers in `agent/tool_lifecycle.go`:
+  `toolOutcomeFromExecution` captures executor facts, error classification,
+  bounded initial result and pre-hook JSON validation;
+  `validateToolOutcome` checks the effective hook result, business failure,
+  child output schema and host result validator. They use existing value types.
+  This separates result policy from lifecycle coordination without a new state
+  container, compatibility wrapper or generic framework.
+- Kept permission checks, child scope ownership/close, update admission/wait,
+  AfterToolCall, cancellation, state.finish, scope reports and final events in
+  executePreparedTool, in their original order. Raw execution success remains
+  independent of hook-adjusted success. Textual inlining of both helper bodies
+  exactly reproduces the parent executePreparedTool body. Independent read-only
+  review found no actionable semantic or aliasing issue; no performance claim.
+- Added one behavior regression,
+  `TestToolFinalizationRequiresRawAndEffectiveSuccessForState`, using RunToolCall,
+  State.Stage and recordJournal: success accepts state; a hook clearing a raw
+  business failure cannot accept state; a hook introducing business failure
+  also rejects state. All three cases pass both before extraction (parent source
+  via read-only Go overlay) and after extraction. No tests mirror the helpers.
+- Validation passed on Windows Go 1.26.4 with `GOWORK=off`, `PIGO_LIVE_TEST=0`:
+  - Parent baseline `go test ./agent -count=1 -timeout=120s`.
+  - `go test ./agent -run '^(TestExecution(OutcomePreservesErrorPartialAndRemoteFacts|HookFailureRedactsRawOutputAndKeepsErrorChain)|TestGenericErrorPreservesTrustedRemoteFacts|TestExplicitResultValidatorRunsAfterHooksForDirectBusinessErrors|TestAfterHookBusinessFailureTracksEffectiveIsError|TestHostChildReportSurvivesParentHookFailure|TestLeafCannotSupplyForgedChildReport|TestExecutorPanic.*|TestAfterHookPanicCompletesChildAndKeepsExecutionFacts|TestResultValidatorPanicReturnsDirectFailureWithExecutionFacts|TestChild(AfterHookIsAuthoritativeAndOutputSchemaChecked|ScopeCloseRetainsActiveFactsAndSuppressesLateEvents|ErrorPartialResultRespectsConfiguredBudget|EndEventRespectsConfiguredSummaryBudget)|TestGeneratedChildFailureTextRespectsResultBudget|TestEngine(ProgressGateSerializesSettlement|IgnoresToolUpdatesAfterExecutionSettles|ToolResultDetailsAreIsolatedAcrossHooksEventsAndTranscript)|TestJournalStateLifetimeRejectionAndRevocation)$' -count=1`.
+  - `go test ./agent/session -run '^TestRuntimeFinalizationRejectsStateAndRetainsChildFacts$' -count=1`.
+  - `go test ./agent -run '^TestToolFinalizationRequiresRawAndEffectiveSuccessForState$' -count=1`, also against the parent overlay.
+  - `go test ./... -count=1 -timeout=120s`, `go build ./...`, `go vet ./agent/...`, `git diff --check`.
+- Local review delivery only. No push/tag/merge/release, downstream changes,
+  new dependencies, live provider calls, race run, separate examples-module
+  verification or UI checks. Stop at the coordination review point.

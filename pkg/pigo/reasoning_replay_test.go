@@ -8,7 +8,7 @@ func TestConvertOpenAICodexMessagesSkipsReasoningOnlyAbortedTurn(t *testing.T) {
 		t.Fatal("expected codex model")
 	}
 
-	input := convertOpenAIResponsesMessages(nil, nil, *model, Context{
+	input := convertOpenAIResponsesMessages(nil, nil, *model, TranscriptContext{
 		Messages: []Message{
 			UserMessage{Content: "Use the tool."},
 			AssistantMessage{
@@ -43,7 +43,7 @@ func TestConvertOpenAICodexMessagesDropsFunctionCallItemIDForDifferentModelRepla
 		t.Fatal("expected codex model")
 	}
 
-	input := convertOpenAIResponsesMessages(nil, nil, *model, Context{
+	input := convertOpenAIResponsesMessages(nil, nil, *model, TranscriptContext{
 		Messages: []Message{
 			UserMessage{Content: "Use the tool."},
 			AssistantMessage{

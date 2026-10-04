@@ -155,8 +155,8 @@ type openAIResponsesToolCallState struct {
 // Shared message conversion
 // ============================================================================
 
-func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom map[string]string, model Model, ctx Context, includeSystemPrompt bool) []map[string]any {
-	transcript := ResolveTranscript(NormalizeContext(ctx), supportsTranscriptSystemMessages(model))
+// transcript has already been resolved for the model's system-message support.
+func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom map[string]string, model Model, transcript TranscriptContext, includeSystemPrompt bool) []map[string]any {
 	// Filtering failed assistant messages must not turn a later system update
 	// into the initial system message used by the tool plan and instructions.
 	hadInitialSystem := GetInitialSystemMessage(transcript.Messages) != nil
