@@ -5,6 +5,13 @@ The behavior reference is the exact upstream Pi v1.0.0 tag
 already pinned official Go SDK v1.8.0. This is a Go library implementation,
 with host-owned application UI, identity, permissions and network policy.
 
+Latest follow-up check: upstream stable is now
+[v1.0.1](https://github.com/earendil-works/pi/releases/tag/v1.0.1)
+(`a7229ddc21810d6245105978033b7df645ecc2f7`). Go master
+`c29b4d502abb4ceb98c464db9918e0b8f7263615` includes N2/N3 via PRs #22/#23;
+its [six CI jobs](https://github.com/Icatme/pi-go/actions/runs/37126745895)
+passed. The earlier planning baselines below are historical, not pending work.
+
 Status checked on 2026-10-03: items 1–6 below are merged and included in
 `v0.12.1` / `master@dcdcf9b740190f20ace5d8bbad7a9670fe2eafd1`.
 The next implementation sequence is defined in [接下来的跟进计划](#接下来的跟进计划2026-10-03).
@@ -211,20 +218,19 @@ N1 的实现与五平台验收已完成，随 v0.13.0 交付；下一功能顺�
 
 ### 第二轮与条件候选
 
-N2 implementation is tracked on `codex/n2-native-grammar`; the reviewed contract,
-exact initial capability evidence and local validation limits are in
-[Native custom tool inputs](native-tools.md). N3 remains a separate, sequential
-PR after the N2 draft is complete. No live-provider acceptance is implied.
-
-N2 at `28f7ade22d1080fa892321ed686e752441664ee4` has passed independent review
-and all six CI jobs in run 37119799205. N3 is now tracked separately on
-`codex/n3-tool-anchors`, stacked on the unmerged N2 branch; its initial boundary
-and source evidence are in [Native dynamic tool declarations](dynamic-tool-anchors.md).
+N2 and N3 passed independent review and were merged sequentially in
+[PR #22](https://github.com/Icatme/pi-go/pull/22) and
+[PR #23](https://github.com/Icatme/pi-go/pull/23). Their contracts, exact initial
+capability evidence and validation limits are in
+[Native custom tool inputs](native-tools.md) and
+[Native dynamic tool declarations](dynamic-tool-anchors.md). The combined
+master passed all six CI jobs in run 37126745895. No live-provider acceptance
+or measured prompt-cache improvement is implied.
 
 | 顺位 | 编号 | 决定与理由 | 交付边界及准入/验收门槛 |
 | --- | --- | --- | --- |
-| 第二轮 1 | N2：原生 grammar 工具 | 计划跟进。收益是直接传递代码及 provider 约束；现有 Codemode 不依赖它才能工作 | `pkg/pigo` capability、声明编码、custom call delta/done/终态、`ctc_` ID、回放及 Agent/Codemode 接线一起交付。用单字符串属性映射回现有参数对象；缺 capability 时发送前明确选择普通 function 表示或拒绝强制 grammar，不能收到 400 再重发 |
-| 第二轮 2 | N3：动态工具声明锚定 | 计划跟进。与工具搜索相关，但它和 grammar 是两个协议能力 | 分开评估 OpenAI `additional_tools`/namespace 与 Anthropic inline tool changes；先一个协议、一个可验证模型。测试增删/同名重定义/回放/缓存及模型切换，能力按精确模型声明，不按 provider 全开 |
+| 第二轮 1 | N2：原生 grammar 工具 | 已合并 #22。直接传递代码及 provider 约束；现有 Codemode 不依赖它才能工作 | `pkg/pigo` capability、声明编码、custom call delta/done/终态、`ctc_` ID、回放及 Agent/Codemode 接线一起交付。用单字符串属性映射回现有参数对象；缺 capability 时发送前明确选择普通 function 表示或拒绝强制 grammar，不能收到 400 再重发 |
+| 第二轮 2 | N3：动态工具声明锚定 | 已合并 #23。完成 OpenAI Responses `additional_tools`/namespace 最小闭环 | 仅精确模型开启能力；增删、同名重定义、回放、模型切换与请求前降级已有回归。Anthropic inline tools 仍需实际消费者需求后单独评估 |
 | 条件候选 1 | N4：新增 provider OAuth | 后置于已有登录边界修复。新的 ChatGPT API token flow 与当前 Codex subscription flow 不相同 | 有明确账号/宿主集成需求后，先只做 ChatGPT OAuth；issued client ID、resource/scope、state、刷新、取消、端口冲突和凭证隔离需独立覆盖。Radius 与 Anthropic copy-code 分开排，不移植 Pi 品牌或 pi.dev 注册身份 |
 | 条件候选 2 | N5：图片生成 API | 独立扩展，不借通用 `image()` 冒充完成 | 先确定一个真实 provider/model；上游 OpenRouter images 路径仅作参考。明确 image model、结果/usage、认证分发与图片字节/尺寸/输出上限，再接 `models.generateImages()`。宿主授权、并发、取消和费用观察必须覆盖模型子调用，脚本不获取凭证 |
 | 条件候选 3 | N6：Classifier API | 当前没有已确认的分类工作负载，低于已有 Agent/MCP 闭环 | 先有具体任务、目标 provider 与可衡量的质量/时延/成本基线，再做一个 provider。choice/score/bool、批量结果、缺失答案、usage 缺失需有合同；不拿聊天 JSON 回答当等价实现，不顺带移植本地推理 |
@@ -233,6 +239,27 @@ and source evidence are in [Native dynamic tool declarations](dynamic-tool-ancho
 N2/N3 与 N1 没有硬功能依赖；安排在第二轮是为先完成一个完整主线，并减少同时修改
 公共 Agent/Responses 合同的风险。N2/N3 共享 provider 编解码，按顺序整合，不抢改同一模块。
 N4–N7 不阻塞下一轮交付，满足表中准入条件后再确定独立实现范围。
+
+### v1.0.1 后的精简跟进（2026-10-03）
+
+只补现有宿主接口的可验证缺口；不扩展 Runtime、登录方式或模型类别。
+
+| 优先级 | 缺口与依据 | 本轮边界 |
+| --- | --- | --- |
+| 1，草稿 PR #24 已验证 | 上游 [overflow 分类](https://github.com/earendil-works/pi/blob/v1.0.1/packages/ai/src/utils/overflow.ts) 和 [测试](https://github.com/earendil-works/pi/blob/v1.0.1/packages/ai/test/overflow.test.ts) 已覆盖 LiteLLM/OpenAI 兼容网关、Together、Poolside、DS4 的明确上下文超限文本；Go `IsContextOverflow` 漏判 | 已补四条匹配规则，保留限流排除和 stop reason 边界，两条本地 HTTP 路径、独立复核及六项 CI 通过。仅帮助宿主分类，不自动压缩或重发请求；模型 context window 未知时也能识别明确错误 |
+| 2，核查结束，无需实现 | 追踪完整调用链后确认共享 HTTP 错误体已经受限：`providerHTTPClient` 在 adapter/SDK 读取前安装统一 transport，默认最多读取 64 KiB + 1 字节、保留 64 KiB 并关闭原始 body | 撤回此前仅依据下游 `io.ReadAll` 提出的候选。宿主自定义限额、截断观察、读取失败、取消、重定向及连接复用已有实现和 race 回归；不再叠加第二套读取器 |
+
+上游 Qwen 的 `Range of input length should be ...` 同时可能表示空输入，本轮不将其
+直接判为上下文溢出。容量重试、Codemode 输出限额、登录取消、journal 和 N2/N3
+已完成，不按上游发布日志重复开发。其余 v1.0.1 改动主要属于 CLI 分发、TUI、
+额外 provider 或宿主 MCP 配置，不为同步版本扩大库的范围。
+
+错误体限额的调用覆盖：`Stream`/`StreamSimple`（及其 `Complete` 入口）统一包装
+HTTP client；共享 `HTTPStreamClient` 也会包装直接调用，覆盖 Completions 与 Codex
+SSE。非成功响应的 `io.ReadAll` 消费的是已受限的 body。`HTTPObservation` 记录
+截断标记和受格式/长度约束的错误标识；原始错误文本与 error chain 仍是不可信内容，
+该合同不是正文自动脱敏。现有实现、测试见 `pkg/pigo/provider_http*.go`；本次核查
+没有改动运行时代码。
 
 ### 上游发布后补丁的处理决定
 
