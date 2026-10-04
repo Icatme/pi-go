@@ -1506,3 +1506,19 @@
 - Local review delivery only. No push/tag/merge/release, downstream changes,
   new dependencies, live provider calls, race run, separate examples-module
   verification or UI checks. Stop at the coordination review point.
+
+
+## 2026-10-04: bump package version to 0.13.1
+
+- Bumped `pkg/pigo/version.go` and the examples module's pi-go requirement from
+  0.13.0 to 0.13.1 for the reviewed history-filtering fix and behavior-preserving
+  Responses/tool-outcome refactors now merged on master. The examples module's
+  existing root-module replace is unchanged; no third-party dependency changed.
+- Validation passed with `GOWORK=off`, `PIGO_LIVE_TEST=0`:
+  `go test ./internal/cli -count=1 -timeout=90s`; examples module
+  `go test ./... -count=1 -timeout=120s`; compiled `./cmd/pigo` and verified its
+  `--help` banner is exactly `pigo 0.13.1`; `git diff --check`.
+  Reused the previously verified implementation's full root test/build/vet
+  evidence; no new live-provider or race validation for this metadata change.
+- User authorized committing and pushing master. This change does not create
+  a release tag or GitHub Release.
