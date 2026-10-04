@@ -496,15 +496,16 @@ func TestResponsesToolAnchorPlanDoesNotRequeryCatalog(t *testing.T) {
 	RegisterProviderModule(module)
 	model := *GetModel(provider, "fixture")
 	ctx := anchorContext()
-	plan := resolveOpenAIResponsesToolPlan(nil, model, ctx)
+	transcript := NormalizeContext(ctx)
+	plan := resolveOpenAIResponsesToolPlan(nil, model, transcript)
 	changed := module.Models[model.ID]
 	changed.Capabilities.ToolAdditions = CapabilityUnsupported
 	module.Models[model.ID] = changed
 	if !providerRegistry.Replace(provider, &module) {
 		t.Fatal("replace catalog")
 	}
-	input := convertOpenAIResponsesMessages(plan, nil, model, ctx, true)
-	if !plan.Anchor || countToolAnchors(input) != 1 || resolveOpenAIResponsesToolPlan(nil, model, ctx).Anchor {
+	input := convertOpenAIResponsesMessages(plan, nil, model, ResolveTranscript(transcript, supportsTranscriptSystemMessages(model)), true)
+	if !plan.Anchor || countToolAnchors(input) != 1 || resolveOpenAIResponsesToolPlan(nil, model, transcript).Anchor {
 		t.Fatal("resolved request changed, or next request ignored catalog change")
 	}
 	// Verify the encoder still emits ordinary JSON, with no executable metadata.

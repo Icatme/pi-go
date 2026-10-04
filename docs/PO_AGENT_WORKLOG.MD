@@ -1409,3 +1409,39 @@
   implementation or separate feature PR is needed. Independent read-only audit
   found no relevant bound bypass, reviewed the corrected documentation and
   passed `git diff --check`.
+
+
+## 2026-10-04: Responses request context preparation (stage 1)
+
+- Isolated worktree: `C:/Users/icatm/.codex/worktrees/responses-context-stage1/pi-go`,
+  branch `codex/responses-context-stage1`, base/HEAD
+  `03237e67c284f9d4d8ef55478e5a95f7524da7c5`; local uncommitted review only.
+- Prerequisite: precisely transplanted only the existing `hadInitialSystem` fix
+  and its two regressions from the dirty `V:/gitdownload/pi-go` workspace owned
+  by chat `01a10555-6b07-73b3-bbe6-3c2db33672af`. Its worklog was not copied.
+  Preserve this prerequisite separately from the behavior-preserving refactor.
+  Original three dirty files were verified byte-for-byte unchanged.
+- The builders previously repeated context normalization, while tool planning
+  needs pre-folding system updates and wire encoding needs resolved history.
+  Responses now normalizes once, plans tools before ResolveTranscript, then
+  sends the resolved transcript to the converter. Codex normalizes once, uses
+  that transcript for current tools, and shares one resolved transcript between
+  instructions and input. The converter still records initial-system identity
+  before TransformMessages filters failed history.
+- Added no fields, public API, compatibility wrapper, dependencies or generalized
+  preparation pipeline. Capability lookup and hook/auth ordering are unchanged.
+  Updated private converter/plan test callers; no agent runtime source changes.
+- New `TestResponsesRequestContextStages` covers 16 combinations of Responses/
+  Codex, native/collapsed systems, no initial system/tools-only initial system,
+  and error/aborted history, including declaration order and caller immutability.
+  It passes on both this refactor and a read-only overlay of the original
+  implementation with the prerequisite fix, proving existing wire behavior.
+- Validation passed on Windows Go 1.26.4 with `GOWORK=off`:
+  - `go test ./pkg/pigo -run 'TestResponses(ToolAnchors|SystemUpdatesSurvive|ToolAnchorPlan)' -count=1` before refactoring.
+  - `go test ./pkg/pigo -run '^(TestResponsesToolAnchor.*|TestResponsesSystemUpdatesSurviveFailedHistoryFiltering|TestResponsesAnchoredFunctionStreamBoundaries|TestTranscriptOpenAIRequestNativeAndCollapsedSystems|TestToolSampling.*|TestConvertOpenAICodexMessages.*|TestCompleteSimpleOpenAICodex(BuildsRequestAndParsesText|NormalizesForeignToolCallIDsInRequest|PassesPreviousResponseID|OmitsEmptyPreviousResponseID)|TestResponsesCustomReplayAndFunctionFallback|TestOpenAIResponsesPreservesTerminalReasoningReplayFields)$' -count=1 -timeout=120s`.
+  - `go build ./...`, `go vet ./pkg/pigo`, and `PIGO_LIVE_TEST=0 go test ./... -count=1 -timeout=120s`.
+  - `go test ./pkg/pigo -run '^TestResponsesRequestContextStages$' -count=1`, also with `-overlay C:/Users/icatm/AppData/Local/Temp/pi-go-responses-context-stage1-original-overlay.json`.
+  - `git diff --check`; independent read-only review found no actionable issues.
+- No live provider, race run, separate examples-module verification or UI check
+  this stage. No commit, push, tag, merge or downstream dependency update.
+  P2 tool execution finalization remains outside this stage pending coordination.

@@ -122,7 +122,8 @@ func streamSimpleOpenAIResponses(model Model, ctx Context, options SimpleStreamO
 }
 
 func buildOpenAIResponsesRequest(customTools map[string]string, model Model, ctx Context, options ProviderStreamOptions) (openAIResponsesRequest, error) {
-	toolPlan := resolveOpenAIResponsesToolPlan(customTools, model, ctx)
+	transcript := NormalizeContext(ctx)
+	toolPlan := resolveOpenAIResponsesToolPlan(customTools, model, transcript)
 	resolvedOptions := resolveOpenAIResponsesProviderOptions(model, options)
 	if toolPlan.RequiresFullHistory && strings.TrimSpace(resolvedOptions.PreviousResponseID) != "" {
 		return openAIResponsesRequest{}, fmt.Errorf("OpenAI Responses dynamic tool declarations require full history without previous_response_id")
@@ -132,12 +133,13 @@ func buildOpenAIResponsesRequest(customTools map[string]string, model Model, ctx
 	if resolvedOptions.ParallelToolCalls != nil {
 		parallelToolCalls = *resolvedOptions.ParallelToolCalls
 	}
+	resolvedTranscript := ResolveTranscript(transcript, supportsTranscriptSystemMessages(model))
 
 	requestBody := openAIResponsesRequest{
 		Model:             model.ID,
 		Store:             false,
 		Stream:            true,
-		Input:             convertOpenAIResponsesMessages(toolPlan, customTools, model, ctx, true),
+		Input:             convertOpenAIResponsesMessages(toolPlan, customTools, model, resolvedTranscript, true),
 		Tools:             convertOpenAIResponsesTools(customTools, toolPlan.RequestTools),
 		ToolChoice:        resolveOpenAIResponsesToolChoice(resolvedOptions.ToolChoice),
 		ParallelToolCalls: &parallelToolCalls,

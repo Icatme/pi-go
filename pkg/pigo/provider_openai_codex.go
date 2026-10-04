@@ -97,9 +97,10 @@ func buildOpenAICodexRequest(customTools map[string]string, model Model, ctx Con
 	resolvedOptions := resolveOpenAICodexProviderOptions(model, options)
 	parallelToolCalls := true
 
-	transcript := ResolveTranscript(NormalizeContext(ctx), supportsTranscriptSystemMessages(model))
+	transcript := NormalizeContext(ctx)
+	resolvedTranscript := ResolveTranscript(transcript, supportsTranscriptSystemMessages(model))
 	instructions := ""
-	if initial := GetInitialSystemMessage(transcript.Messages); initial != nil {
+	if initial := GetInitialSystemMessage(resolvedTranscript.Messages); initial != nil {
 		instructions = GetSystemMessageText(*initial)
 	}
 	if strings.TrimSpace(instructions) == "" {
@@ -111,8 +112,8 @@ func buildOpenAICodexRequest(customTools map[string]string, model Model, ctx Con
 		Store:             false,
 		Stream:            true,
 		Instructions:      instructions,
-		Input:             convertOpenAIResponsesMessages(nil, customTools, model, ctx, false),
-		Tools:             convertOpenAIResponsesTools(customTools, currentContextTools(ctx)),
+		Input:             convertOpenAIResponsesMessages(nil, customTools, model, resolvedTranscript, false),
+		Tools:             convertOpenAIResponsesTools(customTools, GetCurrentTools(transcript.Messages)),
 		ToolChoice:        resolveOpenAICodexToolChoice(resolvedOptions.ToolChoice),
 		ParallelToolCalls: &parallelToolCalls,
 		Include:           []string{"reasoning.encrypted_content"},
