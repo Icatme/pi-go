@@ -21,6 +21,92 @@ func TestResponsesToolAnchorsCanStartAfterConversation(t *testing.T) {
 	}
 }
 
+func TestResponsesToolAnchorsSurviveFailedHistoryFiltering(t *testing.T) {
+	for _, stop := range []StopReason{StopReasonError, StopReasonAborted, StopReasonStop} {
+		for _, initial := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/initial_%t", stop, initial), func(t *testing.T) {
+				requests := make(chan openAIResponsesRequest, 1)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var request openAIResponsesRequest
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
+					requests <- request
+					w.Header().Set("Content-Type", "text/event-stream")
+					item := map[string]any{"type": "function_call", "id": "fc_late", "call_id": "call_late", "name": "late", "namespace": "late", "arguments": "{}", "status": "completed"}
+					fmt.Fprint(w, buildOpenAICodexSSE(customTerminal(item)))
+				}))
+				defer server.Close()
+				model := *GetModel("openai", "gpt-6-astra")
+				model.BaseURL = server.URL
+				ctx := Context{Messages: []Message{
+					AssistantMessage{StopReason: stop, Content: []ContentBlock{TextContent{Text: "previous attempt"}}},
+					SystemMessage{ToolsAdded: []Tool{anchorFunction("late")}},
+					UserMessage{Content: "use late"},
+				}}
+				if initial {
+					ctx.Tools = []Tool{anchorFunction("initial")}
+				}
+				result := CompleteSimple(model, ctx, SimpleStreamOptions{APIKey: "fixture", MaxRetries: 0})
+				if result.StopReason != StopReasonToolUse {
+					t.Fatalf("unexpected result: %+v", result)
+				}
+				request := <-requests
+				wantTools := 0
+				if initial {
+					wantTools = 1
+				}
+				anchorIndex := 0
+				if stop == StopReasonStop {
+					anchorIndex = 1
+				}
+				if len(request.Tools) != wantTools || countToolAnchors(request.Input) != 1 || request.Input[anchorIndex]["type"] != "additional_tools" {
+					t.Fatalf("declaration lost or moved after filtering: %+v", request)
+				}
+				tools := request.Input[anchorIndex]["tools"].([]any)
+				if len(tools) != 1 || tools[0].(map[string]any)["name"] != "late" || request.Input[anchorIndex+1]["role"] != "user" {
+					t.Fatalf("late declaration must precede its user message: %+v", request.Input)
+				}
+				ctx.Messages = append(ctx.Messages, result, ToolResultMessage{ToolCallID: "call_late|fc_late", ToolName: "late", Content: []ContentBlock{TextContent{Text: "done"}}})
+				replay := mustBuildOpenAIResponsesRequest(t, nil, model, ctx, ProviderStreamOptions{})
+				call := replay.Input[len(replay.Input)-2]
+				if call["namespace"] != "late" || call["id"] != "fc_late" {
+					t.Fatalf("anchored replay lost its declaration identity: %v", call)
+				}
+			})
+		}
+	}
+}
+
+func TestResponsesSystemUpdatesSurviveFailedHistoryFiltering(t *testing.T) {
+	for _, api := range []API{"openai-responses", "openai-codex-responses"} {
+		for _, stop := range []StopReason{StopReasonError, StopReasonAborted} {
+			t.Run(fmt.Sprintf("%s/%s", api, stop), func(t *testing.T) {
+				model := *GetModel("openai", "gpt-6-astra")
+				model.API = api
+				ctx := Context{Messages: []Message{
+					AssistantMessage{StopReason: stop},
+					SystemMessage{Sections: map[string]*string{"policy": transcriptString("new policy"), "removed": nil}},
+					UserMessage{Content: "continue"},
+				}}
+				var request openAIResponsesRequest
+				wantInstructions := ""
+				if api == "openai-codex-responses" {
+					request = buildOpenAICodexRequest(nil, model, ctx, ProviderStreamOptions{})
+					wantInstructions = "You are a helpful assistant."
+				} else {
+					request = mustBuildOpenAIResponsesRequest(t, nil, model, ctx, ProviderStreamOptions{})
+				}
+				wantUpdate := "Updated system prompt section \"policy\":\n\nnew policy\n\nRemoved system prompt section \"removed\"."
+				if request.Instructions != wantInstructions || len(request.Input) != 2 || request.Input[0]["content"] != wantUpdate || request.Input[1]["role"] != "user" {
+					t.Fatalf("dynamic system update was treated as initial: %+v", request)
+				}
+			})
+		}
+	}
+}
+
 func TestResponsesAnchoredFunctionStreamBoundaries(t *testing.T) {
 	for _, mode := range []string{"incremental", "namespace changes", "conflicting terminal", "changed call identity", "call count bound", "partial", "cancel", "malformed capacity output", "http 400"} {
 		t.Run(mode, func(t *testing.T) {

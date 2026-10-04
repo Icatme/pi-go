@@ -1409,3 +1409,22 @@
   implementation or separate feature PR is needed. Independent read-only audit
   found no relevant bound bypass, reviewed the corrected documentation and
   passed `git diff --check`.
+
+## 2026-10-04: preserve dynamic declarations after failed-history filtering
+
+- Fixed the reviewed Responses regression where an error/aborted assistant at
+  the beginning of history was filtered out, moving a later system declaration
+  to index zero. The tool plan treated it as dynamic while the encoder treated
+  it as initial, dropping the tool from both declaration locations.
+- Record initial-system identity after protocol-specific system folding and
+  before message transformation. Use that identity for tool anchoring, initial
+  prompt exclusion and system-update rendering. This also preserves later
+  section updates on Responses and Codex when failed history is removed.
+- Added public CompleteSimple loopback request regressions for error/aborted
+  history, normal completion and genuine initial tools. Assert the declaration
+  occurs once before its user message and preserves namespace/item-ID replay.
+  Separate Responses/Codex cases cover section update and removal semantics.
+  The affected cases failed before the fix and pass after it.
+- Focused anchor/system regressions, root `go test -race ./... -count=1`,
+  `go vet ./...` and independent read-only review passed on Windows Go 1.26.4.
+  No live provider call, dependency change, commit or push was made.
