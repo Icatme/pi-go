@@ -192,7 +192,7 @@ func (r *Runner) resume(ctx context.Context, id CheckpointID, params ResumeParam
 		return transientOutcomeFromEnvelope(id, envelope), err
 	}
 
-	gate := newApprovalGate(r.approvalPolicy, decisionsByDigest(running.Decisions), r.definitionVersion)
+	gate := newApprovalGate(r.approvalPolicy, running.Decisions, r.definitionVersion)
 	coreStream := r.runner.ResumePendingToolCallsWithHooks(ctx, running.Snapshot, agent.LoopHooks{ToolGate: gate.evaluate})
 	next, runErr, end, toolActivity := consumeCoreStream(coreStream, emit)
 	return r.finishExecution(ctx, id, running, activeInterrupts, next, gate, runErr, end, toolActivity, emit)
@@ -310,6 +310,18 @@ func (r *Runner) save(ctx context.Context, id CheckpointID, expected Revision, e
 			return checkpointEnvelope{}, fmt.Errorf("%w: saved snapshot: %v", ErrInvalidCheckpoint, err)
 		}
 	}
+	// These bindings contain owned strings, not source argument objects. Preserve
+	// them across normalization, checking the serialized approval representation
+	// before trusting the cache. Decisions have no custom-serializable fields.
+	for index := range saved.Interrupts {
+		saved.Interrupts[index].bound = envelope.Interrupts[index].bound
+		if _, err := validateApprovalBinding(saved.DefinitionVersion, saved.Interrupts[index], saved.Snapshot); err != nil {
+			return checkpointEnvelope{}, fmt.Errorf("%w: saved approval: %v", ErrInvalidCheckpoint, err)
+		}
+	}
+	for index := range saved.Decisions {
+		saved.Decisions[index].bound = envelope.Decisions[index].bound
+	}
 	return saved, nil
 }
 
@@ -395,7 +407,7 @@ func applyResumeDecisions(envelope *checkpointEnvelope, params ResumeParams) ([]
 	for _, interrupt := range envelope.Interrupts {
 		decision, decided := params.Decisions[interrupt.Interrupt.ID]
 		if decided {
-			envelope.Decisions = append(envelope.Decisions, storedDecision{Digest: interrupt.Digest, Decision: decision})
+			envelope.Decisions = append(envelope.Decisions, storedDecision{Digest: interrupt.Digest, Decision: decision, bound: interrupt.bound})
 			continue
 		}
 		rotated, err := newInterruptID()
@@ -408,37 +420,59 @@ func applyResumeDecisions(envelope *checkpointEnvelope, params ResumeParams) ([]
 	return unresolved, nil
 }
 
-func decisionsByDigest(decisions []storedDecision) map[string]ResumeDecision {
-	result := make(map[string]ResumeDecision, len(decisions))
-	for _, stored := range decisions {
-		result[stored.Digest] = stored.Decision
-	}
-	return result
-}
-
 type pendingApproval struct {
-	digest  string
+	binding approvalBinding
 	request ToolApprovalRequest
 	message string
 }
 
+// Canonical strings own the exact approval input without retaining mutable
+// argument maps or calling custom marshalers during later equality checks.
+type approvalBinding struct {
+	definitionVersion  string
+	toolCallID         string
+	originalToolCallID string
+	toolName           string
+	rawArguments       string
+	arguments          string
+}
+
+// The digest remains a v1 persistence identifier. This unexported cache is
+// populated only after validating it, and is never serialized into checkpoints.
+type boundApproval struct {
+	digest  string
+	binding approvalBinding
+}
+
 type approvalGate struct {
 	policy            ApprovalPolicy
-	decisions         map[string]ResumeDecision
+	decisions         map[approvalBinding]ResumeDecision
+	legacyDecisions   map[string]ResumeDecision
 	definitionVersion string
 
 	mu        sync.Mutex
-	order     []string
-	suspended map[string]pendingApproval
+	order     []approvalBinding
+	suspended map[approvalBinding]pendingApproval
 }
 
-func newApprovalGate(policy ApprovalPolicy, decisions map[string]ResumeDecision, definitionVersion string) *approvalGate {
-	return &approvalGate{
+func newApprovalGate(policy ApprovalPolicy, decisions []storedDecision, definitionVersion string) *approvalGate {
+	gate := &approvalGate{
 		policy:            policy,
-		decisions:         decisions,
+		decisions:         make(map[approvalBinding]ResumeDecision, len(decisions)),
+		legacyDecisions:   make(map[string]ResumeDecision),
 		definitionVersion: definitionVersion,
-		suspended:         make(map[string]pendingApproval),
+		suspended:         make(map[approvalBinding]pendingApproval),
 	}
+	for _, stored := range decisions {
+		if stored.bound.digest != "" && stored.bound.digest == stored.Digest {
+			gate.decisions[stored.bound.binding] = stored.Decision
+		} else {
+			// Previously persisted partial decisions only contain a digest. Their
+			// final parser/hook arguments cannot be recovered from the snapshot.
+			gate.legacyDecisions[stored.Digest] = stored.Decision
+		}
+	}
+	return gate
 }
 
 func (g *approvalGate) evaluate(ctx context.Context, input agent.BeforeToolCallContext) (agent.ToolGateResult, error) {
@@ -446,7 +480,7 @@ func (g *approvalGate) evaluate(ctx context.Context, input agent.BeforeToolCallC
 	if err != nil {
 		return agent.ToolGateResult{}, err
 	}
-	if decision, ok := g.takeDecision(approval.digest); ok {
+	if decision, ok := g.takeDecision(approval.binding); ok {
 		switch decision.Action {
 		case DecisionActionApprove:
 			return agent.ToolGateResult{Action: agent.ToolGateActionAllow}, nil
@@ -473,20 +507,28 @@ func (g *approvalGate) evaluate(ctx context.Context, input agent.BeforeToolCallC
 	}
 	approval.message = requirement.Message
 	g.mu.Lock()
-	if _, exists := g.suspended[approval.digest]; !exists {
-		g.order = append(g.order, approval.digest)
-		g.suspended[approval.digest] = approval
+	if _, exists := g.suspended[approval.binding]; !exists {
+		g.order = append(g.order, approval.binding)
+		g.suspended[approval.binding] = approval
 	}
 	g.mu.Unlock()
 	return agent.ToolGateResult{Action: agent.ToolGateActionSuspend, Reason: requirement.Message}, nil
 }
 
-func (g *approvalGate) takeDecision(digest string) (ResumeDecision, bool) {
+func (g *approvalGate) takeDecision(binding approvalBinding) (ResumeDecision, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	decision, ok := g.decisions[digest]
+	decision, ok := g.decisions[binding]
 	if ok {
-		delete(g.decisions, digest)
+		delete(g.decisions, binding)
+		return decision, true
+	}
+	if len(g.legacyDecisions) > 0 {
+		digest := binding.legacyDigest()
+		decision, ok = g.legacyDecisions[digest]
+		if ok {
+			delete(g.legacyDecisions, digest)
+		}
 	}
 	return decision, ok
 }
@@ -495,8 +537,8 @@ func (g *approvalGate) suspendedApprovals() []pendingApproval {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	approvals := make([]pendingApproval, 0, len(g.order))
-	for _, digest := range g.order {
-		approval := g.suspended[digest]
+	for _, binding := range g.order {
+		approval := g.suspended[binding]
 		approval.request = cloneApprovalRequest(approval.request)
 		approvals = append(approvals, approval)
 	}
@@ -516,7 +558,29 @@ func makePendingApproval(definitionVersion string, call agent.ToolCall, args any
 	if err != nil {
 		return pendingApproval{}, fmt.Errorf("%w: raw tool arguments are not durable: %v", ErrInvalidCheckpoint, err)
 	}
-	binding := struct {
+	return pendingApproval{
+		binding: approvalBinding{
+			definitionVersion:  definitionVersion,
+			toolCallID:         call.ID,
+			originalToolCallID: originalID,
+			toolName:           call.Name,
+			rawArguments:       string(rawArguments),
+			arguments:          string(arguments),
+		},
+		request: ToolApprovalRequest{
+			ToolCallID:         call.ID,
+			OriginalToolCallID: call.OriginalID,
+			ToolName:           call.Name,
+			Arguments:          arguments,
+		},
+	}, nil
+}
+
+// Keep the original v1 serialization byte-for-byte for existing checkpoints.
+// Live matching uses canonical equality; hash only when persisting an interrupt,
+// validating a loaded digest, or matching a legacy partial decision.
+func (binding approvalBinding) legacyDigest() string {
+	input := struct {
 		Domain             string          `json:"domain"`
 		DefinitionVersion  string          `json:"definition_version"`
 		ToolCallID         string          `json:"tool_call_id"`
@@ -526,27 +590,17 @@ func makePendingApproval(definitionVersion string, call agent.ToolCall, args any
 		Arguments          json.RawMessage `json:"arguments"`
 	}{
 		Domain:             "pi-go.agent.tool-approval.v1",
-		DefinitionVersion:  definitionVersion,
-		ToolCallID:         call.ID,
-		OriginalToolCallID: originalID,
-		ToolName:           call.Name,
-		RawArguments:       rawArguments,
-		Arguments:          arguments,
+		DefinitionVersion:  binding.definitionVersion,
+		ToolCallID:         binding.toolCallID,
+		OriginalToolCallID: binding.originalToolCallID,
+		ToolName:           binding.toolName,
+		RawArguments:       json.RawMessage(binding.rawArguments),
+		Arguments:          json.RawMessage(binding.arguments),
 	}
-	payload, err := json.Marshal(binding)
-	if err != nil {
-		return pendingApproval{}, err
-	}
+	// Both raw messages were produced by canonicalJSON when binding was built.
+	payload, _ := json.Marshal(input)
 	digest := sha256.Sum256(payload)
-	return pendingApproval{
-		digest: hex.EncodeToString(digest[:]),
-		request: ToolApprovalRequest{
-			ToolCallID:         call.ID,
-			OriginalToolCallID: call.OriginalID,
-			ToolName:           call.Name,
-			Arguments:          append(json.RawMessage(nil), arguments...),
-		},
-	}, nil
+	return hex.EncodeToString(digest[:])
 }
 
 func canonicalToolCallArguments(arguments json.RawMessage) (json.RawMessage, error) {
@@ -591,6 +645,7 @@ func newStoredInterrupts(approvals []pendingApproval) ([]storedInterrupt, error)
 		if message == "" {
 			message = fmt.Sprintf("approval required for tool %q", approval.request.ToolName)
 		}
+		digest := approval.binding.legacyDigest()
 		interrupts = append(interrupts, storedInterrupt{
 			Interrupt: Interrupt{
 				ID:      id,
@@ -598,7 +653,8 @@ func newStoredInterrupts(approvals []pendingApproval) ([]storedInterrupt, error)
 				Message: message,
 				Tool:    cloneApprovalRequest(approval.request),
 			},
-			Digest: approval.digest,
+			Digest: digest,
+			bound:  boundApproval{digest: digest, binding: approval.binding},
 		})
 	}
 	return interrupts, nil
