@@ -1565,8 +1565,13 @@
 - Reuse the implementation baseline's successful six-job CI run 37255985674
   for master 2105613fc327b900998db83df278ab98c5a0a5f1. The final release commit
   must pass the existing CI workflow before publication.
-- Prepare cloud publication through a reviewed release workflow, because this
-  executor's direct GitHub CLI API access is unavailable. Release publication
-  requires an explicit release/vX.Y.Z branch at the tested master commit, a new
-  annotated tag, five CLI archives, checksums and downloaded-asset verification.
-  Existing tags and releases must never be overwritten.
+- Follow the existing release process entirely in the cloud: prepare five CLI
+  archives and checksums from the clean tested master commit, then publish a new
+  annotated tag and formal GitHub Release. Verify downloaded assets before
+  closeout. Existing tags and releases must never be overwritten; no new release
+  workflow, repository permission or account-access change is included.
+- Cloud Go 1.26.2 checks passed for the version change: `go test
+  -mod=readonly ./internal/cli -count=1`, and examples all-package tests and vet.
+  A blocked proxy zip was retrieved from its official Git source; no dependency
+  versions or checksum files changed. The cloud packaging helper receives
+  independent review plus syntax and actual archive validation.
