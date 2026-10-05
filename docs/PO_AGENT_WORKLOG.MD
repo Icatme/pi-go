@@ -1552,3 +1552,21 @@
   2,590,445 → 1,900,529 ns/op, 1,813,938 → 1,748,130 B/op, 109 → 106 allocs/op.
   Shared-host timing is indicative; canonical argument serialization is retained.
 - Implementation checkpoints and draft PR only; no merge or release.
+
+## 2026-10-05: prepare v0.14.0 in the cloud
+
+- Confirm the latest published tag/release is v0.13.0; the source-only 0.13.1
+  bump was never tagged. Choose v0.14.0 for the public native-tool sampling and
+  dynamic Responses declaration features since the last release, together with
+  the reviewed correctness and performance changes through PR #30.
+- Update pigo.Version and the examples dependency together; preserve all
+  third-party dependency versions. Record capability restrictions, full-history
+  requirements, and checkpoint v1 compatibility in the release notes.
+- Reuse the implementation baseline's successful six-job CI run 37255985674
+  for master 2105613fc327b900998db83df278ab98c5a0a5f1. The final release commit
+  must pass the existing CI workflow before publication.
+- Prepare cloud publication through a reviewed release workflow, because this
+  executor's direct GitHub CLI API access is unavailable. Release publication
+  requires an explicit release/vX.Y.Z branch at the tested master commit, a new
+  annotated tag, five CLI archives, checksums and downloaded-asset verification.
+  Existing tags and releases must never be overwritten.
