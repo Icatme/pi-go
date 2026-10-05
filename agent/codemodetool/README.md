@@ -24,6 +24,10 @@ readable namespace plus a 12-hex identity hash. Tool names exceeding the remaini
 64-byte identifier budget or requiring sanitization get a tool-identity hash
 suffix. `Binding.NamespacePrefix()` lets hosts reconnect only the exact original
 namespace for a saved alias; `Binding.ExportedName()` returns the complete alias.
+These short SHA-256 suffixes encode stable identity, not transport integrity;
+changing them would break saved aliases. Construction reuses each namespace
+prefix within that catalog only. Public binding lookups and later catalog
+builds derive aliases from their current names without a global cache.
 Exceptional namespace aliases changed from the previous combined-prefix hash;
 there are no legacy aliases. Duplicate final names
 and conflicting native/MCP namespace identities fail construction. Applications

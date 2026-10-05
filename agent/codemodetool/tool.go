@@ -118,7 +118,10 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 	definitions := make([]agent.ToolDefinition, 0, len(bindings))
 	templates := make([]codemode.Tool, 0, len(bindings))
 	projections := make(map[string]Projection, len(bindings))
-	namespaces := make(map[string]Projection)
+	namespaces := make(map[string]struct {
+		projection Projection
+		prefix     string
+	})
 	sequential := false
 	for _, binding := range bindings {
 		if binding.Projection != NativeValue && binding.Projection != MCPEnvelope {
@@ -130,11 +133,18 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 		if binding.Tool.ChildTools != nil || binding.Tool.ResolveChildTools != nil {
 			return agent.ToolDefinition{}, errors.New("codemodetool: recursive containers are unsupported")
 		}
-		if previous, exists := namespaces[binding.Namespace]; exists && previous != binding.Projection {
+		namespace, exists := namespaces[binding.Namespace]
+		if exists && namespace.projection != binding.Projection {
 			return agent.ToolDefinition{}, fmt.Errorf("codemodetool: conflicting namespace %q", binding.Namespace)
 		}
-		namespaces[binding.Namespace] = binding.Projection
-		name := exportedName(binding)
+		if !exists {
+			namespace.projection = binding.Projection
+			// Reuse namespace identity only inside this frozen catalog build.
+			// A later New call always derives it from the current binding.
+			namespace.prefix = binding.NamespacePrefix()
+			namespaces[binding.Namespace] = namespace
+		}
+		name := exportedNameWithPrefix(binding, namespace.prefix)
 		if _, exists := projections[name]; exists || name == options.Name {
 			return agent.ToolDefinition{}, fmt.Errorf("codemodetool: conflicting exported name %q", name)
 		}
@@ -568,19 +578,22 @@ func identifier(value string) bool {
 }
 
 func exportedName(binding Binding) string {
+	return exportedNameWithPrefix(binding, binding.NamespacePrefix())
+}
+
+func exportedNameWithPrefix(binding Binding, namespacePrefix string) string {
 	value := binding.Tool.Name
 	if binding.Projection == MCPEnvelope {
-		prefix := mcpNamespacePrefix(binding.Namespace)
-		value = prefix + value
+		value = namespacePrefix + value
 		if identifier(value) && len(value) <= 64 {
 			return value
 		}
 		tool := cleanIdentifier(binding.Tool.Name)
-		if len(tool) > 64-len(prefix)-14 {
-			tool = tool[:64-len(prefix)-14]
+		if len(tool) > 64-len(namespacePrefix)-14 {
+			tool = tool[:64-len(namespacePrefix)-14]
 		}
 		identity := sha256.Sum256([]byte(string(binding.Projection) + "\x00" + binding.Namespace + "\x00" + binding.Tool.Name))
-		return prefix + tool + "__" + hex.EncodeToString(identity[:6])
+		return namespacePrefix + tool + "__" + hex.EncodeToString(identity[:6])
 	}
 	if identifier(value) && len(value) <= 64 {
 		return value
