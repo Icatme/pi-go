@@ -444,6 +444,21 @@ func clearPendingToolControlState(snapshot *AgentSnapshot) {
 	snapshot.PendingToolControl = nil
 }
 
+// validatePendingToolArguments checks durability before any gate or executor
+// runs. Canonicalization and hashing are only needed when creating or checking
+// the binding of an actually suspended batch.
+func validatePendingToolArguments(assistant Message) error {
+	for i, call := range assistant.ToolCalls {
+		if len(call.Arguments) > 0 && !json.Valid(call.Arguments) {
+			return fmt.Errorf("agent: assistant tool call %d has invalid raw arguments: invalid JSON", i)
+		}
+		if _, err := json.Marshal(call.ParsedArgs); err != nil {
+			return fmt.Errorf("agent: assistant tool call %d has non-durable parsed arguments: %w", i, err)
+		}
+	}
+	return nil
+}
+
 func pendingToolBindingDigest(assistant Message, turn int) (string, error) {
 	type callBinding struct {
 		Index            int    `json:"index"`
@@ -1015,7 +1030,7 @@ func (e *Engine) executeToolCallsGated(ctx context.Context, definition AgentDefi
 	if err := validateNormalizedToolCallIDs(assistant.ToolCalls); err != nil {
 		return executedToolBatch{}, err
 	}
-	if _, err := pendingToolBindingDigest(assistant, 1); err != nil {
+	if err := validatePendingToolArguments(assistant); err != nil {
 		return executedToolBatch{}, err
 	}
 	toolMap := make(map[string]ToolDefinition, len(tools))

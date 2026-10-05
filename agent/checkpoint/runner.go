@@ -291,7 +291,13 @@ func (r *Runner) save(ctx context.Context, id CheckpointID, expected Revision, e
 	if err != nil {
 		return checkpointEnvelope{}, err
 	}
-	return decodeStoredCheckpoint(id, record)
+	if record.Revision != envelope.Revision {
+		return checkpointEnvelope{}, fmt.Errorf("%w: saved revision %d does not match expected revision %d", ErrInvalidCheckpoint, record.Revision, envelope.Revision)
+	}
+	// The trusted store commits the exact payload we just validated and encoded.
+	// Keep the owned envelope instead of decoding and revalidating its CAS echo.
+	// Records entering through Load still receive the full codec validation.
+	return envelope, nil
 }
 
 func (r *Runner) saveFinal(ctx context.Context, id CheckpointID, expected Revision, envelope checkpointEnvelope) (checkpointEnvelope, error) {
