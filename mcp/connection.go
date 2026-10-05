@@ -33,6 +33,32 @@ type Catalog struct {
 	Tools        []*sdk.Tool
 }
 
+// A frozen catalog owns decoded pages and their original tool JSON. SDK cache
+// hits reuse the observer's immutable binding identity; callers receive fresh
+// decoded tools, never storage owned by the frozen catalog or SDK.
+type frozenCatalog struct {
+	Catalog
+	pages []*catalogPage
+}
+
+type catalogPage struct {
+	cursor string
+	source *rawBinding
+	result sdk.ListToolsResult
+	tools  []json.RawMessage
+}
+
+func (c *frozenCatalog) page(cursor string) *catalogPage {
+	if c != nil {
+		for _, page := range c.pages {
+			if page.cursor == cursor {
+				return page
+			}
+		}
+	}
+	return nil
+}
+
 type Connection struct {
 	config      ServerConfig
 	scope       Scope
@@ -57,7 +83,7 @@ type Connection struct {
 	revision    atomic.Uint64
 	refreshMu   sync.Mutex
 	mu          sync.RWMutex
-	catalog     *Catalog
+	catalog     *frozenCatalog
 }
 
 type headerTransport struct {
@@ -318,12 +344,74 @@ func decode(raw []byte, value any) error {
 
 // ListTools preserves schemas from the associated true wire page, even when
 // the SDK returns a cached page. No typed serialization is used as a fallback.
-func (c *Connection) ListTools(ctx context.Context, p *sdk.ListToolsParams) (*sdk.ListToolsResult, error) {
-	out, _, err := c.listToolsPage(ctx, p)
-	return out, err
+func (c *Connection) ListTools(ctx context.Context, p *sdk.ListToolsParams) (out *sdk.ListToolsResult, err error) {
+	cursor := ""
+	if p != nil {
+		cursor = p.Cursor
+	}
+	var dispatched atomic.Bool
+	var source *rawBinding
+	ctx = WithDispatchCheck(ctx, func(context.Context) error {
+		// Cache hits never reach the byte boundary. Record real refreshes so
+		// failed responses can retire a catalog whose content is now unknown.
+		dispatched.Store(true)
+		return nil
+	})
+	defer func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		// Publish invalidation before returning the observation to the caller.
+		// An in-flight request alone does not prove a change: fencing it would
+		// reject concurrent tool schema checks even when all pages are equal.
+		if c.catalog == nil {
+			if dispatched.Load() {
+				c.revision.Add(1)
+			}
+			return
+		}
+		if c.catalog.Revision != c.revision.Load() {
+			return
+		}
+		if err != nil {
+			if dispatched.Load() {
+				c.revision.Add(1)
+			}
+			return
+		}
+		old := c.catalog.page(cursor)
+		if old != nil && old.source == source {
+			return
+		}
+		if old == nil || !bytes.Equal(old.source.raw, source.raw) {
+			c.revision.Add(1)
+			return
+		}
+		// Revalidate a genuinely new observation once with direct equality,
+		// then retain its identity without decoding/hashing the catalog again.
+		page := *old
+		page.source = source
+		frozen := *c.catalog
+		frozen.pages = slices.Clone(frozen.pages)
+		for i, existing := range frozen.pages {
+			if existing == old {
+				frozen.pages[i] = &page
+			}
+		}
+		c.catalog = &frozen
+	}()
+	result, observed, err := c.listToolsPage(ctx, p)
+	source = observed
+	if err != nil {
+		return nil, err
+	}
+	page, err := c.freezeToolPage(cursor, result, source)
+	if err != nil {
+		return nil, err
+	}
+	return &page.result, nil
 }
 
-func (c *Connection) listToolsPage(ctx context.Context, p *sdk.ListToolsParams) (*sdk.ListToolsResult, json.RawMessage, error) {
+func (c *Connection) listToolsPage(ctx context.Context, p *sdk.ListToolsParams) (*sdk.ListToolsResult, *rawBinding, error) {
 	r, stop, err := c.requestContext(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -333,46 +421,64 @@ func (c *Connection) listToolsPage(ctx context.Context, p *sdk.ListToolsParams) 
 	if err != nil {
 		return nil, nil, err
 	}
-	raw, err := c.raw(result)
+	source, err := c.observer.binding(result)
 	if err != nil {
 		return nil, nil, err
-	}
-	var out sdk.ListToolsResult
-	if err := decode(raw, &out); err != nil {
-		return nil, nil, err
-	}
-	// The SDK can reject tools with invalid protocol annotations. Raw number
-	// restoration must not resurrect a capability that the SDK discarded.
-	if len(out.Tools) != len(result.Tools) {
-		return nil, nil, errors.New("mcp: SDK rejected a raw directory entry")
-	}
-	for i, tool := range out.Tools {
-		if tool == nil || result.Tools[i] == nil || tool.Name != result.Tools[i].Name {
-			return nil, nil, errors.New("mcp: raw directory does not match SDK result")
-		}
-	}
-	var page struct {
-		Tools []struct {
-			Input  json.RawMessage `json:"inputSchema"`
-			Output json.RawMessage `json:"outputSchema"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal(raw, &page); err != nil || len(page.Tools) != len(out.Tools) {
-		return nil, nil, errors.New("mcp: malformed tool directory")
-	}
-	for i, t := range out.Tools {
-		if t == nil {
-			return nil, nil, errors.New("mcp: nil tool")
-		}
-		t.InputSchema = append(json.RawMessage(nil), page.Tools[i].Input...)
-		if len(page.Tools[i].Output) > 0 {
-			t.OutputSchema = append(json.RawMessage(nil), page.Tools[i].Output...)
-		}
 	}
 	if err := c.available(); err != nil {
 		return nil, nil, err
 	}
-	return &out, raw, nil
+	return result, source, nil
+}
+
+func (c *Connection) freezeToolPage(cursor string, result *sdk.ListToolsResult, source *rawBinding) (*catalogPage, error) {
+	raw := source.raw
+	if len(raw) > c.limits.MaxResponseBytes {
+		return nil, errors.New("mcp: response limit exceeded")
+	}
+	if err := jsontext.ValidateUnicode(raw); err != nil {
+		return nil, err
+	}
+	var out sdk.ListToolsResult
+	if err := decode(raw, &out); err != nil {
+		return nil, err
+	}
+	// The SDK can reject tools with invalid protocol annotations. Raw number
+	// restoration must not resurrect a capability that the SDK discarded.
+	if len(out.Tools) != len(result.Tools) {
+		return nil, errors.New("mcp: SDK rejected a raw directory entry")
+	}
+	for i, tool := range out.Tools {
+		if tool == nil || result.Tools[i] == nil || tool.Name != result.Tools[i].Name {
+			return nil, errors.New("mcp: raw directory does not match SDK result")
+		}
+	}
+	var page struct {
+		Tools []json.RawMessage `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &page); err != nil || len(page.Tools) != len(out.Tools) {
+		return nil, errors.New("mcp: malformed tool directory")
+	}
+	for i, t := range out.Tools {
+		if t == nil {
+			return nil, errors.New("mcp: nil tool")
+		}
+		var schemas struct {
+			Input  json.RawMessage `json:"inputSchema"`
+			Output json.RawMessage `json:"outputSchema"`
+		}
+		if err := json.Unmarshal(page.Tools[i], &schemas); err != nil {
+			return nil, err
+		}
+		t.InputSchema = schemas.Input
+		if len(schemas.Output) > 0 {
+			t.OutputSchema = schemas.Output
+		}
+	}
+	if err := c.available(); err != nil {
+		return nil, err
+	}
+	return &catalogPage{cursor: cursor, source: source, result: out, tools: page.Tools}, nil
 }
 
 func (c *Connection) CallTool(ctx context.Context, p *sdk.CallToolParams) (*sdk.CallToolResult, error) {
@@ -443,26 +549,44 @@ func (c *Connection) Refresh(ctx context.Context) (Catalog, error) {
 			snap.Resources = init.Capabilities.Resources != nil
 		}
 	}
-	digest := sha256.New()
 	toolsSupported := init != nil && init.Capabilities != nil && init.Capabilities.Tools != nil
 	seen := map[string]bool{}
 	names := map[string]bool{}
+	var pages []*catalogPage
 	cursor := ""
 	total := 0
+	unchanged := cached != nil
+	sameSources := cached != nil
 	for page := 0; toolsSupported && page < c.limits.MaxPages; page++ {
 		// Always ask the SDK: it owns cache notification and TTL invalidation.
 		// A cached SDK object keeps its original, genuinely observed raw page.
-		res, raw, err := c.listToolsPage(ctx, &sdk.ListToolsParams{Cursor: cursor})
+		res, source, err := c.listToolsPage(ctx, &sdk.ListToolsParams{Cursor: cursor})
 		if err != nil {
 			return Catalog{}, err
 		}
-		fmt.Fprintf(digest, "%d:", len(raw))
-		digest.Write(raw)
-		total += len(raw)
+		frozen := cached.page(cursor)
+		if frozen == nil || frozen.source != source {
+			sameSources = false
+			if frozen != nil && bytes.Equal(frozen.source.raw, source.raw) {
+				// TTL/legacy requests can observe identical bytes in a new SDK
+				// object. Revalidate once, keeping the decoded immutable page.
+				page := *frozen
+				page.source = source
+				frozen = &page
+			} else {
+				unchanged = false
+				frozen, err = c.freezeToolPage(cursor, res, source)
+				if err != nil {
+					return Catalog{}, err
+				}
+			}
+		}
+		pages = append(pages, frozen)
+		total += len(source.raw)
 		if total > c.limits.MaxCatalogBytes {
 			return Catalog{}, errors.New("mcp: catalog limit exceeded")
 		}
-		for _, t := range res.Tools {
+		for _, t := range frozen.result.Tools {
 			if t == nil || t.Name == "" || names[t.Name] {
 				return Catalog{}, errors.New("mcp: invalid or duplicate tool")
 			}
@@ -472,7 +596,7 @@ func (c *Connection) Refresh(ctx context.Context) (Catalog, error) {
 			}
 			snap.Tools = append(snap.Tools, t)
 		}
-		cursor = res.NextCursor
+		cursor = frozen.result.NextCursor
 		if cursor == "" {
 			break
 		}
@@ -484,7 +608,19 @@ func (c *Connection) Refresh(ctx context.Context) (Catalog, error) {
 			return Catalog{}, errors.New("mcp: directory page limit exceeded")
 		}
 	}
-	snap.SourceDigest = hex.EncodeToString(digest.Sum(nil))
+	unchanged = unchanged && len(pages) == len(cached.pages)
+	if unchanged {
+		snap.SourceDigest = cached.SourceDigest
+	} else {
+		// The public digest describes true wire bytes. Compute it once for a
+		// new frozen page set, never to recognize an SDK cache hit.
+		digest := sha256.New()
+		for _, page := range pages {
+			fmt.Fprintf(digest, "%d:", len(page.source.raw))
+			digest.Write(page.source.raw)
+		}
+		snap.SourceDigest = hex.EncodeToString(digest.Sum(nil))
+	}
 	if c.available() != nil || ctx.Err() != nil || c.revision.Load() != rev {
 		return Catalog{}, ErrStale
 	}
@@ -500,29 +636,35 @@ func (c *Connection) Refresh(ctx context.Context) (Catalog, error) {
 		c.mu.Unlock()
 		return Catalog{}, ErrStale
 	}
-	c.catalog = &snap
+	frozen := &frozenCatalog{Catalog: snap, pages: pages}
+	if sameSources && unchanged && cached.Revision == rev {
+		frozen = cached
+	}
+	c.catalog = frozen
 	c.mu.Unlock()
-	return cloneCatalog(snap)
+	return cloneCatalog(frozen)
 }
 
-func cloneCatalog(c Catalog) (Catalog, error) {
-	c.Tools = append([]*sdk.Tool(nil), c.Tools...)
-	for i, t := range c.Tools {
-		b, err := json.Marshal(t)
-		if err != nil {
-			return Catalog{}, err
+func cloneCatalog(frozen *frozenCatalog) (Catalog, error) {
+	c := frozen.Catalog
+	c.Tools = slices.Clone(c.Tools)
+	index := 0
+	for _, page := range frozen.pages {
+		for i, raw := range page.tools {
+			var copied sdk.Tool
+			if err := decode(raw, &copied); err != nil {
+				return Catalog{}, err
+			}
+			t := page.result.Tools[i]
+			if v, ok := t.InputSchema.(json.RawMessage); ok {
+				copied.InputSchema = append(json.RawMessage(nil), v...)
+			}
+			if v, ok := t.OutputSchema.(json.RawMessage); ok {
+				copied.OutputSchema = append(json.RawMessage(nil), v...)
+			}
+			c.Tools[index] = &copied
+			index++
 		}
-		var copied sdk.Tool
-		if err := decode(b, &copied); err != nil {
-			return Catalog{}, err
-		}
-		if v, ok := t.InputSchema.(json.RawMessage); ok {
-			copied.InputSchema = append(json.RawMessage(nil), v...)
-		}
-		if v, ok := t.OutputSchema.(json.RawMessage); ok {
-			copied.OutputSchema = append(json.RawMessage(nil), v...)
-		}
-		c.Tools[i] = &copied
 	}
 	return c, nil
 }

@@ -485,6 +485,17 @@ func (o *Observer) forgetLocked(result sdk.Result) {
 // A typed result from another connection or one whose bounded binding was evicted
 // fails explicitly; reserializing it is never a substitute for observation.
 func (o *Observer) Raw(result sdk.Result) (json.RawMessage, error) {
+	binding, err := o.binding(result)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.Clone(binding.raw), nil
+}
+
+// binding returns an immutable, observer-owned snapshot. Its identity may be
+// reused only after another lookup succeeds: eviction and invalidation still
+// reject an SDK cache hit whose real wire observation is no longer available.
+func (o *Observer) binding(result sdk.Result) (*rawBinding, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.closed || result == nil || !reflect.ValueOf(result).Comparable() {
@@ -494,7 +505,7 @@ func (o *Observer) Raw(result sdk.Result) (json.RawMessage, error) {
 	if binding == nil {
 		return nil, ErrRawSnapshotUnavailable
 	}
-	return bytes.Clone(binding.raw), nil
+	return binding, nil
 }
 
 // Forget releases a non-cached result after its caller has copied the raw data.

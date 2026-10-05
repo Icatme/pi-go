@@ -72,7 +72,13 @@ and cache TTL. Catalog snapshots carry identity, epoch, connection generation,
 revision and a digest of the real wire pages. Incoming notifications invalidate
 the corresponding raw bindings and reject older in-flight directory/resource
 responses before they can populate the SDK cache. Changed raw pages advance the
-catalog revision even without a notification. Detached schemas and structured
+catalog revision even without a notification. Connection-owned frozen pages reuse
+the observer's immutable binding identity on cache hits; the wire digest is
+computed only for a new page set. Detached tools decode their retained original
+JSON without reserializing the cached catalog. A real external `ListTools` refresh
+retires a changed or failed catalog before returning the observation, while
+unchanged schema re-lists preserve its revision and allow concurrent tool calls.
+Detached schemas and structured
 results retain `json.Number` lexemes; JavaScript still rejects unsafe Number
 values through the existing Codemode boundary.
 
