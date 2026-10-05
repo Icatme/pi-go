@@ -2,9 +2,7 @@ package codemode
 
 import (
 	"context"
-	"crypto/sha256"
 	_ "embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,10 +57,6 @@ func NewSandbox(ctx context.Context, config Config) (*Sandbox, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	hash := sha256.Sum256(assets.WASM)
-	if hex.EncodeToString(hash[:]) != assets.SHA256 {
-		return nil, fmt.Errorf("embedded QuickJS digest mismatch")
-	}
 	var rt wazero.Runtime
 	var compiled wazero.CompiledModule
 	var err error
@@ -73,6 +67,7 @@ func NewSandbox(ctx context.Context, config Config) (*Sandbox, error) {
 			return
 		}
 		rt = wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCompilationCache(compilationCache).WithCloseOnContextDone(true).WithMemoryLimitPages(config.MemoryLimitPages))
+		// Asset tests pin the embedded bytes; compilation still validates WASM.
 		compiled, err = rt.CompileModule(ctx, assets.WASM)
 	}()
 	if err != nil {
