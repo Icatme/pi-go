@@ -4,9 +4,41 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icatme/pi-go/codemode/internal/assets"
 )
+
+func TestSandboxCompilesEmbeddedModule(t *testing.T) {
+	// This test must remain serial: assets.WASM is shared by sandbox creation.
+	original := assets.WASM
+	t.Cleanup(func() { assets.WASM = original })
+
+	t.Run("valid module without a repeated digest check", func(t *testing.T) {
+		// Append an inert custom section named "audit". Asset tests independently
+		// pin the shipped module, while runtime creation only needs valid WASM.
+		assets.WASM = append(append([]byte(nil), original...), 0, 7, 5, 'a', 'u', 'd', 'i', 't', 0)
+		sandbox := sandboxForTest(t, DefaultConfig())
+		result, err := sandbox.Run(t.Context(), "text(3);", RunOptions{})
+		if err != nil || textOutput(result) != "3" {
+			t.Fatalf("valid module execution: result=%+v err=%v", result, err)
+		}
+	})
+
+	t.Run("invalid module rejected by compiler", func(t *testing.T) {
+		assets.WASM = []byte("invalid wasm")
+		sandbox, err := NewSandbox(t.Context(), DefaultConfig())
+		if sandbox != nil {
+			_ = sandbox.Close(t.Context())
+			t.Fatal("invalid module produced a sandbox")
+		}
+		if err == nil || !strings.Contains(err.Error(), "invalid magic number") {
+			t.Fatalf("expected WASM compiler validation error, got %v", err)
+		}
+	})
+}
 
 func TestConcurrentSandboxCreation(t *testing.T) {
 	const count = 8

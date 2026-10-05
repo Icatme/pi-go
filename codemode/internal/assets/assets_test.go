@@ -31,3 +31,13 @@ func TestPinnedArtifactAndLicenseSources(t *testing.T) {
 		}
 	}
 }
+
+// BenchmarkPinnedArtifactDigest measures the full-module scan retained by the
+// asset verification test, which sandbox construction no longer repeats.
+func BenchmarkPinnedArtifactDigest(b *testing.B) {
+	b.SetBytes(int64(len(WASM)))
+	b.ReportAllocs()
+	for b.Loop() {
+		sha256.Sum256(WASM)
+	}
+}
