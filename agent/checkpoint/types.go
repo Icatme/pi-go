@@ -102,6 +102,11 @@ type StoredCheckpoint struct {
 
 // Store provides optimistic, revisioned checkpoint persistence. Implementations
 // are a trusted boundary because checkpoint payloads can contain provider secrets.
+// A successful CompareAndSwap must commit the supplied payload unchanged and
+// return its record at revision expected+1. Runner normalizes its own encoded
+// payload and checks its pending binding after a successful write; it fully
+// validates records on Load.
+// Stores must own retained payload bytes and return ownership-isolated records.
 type Store interface {
 	Load(context.Context, CheckpointID) (StoredCheckpoint, error)
 	CompareAndSwap(context.Context, CheckpointID, Revision, []byte) (StoredCheckpoint, error)

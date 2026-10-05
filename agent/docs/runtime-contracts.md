@@ -450,6 +450,11 @@ pure and deterministic.
 
 The provided `MemoryStore` is process-local. The public `Store` contract is a
 trusted secret-bearing boundary: snapshots may contain provider credentials.
+A successful CAS commits the supplied payload unchanged at the next revision.
+The runner normalizes its own encoded payload after that write without validating
+the returned echo again. It checks the serialized pending batch's binding because
+custom parsed-argument marshalers can change values during encoding. Records read
+through `Load` still receive full format and approval-binding validation.
 `running` means busy, not proof of a crashed execution, and is never replayed
 automatically. A terminal CAS failure after possible side effects returns an
 observational `StatusIndeterminate` outcome with `Persisted=false`; the stored
