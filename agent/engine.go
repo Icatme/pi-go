@@ -452,8 +452,12 @@ func validatePendingToolArguments(assistant Message) error {
 		if len(call.Arguments) > 0 && !json.Valid(call.Arguments) {
 			return fmt.Errorf("agent: assistant tool call %d has invalid raw arguments: invalid JSON", i)
 		}
-		if _, err := json.Marshal(call.ParsedArgs); err != nil {
+		parsed, err := json.Marshal(call.ParsedArgs)
+		if err != nil {
 			return fmt.Errorf("agent: assistant tool call %d has non-durable parsed arguments: %w", i, err)
+		}
+		if !json.Valid(parsed) {
+			return fmt.Errorf("agent: assistant tool call %d has non-durable parsed arguments: invalid JSON", i)
 		}
 	}
 	return nil

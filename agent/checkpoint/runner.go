@@ -295,9 +295,22 @@ func (r *Runner) save(ctx context.Context, id CheckpointID, expected Revision, e
 		return checkpointEnvelope{}, fmt.Errorf("%w: saved revision %d does not match expected revision %d", ErrInvalidCheckpoint, record.Revision, envelope.Revision)
 	}
 	// The trusted store commits the exact payload we just validated and encoded.
-	// Keep the owned envelope instead of decoding and revalidating its CAS echo.
-	// Records entering through Load still receive the full codec validation.
-	return envelope, nil
+	// Decode our bytes once to retain JSON normalization and ownership isolation,
+	// without revalidating the CAS echo. Records from Load still use the full codec.
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var saved checkpointEnvelope
+	if err := decoder.Decode(&saved); err != nil {
+		return checkpointEnvelope{}, fmt.Errorf("%w: decode saved payload: %v", ErrInvalidCheckpoint, err)
+	}
+	// ParsedArgs can contain custom marshalers, so the serialized batch still
+	// needs to match its binding even though the store's echo is trusted.
+	if len(saved.Snapshot.PendingToolCalls) > 0 {
+		if err := validatePendingSnapshot(saved.Snapshot); err != nil {
+			return checkpointEnvelope{}, fmt.Errorf("%w: saved snapshot: %v", ErrInvalidCheckpoint, err)
+		}
+	}
+	return saved, nil
 }
 
 func (r *Runner) saveFinal(ctx context.Context, id CheckpointID, expected Revision, envelope checkpointEnvelope) (checkpointEnvelope, error) {
