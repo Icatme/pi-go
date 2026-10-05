@@ -84,7 +84,22 @@ func (s *FileArtifactStore) WriteArtifact(ctx context.Context, artifact Resource
 	if err := ctx.Err(); err != nil {
 		return ArtifactDescriptor{}, err
 	}
-	if len(artifact.Data) > s.maxBytes || artifact.Scope.Identity == "" || artifact.Scope.AuthEpoch == 0 || artifact.Server == "" || len(artifact.Server) > 128 || validURI(artifact.URI, 16<<10) != nil || artifact.SHA256 != artifactDigest(artifact.Data) {
+	// Public callers supply both the bytes and their digest. Keep validating
+	// that binding before accepting data from outside the resource converter.
+	if len(artifact.Data) > s.maxBytes || artifact.SHA256 != artifactDigest(artifact.Data) {
+		return ArtifactDescriptor{}, errors.New("mcpresources: invalid artifact binding or size")
+	}
+	return s.writeOwnedArtifact(ctx, artifact)
+}
+
+// writeOwnedArtifact accepts the private copy and digest constructed by
+// convertRead, or a request already checked by WriteArtifact. Rehashing those
+// bytes before writing would not verify their persistence on disk.
+func (s *FileArtifactStore) writeOwnedArtifact(ctx context.Context, artifact ResourceArtifact) (descriptor ArtifactDescriptor, err error) {
+	if err := ctx.Err(); err != nil {
+		return ArtifactDescriptor{}, err
+	}
+	if len(artifact.Data) > s.maxBytes || artifact.Scope.Identity == "" || artifact.Scope.AuthEpoch == 0 || artifact.Server == "" || len(artifact.Server) > 128 || validURI(artifact.URI, 16<<10) != nil {
 		return ArtifactDescriptor{}, errors.New("mcpresources: invalid artifact binding or size")
 	}
 	if _, err := validMIME(artifact.MIMEType, 256, ""); err != nil || artifact.MIMEType == "" {

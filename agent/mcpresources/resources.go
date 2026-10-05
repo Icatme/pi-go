@@ -448,7 +448,8 @@ func convertRead(ctx context.Context, scope managed.Scope, server, uri string, r
 			descriptor := ArtifactDescriptor{
 				ID: strings.Repeat("a", 128), ScopeKey: artifactScopeKey(scope), Scope: scope,
 				Server: server, URI: entry.URI, MIMEType: entry.MIMEType,
-				SHA256: artifactDigest(response.Contents[i].Blob), Bytes: len(response.Contents[i].Blob),
+				// Every SHA-256 hex digest occupies the same JSON space.
+				SHA256: strings.Repeat("0", 64), Bytes: len(response.Contents[i].Blob),
 			}
 			output.Contents[i].Artifact = &descriptor
 			preflightParts = append(preflightParts, agent.NewTextPart("MCP resource artifact: "+descriptor.ID))
@@ -471,7 +472,14 @@ func convertRead(ctx context.Context, scope managed.Scope, server, uri string, r
 		}
 		artifact := ResourceArtifact{Scope: scope, Server: server, URI: entry.URI, MIMEType: entry.MIMEType, Data: append([]byte(nil), response.Contents[i].Blob...)}
 		artifact.SHA256 = artifactDigest(artifact.Data)
-		descriptor, err := o.ArtifactSink.WriteArtifact(ctx, artifact)
+		var descriptor ArtifactDescriptor
+		var err error
+		if store, ok := o.ArtifactSink.(*FileArtifactStore); ok {
+			// Only the built-in store may reuse the digest of this owned copy.
+			descriptor, err = store.writeOwnedArtifact(ctx, artifact)
+		} else {
+			descriptor, err = o.ArtifactSink.WriteArtifact(ctx, artifact)
+		}
 		if err != nil {
 			return agent.ToolResult{}, fmt.Errorf("mcpresources: host artifact export failed: %w", err)
 		}

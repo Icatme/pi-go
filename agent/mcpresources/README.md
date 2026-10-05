@@ -47,6 +47,15 @@ retention, cleanup, and when to close the store. Complete exports may remain if
 a later permission/scope check rejects model publication; descriptors retain
 their original scope and cannot be treated as new-identity artifacts.
 
+Resource conversion hashes its private copy of each binary artifact once for
+the descriptor. Preflight reserves the fixed digest field size without reading
+the payload. The built-in file store reuses that digest on this internal path;
+direct `WriteArtifact` calls still check the caller's bytes against its digest.
+Custom sinks receive the private copy and digest through `ArtifactSink`, and
+their returned descriptor bindings are checked before publication. A digest
+computed before writing does not verify disk persistence; file write, short
+write, sync, and close errors are checked separately.
+
 Limits cover items, aggregate model/structured result bytes, text bytes, decoded
 blob bytes, URI/cursor length, MIME length, and image pixels. Exceeded limits
 reject the result, with remote completion facts preserved. `input_required`
