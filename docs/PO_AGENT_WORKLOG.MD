@@ -1522,3 +1522,33 @@
   evidence; no new live-provider or race validation for this metadata change.
 - User authorized committing and pushing master. This change does not create
   a release tag or GitHub Release.
+
+## 2026-10-05: SHA item 6, owned checkpoint approval bindings
+
+- Base: `fad41fb810b54449abb4bc124ed21ecef933b7e5` (merged PR25–27).
+  Live approval gates compare owned canonical definition/call identity, raw
+  arguments and final parser/hook arguments directly. They no longer serialize
+  and SHA-256 the binding envelope on each gate evaluation.
+- Keep the public API and v1 checkpoint bytes unchanged. Compute the existing
+  digest when persisting a new interrupt and validate it on Load, then carry
+  private immutable bindings through decisions and save normalization. Already
+  persisted partial decisions contain only the digest, so matching those uses
+  the legacy digest fallback; guessing their final hook arguments would be unsafe.
+- Retain PR27's post-custom-serialization pending-batch validation. The saved
+  approval representation is also compared with its owned binding before that
+  binding is reused. No equality or replay checks are removed.
+- Regressions cover canonical identity and ownership, a fixed v1 digest vector,
+  concurrent single-use owned/legacy approvals, and process restart after partial
+  approval followed by hook-argument drift. Existing custom serializer and
+  whole-batch reapproval tests remain passing.
+- Validation: `go test ./agent/checkpoint`, `go test -race ./agent/checkpoint
+  ./agent`, and `go test ./...` passed on Linux/amd64, Go 1.26.2. Independent
+  review found no blocking issue and reran checkpoint race tests successfully.
+  Live providers and the separate examples module were not run for this change.
+- `BenchmarkApprovalGateAllow` was copied unchanged into a detached baseline
+  worktree; both test binaries ran with `-test.cpu=1 -test.count=3` and allocations
+  enabled on AMD EPYC 9V74. Median baseline → changed: 64-byte arguments,
+  9,257 → 7,377 ns/op, 6,328 → 5,832 B/op, 79 → 76 allocs/op; 64-KiB arguments,
+  2,590,445 → 1,900,529 ns/op, 1,813,938 → 1,748,130 B/op, 109 → 106 allocs/op.
+  Shared-host timing is indicative; canonical argument serialization is retained.
+- Implementation checkpoints and draft PR only; no merge or release.

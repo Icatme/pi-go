@@ -37,11 +37,13 @@ type checkpointEnvelope struct {
 type storedInterrupt struct {
 	Interrupt Interrupt `json:"interrupt"`
 	Digest    string    `json:"digest"`
+	bound     boundApproval
 }
 
 type storedDecision struct {
 	Digest   string         `json:"digest"`
 	Decision ResumeDecision `json:"decision"`
+	bound    boundApproval
 }
 
 func newEnvelope(id CheckpointID, definitionVersion string, snapshot agent.AgentSnapshot) checkpointEnvelope {
@@ -272,6 +274,8 @@ func scanJSONValue(decoder *json.Decoder, depth int) error {
 	return nil
 }
 
+// Validation seeds private immutable binding caches in the owned interrupt
+// slice. Callers must exclusively own the envelope while validating it.
 func validateEnvelope(envelope checkpointEnvelope) error {
 	if envelope.Kind != checkpointEnvelopeKind {
 		return fmt.Errorf("%w: unexpected kind %q", ErrInvalidCheckpoint, envelope.Kind)
@@ -331,7 +335,7 @@ func validateEnvelope(envelope checkpointEnvelope) error {
 	interruptIDs := make(map[InterruptID]struct{}, len(envelope.Interrupts))
 	interruptDigests := make(map[string]struct{}, len(envelope.Interrupts))
 	interruptTargets := make(map[string]struct{}, len(envelope.Interrupts))
-	for _, stored := range envelope.Interrupts {
+	for index, stored := range envelope.Interrupts {
 		interrupt := stored.Interrupt
 		if strings.TrimSpace(string(interrupt.ID)) == "" || !validApprovalDigest(stored.Digest) {
 			return fmt.Errorf("%w: incomplete interrupt", ErrInvalidCheckpoint)
@@ -362,9 +366,11 @@ func validateEnvelope(envelope checkpointEnvelope) error {
 		if !approvalMatchesPending(interrupt.Tool, envelope.Snapshot.PendingToolCalls) {
 			return fmt.Errorf("%w: interrupt %q does not match a pending tool call", ErrInvalidCheckpoint, interrupt.ID)
 		}
-		if err := validateApprovalBinding(envelope.DefinitionVersion, stored, envelope.Snapshot); err != nil {
+		binding, err := validateApprovalBinding(envelope.DefinitionVersion, stored, envelope.Snapshot)
+		if err != nil {
 			return fmt.Errorf("%w: interrupt %q binding: %v", ErrInvalidCheckpoint, interrupt.ID, err)
 		}
+		envelope.Interrupts[index].bound = boundApproval{digest: stored.Digest, binding: binding}
 	}
 
 	decisionDigests := make(map[string]struct{}, len(envelope.Decisions))
@@ -459,9 +465,9 @@ func approvalMatchesPending(request ToolApprovalRequest, pending []agent.Pending
 	return false
 }
 
-func validateApprovalBinding(definitionVersion string, stored storedInterrupt, snapshot agent.AgentSnapshot) error {
+func validateApprovalBinding(definitionVersion string, stored storedInterrupt, snapshot agent.AgentSnapshot) (approvalBinding, error) {
 	if len(snapshot.Messages) == 0 {
-		return errors.New("missing assistant tool-call message")
+		return approvalBinding{}, errors.New("missing assistant tool-call message")
 	}
 	tail := snapshot.Messages[len(snapshot.Messages)-1]
 	var call *agent.ToolCall
@@ -473,31 +479,35 @@ func validateApprovalBinding(definitionVersion string, stored storedInterrupt, s
 		}
 	}
 	if call == nil {
-		return errors.New("approval request does not identify an assistant tool call")
+		return approvalBinding{}, errors.New("approval request does not identify an assistant tool call")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(stored.Interrupt.Tool.Arguments))
 	decoder.UseNumber()
 	var args any
 	if err := decoder.Decode(&args); err != nil {
-		return fmt.Errorf("decode displayed arguments: %w", err)
+		return approvalBinding{}, fmt.Errorf("decode displayed arguments: %w", err)
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		if err == nil {
 			err = errors.New("multiple JSON values")
 		}
-		return fmt.Errorf("decode displayed arguments: %w", err)
+		return approvalBinding{}, fmt.Errorf("decode displayed arguments: %w", err)
 	}
 	recomputed, err := makePendingApproval(definitionVersion, *call, args)
 	if err != nil {
-		return err
+		return approvalBinding{}, err
 	}
-	if recomputed.digest != stored.Digest {
-		return errors.New("digest does not match the displayed request and assistant call")
+	if stored.bound.digest == stored.Digest && stored.bound.digest != "" {
+		if recomputed.binding != stored.bound.binding {
+			return approvalBinding{}, errors.New("binding does not match the displayed request and assistant call")
+		}
+	} else if recomputed.binding.legacyDigest() != stored.Digest {
+		return approvalBinding{}, errors.New("digest does not match the displayed request and assistant call")
 	}
 	if !bytes.Equal(recomputed.request.Arguments, stored.Interrupt.Tool.Arguments) {
-		return errors.New("displayed arguments do not match the digest input")
+		return approvalBinding{}, errors.New("displayed arguments do not match the binding input")
 	}
-	return nil
+	return recomputed.binding, nil
 }
 
 func cloneInterrupts(interrupts []Interrupt) []Interrupt {

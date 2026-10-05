@@ -232,7 +232,7 @@ func TestCloneOutcomeDoesNotFallBackToAliasedNonDurableSnapshot(t *testing.T) {
 	}
 }
 
-func TestApprovalDigestBindsDefinitionVersion(t *testing.T) {
+func TestApprovalBindingBindsDefinitionVersion(t *testing.T) {
 	call := agent.ToolCall{ID: "call", Name: "tool", Arguments: json.RawMessage(`{}`)}
 	v1, err := makePendingApproval("v1", call, map[string]any{})
 	if err != nil {
@@ -242,8 +242,8 @@ func TestApprovalDigestBindsDefinitionVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("v2 binding: %v", err)
 	}
-	if v1.digest == v2.digest {
-		t.Fatal("definition version was not bound into approval digest")
+	if v1.binding == v2.binding {
+		t.Fatal("definition version was not bound into approval")
 	}
 }
 
