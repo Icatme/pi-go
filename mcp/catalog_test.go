@@ -71,9 +71,13 @@ func TestCatalogCacheOwnsFrozenPagesAndDetachedTools(t *testing.T) {
 	}
 }
 
-func TestCatalogExternalRefreshFencesBeforeResponse(t *testing.T) {
-	for _, fail := range []bool{false, true} {
-		t.Run(fmt.Sprintf("failure=%t", fail), func(t *testing.T) {
+func TestCatalogExternalRefreshInvalidatesBeforeReturn(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		changed bool
+		fail    bool
+	}{{name: "unchanged"}, {name: "changed", changed: true}, {name: "failed", fail: true}} {
+		t.Run(tc.name, func(t *testing.T) {
 			server := wireTestServer()
 			addWireTool(server, "fixture", func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 				return &sdk.CallToolResult{}, nil
@@ -94,11 +98,15 @@ func TestCatalogExternalRefreshFencesBeforeResponse(t *testing.T) {
 						case <-ctx.Done():
 							return nil, ctx.Err()
 						}
-						if fail {
+						if tc.fail {
 							return nil, errors.New("refresh failed")
 						}
 					}
-					return &sdk.ListToolsResult{Tools: []*sdk.Tool{{Name: "fixture", Description: fmt.Sprint(n), InputSchema: map[string]any{"type": "object"}}}}, nil
+					description := "original"
+					if tc.changed && n > 1 {
+						description = "changed"
+					}
+					return &sdk.ListToolsResult{Tools: []*sdk.Tool{{Name: "fixture", Description: description, InputSchema: map[string]any{"type": "object"}}}}, nil
 				}
 			})
 			_, c := newManagerFixture(t, server, true)
@@ -107,6 +115,7 @@ func TestCatalogExternalRefreshFencesBeforeResponse(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			original := c.catalog.pages[0]
 			done := make(chan error, 1)
 			go func() { _, err := c.ListTools(t.Context(), nil); done <- err }()
 			select {
@@ -114,18 +123,57 @@ func TestCatalogExternalRefreshFencesBeforeResponse(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("external refresh did not reach server")
 			}
-			if c.IsCurrent(first) {
-				t.Fatal("published catalog stayed current during an external wire refresh")
+			if !c.IsCurrent(first) {
+				t.Fatal("an unobserved response blocked concurrent schema checks")
 			}
 			releaseOnce.Do(func() { close(release) })
-			if err := <-done; (err != nil) != fail {
-				t.Fatalf("external refresh failure=%t: %v", fail, err)
+			if err := <-done; (err != nil) != tc.fail {
+				t.Fatalf("external refresh failure=%t: %v", tc.fail, err)
+			}
+			retired := tc.changed || tc.fail
+			if c.IsCurrent(first) == retired {
+				t.Fatalf("external refresh retired=%t, current=%t", retired, c.IsCurrent(first))
 			}
 			fresh, err := c.Refresh(t.Context())
-			if err != nil || fresh.Revision <= first.Revision || !c.IsCurrent(fresh) || c.IsCurrent(first) {
+			if err != nil || (fresh.Revision > first.Revision) != retired || !c.IsCurrent(fresh) || c.IsCurrent(first) == retired {
 				t.Fatalf("new catalog did not replace external refresh: revision=%d err=%v", fresh.Revision, err)
 			}
+			if !retired && (c.catalog.pages[0].source == original.source || c.catalog.pages[0].result.Tools[0] != original.result.Tools[0]) {
+				t.Fatal("unchanged real refresh did not retain decoded page with its new observation identity")
+			}
 		})
+	}
+}
+
+func TestCatalogExternalTTLRefreshInvalidatesPublishedSnapshot(t *testing.T) {
+	server := wireTestServer()
+	addWireTool(server, "fixture", func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return &sdk.CallToolResult{}, nil
+	})
+	var lists atomic.Int32
+	server.AddReceivingMiddleware(func(next sdk.MethodHandler) sdk.MethodHandler {
+		return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
+			if method != "tools/list" {
+				return next(ctx, method, req)
+			}
+			return &sdk.ListToolsResult{Cacheable: sdk.Cacheable{TTLMs: 200, CacheScope: "private"}, Tools: []*sdk.Tool{{Name: "fixture", Description: fmt.Sprint(lists.Add(1)), InputSchema: map[string]any{"type": "object"}}}}, nil
+		}
+	})
+	_, c := newManagerFixture(t, server, true)
+	first, err := c.Refresh(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ListTools(t.Context(), nil); err != nil || !c.IsCurrent(first) || lists.Load() != 1 {
+		t.Fatalf("public SDK hit retired the catalog: lists=%d err=%v", lists.Load(), err)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if _, err := c.ListTools(t.Context(), nil); err != nil || c.IsCurrent(first) || lists.Load() != 2 {
+		t.Fatalf("public TTL refresh retained stale catalog: lists=%d err=%v", lists.Load(), err)
+	}
+	fresh, err := c.Refresh(t.Context())
+	if err != nil || !c.IsCurrent(fresh) || fresh.Revision <= first.Revision || fresh.Tools[0].Description != "2" || lists.Load() != 2 {
+		t.Fatalf("catalog missed external SDK cache replacement: %+v err=%v", fresh, err)
 	}
 }
 
@@ -208,4 +256,45 @@ func TestCatalogConcurrentDetachedRefresh(t *testing.T) {
 		})
 	}
 	group.Wait()
+}
+
+func TestCatalogConcurrentUncachedRefresh(t *testing.T) {
+	server := wireTestServer()
+	addWireTool(server, "fixture", func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return &sdk.CallToolResult{}, nil
+	})
+	_, c := newManagerFixture(t, server, false)
+	first, err := c.Refresh(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var group sync.WaitGroup
+	for worker := range 8 {
+		group.Go(func() {
+			for range 12 {
+				if worker%2 == 0 {
+					catalog, err := c.Refresh(t.Context())
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					catalog.Tools[0].InputSchema.(json.RawMessage)[0] = '!'
+				} else {
+					page, err := c.ListTools(t.Context(), nil)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					page.Tools[0].InputSchema.(json.RawMessage)[0] = '!'
+				}
+				if !c.IsCurrent(first) {
+					t.Error("overlapping unchanged refresh invalidated the catalog")
+				}
+			}
+		})
+	}
+	group.Wait()
+	if fresh, err := c.Refresh(t.Context()); err != nil || !c.IsCurrent(fresh) || !c.IsCurrent(first) || fresh.Revision != first.Revision {
+		t.Fatalf("concurrent unchanged refreshes changed revision: %+v err=%v", fresh, err)
+	}
 }

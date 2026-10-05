@@ -76,8 +76,8 @@ catalog revision even without a notification. Connection-owned frozen pages reus
 the observer's immutable binding identity on cache hits; the wire digest is
 computed only for a new page set. Detached tools decode their retained original
 JSON without reserializing the cached catalog. A real external `ListTools` refresh
-temporarily fences the published catalog until its response is validated; changed
-or failed refreshes retire it, while unchanged schema re-lists preserve its revision.
+retires a changed or failed catalog before returning the observation, while
+unchanged schema re-lists preserve its revision and allow concurrent tool calls.
 Detached schemas and structured
 results retain `json.Number` lexemes; JavaScript still rejects unsafe Number
 values through the existing Codemode boundary.

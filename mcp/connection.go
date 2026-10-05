@@ -60,31 +60,30 @@ func (c *frozenCatalog) page(cursor string) *catalogPage {
 }
 
 type Connection struct {
-	config       ServerConfig
-	scope        Scope
-	generation   uint64
-	limits       Limits
-	session      *sdk.ClientSession
-	sessionDone  chan struct{}
-	sessionErr   error // published by closing sessionDone
-	observer     *Observer
-	oauth        *OAuth
-	process      *managedProcess
-	ctx          context.Context
-	cancel       context.CancelFunc
-	closed       atomic.Bool
-	stale        atomic.Bool
-	closeOnce    sync.Once
-	closeDone    chan struct{}
-	closeErr     error
-	authMu       sync.Mutex
-	authState    OAuthState
-	authPending  atomic.Int64
-	revision     atomic.Uint64
-	refreshMu    sync.Mutex
-	mu           sync.RWMutex
-	catalog      *frozenCatalog
-	catalogReads int // real external ListTools requests awaiting validation
+	config      ServerConfig
+	scope       Scope
+	generation  uint64
+	limits      Limits
+	session     *sdk.ClientSession
+	sessionDone chan struct{}
+	sessionErr  error // published by closing sessionDone
+	observer    *Observer
+	oauth       *OAuth
+	process     *managedProcess
+	ctx         context.Context
+	cancel      context.CancelFunc
+	closed      atomic.Bool
+	stale       atomic.Bool
+	closeOnce   sync.Once
+	closeDone   chan struct{}
+	closeErr    error
+	authMu      sync.Mutex
+	authState   OAuthState
+	authPending atomic.Int64
+	revision    atomic.Uint64
+	refreshMu   sync.Mutex
+	mu          sync.RWMutex
+	catalog     *frozenCatalog
 }
 
 type headerTransport struct {
@@ -206,7 +205,7 @@ func (c *Connection) Generation() uint64 { return c.generation }
 func (c *Connection) IsCurrent(catalog Catalog) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.available() == nil && c.catalogReads == 0 && catalog.Server == c.config.Name && catalog.Scope == c.scope && catalog.Generation == c.generation && catalog.Revision == c.revision.Load() && c.catalog != nil && c.catalog.SourceDigest == catalog.SourceDigest
+	return c.available() == nil && catalog.Server == c.config.Name && catalog.Scope == c.scope && catalog.Generation == c.generation && catalog.Revision == c.revision.Load() && c.catalog != nil && c.catalog.SourceDigest == catalog.SourceDigest
 }
 func (c *Connection) Config() ServerConfig {
 	return cloneServerConfig(c.config)
@@ -353,21 +352,17 @@ func (c *Connection) ListTools(ctx context.Context, p *sdk.ListToolsParams) (out
 	var dispatched atomic.Bool
 	var source *rawBinding
 	ctx = WithDispatchCheck(ctx, func(context.Context) error {
-		// Cache hits never reach the byte boundary. Fence a real refresh until
-		// its bytes are checked; unchanged legacy schema re-lists stay valid.
-		if dispatched.CompareAndSwap(false, true) {
-			c.mu.Lock()
-			c.catalogReads++
-			c.mu.Unlock()
-		}
+		// Cache hits never reach the byte boundary. Record real refreshes so
+		// failed responses can retire a catalog whose content is now unknown.
+		dispatched.Store(true)
 		return nil
 	})
 	defer func() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		if dispatched.Load() {
-			c.catalogReads--
-		}
+		// Publish invalidation before returning the observation to the caller.
+		// An in-flight request alone does not prove a change: fencing it would
+		// reject concurrent tool schema checks even when all pages are equal.
 		if c.catalog == nil {
 			if dispatched.Load() {
 				c.revision.Add(1)
@@ -544,11 +539,7 @@ func (c *Connection) Refresh(ctx context.Context) (Catalog, error) {
 	rev := c.revision.Load()
 	c.mu.RLock()
 	cached := c.catalog
-	reading := c.catalogReads != 0
 	c.mu.RUnlock()
-	if reading {
-		return Catalog{}, ErrStale
-	}
 	init := c.session.InitializeResult()
 	snap := Catalog{Server: c.config.Name, Scope: c.scope, Generation: c.generation, Revision: rev, Description: c.config.Description}
 	if init != nil {
@@ -565,6 +556,7 @@ func (c *Connection) Refresh(ctx context.Context) (Catalog, error) {
 	cursor := ""
 	total := 0
 	unchanged := cached != nil
+	sameSources := cached != nil
 	for page := 0; toolsSupported && page < c.limits.MaxPages; page++ {
 		// Always ask the SDK: it owns cache notification and TTL invalidation.
 		// A cached SDK object keeps its original, genuinely observed raw page.
@@ -574,10 +566,19 @@ func (c *Connection) Refresh(ctx context.Context) (Catalog, error) {
 		}
 		frozen := cached.page(cursor)
 		if frozen == nil || frozen.source != source {
-			unchanged = false
-			frozen, err = c.freezeToolPage(cursor, res, source)
-			if err != nil {
-				return Catalog{}, err
+			sameSources = false
+			if frozen != nil && bytes.Equal(frozen.source.raw, source.raw) {
+				// TTL/legacy requests can observe identical bytes in a new SDK
+				// object. Revalidate once, keeping the decoded immutable page.
+				page := *frozen
+				page.source = source
+				frozen = &page
+			} else {
+				unchanged = false
+				frozen, err = c.freezeToolPage(cursor, res, source)
+				if err != nil {
+					return Catalog{}, err
+				}
 			}
 		}
 		pages = append(pages, frozen)
@@ -631,12 +632,12 @@ func (c *Connection) Refresh(ctx context.Context) (Catalog, error) {
 		snap.Revision = rev
 	}
 	c.mu.Lock()
-	if c.available() != nil || c.catalogReads != 0 || c.revision.Load() != rev {
+	if c.available() != nil || c.revision.Load() != rev {
 		c.mu.Unlock()
 		return Catalog{}, ErrStale
 	}
 	frozen := &frozenCatalog{Catalog: snap, pages: pages}
-	if unchanged && cached.Revision == rev {
+	if sameSources && unchanged && cached.Revision == rev {
 		frozen = cached
 	}
 	c.catalog = frozen
@@ -646,7 +647,8 @@ func (c *Connection) Refresh(ctx context.Context) (Catalog, error) {
 
 func cloneCatalog(frozen *frozenCatalog) (Catalog, error) {
 	c := frozen.Catalog
-	c.Tools = make([]*sdk.Tool, 0, len(c.Tools))
+	c.Tools = slices.Clone(c.Tools)
+	index := 0
 	for _, page := range frozen.pages {
 		for i, raw := range page.tools {
 			var copied sdk.Tool
@@ -660,7 +662,8 @@ func cloneCatalog(frozen *frozenCatalog) (Catalog, error) {
 			if v, ok := t.OutputSchema.(json.RawMessage); ok {
 				copied.OutputSchema = append(json.RawMessage(nil), v...)
 			}
-			c.Tools = append(c.Tools, &copied)
+			c.Tools[index] = &copied
+			index++
 		}
 	}
 	return c, nil
