@@ -458,17 +458,21 @@ type approvalGate struct {
 func newApprovalGate(policy ApprovalPolicy, decisions []storedDecision, definitionVersion string) *approvalGate {
 	gate := &approvalGate{
 		policy:            policy,
-		decisions:         make(map[approvalBinding]ResumeDecision, len(decisions)),
-		legacyDecisions:   make(map[string]ResumeDecision),
 		definitionVersion: definitionVersion,
 		suspended:         make(map[approvalBinding]pendingApproval),
 	}
 	for _, stored := range decisions {
 		if stored.bound.digest != "" && stored.bound.digest == stored.Digest {
+			if gate.decisions == nil {
+				gate.decisions = make(map[approvalBinding]ResumeDecision)
+			}
 			gate.decisions[stored.bound.binding] = stored.Decision
 		} else {
 			// Previously persisted partial decisions only contain a digest. Their
 			// final parser/hook arguments cannot be recovered from the snapshot.
+			if gate.legacyDecisions == nil {
+				gate.legacyDecisions = make(map[string]ResumeDecision)
+			}
 			gate.legacyDecisions[stored.Digest] = stored.Decision
 		}
 	}

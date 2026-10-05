@@ -18,6 +18,10 @@ func TestApprovalBindingCanonicalIdentityAndOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Fixed v1 wire-format vector, independent of the current binding helper.
+	if got := original.binding.legacyDigest(); got != "98d2a8193e3cfcd451fe270c541aa4d78d3625cd5810de6271b70228a23e7dfe" {
+		t.Fatalf("v1 checkpoint digest changed: %s", got)
+	}
 	canonicalCall := call
 	canonicalCall.OriginalID = call.ID // The historical binding falls back to ID.
 	canonicalCall.Arguments = json.RawMessage("{ \"a\": 1, \"z\": 2 }")
@@ -34,22 +38,28 @@ func TestApprovalBindingCanonicalIdentityAndOwnership(t *testing.T) {
 
 	for _, field := range []string{"definition", "call", "original", "name", "raw", "final"} {
 		t.Run(field, func(t *testing.T) {
-			changed := equivalent.binding
+			changedCall := canonicalCall
+			version := "v1"
+			changedArgs := map[string]any{"value": json.Number("9007199254740993")}
 			switch field {
 			case "definition":
-				changed.definitionVersion = "v2"
+				version = "v2"
 			case "call":
-				changed.toolCallID = "other"
+				changedCall.ID = "other"
 			case "original":
-				changed.originalToolCallID = "other"
+				changedCall.OriginalID = "other"
 			case "name":
-				changed.toolName = "other"
+				changedCall.Name = "other"
 			case "raw":
-				changed.rawArguments = `{"a":2,"z":2}`
+				changedCall.Arguments = json.RawMessage(`{"a":2,"z":2}`)
 			case "final":
-				changed.arguments = `{"value":9007199254740992}`
+				changedArgs["value"] = json.Number("9007199254740992")
 			}
-			if changed == equivalent.binding || changed.legacyDigest() == equivalent.binding.legacyDigest() {
+			changed, err := makePendingApproval(version, changedCall, changedArgs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if changed.binding == equivalent.binding || changed.binding.legacyDigest() == equivalent.binding.legacyDigest() {
 				t.Fatal("changed approval input matched the original")
 			}
 		})
