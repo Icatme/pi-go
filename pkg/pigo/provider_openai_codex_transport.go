@@ -24,9 +24,11 @@ var (
 )
 
 type openAICodexWebSocketCacheKey struct {
-	endpoint  string
-	accountID string
-	sessionID string
+	endpoint   string
+	accountID  string
+	sessionID  string
+	originator string
+	userAgent  string
 }
 
 type cachedOpenAICodexWebSocketConnection struct {
@@ -162,14 +164,15 @@ func streamOpenAICodexSSE(
 }
 
 func buildOpenAICodexSSEHeaders(options ProviderStreamOptions, apiKey string, accountID string) map[string]string {
-	headers := mergeRequestHeaders(options.Headers, map[string]string{
+	headers := mergeRequestHeaders(map[string]string{
+		"originator": "pi",
+		"user-agent": openAICodexUserAgent(),
+	}, options.Headers, map[string]string{
 		"content-type":       "application/json",
 		"accept":             "text/event-stream",
 		"authorization":      "Bearer " + apiKey,
 		"chatgpt-account-id": accountID,
-		"originator":         "pi",
 		"openai-beta":        "responses=experimental",
-		"user-agent":         openAICodexUserAgent(),
 	})
 	if options.SessionID != "" {
 		headers = mergeRequestHeaders(headers, map[string]string{
@@ -197,6 +200,8 @@ func streamOpenAICodexWebSocket(
 	}
 
 	headers := http.Header{}
+	headers.Set("originator", "pi")
+	headers.Set("user-agent", openAICodexUserAgent())
 	for key, value := range options.Headers {
 		headers.Set(key, value)
 	}
@@ -205,11 +210,9 @@ func streamOpenAICodexWebSocket(
 	headers.Del("openai-beta")
 	headers.Set("authorization", "Bearer "+apiKey)
 	headers.Set("chatgpt-account-id", accountID)
-	headers.Set("originator", "pi")
 	headers.Set("openai-beta", openAICodexWebSocketBetaHeader)
 	headers.Set("x-client-request-id", requestID)
 	headers.Set("session_id", requestID)
-	headers.Set("user-agent", openAICodexUserAgent())
 
 	dialer := websocket.Dialer{}
 	requestContext := options.RequestContext
@@ -331,9 +334,11 @@ func acquireOpenAICodexWebSocket(
 		}, nil
 	}
 	cacheKey := openAICodexWebSocketCacheKey{
-		endpoint:  url,
-		accountID: accountID,
-		sessionID: sessionID,
+		endpoint:   url,
+		accountID:  accountID,
+		sessionID:  sessionID,
+		originator: headers.Get("originator"),
+		userAgent:  headers.Get("user-agent"),
 	}
 
 	openAICodexWebSocketCacheMu.Lock()

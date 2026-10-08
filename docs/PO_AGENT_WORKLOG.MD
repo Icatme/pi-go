@@ -1575,3 +1575,65 @@
   A blocked proxy zip was retrieved from its official Git source; no dependency
   versions or checksum files changed. The cloud packaging helper receives
   independent review plus syntax and actual archive validation.
+
+## 2026-10-08: Codex identity headers and thinking-specific sampling
+
+- Follow only the two user-selected Pi v1.1.0 behaviors: Codex identity header
+  precedence (`0cf65d2bf7cad7a58437a6c8a9172f29dbc43ea7`) and thinking-level
+  sampling (`76dfb88f63ce51ff2e3fe2ead4fcf1f65f71f121`). Mistral is excluded.
+- Reproduced the old SSE/WebSocket override failures with local HTTP servers.
+  Both transports now apply provider defaults before model/caller originator
+  and User-Agent headers. Credential-derived authorization/account headers and
+  transport headers remain protected. Header merging is case-insensitive and
+  does not mutate either input map.
+- Added SamplingParams and SamplingParamsByThinkingLevel to the model/options
+  surface. OpenAI Completions and Responses merge model defaults, effective pi
+  thinking-level overrides, then request keys, over named request fields.
+  Preserve explicit zero/null JSON values and isolate cloned maps. Other APIs
+  do not apply these maps; no provider, catalog or dependency is added.
+- Reproduced missing sampling payload fields and summary-only Responses
+  requests lacking medium reasoning. Responses normalization now retains the
+  logical pi level; wire translation happens at serialization/validation, so
+  aliases and repeated normalization cannot select a different sampling tier.
+  Consumers inspecting normalized Responses options now see logical levels,
+  rather than mapped provider wire strings. README documents this distinction.
+- Existing Responses capability/range validation checks the merged temperature
+  and top_p, including request overrides of named fields, before network I/O.
+  Tests cover direct/simple entry points, defaults and override precedence,
+  disabled reasoning, clamping, wire aliases, summary-only medium, option reuse,
+  invalid sampling, non-compatible APIs and cloned configuration isolation.
+- Validation passed on Windows with GOWORK=off and PIGO_LIVE_TEST=0:
+  root and examples `go test ./... -count=1 -timeout=120s`; focused pkg/pigo
+  sampling/header/capability/clone regressions with `-race -count=1`; root
+  `go vet ./...`; `git diff --check`. New behavior regressions failed before
+  implementation and passed afterward. No live-provider or UI validation.
+- Local changes only; no commit, push, tag, release or downstream changes.
+
+## 2026-10-08: review repairs and authorized master push
+
+- User authorized review, fixes and push. Fetched origin/master and integrated
+  its 19 intervening commits by fast-forward to 619c07d. Preserved local changes
+  in an identified stash during synchronization; the only conflict was the
+  worklog, resolved by retaining both dated histories. Keep upstream v0.14.0
+  metadata and all unrelated changes intact.
+- Reproduced and fixed four review findings with local regressions:
+  - A session socket could retain the previous originator/User-Agent after a
+    caller override. Include effective identity headers in its cache key;
+    equivalent header casing still reuses the connection.
+  - NaN in an overridden named temperature/top_p failed base serialization
+    before the valid sampling override was applied. Remove shadowed named
+    values from the serialization copy, preserving explicit null overrides.
+  - Whitespace around a Responses thinking level selected off sampling while
+    the wire used high. Trim the logical sampling input like the wire mapper.
+  - Sampling maps could replace model/reasoning/tools/stream after capability
+    and tool-plan validation. Reject protocol-control fields during request
+    serialization, before network I/O, instead of silently dropping them.
+    This is an intentional restriction relative to upstream's unrestricted
+    Object.assign; provider-specific sampling keys remain supported.
+- All four regressions failed before their fixes and now pass. Final Windows
+  validation on the synchronized tree passed with GOWORK=off, PIGO_LIVE_TEST=0:
+  root and examples `go test ./... -count=1 -timeout=120s`; full provider
+  `go test -race ./pkg/pigo -count=1 -timeout=120s`; root/examples `go vet ./...`;
+  root `go build ./...`; `git diff --check`. No live-provider calls or UI checks.
+- Commit and push only the reviewed header/sampling change and its tests/docs
+  to master. No tag, new release, dependency upgrade or Mistral change.

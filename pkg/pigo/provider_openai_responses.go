@@ -152,6 +152,7 @@ func buildOpenAIResponsesRequest(customTools map[string]string, model Model, ctx
 	if resolvedOptions.TopP != nil {
 		requestBody.TopP = resolvedOptions.TopP
 	}
+	requestBody.SamplingParams = resolveSamplingParams(model, ModelThinkingLevel(resolvedOptions.Reasoning), resolvedOptions.SamplingParams)
 	if resolvedOptions.SessionID != "" && resolvedOptions.CacheRetention != CacheRetentionNone {
 		requestBody.PromptCacheKey = resolvedOptions.SessionID
 	}
@@ -190,7 +191,7 @@ func buildOpenAIResponsesRequest(customTools map[string]string, model Model, ctx
 		}
 	}
 
-	if effort := string(resolvedOptions.Reasoning); effort != "" {
+	if effort := clampOpenAIResponsesReasoningEffort(model, resolvedOptions.Reasoning); effort != "" {
 		requestBody.Reasoning = &openAIResponsesReasoningOptions{
 			Effort:  effort,
 			Summary: resolvedOptions.ReasoningSummary,

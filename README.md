@@ -123,6 +123,38 @@ final := stream.Result()
 _ = final
 ```
 
+OpenAI Completions and Responses accept model and per-request sampling fields:
+
+```go
+model.SamplingParams = pigo.SamplingParams{"top_p": 0.95}
+model.SamplingParamsByThinkingLevel = pigo.SamplingParamsByThinkingLevel{
+	pigo.ModelThinkingLevelHigh: {"temperature": 0.8},
+}
+options := pigo.ProviderStreamOptions{
+	Reasoning: pigo.ThinkingLevelHigh,
+	SamplingParams: pigo.SamplingParams{"top_p": 0.5},
+}
+_ = options
+```
+
+Sampling fields merge per key: model defaults, then effective thinking-level
+overrides, then request `SamplingParams`. The merged fields override named
+`Temperature`/`TopP` fields, including explicit zero or null values. Responses
+validates the final temperature and top_p against its registered model capabilities.
+Protocol fields such as `model`, `reasoning`, `tools`, and `stream` are rejected
+in sampling maps; use the dedicated request options for those controls.
+Other APIs, including Codex, ignore these sampling maps. `Stream` and
+`StreamSimple` use the same precedence. Responses keeps the logical pi thinking
+level during option normalization and translates it at request serialization;
+a summary-only request uses `medium`.
+
+Codex SSE and WebSocket requests merge identity headers in this order: provider
+defaults, model headers, caller headers (case-insensitive). Callers can override
+`originator` and `User-Agent`; authorization and account headers remain derived
+from the resolved credential.
+Cached WebSocket sessions use the effective originator and User-Agent identity,
+and reuse requires both identity headers to match the handshake.
+
 ## Architecture Overview
 
 | Path | Responsibility |

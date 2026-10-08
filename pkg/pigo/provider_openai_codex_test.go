@@ -61,11 +61,11 @@ func TestCompleteSimpleOpenAICodexBuildsRequestAndParsesText(t *testing.T) {
 		if got := r.Header.Get("chatgpt-account-id"); got != "acc_test" {
 			t.Fatalf("expected account id header, got %q", got)
 		}
-		if got := r.Header.Get("originator"); got != "pi" {
-			t.Fatalf("expected pi originator header, got %q", got)
+		if got := r.Header.Get("originator"); got != "plugin" {
+			t.Fatalf("expected caller originator header, got %q", got)
 		}
-		if got := r.Header.Get("user-agent"); got != openAICodexUserAgent() {
-			t.Fatalf("expected pi user-agent %q, got %q", openAICodexUserAgent(), got)
+		if got := r.Header.Get("user-agent"); got != "plugin-agent/1.0" {
+			t.Fatalf("expected caller user-agent, got %q", got)
 		}
 		if got := r.Header.Get("x-plugin"); got != "enabled" {
 			t.Fatalf("expected custom plugin header, got %q", got)
@@ -1506,11 +1506,11 @@ func TestCompleteSimpleOpenAICodexAutoTransportDoesNotFallbackAfterWebSocketStar
 			if got := r.Header.Get("authorization"); got != "Bearer "+token {
 				t.Fatalf("expected protected websocket authorization header, got %q", got)
 			}
-			if got := r.Header.Get("originator"); got != "pi" {
-				t.Fatalf("expected pi websocket originator, got %q", got)
+			if got := r.Header.Get("originator"); got != "plugin" {
+				t.Fatalf("expected caller websocket originator, got %q", got)
 			}
-			if got := r.Header.Get("user-agent"); got != openAICodexUserAgent() {
-				t.Fatalf("expected pi websocket user-agent %q, got %q", openAICodexUserAgent(), got)
+			if got := r.Header.Get("user-agent"); got != "plugin-agent/1.0" {
+				t.Fatalf("expected caller websocket user-agent, got %q", got)
 			}
 			if got := r.Header.Get("accept"); got != "" {
 				t.Fatalf("expected websocket accept header to be removed, got %q", got)

@@ -34,8 +34,10 @@ func resolveOpenAIResponsesProviderOptions(model Model, options ProviderStreamOp
 		StreamOptions: streamOptionsFromProvider(model, options),
 	}
 
-	if resolved.Reasoning != "" {
-		resolved.Reasoning = ThinkingLevel(clampOpenAIResponsesReasoningEffort(model, resolved.Reasoning))
+	// Keep the pi level until request serialization. Provider wire aliases must
+	// not become keys in SamplingParamsByThinkingLevel on a later normalization.
+	if resolved.Reasoning == "" && model.Reasoning && strings.TrimSpace(resolved.ReasoningSummary) != "" {
+		resolved.Reasoning = ThinkingLevelMedium
 	}
 	if strings.TrimSpace(resolved.ReasoningSummary) == "" && resolved.Reasoning != "" {
 		resolved.ReasoningSummary = defaultReasoningSummary("")

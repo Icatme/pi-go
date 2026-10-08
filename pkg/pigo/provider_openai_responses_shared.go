@@ -28,6 +28,7 @@ type openAIResponsesRequest struct {
 	ParallelToolCalls    *bool                              `json:"parallel_tool_calls,omitempty"`
 	Temperature          *float64                           `json:"temperature,omitempty"`
 	TopP                 *float64                           `json:"top_p,omitempty"`
+	SamplingParams       SamplingParams                     `json:"-"`
 	Reasoning            *openAIResponsesReasoningOptions   `json:"reasoning,omitempty"`
 	ServiceTier          string                             `json:"service_tier,omitempty"`
 	Text                 *openAIResponsesTextOptions        `json:"text,omitempty"`

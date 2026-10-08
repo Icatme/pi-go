@@ -1,6 +1,7 @@
 package pigo
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -15,6 +16,18 @@ var (
 )
 
 func validateOpenAIResponsesSamplingOptions(model Model, options ProviderStreamOptions) error {
+	resolved := resolveOpenAIResponsesProviderOptions(model, options)
+	params := resolveSamplingParams(model, ModelThinkingLevel(resolved.Reasoning), options.SamplingParams)
+	var err error
+	options.Temperature, err = samplingNumber(params, "temperature", options.Temperature)
+	if err != nil {
+		return err
+	}
+	options.TopP, err = samplingNumber(params, "top_p", options.TopP)
+	if err != nil {
+		return err
+	}
+	options.Reasoning = ThinkingLevel(clampOpenAIResponsesReasoningEffort(model, resolved.Reasoning))
 	if options.Temperature == nil && options.TopP == nil {
 		return nil
 	}
@@ -57,6 +70,22 @@ func validateOpenAIResponsesSamplingOptions(model Model, options ProviderStreamO
 	}
 
 	return nil
+}
+
+func samplingNumber(params SamplingParams, name string, fallback *float64) (*float64, error) {
+	value, exists := params[name]
+	if !exists {
+		return fallback, nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: %v", errOpenAIResponsesSamplingInvalid, name, err)
+	}
+	var number *float64
+	if err := json.Unmarshal(data, &number); err != nil {
+		return nil, fmt.Errorf("%w: %s must be a number or null", errOpenAIResponsesSamplingInvalid, name)
+	}
+	return number, nil
 }
 
 func validateOpenAIResponsesSamplingReasoning(

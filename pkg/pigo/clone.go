@@ -5,6 +5,13 @@ import "encoding/json"
 func cloneModel(model Model) Model {
 	cloned := model
 	cloned.Capabilities = cloneModelCapabilities(model.Capabilities)
+	cloned.SamplingParams = cloneMap(model.SamplingParams)
+	if model.SamplingParamsByThinkingLevel != nil {
+		cloned.SamplingParamsByThinkingLevel = make(SamplingParamsByThinkingLevel, len(model.SamplingParamsByThinkingLevel))
+		for level, params := range model.SamplingParamsByThinkingLevel {
+			cloned.SamplingParamsByThinkingLevel[level] = cloneMap(params)
+		}
+	}
 	if len(model.Input) > 0 {
 		cloned.Input = append([]InputType(nil), model.Input...)
 	}
@@ -175,6 +182,8 @@ func cloneAny(value any) any {
 		return append([]string(nil), typed...)
 	case map[string]any:
 		return cloneMap(typed)
+	case SamplingParams:
+		return SamplingParams(cloneMap(typed))
 	case []any:
 		out := make([]any, len(typed))
 		for index, item := range typed {

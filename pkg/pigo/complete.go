@@ -19,6 +19,7 @@ type StreamOptions struct {
 	MaxTokens         int
 	Temperature       *float64
 	TopP              *float64
+	SamplingParams    SamplingParams
 	ParallelToolCalls *bool
 	Transport         Transport
 	CacheRetention    CacheRetention
@@ -112,6 +113,7 @@ type ProviderStreamOptions struct {
 	MaxTokens             int
 	Temperature           *float64
 	TopP                  *float64
+	SamplingParams        SamplingParams
 	ParallelToolCalls     *bool
 	Transport             Transport
 	CacheRetention        CacheRetention
@@ -146,6 +148,7 @@ type SimpleStreamOptions struct {
 	MaxTokens             int
 	Temperature           *float64
 	TopP                  *float64
+	SamplingParams        SamplingParams
 	ParallelToolCalls     *bool
 	Transport             Transport
 	CacheRetention        CacheRetention

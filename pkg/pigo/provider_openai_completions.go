@@ -22,6 +22,7 @@ type openAICompletionsRequest struct {
 	MaxTokens            int                             `json:"max_tokens,omitempty"`
 	MaxCompletionTokens  int                             `json:"max_completion_tokens,omitempty"`
 	Temperature          *float64                        `json:"temperature,omitempty"`
+	SamplingParams       SamplingParams                  `json:"-"`
 	Tools                []openAICompletionsTool         `json:"tools,omitempty"`
 	ToolChoice           any                             `json:"tool_choice,omitempty"`
 	ResponseFormat       any                             `json:"response_format,omitempty"`
@@ -328,6 +329,7 @@ func buildOpenAICompletionsRequest(model Model, ctx Context, options ProviderStr
 		}
 	}
 	request.Temperature = resolvedOptions.Temperature
+	request.SamplingParams = resolveSamplingParams(model, ModelThinkingLevel(resolvedOptions.Reasoning), resolvedOptions.SamplingParams)
 	request.ToolChoice = buildOpenAICompletionsToolChoice(resolvedOptions.ToolChoice)
 	request.ResponseFormat = buildOpenAICompletionsResponseFormat(resolvedOptions.ResponseFormat)
 	if resolvedOptions.CacheRetention == CacheRetentionLong && compat.SupportsLongCacheRetention && resolvedOptions.SessionID != "" {

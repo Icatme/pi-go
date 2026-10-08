@@ -16,6 +16,16 @@ type ThinkingBudgets struct {
 
 type ThinkingLevelMap map[ModelThinkingLevel]string
 
+// SamplingParams contains JSON sampling fields for OpenAI Completions and
+// Responses. These fields override the named request fields, including zero values.
+// Protocol controls (model, reasoning, tools, stream, etc.) are not sampling fields
+// and are rejected; use the corresponding request options instead.
+type SamplingParams map[string]any
+
+// SamplingParamsByThinkingLevel selects overrides by the effective pi thinking
+// level, before that level is translated to a provider's wire value.
+type SamplingParamsByThinkingLevel map[ModelThinkingLevel]SamplingParams
+
 type HostedToolCapabilities struct {
 	WebSearch  bool
 	Fetch      bool
@@ -61,20 +71,22 @@ type Usage struct {
 }
 
 type Model struct {
-	ID               string
-	Name             string
-	API              API
-	Provider         Provider
-	BaseURL          string
-	Reasoning        bool
-	ThinkingLevelMap ThinkingLevelMap
-	Capabilities     ModelCapabilities
-	Input            []InputType
-	HostedTools      HostedToolCapabilities
-	Cost             UsageCost
-	CostTiers        []ModelCostTier
-	ContextWindow    int
-	MaxTokens        int
-	Headers          map[string]string
-	Compat           ProviderCompat
+	ID                            string
+	Name                          string
+	API                           API
+	Provider                      Provider
+	BaseURL                       string
+	Reasoning                     bool
+	ThinkingLevelMap              ThinkingLevelMap
+	SamplingParams                SamplingParams
+	SamplingParamsByThinkingLevel SamplingParamsByThinkingLevel
+	Capabilities                  ModelCapabilities
+	Input                         []InputType
+	HostedTools                   HostedToolCapabilities
+	Cost                          UsageCost
+	CostTiers                     []ModelCostTier
+	ContextWindow                 int
+	MaxTokens                     int
+	Headers                       map[string]string
+	Compat                        ProviderCompat
 }
