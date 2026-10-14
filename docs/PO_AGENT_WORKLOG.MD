@@ -1865,3 +1865,24 @@
   recorded above. Validate the version bump locally and rely on exact-commit
   CI for the release-wide platform checks. No additional live-model calls,
   downstream repository edits, UI acceptance or new release workflow.
+- Exact-release CI 38527695410 exposed an existing Windows OAuth lock race in
+  TestOAuthFileStoreCrossProcessCAS: Mkdir returned ERROR_ACCESS_DENIED while
+  another process's directory deletion was pending. A normal local stress run
+  did not reproduce it, so added a deterministic Windows fixture that marks
+  the lock for deletion while keeping its handle open. The regression fails
+  before the fix with the same public storage failure.
+- Preserve the exclusive directory-lock protocol. Windows creation now uses
+  NtCreateFile(FILE_CREATE), distinguishing STATUS_DELETE_PENDING and existing
+  name collisions from permission errors before Win32 collapses the status.
+  Close the creation handle immediately; keep the existing contention deadline,
+  cancellation and stale-lock handling. Other operating systems still use
+  Mkdir. Reuse the existing x/sys version; no library or lock-format migration.
+  Windows tests cover pending deletion, acquisition after the final handle
+  closes, real ACL denial without retry, and extended-length paths. The native
+  status and directory lifetime follow Microsoft NtCreateFile/RemoveDirectory
+  documentation. Replace only the unpublished local release tag after the fix;
+  rebuild all artifacts and require the new exact commit's full CI to pass.
+- The Windows deletion-pending regression passes after the fix. All OAuth
+  file-store regressions pass for 12 race-enabled iterations using Go 1.26.2
+  (the CI toolchain); root all-package tests and vet pass with Go 1.26.4.
+  Reference: https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile

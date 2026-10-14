@@ -285,9 +285,8 @@ func (s *FileCredentialStore) publish(ctx context.Context, data []byte) error {
 func (s *FileCredentialStore) lock(ctx context.Context) (func() error, error) {
 	// A fixed lock pathname makes the compare/read/write one transaction across
 	// independent store objects and processes, rather than just a Go mutex.
-	// Mkdir has no persistent file handle. A CREATE_NEW lock file can instead
-	// return ERROR_ACCESS_DENIED when another Windows process races its deletion
-	// with an open attempt; that is not a credential write failure or an ErrExist.
+	// Creation must distinguish existing/delete-pending ownership from a real
+	// permission failure. Windows exposes that distinction through NTSTATUS.
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 	lockPath := s.path + ".lock"
@@ -295,17 +294,17 @@ func (s *FileCredentialStore) lock(ctx context.Context) (func() error, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		err := os.Mkdir(lockPath, 0700)
-		if err == nil {
+		created, err := authCreateLockDirectory(lockPath)
+		if err != nil {
+			return nil, authStoreCause("lock", err)
+		}
+		if created {
 			return func() error {
 				if err := os.Remove(lockPath); err != nil {
 					return authStoreCause("unlock", err)
 				}
 				return nil
 			}, nil
-		}
-		if !errors.Is(err, os.ErrExist) {
-			return nil, authStoreCause("lock", err)
 		}
 		timer := time.NewTimer(20 * time.Millisecond)
 		select {
