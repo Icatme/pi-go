@@ -1843,3 +1843,25 @@
   executable, explicit model selection, MaxRetries=0 and the temporary process
   credential only. No environment file, stored authentication or dependencies
   were changed. No UI testing or release/tag is part of this update.
+
+## 2026-10-14: Publish v0.15.0
+
+- User requested a new pi-go release containing the Command Code catalog and
+  live-validation fixes. Latest published version is v0.14.0; choose v0.15.0
+  for the new model/protocol support and public sampling configuration surface.
+  Include master changes 8d958d9, fe8f5d5 and 48c9a4f, update pigo.Version and
+  the examples requirement together, and retain all third-party versions.
+- Release notes describe native endpoint selection, bounded upgrade-required
+  fallback, opaque reasoning replay, supported effort clamping and Luna PNG
+  preparation. Call out lossy JPEG/white compositing and local decoding limits,
+  plan-dependent access, logical Responses thinking levels and Go 1.26.2.
+- Follow the existing publication process: verify the final release commit's
+  six CI jobs, build five CGO-disabled CLI targets from a clean checkout, check
+  embedded VCS revision/clean flags and Unix executable modes, and publish a
+  new annotated tag plus formal GitHub Release with SHA256SUMS.txt. Download
+  and verify every asset and check public Go module resolution. Keep generated
+  packaging and publication evidence under ignored dist/release-v0.15.0.
+- Reuse the completed implementation tests and paid synthetic model probes
+  recorded above. Validate the version bump locally and rely on exact-commit
+  CI for the release-wide platform checks. No additional live-model calls,
+  downstream repository edits, UI acceptance or new release workflow.
