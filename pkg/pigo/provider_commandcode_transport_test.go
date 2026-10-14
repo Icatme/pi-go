@@ -525,11 +525,14 @@ func TestCommandCodeNativeTwoTurnReasoningAndTools(t *testing.T) {
 		api     API
 		first   string
 		final   string
+		thought string
 	}{
-		{name: "Claude", modelID: "claude-fable-5", api: "anthropic-messages", first: commandCodeClaudeToolRoundSSE(), final: commandCodeClaudeFinalSSE()},
+		{name: "Claude", modelID: "claude-fable-5", api: "anthropic-messages", first: commandCodeClaudeToolRoundSSE(), final: commandCodeClaudeFinalSSE(), thought: "plan"},
+		{name: "Claude opaque thinking", modelID: "claude-haiku-5-5", api: "anthropic-messages", first: strings.ReplaceAll(commandCodeClaudeToolRoundSSE(), `"thinking":"plan"`, `"thinking":""`), final: commandCodeClaudeFinalSSE()},
 		{name: "Completions", modelID: "gpt-5.6-luna", api: "openai-completions",
-			first: `data: {"model":"gpt-5.6-luna","choices":[{"index":0,"delta":{"reasoning_content":"plan","tool_calls":[{"index":0,"id":"call_first","type":"function","function":{"name":"read","arguments":"{\"path\":\"a.go\"}"}}]},"finish_reason":null}]}` + "\n\n" + `data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":3}}` + "\n\ndata: [DONE]\n\n",
-			final: `data: {"choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":2}}` + "\n\ndata: [DONE]\n\n"},
+			thought: "plan",
+			first:   `data: {"model":"gpt-5.6-luna","choices":[{"index":0,"delta":{"reasoning_content":"plan","tool_calls":[{"index":0,"id":"call_first","type":"function","function":{"name":"read","arguments":"{\"path\":\"a.go\"}"}}]},"finish_reason":null}]}` + "\n\n" + `data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":3}}` + "\n\ndata: [DONE]\n\n",
+			final:   `data: {"choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":2}}` + "\n\ndata: [DONE]\n\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			bodies := []map[string]any{}
@@ -557,7 +560,7 @@ func TestCommandCodeNativeTwoTurnReasoningAndTools(t *testing.T) {
 				t.Fatalf("first native result lost provenance: %+v", first)
 			}
 			thought, ok := first.Content[0].(ThinkingContent)
-			if !ok || thought.Thinking != "plan" || thought.ThinkingSignature == "" {
+			if !ok || thought.Thinking != test.thought || thought.ThinkingSignature == "" {
 				t.Fatalf("first reasoning missing: %+v", first.Content)
 			}
 			for _, event := range events {
@@ -586,7 +589,7 @@ func TestCommandCodeNativeTwoTurnReasoningAndTools(t *testing.T) {
 			assistant := commandCodeRecord(messages[1])
 			if test.api == "anthropic-messages" {
 				parts := commandCodeAnySlice(assistant["content"])
-				if len(parts) != 2 || commandCodeRecord(parts[0])["type"] != "thinking" || commandCodeRecord(parts[0])["signature"] != "signed-plan" || commandCodeRecord(parts[0])["thinking"] != "plan" || commandCodeRecord(parts[1])["type"] != "tool_use" {
+				if len(parts) != 2 || commandCodeRecord(parts[0])["type"] != "thinking" || commandCodeRecord(parts[0])["signature"] != "signed-plan" || commandCodeRecord(parts[0])["thinking"] != test.thought || commandCodeRecord(parts[1])["type"] != "tool_use" {
 					t.Fatalf("Claude signed tool history changed: %+v", assistant)
 				}
 				toolResult := commandCodeRecord(commandCodeAnySlice(commandCodeRecord(messages[2])["content"])[0])
@@ -672,5 +675,29 @@ func TestCommandCodeNativeRejectsForeignThinkingOrigins(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCommandCodeGenerateClampsReasoning(t *testing.T) {
+	for _, test := range []struct {
+		id    string
+		level ThinkingLevel
+		want  string
+	}{
+		{"Qwen/Qwen3.8-Omni-Flash", ThinkingLevelHigh, "xhigh"},
+		{"Qwen/Qwen3.8-Omni-Flash", " high ", "xhigh"},
+		{"Qwen/Qwen3.8-Omni-Flash", ThinkingLevelMinimal, "low"},
+		{"Qwen/Qwen3.8-Omni-Flash", "off", ""},
+		{"Qwen/Qwen3.8-Omni-Flash", "", ""},
+		{"Qwen/Qwen3.7-Flash", ThinkingLevelHigh, ""},
+		{"unknown-model", ThinkingLevelHigh, ""},
+	} {
+		t.Run(string(test.level), func(t *testing.T) {
+			model := newCommandCodeModel(test.id, test.id, 100000, 4096, UsageCost{})
+			request, _, err := buildCommandCodeRequest(model, Context{}, ProviderStreamOptions{Reasoning: test.level})
+			if err != nil || request.Params.ReasoningEffort != test.want {
+				t.Fatalf("effort=%q want=%q err=%v", request.Params.ReasoningEffort, test.want, err)
+			}
+		})
 	}
 }

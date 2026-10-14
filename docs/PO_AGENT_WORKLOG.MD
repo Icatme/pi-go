@@ -1699,3 +1699,147 @@
   origin and confirmed master matched the local baseline before committing.
   Scope remains Command Code models/protocols, related tests and documentation;
   no release or live inference was performed.
+
+## 2026-10-14: Command Code live model capability verification
+
+- User requested real inference checks for reasoning, tool calls and image
+  input. Built the package test executable with GOWORK=off, then ran only the
+  explicitly gated `TestCommandCodeCapabilitiesLive` with selected model IDs.
+  Requests use synthetic prompts, a locally generated four-color PNG, and a
+  random nonce returned by an in-memory tool. No user documents or credentials
+  appear in logged evidence. Each call caps output at 4096 tokens, times out at
+  90 seconds, and disables automatic retries.
+- Current runtime credentials are identified by the service as the Go plan.
+  `/provider/v1/responses` returns 403 `permission_error/upgrade_required`, so
+  the existing adapter selects `/alpha/generate`. Messages returns 403
+  `permission_error` without the upgrade code and is not broadened into a
+  generic permission-error fallback. Public catalog discovery succeeds, but
+  no native Messages/Responses inference succeeded with these credentials.
+- DeepSeek V4.1 Flash (`deepseek/deepseek-v4.1-flash`, high): all three checks
+  passed through generate. Arithmetic returned 423 with 88 nonempty thinking
+  deltas; one tool call had the expected name/arguments and consumed the random
+  result on the next turn; PNG quadrants returned red,blue,green,yellow.
+- Qwen 3.8 Omni Flash (`Qwen/Qwen3.8-Omni-Flash`, xhigh): final probe passed all
+  three checks, with 91 nonempty thinking deltas for the arithmetic request and
+  correct tool replay/image answer. The first probe requested unsupported high,
+  which the generate adapter omitted; it produced a correct numeric answer with
+  unwanted prose. Its independent image request also emitted a literal
+  `</think>` and duplicate answer. Select a supported effort in the harness and
+  retain these observed output-format anomalies; a later pass does not prove
+  output stability.
+- GPT-6 Luna (`gpt-6-luna`, high): tool call/result replay passed twice. No raw
+  reasoning-delta events arrived in either reasoning attempt (one had only
+  reasoning-start/end). Arithmetic returned 278 first and 423 on diagnostic
+  reproduction. Image recognition twice returned yellow,yellow,green,green
+  instead of red,blue,green,yellow. The diagnostic payload checks confirmed the
+  requested model/effort and unmodified image bytes. This is a failed live
+  validation; no parser filtering or retry was added to hide the result.
+- Claude Haiku 5.5 and Gemini 4 Argon remain unverified: the generate endpoint
+  explicitly rejects them with MODEL_NOT_IN_PLAN, requiring GOAT+ and Pro+
+  respectively. No subscription or billing settings were changed. Official
+  https://commandcode.ai/docs/plans/goat#api-support confirms Go lacks Provider
+  API access and GOAT includes it; eligible credentials are needed to complete
+  native protocol checks.
+- Added `pkg/pigo/provider_commandcode_capabilities_live_test.go` with the
+  additional PIGO_COMMANDCODE_LIVE_MODELS opt-in, live-catalog lookup, bounded
+  requests, protocol/error-shape evidence, input-byte assertions and strict
+  output checks. Offline focused Command Code tests, pkg/pigo vet and diff
+  whitespace checks pass with PIGO_LIVE_TEST=0. No production code changed;
+  this test and work-log update remain local, without a new commit or push.
+
+### GOAT credential follow-up and Luna image diagnosis
+
+- The user supplied `CommadCode_GOAT` in `V:\env\.env`. Read only that entry
+  into the test process's canonical COMMAND_CODE_API_KEY environment variable;
+  never printed or copied its value into repository files. The new credential
+  succeeds directly on `/provider/v1/messages` and `/provider/v1/responses`,
+  without the Go-plan generate fallback.
+- Claude Haiku 5.5: arithmetic, tool call/result replay and PNG input pass on
+  Messages. Adaptive/high reasoning returns a thinking block and an empty
+  thinking delta plus a nonempty signature (1604/1692 characters in diagnostic
+  samples); raw thinking text length is zero. The parsed ThinkingContent keeps
+  that signature. This is opaque signed reasoning, not a missing parser delta.
+  The live check now distinguishes signed reasoning from visible thinking and
+  does not claim the former exposes a reasoning stream.
+- DeepSeek V4.1 Flash: all three checks pass on native Responses. Arithmetic
+  returns 423 with 72 nonempty thinking deltas; tool replay and the same PNG
+  fixture succeed. This completes native-protocol evidence previously blocked
+  by the Go credential.
+- GPT-6 Luna: native Responses arithmetic returns 423 with 105 nonempty
+  reasoning-summary deltas; tool call and result replay pass. The earlier
+  missing-delta finding was observed on the Go/generate path, whose raw stream
+  did not contain text deltas for reasoning. It is not a general inability of
+  Luna or pi-go to stream reasoning through the native API.
+- Luna PNG recognition still fails with the new key. The same synthetic image
+  has red/blue/green/yellow quadrants; pi-go sends unchanged image bytes, yet
+  native Responses returns yellow/yellow/green/green. Bypassed pi-go entirely
+  using bounded standard-library HTTP requests: Responses returned
+  yellow/yellow/green/yellow and Chat Completions yellow/yellow/green/cyan for
+  the PNG. A separately encoded RGB PNG with no scanline filtering/compression
+  also failed (yellow/yellow/green/red), ruling out a Go PNG filter/compression
+  detail as the explanation. Each fixture was decoded locally and its quadrant
+  center pixels checked before transmission.
+- The same image encoded as JPEG (quality 95) returns red/blue/green/yellow in
+  two direct HTTP probes and the pi-go Responses probe. DeepSeek recognizes
+  the original PNG using the same direct Responses request. Evidence therefore
+  localizes the remaining fault to the upstream Command Code/Luna PNG handling
+  or recognition path; it does not identify which upstream internal layer is
+  responsible. No automatic image conversion or production fallback was added.
+  Representative Luna request IDs: PNG Responses gen_01M4WJRVFCYX55HHCV6MVHTBQR;
+  PNG Chat gen_01M4WJRZCD70JND9RD5MSCQ34F; unfiltered PNG
+  gen_01M4WJVM2M8FWXS6Z9F3FV214G; JPEG through pi-go
+  gen_01M4WJZBYR27D19FV4F04KGY45.
+- The gated test supports PIGO_COMMANDCODE_LIVE_IMAGE_FORMAT=png|jpeg (default
+  png), logs only event types, field sizes and safe protocol parameters, and
+  preserves strict image assertions. Final live Haiku/DeepSeek suite and Luna
+  JPEG probe pass; Luna PNG remains a documented failure. Focused offline
+  Command Code tests, pkg/pigo vet and diff whitespace checks pass. Production
+  code, persisted environment settings and the prior pushed commit are
+  unchanged; test/work-log changes remain local.
+
+### Model adaptation fixes after GOAT live validation
+
+- User approved automatic PNG-to-JPEG preparation for Command Code GPT-6 Luna.
+  The adapter now converts user and tool-result PNGs before protocol selection,
+  using Go's standard library, JPEG quality 95, unchanged dimensions and a white
+  background for transparency. Caller history stays unchanged; already prepared
+  JPEGs are not re-encoded. Other models and formats retain their original data.
+  Invalid PNG/base64 and excessive dimensions fail before HTTP. Local decode
+  limits are 32 MiB PNG data, 64 Mi pixels and JPEG's 65535-pixel side limit.
+- Fixed the shared Anthropic serializer dropping signed thinking with empty
+  visible text. Same-model/provider/protocol replay now retains the exact empty
+  thinking field and signature; foreign opaque signatures and unsigned empty
+  blocks remain excluded. Two-turn Command Code regression coverage reproduces
+  the original dropped block and verifies the corrected wire payload.
+- Generate requests now trim and clamp requested reasoning levels against model
+  metadata, matching native routing: Qwen 3.8 high selects xhigh and minimal
+  selects low; off, non-reasoning and non-selectable models omit the effort.
+- Regression tests failed before the fixes and pass afterward. Added image
+  tests for alpha compositing, unchanged dimensions, caller immutability,
+  idempotence, unaffected models, malformed/oversized headers, and actual
+  Responses/Completions/upgrade-to-generate payloads. Replaced the older Luna
+  fake-PNG fixture with a real PNG. README documents conversion and limits.
+- GOAT live validation after production changes: Haiku 5.5 and Qwen 3.8 Omni
+  Flash pass reasoning, tool call/result replay and image checks. Luna passes
+  tools and the original PNG fixture through automatic JPEG preparation
+  (gen_01M4WKXMDTXBTRE5XP9K2EX4WT). No retry or protocol fallback was needed.
+- The first Luna reasoning check returned the correct answer plus encrypted
+  reasoning, with no visible deltas. The harness previously only recognized
+  opaque Anthropic signatures; it now requires a real Responses encrypted
+  payload when visible deltas are absent, and checks that payload on replay.
+  A follow-up Luna run returned 108 visible reasoning deltas and successfully
+  replayed its encrypted block (gen_01M4WM1KTCP109X2FCXXH2V54S followed by
+  gen_01M4WM1RKJPNZEEK0WESKGHETQ).
+- Haiku's opaque signature replay is verified on real Messages requests,
+  including exact signature presence in the outbound payload. One arithmetic
+  answer was Markdown-bold 423; the semantic arithmetic check now permits a
+  single bold/code wrapper while rejecting extra prose or wrong numbers.
+  The final focused run passes both reasoning and continuation, with a
+  1700-character opaque signature and no visible thinking text
+  (msg_011Cg1iTazVPmvfbKatZjAgD -> msg_011Cg1iTnss5h3mfzyvvJix9).
+- Validation: root and examples go test ./... pass; root go vet ./... and
+  go build ./... pass; focused Command Code/Anthropic/Kimi/Transform race tests
+  pass. Final focused regression tests pass. Live checks use a compiled test
+  executable, explicit model selection, MaxRetries=0 and the temporary process
+  credential only. No environment file, stored authentication or dependencies
+  were changed. No UI testing or release/tag is part of this update.

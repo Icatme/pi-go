@@ -72,7 +72,7 @@ func TestCommandCodeResponsesWireAndToolReplay(t *testing.T) {
 					t.Errorf("Command Code must use the system role: %+v", input)
 				}
 				encodedInput, _ := json.Marshal(input)
-				if !strings.Contains(string(encodedInput), `"type":"input_image"`) || !strings.Contains(string(encodedInput), `"image_url":"data:image/png;base64,aGVsbG8="`) {
+				if !strings.Contains(string(encodedInput), `"type":"input_image"`) || !strings.Contains(string(encodedInput), `"image_url":"data:image/jpeg;base64,`) {
 					t.Errorf("image prompt not preserved: %s", encodedInput)
 				}
 				if level == "off" {
@@ -111,7 +111,7 @@ func TestCommandCodeResponsesWireAndToolReplay(t *testing.T) {
 			defer server.Close()
 			model := newCommandCodeProviderModule().Models["gpt-6-luna"]
 			model.BaseURL = server.URL
-			ctx := Context{SystemPrompt: "Follow instructions", Tools: []Tool{{Name: "read", Parameters: map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}}}}, Messages: []Message{UserMessage{Content: []ContentBlock{TextContent{Text: "inspect"}, ImageContent{Data: "aGVsbG8=", MIMEType: "image/png"}}}}}
+			ctx := Context{SystemPrompt: "Follow instructions", Tools: []Tool{{Name: "read", Parameters: map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}}}}, Messages: []Message{UserMessage{Content: []ContentBlock{TextContent{Text: "inspect"}, commandCodePNGFixture(t)}}}}
 			options := SimpleStreamOptions{APIKey: "cc-key", Reasoning: level, MaxTokens: 4096}
 			stream := StreamSimple(model, ctx, options)
 			events := collectCommandCodeEvents(stream)

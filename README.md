@@ -330,6 +330,19 @@ Models keep `API=commandcode-custom` for routing; returned assistant messages re
 their actual wire API so reasoning signatures replay only across matching protocols.
 The Responses adapter preserves Command Code's incremental reasoning events,
 uses system-role prompts and omits optional reasoning controls for `off`.
+Requested reasoning levels are clamped to the model's advertised efforts on
+both native and generate routes (for example, Qwen 3.8 `high` selects `xhigh`).
+Claude signed thinking blocks are preserved for native replay even when their
+visible thinking text is empty.
+
+For Command Code `gpt-6-luna`, PNG inputs are converted to JPEG before sending
+to avoid an upstream PNG recognition defect observed on 2026-10-14. This applies
+to user and tool-result images on all routes: dimensions are preserved, JPEG
+quality is 95, and transparency is composited onto white. Conversion is lossy;
+the caller's original image data remains unchanged. Invalid PNGs fail locally.
+Local conversion limits are 32 MiB of PNG data, 64 Mi pixels, and 65535 pixels per
+side. Other models and image formats are sent unchanged.
+
 Unknown dynamic model capabilities remain unknown; their zero price estimate
 does not mean free usage. Prices are display snapshots, including context-based
 tiers; DeepSeek estimates use off-peak rates rather than live billing rates.

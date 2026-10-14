@@ -58,6 +58,34 @@ func TestAnthropicEmptyThinkingSignatureModelCapability(t *testing.T) {
 	}
 }
 
+func TestAnthropicOpaqueThinkingReplayIsolation(t *testing.T) {
+	model := Model{ID: "claude-haiku-5-5", API: "anthropic-messages", Provider: "commandcode"}
+	for _, source := range []Model{
+		model,
+		{ID: "other", API: model.API, Provider: model.Provider},
+		{ID: model.ID, API: "commandcode-custom", Provider: model.Provider},
+		{ID: model.ID, API: model.API, Provider: "anthropic"},
+	} {
+		prior := AssistantMessage{Model: source.ID, API: source.API, Provider: source.Provider, Content: []ContentBlock{
+			ThinkingContent{ThinkingSignature: "opaque-signature"},
+			ThinkingContent{},
+			TextContent{Text: "answer"},
+		}}
+		messages := convertAnthropicMessagesWithCache([]Message{prior}, model, nil, false, nil, nil)
+		content := messages[0].Content.([]any)
+		if source.ID == model.ID && source.API == model.API && source.Provider == model.Provider {
+			if len(content) != 2 {
+				t.Fatalf("signed opaque thinking lost or unsigned empty thinking retained: %+v", content)
+			}
+			if block, ok := content[0].(anthropicThinkingBlock); !ok || block.Thinking != "" || block.Signature != "opaque-signature" {
+				t.Fatalf("signed opaque block changed: %+v", content[0])
+			}
+		} else if len(content) != 1 {
+			t.Fatalf("foreign opaque thinking must not replay: %+v", content)
+		}
+	}
+}
+
 func TestZAICNPromptExceedsMaxLengthIsOverflow(t *testing.T) {
 	message := createErrorMessage(`{"error":{"code":"1261","message":"Prompt exceeds max length"}}`)
 	message.Provider = "zai"

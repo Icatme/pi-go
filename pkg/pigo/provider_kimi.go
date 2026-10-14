@@ -1021,7 +1021,9 @@ func convertAssistantContent(blocks []ContentBlock, isOAuth bool, hostedTools []
 				})
 				continue
 			}
-			if strings.TrimSpace(typed.Thinking) == "" {
+			// Signed opaque thinking may have no visible text. Preserve the
+			// exact block for same-model replay, including its empty thinking field.
+			if strings.TrimSpace(typed.Thinking) == "" && strings.TrimSpace(typed.ThinkingSignature) == "" {
 				continue
 			}
 			if strings.TrimSpace(typed.ThinkingSignature) == "" && !allowEmptySignature {

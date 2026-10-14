@@ -6,10 +6,11 @@ import (
 )
 
 func commandCodeReasoningEffort(model Model, level ThinkingLevel) string {
+	level = ThinkingLevel(strings.TrimSpace(string(level)))
 	if !model.Reasoning || level == "" || level == "off" {
 		return ""
 	}
-	return model.ThinkingLevelMap[ModelThinkingLevel(level)]
+	return model.ThinkingLevelMap[ClampThinkingLevel(model, ModelThinkingLevel(level))]
 }
 
 func commandCodeUUID(value string) bool {
@@ -50,16 +51,21 @@ func commandCodeImageContext(model Model, ctx Context) (Context, error) {
 		switch m := message.(type) {
 		case UserMessage:
 			if blocks, ok := m.Content.([]ContentBlock); ok {
-				for _, block := range blocks {
+				blocks = cloneBlocks(blocks)
+				for i, block := range blocks {
 					if image, ok := block.(ImageContent); ok {
 						if !allowImages {
 							return Context{}, fmt.Errorf("selected Command Code model does not support image content in user messages")
 						}
-						if _, err := commandCodeImage(image); err != nil {
+						prepared, err := commandCodePrepareImage(model, image)
+						if err != nil {
 							return Context{}, err
 						}
+						blocks[i] = prepared
 					}
 				}
+				m.Content = blocks
+				message = m
 			}
 		case ToolResultMessage:
 			m.Content = cloneBlocks(m.Content)
@@ -71,9 +77,11 @@ func commandCodeImageContext(model Model, ctx Context) (Context, error) {
 						omitted = true
 						continue
 					}
-					if _, err := commandCodeImage(image); err != nil {
+					prepared, err := commandCodePrepareImage(model, image)
+					if err != nil {
 						return Context{}, err
 					}
+					block = prepared
 				}
 				blocks = append(blocks, block)
 			}
