@@ -306,23 +306,34 @@ Support-file boundaries:
 - `01_auth.json` is test-only and ignored by git
 - library runtime auth should normally be passed explicitly via options or auth config; `commandcode` additionally supports the upstream user-home auth files listed below
 
-The `commandcode` provider follows `pi-commandcode-provider` v0.6.4's provider
-transport and model capability catalog. `pigo login commandcode` opens the browser-assisted login flow and
+The `commandcode` provider uses the 2026-10-14 public catalog (89 chat models),
+with capabilities and estimated prices from `pi-commandcode-provider` v0.7.7
+and the latest Gemini 4 Argon/Muse Wonder metadata from `command-code` 1.82.1.
+`pigo login commandcode` opens the browser-assisted login flow and
 stores the returned API key in `.pigo/auth.json`. Runtime lookup also accepts
 `COMMAND_CODE_API_KEY` (or `COMMANDCODE_API_KEY`), `SimpleStreamOptions.APIKey`, caller-supplied
 `AuthConfig`, and the supported Command Code/pi/OMP auth-file shapes under the
 user home directory: `.commandcode/auth.json`, `.omp/agent/auth.json`, and
 `.pi/agent/auth.json`.
 
-Generation prefers `/provider/v1/chat/completions`, or
-`/provider/v1/messages` for Claude models. Only an HTTP 403 with
+Discovery selects the wire protocol from `supported_endpoints`: Messages,
+then Responses, then Chat Completions. Models advertising only non-chat
+endpoints (such as `/systemone`) are excluded. The selected protocol is stored
+in `Model.Compat` as `CommandCodeCompat` and retained in the catalog cache.
+Catalogs or manually constructed models without endpoint metadata keep the
+Claude Messages / other-model Chat Completions selection.
+Only an HTTP 403 with
 `upgrade_required` selects `/alpha/generate`; authentication errors, network
 failures, rate limits, and other provider errors do not trigger that fallback.
 The selection is isolated by endpoint and credential.
 Models keep `API=commandcode-custom` for routing; returned assistant messages retain
-their actual wire API so reasoning signatures replay only across matching protocols. Model capabilities,
-reasoning efforts, image encoding, and pricing follow the v0.6.4 snapshot;
-unknown dynamic model capabilities remain unknown. Generated responses that
+their actual wire API so reasoning signatures replay only across matching protocols.
+The Responses adapter preserves Command Code's incremental reasoning events,
+uses system-role prompts and omits optional reasoning controls for `off`.
+Unknown dynamic model capabilities remain unknown; their zero price estimate
+does not mean free usage. Prices are display snapshots, including context-based
+tiers; DeepSeek estimates use off-peak rates rather than live billing rates.
+Generated responses that
 report an upstream/network failure in their finish metadata are errors.
 Completed reasoning is not replayed through the generate protocol, and missing
 tool results are represented explicitly. `CMD_ZDR=1` (or `COMMANDCODE_ZDR=1`) requests strict zero data

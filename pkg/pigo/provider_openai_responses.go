@@ -209,6 +209,7 @@ func resolveOpenAIResponsesToolChoice(toolChoice string) string {
 }
 
 type resolvedOpenAIResponsesCompat struct {
+	SupportsDeveloperRole           bool
 	SendSessionIDHeader             bool
 	SupportsLongCacheRetention      bool
 	SupportsExplicitPromptCacheMode bool
@@ -217,6 +218,7 @@ type resolvedOpenAIResponsesCompat struct {
 
 func resolveOpenAIResponsesCompat(model Model) resolvedOpenAIResponsesCompat {
 	resolved := resolvedOpenAIResponsesCompat{
+		SupportsDeveloperRole:      true,
 		SendSessionIDHeader:        true,
 		SupportsLongCacheRetention: true,
 		SupportsMaxOutputTokens:    true,
@@ -224,6 +226,9 @@ func resolveOpenAIResponsesCompat(model Model) resolvedOpenAIResponsesCompat {
 	compat, ok := model.Compat.(*OpenAIResponsesCompat)
 	if !ok || compat == nil {
 		return resolved
+	}
+	if compat.SupportsDeveloperRole != nil {
+		resolved.SupportsDeveloperRole = *compat.SupportsDeveloperRole
 	}
 	if compat.SendSessionIdHeader != nil {
 		resolved.SendSessionIDHeader = *compat.SendSessionIdHeader

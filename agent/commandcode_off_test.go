@@ -23,7 +23,7 @@ func TestAgentCommandCodeThinkingOffOnTheWire(t *testing.T) {
 						payload map[string]any
 					}
 					requests := make(chan capturedRequest, 4)
-					nativePath := "/provider/v1/chat/completions"
+					nativePath := "/provider/v1/responses"
 					if modelID == "claude-fable-5" {
 						nativePath = "/provider/v1/messages"
 					}
@@ -47,8 +47,9 @@ func TestAgentCommandCodeThinkingOffOnTheWire(t *testing.T) {
 							fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_off\",\"model\":\"claude-fable-5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n")
 							fmt.Fprint(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n")
 							fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
-						case "/provider/v1/chat/completions":
-							fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+						case "/provider/v1/responses":
+							fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"id\":\"msg_cc\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\n")
+							fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_cc\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
 						default:
 							t.Errorf("unexpected request path %s", r.URL.Path)
 							w.WriteHeader(http.StatusNotFound)
@@ -94,6 +95,9 @@ func TestAgentCommandCodeThinkingOffOnTheWire(t *testing.T) {
 						}
 						if _, exists := payload["reasoning_effort"]; exists {
 							t.Errorf("off sent reasoning effort to %s: %+v", request.path, payload)
+						}
+						if _, exists := payload["reasoning"]; exists {
+							t.Errorf("off sent Responses reasoning to %s: %+v", request.path, payload)
 						}
 						if _, exists := payload["output_config"]; exists {
 							t.Errorf("off sent adaptive effort to %s: %+v", request.path, payload)

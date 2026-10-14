@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -137,6 +138,10 @@ func streamCommandCode(model Model, ctx Context, options ProviderStreamOptions) 
 		return streamAPIUnavailable(model, err.Error())
 	}
 	ctx = imageContext
+	nativeModel := commandCodeNativeModel(model)
+	if nativeModel.API != "anthropic-messages" && nativeModel.API != "openai-completions" && nativeModel.API != "openai-responses" {
+		return streamAPIUnavailable(model, "unsupported Command Code provider API: "+string(nativeModel.API))
+	}
 	headers := mergeRequestHeaders(map[string]string{"Authorization": "Bearer " + apiKey}, options.Headers)
 	identity := ""
 	for name, value := range headers {
@@ -153,7 +158,6 @@ func streamCommandCode(model Model, ctx Context, options ProviderStreamOptions) 
 	output.setObserver(options.Observer, model)
 	logical := &commandCodeLogicalObservation{output: output, ctx: options.RequestContext}
 	go func() {
-		nativeModel := commandCodeNativeModel(model)
 		nativeOptions := options
 		nativeOptions.Observer = &commandCodeAttemptObserver{logical: logical, timeoutMs: options.TimeoutMs}
 		nativeOptions.TimeoutMs = 0
@@ -195,9 +199,21 @@ func streamCommandCode(model Model, ctx Context, options ProviderStreamOptions) 
 		}
 		nativeOptions.Headers = mergeRequestHeaders(map[string]string{"Authorization": "Bearer " + apiKey}, nativeOptions.Headers)
 		var source *AssistantMessageEventStream
-		if nativeModel.API == "anthropic-messages" {
+		switch nativeModel.API {
+		case "anthropic-messages":
 			source = streamAnthropicMessages(nativeModel, ctx, nativeOptions)
-		} else {
+		case "openai-responses":
+			// Resolve summary-only defaults before checking the effective level.
+			// Both explicit off and unsupported efforts must omit the optional
+			// controls; "off" is not a Command Code Responses wire effort.
+			resolved := resolveOpenAIResponsesProviderOptions(nativeModel, nativeOptions)
+			level := ModelThinkingLevel(strings.TrimSpace(string(resolved.Reasoning)))
+			if !nativeModel.Reasoning || (level != "" && ClampThinkingLevel(nativeModel, level) == ModelThinkingLevelOff) {
+				resolved.Reasoning = ""
+				resolved.ReasoningSummary = ""
+			}
+			source = streamOpenAIResponses(nativeModel, ctx, resolved.toProviderStreamOptions(nativeModel))
+		case "openai-completions":
 			source = streamOpenAICompletions(nativeModel, ctx, nativeOptions)
 		}
 		pending := []AssistantMessageEvent{}
@@ -246,16 +262,43 @@ func commandCodeProviderBase(base string) string {
 func commandCodeNativeModel(model Model) Model {
 	native := cloneModel(model)
 	native.BaseURL = commandCodeProviderBase(model.BaseURL)
+	native.API = commandCodeAPIForEndpoints(model.ID, nil)
+	if compat, ok := model.Compat.(*CommandCodeCompat); ok && compat != nil && compat.API != "" {
+		native.API = compat.API
+	}
 	disabled := false
-	if strings.HasPrefix(model.ID, "claude-") {
-		native.API = "anthropic-messages"
+	switch native.API {
+	case "anthropic-messages":
 		native.BaseURL = strings.TrimSuffix(native.BaseURL, "/v1")
 		forceAdaptive := model.Reasoning
 		native.Compat = &AnthropicMessagesCompat{SupportsEagerToolInputStreaming: &disabled, SupportsLongCacheRetention: &disabled, ForceAdaptiveThinking: &forceAdaptive}
-	} else {
-		native.API = "openai-completions"
+	case "openai-responses":
+		native.Compat = &OpenAIResponsesCompat{SupportsDeveloperRole: &disabled, SendSessionIdHeader: &disabled, SupportsLongCacheRetention: &disabled}
+	case "openai-completions":
 		effort := len(commandCodeModelCatalog[model.ID].Efforts) > 0
 		native.Compat = &OpenAICompletionsCompat{SupportsStore: &disabled, SupportsDeveloperRole: &disabled, SupportsReasoningEffort: &effort, MaxTokensField: "max_tokens"}
 	}
 	return native
+}
+
+func commandCodeAPIForEndpoints(id string, endpoints []string) API {
+	if endpoints == nil {
+		if strings.HasPrefix(id, "claude-") {
+			return "anthropic-messages"
+		}
+		return "openai-completions"
+	}
+	for _, route := range []struct {
+		endpoint string
+		api      API
+	}{
+		{"/messages", "anthropic-messages"},
+		{"/responses", "openai-responses"},
+		{"/chat/completions", "openai-completions"},
+	} {
+		if slices.Contains(endpoints, route.endpoint) {
+			return route.api
+		}
+	}
+	return ""
 }

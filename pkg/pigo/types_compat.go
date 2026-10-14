@@ -45,6 +45,7 @@ type OpenAICompletionsCompat struct {
 func (c *OpenAICompletionsCompat) compatAPI() string { return "openai-completions" }
 
 type OpenAIResponsesCompat struct {
+	SupportsDeveloperRole           *bool
 	SupportsMidConvoSystemMessages  *bool
 	SendSessionIdHeader             *bool
 	SupportsLongCacheRetention      *bool

@@ -188,7 +188,7 @@ func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom ma
 			}
 			if text != "" {
 				role := "system"
-				if model.Reasoning {
+				if model.Reasoning && resolveOpenAIResponsesCompat(model).SupportsDeveloperRole {
 					role = "developer"
 				}
 				input = append(input, map[string]any{"role": role, "content": text})
@@ -457,6 +457,18 @@ func processOpenAIResponsesStreamEventWithProvider(
 	}
 
 	eventType, _ := event["type"].(string)
+	// Command Code uses this name for the canonical reasoning-text delta.
+	// Keep the raw provider event intact for observers and diagnostics.
+	if model.Provider == "commandcode" && eventType == "response.reasoning.delta" {
+		if _, ok := event["delta"].(string); !ok {
+			return false, fmt.Errorf("invalid Command Code reasoning delta: expected string delta")
+		}
+		index, ok := event["output_index"].(float64)
+		if !ok || index < 0 || index != math.Trunc(index) {
+			return false, fmt.Errorf("invalid Command Code reasoning delta: expected non-negative integer output_index")
+		}
+		eventType = "response.reasoning_text.delta"
+	}
 	switch eventType {
 	case "response.created":
 		if responseMap, ok := event["response"].(map[string]any); ok {

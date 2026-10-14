@@ -31,9 +31,10 @@ type commandCodeModelsResponse struct {
 }
 
 type commandCodeAPIModel struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	ContextLength int    `json:"context_length"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	ContextLength      int      `json:"context_length"`
+	SupportedEndpoints []string `json:"supported_endpoints"`
 }
 
 // CommandCodeModelsSource identifies where the current catalog came from.
@@ -64,6 +65,7 @@ type commandCodeCachedModel struct {
 	Reasoning     *bool  `json:"reasoning"`
 	ContextWindow int    `json:"contextWindow"`
 	MaxTokens     int    `json:"maxTokens"`
+	API           API    `json:"api,omitempty"`
 }
 
 // FetchCommandCodeModels reads the current Provider API catalog without
@@ -213,6 +215,11 @@ func fetchCommandCodeModelSpecs(ctx context.Context, client *http.Client, endpoi
 	for index, model := range payload.Data {
 		model.ID = strings.TrimSpace(model.ID)
 		model.Name = strings.TrimSpace(model.Name)
+		api := commandCodeAPIForEndpoints(model.ID, model.SupportedEndpoints)
+		if api == "" {
+			// Decision models (e.g. /systemone) cannot drive a chat session.
+			continue
+		}
 		if model.ID == "" || model.Name == "" || model.ContextLength <= 0 {
 			return nil, fmt.Errorf("decode Command Code models: invalid model at index %d", index)
 		}
@@ -224,7 +231,11 @@ func fetchCommandCodeModelSpecs(ctx context.Context, client *http.Client, endpoi
 			ID:            model.ID,
 			Name:          model.Name,
 			ContextWindow: model.ContextLength,
+			API:           api,
 		})
+	}
+	if len(specs) == 0 {
+		return nil, errors.New("decode Command Code models: no supported chat models")
 	}
 	return specs, nil
 }
@@ -257,13 +268,20 @@ func readCommandCodeModelsCache(path string) ([]Model, error) {
 			return nil, fmt.Errorf("decode Command Code model cache: duplicate model %q", cached.ID)
 		}
 		seen[cached.ID] = struct{}{}
-		models = append(models, newCommandCodeModel(
+		if cached.API != "" && cached.API != "openai-responses" && cached.API != "openai-completions" && cached.API != "anthropic-messages" {
+			return nil, fmt.Errorf("decode Command Code model cache: unsupported API %q for %q", cached.API, cached.ID)
+		}
+		model := newCommandCodeModel(
 			cached.ID,
 			cached.Name,
 			cached.ContextWindow,
 			cached.MaxTokens,
 			commandCodeModelCosts[cached.ID],
-		))
+		)
+		if cached.API != "" {
+			model.Compat = &CommandCodeCompat{API: cached.API}
+		}
+		models = append(models, model)
 	}
 	return models, nil
 }
@@ -281,6 +299,7 @@ func writeCommandCodeModelsCache(path string, models []Model) error {
 			Reasoning:     &reasoning,
 			ContextWindow: model.ContextWindow,
 			MaxTokens:     model.MaxTokens,
+			API:           commandCodeNativeModel(model).API,
 		})
 	}
 	body, err := json.MarshalIndent(cache, "", "  ")

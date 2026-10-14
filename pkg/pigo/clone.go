@@ -40,6 +40,9 @@ func cloneCompat(compat ProviderCompat) ProviderCompat {
 	}
 
 	switch typed := compat.(type) {
+	case *CommandCodeCompat:
+		cloned := *typed
+		return &cloned
 	case *OpenAICompletionsCompat:
 		cloned := *typed
 		cloned.SupportsMidConvoSystemMessages = cloneBoolPointer(typed.SupportsMidConvoSystemMessages)
@@ -63,6 +66,7 @@ func cloneCompat(compat ProviderCompat) ProviderCompat {
 		return &cloned
 	case *OpenAIResponsesCompat:
 		cloned := *typed
+		cloned.SupportsDeveloperRole = cloneBoolPointer(typed.SupportsDeveloperRole)
 		cloned.SupportsMidConvoSystemMessages = cloneBoolPointer(typed.SupportsMidConvoSystemMessages)
 		cloned.SendSessionIdHeader = cloneBoolPointer(typed.SendSessionIdHeader)
 		cloned.SupportsLongCacheRetention = cloneBoolPointer(typed.SupportsLongCacheRetention)

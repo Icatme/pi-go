@@ -1637,3 +1637,65 @@
   root `go build ./...`; `git diff --check`. No live-provider calls or UI checks.
 - Commit and push only the reviewed header/sampling change and its tests/docs
   to master. No tag, new release, dependency upgrade or Mistral change.
+
+## 2026-10-14: Command Code current model catalog and protocol support
+
+- Refresh the deterministic Command Code catalog to the 89 chat models returned
+  by `https://api.commandcode.ai/provider/v1/models` on 2026-10-14. Add the current
+  Claude 5.5, GPT-6/6.1, DeepSeek V4.1, MiMo V2.6, Qwen Omni, GLM FlashX,
+  Step 5, Mistral Large 4 and free-model entries, with input capabilities,
+  selectable reasoning efforts, output limits and estimated token prices.
+- Sources: `pi-commandcode-provider` v0.7.7 (published 2026-10-11; generated
+  capability data from `command-code` 1.79.2 and pricing verified 2026-10-09),
+  plus Gemini 4 Argon and Muse Wonder from official `command-code` 1.82.1
+  (published 2026-10-13) and their Command Code model pricing pages. Downloaded
+  npm archives were integrity-checked. No new runtime dependency was added.
+  Sources remain active; the native Go implementation uses the existing
+  Go 1.26 module and HTTP/protocol adapters on Windows.
+- Read `supported_endpoints`, prefer Messages/Responses/Chat Completions in that
+  order, and exclude non-chat endpoints such as System One. Preserve the chosen
+  protocol through model cloning, registry refresh and the Pi-compatible v1
+  cache's `api` field. Older caches/manual models without endpoint metadata keep
+  the established name-based selection. Invalid explicit protocols fail before
+  HTTP; only the existing `403 upgrade_required` response selects generate.
+- Keep protocol adaptation in `pkg/pigo`. Command Code Responses uses system
+  prompts, omits optional reasoning controls for off, and consumes its
+  `response.reasoning.delta` alias without rewriting raw provider observations.
+  The shared Responses adapter gains an optional developer-role capability;
+  other providers retain their previous default. Agent changes are tests only.
+- Include the current context-price tiers. DeepSeek cost estimates deliberately
+  remain documented off-peak snapshots, not authoritative live billing prices.
+- Regression tests first reproduced missing built-in models, ignored endpoints,
+  dropped incremental reasoning, developer-role prompts and off effort on the
+  Responses path. Cover the fixes plus image prompts, two-turn tool replay,
+  cached-token usage, tier boundaries, cache protocol retention, non-chat
+  exclusion, malformed metadata and cloned protocol isolation.
+- Validation passed with GOWORK=off and PIGO_LIVE_TEST=0: focused Command Code
+  tests in pkg/pigo, agent and internal/cli; root and examples `go test ./...
+  -count=1 -timeout=120s`; root `go vet ./...`; focused Command Code/clone/Responses
+  compatibility tests with `-race` in pkg/pigo and agent; `git diff --check`.
+  Built a temporary Windows CLI and verified public model discovery and an
+  isolated cache: 89 models, 11 Messages / 70 Responses / 8 Chat Completions.
+- Initial implementation did not include a commit or push. No live inference,
+  UI acceptance, tag, release or downstream repository change. Public catalog
+  discovery is not live model-generation proof.
+
+### Review and authorized commit/push
+
+- Review reproduced two defects with failing regression tests before fixing
+  them. Responses sent unsupported `effort: off` for whitespace-padded off,
+  models without reasoning or selectable efforts, and summary-only requests
+  whose implicit medium level is unsupported. Resolve summary defaults and
+  check the model's effective level before clearing optional reasoning controls.
+- The Command Code reasoning-delta alias accepted null, string, negative and
+  fractional output indexes as valid thinking content. Validate the advertised
+  non-negative integer field before emitting content; preserve other providers'
+  event handling. Strengthen the two-turn test to assert the image payload.
+- Final validation passed with GOWORK=off and PIGO_LIVE_TEST=0: focused Command
+  Code tests; root and examples `go test ./... -count=1 -timeout=120s`; full
+  `go test -race ./pkg/pigo ./agent -count=1 -timeout=120s`; root `go vet ./...`
+  and `go build ./...`; `git diff --check`. No remaining review findings.
+- The user authorized committing and pushing this reviewed change. Fetched
+  origin and confirmed master matched the local baseline before committing.
+  Scope remains Command Code models/protocols, related tests and documentation;
+  no release or live inference was performed.

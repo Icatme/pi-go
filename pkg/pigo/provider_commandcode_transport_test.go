@@ -191,8 +191,8 @@ func TestCommandCodeGenerateRequestMetadata(t *testing.T) {
 		t.Fatalf("request=%+v err=%v", request, err)
 	}
 	request, _, err = buildCommandCodeRequest(model, Context{}, ProviderStreamOptions{Reasoning: ThinkingLevelMax, SessionID: "not-a-uuid"})
-	if err != nil || request.ThreadID != "" || request.Params.ReasoningEffort != "" || request.Params.Temperature != nil {
-		t.Fatalf("unsupported effort/session not omitted: %+v err=%v", request, err)
+	if err != nil || request.ThreadID != "" || request.Params.ReasoningEffort != "max" || request.Params.Temperature != nil {
+		t.Fatalf("new max effort or invalid session handling incorrect: %+v err=%v", request, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

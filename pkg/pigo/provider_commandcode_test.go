@@ -23,7 +23,7 @@ func TestCommandCodeProviderRegistration(t *testing.T) {
 	if model.API != "commandcode-custom" || model.BaseURL != commandCodeDefaultBaseURL {
 		t.Fatalf("unexpected Command Code transport metadata: %+v", model)
 	}
-	if model.Name != "DeepSeek V4 Flash (CC)" || !model.Reasoning || model.ContextWindow != 1000000 || model.MaxTokens != 65536 {
+	if model.Name != "DeepSeek V4 Flash (latest) (CC)" || !model.Reasoning || model.ContextWindow != 1000000 || model.MaxTokens != 65536 {
 		t.Fatalf("unexpected Command Code model metadata: %+v", model)
 	}
 	if model.Cost != (commandCodeModelCosts[model.ID]) {

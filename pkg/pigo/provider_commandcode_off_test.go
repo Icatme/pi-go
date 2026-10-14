@@ -14,8 +14,8 @@ func TestCommandCodeCatalogPreservesThinkingOff(t *testing.T) {
 	}{
 		{"claude-fable-5", true, CapabilitySupported, []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh, ModelThinkingLevelXHigh, ModelThinkingLevelMax}},
 		{"gpt-5.6-luna", true, CapabilitySupported, []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh, ModelThinkingLevelXHigh, ModelThinkingLevelMax}},
-		{"meta/muse-spark-1.3", true, CapabilitySupported, []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelMinimal, ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh, ModelThinkingLevelXHigh}},
-		{"MiniMaxAI/MiniMax-M3", true, CapabilityUnsupported, []ModelThinkingLevel{ModelThinkingLevelOff}},
+		{"meta/muse-spark-1.3", true, CapabilitySupported, []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh, ModelThinkingLevelXHigh, ModelThinkingLevelMax}},
+		{"MiniMaxAI/MiniMax-M3", true, CapabilitySupported, []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh}},
 		{"claude-haiku-4-5-20251001", false, CapabilityUnsupported, []ModelThinkingLevel{ModelThinkingLevelOff}},
 		{"unknown/model", false, CapabilityUnknown, []ModelThinkingLevel{ModelThinkingLevelOff}},
 	} {
