@@ -457,8 +457,9 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 		return response, err
 	}
 	if !terminalSeen {
-		applyRequestError(&response, withProviderFailure(errAnthropicStreamMissingTerminal, ProviderFailureStream, "missing_terminal"))
-		return response, errAnthropicStreamMissingTerminal
+		err := withProviderFailure(errAnthropicStreamMissingTerminal, ProviderFailureStream, "missing_terminal")
+		applyRequestError(&response, err)
+		return response, err
 	}
 	return response, nil
 }

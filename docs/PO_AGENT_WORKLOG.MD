@@ -1913,3 +1913,9 @@
 - User authorizes pushing this repair to an independent source branch so
   ai-relay can pin a downloadable immutable commit. Formal release/tag and
   production deployment are outside this step.
+- Final source audit found that the Anthropic hosted continuation boundary
+  returned an untyped missing-terminal error after recording its typed version,
+  so the outer error handler overwrote the diagnostic. Extend the existing
+  hosted missing-message-stop regression: it fails with sdk_error/unclassified
+  before the repair and passes after propagating the same typed error. Focused
+  diagnostic/hosted/Anthropic/retry tests (0.359s) and pkg/pigo vet pass.
