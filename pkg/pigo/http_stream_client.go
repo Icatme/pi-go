@@ -88,7 +88,7 @@ func (c *HTTPStreamClient) postStream(ctx context.Context, url string, requestOp
 		}
 
 		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
-			body, _ := io.ReadAll(httpResponse.Body)
+			body, readErr := io.ReadAll(httpResponse.Body)
 			_ = httpResponse.Body.Close()
 			message := httpResponse.Status
 			if requestOptions.ParseError != nil {
@@ -106,7 +106,10 @@ func (c *HTTPStreamClient) postStream(ctx context.Context, url string, requestOp
 				}
 				continue
 			}
-			return errors.New(message)
+			if readErr != nil {
+				return withProviderFailure(errors.Join(errors.New(message), readErr), ProviderFailureStream, "body_read")
+			}
+			return withProviderFailure(errors.New(message), ProviderFailureUpstream, "http_error")
 		}
 
 		if requestOptions.OnOpen != nil {

@@ -285,7 +285,7 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 			},
 		})
 		if err == nil && !state.FinishSeen {
-			err = errOpenAICompletionsStreamMissingTerminal
+			err = withProviderFailure(errOpenAICompletionsStreamMissingTerminal, ProviderFailureStream, "missing_terminal")
 		}
 		if err != nil {
 			applyOpenAICompletionsReasoningDetails(&response, state)
@@ -710,7 +710,7 @@ func processOpenAICompletionsStreamEvent(data string, model Model, response *Ass
 		return false, err
 	}
 	if chunk.Error != nil && strings.TrimSpace(chunk.Error.Message) != "" {
-		return true, errors.New(chunk.Error.Message)
+		return true, withProviderFailure(errors.New(chunk.Error.Message), ProviderFailureUpstream, "error_event")
 	}
 	if chunk.ID != "" {
 		response.ResponseID = chunk.ID
@@ -748,7 +748,7 @@ func processOpenAICompletionsStreamEvent(data string, model Model, response *Ass
 			state.FinishSeen = true
 			response.StopReason = mapOpenAICompletionsFinishReason(choice.FinishReason, response.Content)
 			if response.StopReason == StopReasonError {
-				return true, fmt.Errorf("unsupported finish_reason %q", choice.FinishReason)
+				return true, withProviderFailure(fmt.Errorf("unsupported finish_reason %q", choice.FinishReason), ProviderFailureParse, "unsupported_finish_reason")
 			}
 		}
 	}

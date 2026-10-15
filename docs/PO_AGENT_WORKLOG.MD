@@ -1886,3 +1886,30 @@
   file-store regressions pass for 12 race-enabled iterations using Go 1.26.2
   (the CI toolchain); root all-package tests and vet pass with Go 1.26.4.
   Reference: https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile
+
+
+## 2026-10-15 - Preserve provider failure origin for relay diagnostics
+
+- Repair the error-origin loss at the SDK boundary. ProviderFailureOf reads a
+  structured provider_failure diagnostic from AssistantMessage; the diagnostic
+  survives cloning, streamed terminal errors and Context JSON persistence.
+  Native Chat Completions, Responses and Anthropic Messages identify explicit
+  upstream HTTP/error events, interrupted response reads/missing terminal
+  events, and response decoding failures. Local callbacks, cancellation and
+  unclassified SDK failures remain distinct from upstream failures.
+- Preserve original SDK error text and add interrupted HTTP error-body evidence.
+  Error wrappers keep errors.Is/As identity. Retry predicates, counters, delays,
+  output/usage guards and configured budgets are unchanged; diagnostics are
+  evidence only and never grant retry permission.
+- P1 regression extends protocol failure coverage because prior stream/result
+  tests did not assert error origin and persistence together. Cover the reported
+  HTTP-200 ambiguity, malformed JSON/field types/finish reasons, EOF, DONE without
+  a terminal event, reader failures, non-2xx and interrupted error bodies across
+  the three native protocols. Existing retry and HTTP evidence tests also pass.
+- Verified: focused pkg/pigo ProviderFailure, ProviderHTTP, HTTPStreamClient,
+  OpenAI Responses/Completions, Anthropic, stream retry and callback contracts
+  (2.759s), plus go vet ./pkg/pigo. No whole-repository tests/race or paid live
+  model requests. No dependency or source-version changes.
+- User authorizes pushing this repair to an independent source branch so
+  ai-relay can pin a downloadable immutable commit. Formal release/tag and
+  production deployment are outside this step.

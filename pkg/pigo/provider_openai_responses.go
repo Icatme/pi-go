@@ -326,6 +326,9 @@ func streamOpenAIResponsesSSE(
 			if options.OnResponse != nil && httpResponse != nil {
 				options.OnResponse(providerResponseFromHTTPResponse(httpResponse), model)
 			}
+			if apiErr != nil {
+				return withProviderFailure(err, ProviderFailureUpstream, "http_error")
+			}
 			return err
 		}
 		if httpResponse == nil {
@@ -340,7 +343,7 @@ func streamOpenAIResponsesSSE(
 			body, readErr := io.ReadAll(httpResponse.Body)
 			_ = httpResponse.Body.Close()
 			if readErr != nil {
-				return readErr
+				return withProviderFailure(readErr, ProviderFailureStream, "body_read")
 			}
 			message := parseOpenAIResponsesError(body, httpResponse.Status)
 			if shouldRetryOpenAIProviderResponse(httpResponse.StatusCode, body, message) && attempt < maxRetries {
@@ -349,7 +352,7 @@ func streamOpenAIResponsesSSE(
 				}
 				continue
 			}
-			return errors.New(message)
+			return withProviderFailure(errors.New(message), ProviderFailureUpstream, "http_error")
 		}
 
 		state := openAIResponsesStreamingState{
@@ -393,7 +396,7 @@ func streamOpenAIResponsesSSE(
 			return err
 		}
 		if !terminalSeen {
-			return fmt.Errorf("missing terminal sse event")
+			return withProviderFailure(fmt.Errorf("missing terminal sse event"), ProviderFailureStream, "missing_terminal")
 		}
 		return nil
 	}

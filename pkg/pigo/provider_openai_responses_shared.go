@@ -697,7 +697,7 @@ func processOpenAIResponsesStreamEventWithProvider(
 				response.ErrorMessage = "response failed"
 			}
 		}
-		return true, errors.New(response.ErrorMessage)
+		return true, withProviderFailure(errors.New(response.ErrorMessage), ProviderFailureUpstream, "error_event")
 	case "error":
 		if message, ok := event["message"].(string); ok && strings.TrimSpace(message) != "" {
 			response.ErrorMessage = message
@@ -705,7 +705,7 @@ func processOpenAIResponsesStreamEventWithProvider(
 			response.ErrorMessage = "error"
 		}
 		response.StopReason = StopReasonError
-		return true, errors.New(response.ErrorMessage)
+		return true, withProviderFailure(errors.New(response.ErrorMessage), ProviderFailureUpstream, "error_event")
 	}
 
 	return false, nil

@@ -421,15 +421,22 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 	defer httpResponse.Body.Close()
 	notifyAnthropicResponse(options.OnResponse, model, httpResponse)
 	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
-		body, _ := io.ReadAll(httpResponse.Body)
-		return AssistantMessage{
+		body, readErr := io.ReadAll(httpResponse.Body)
+		failed := AssistantMessage{
 			API:          model.API,
 			Provider:     model.Provider,
 			Model:        model.ID,
 			StopReason:   StopReasonError,
 			ErrorMessage: parseAnthropicError(body, httpResponse.Status),
 			Timestamp:    time.Now().UTC(),
-		}, nil
+		}
+		failure := withProviderFailure(errors.New(failed.ErrorMessage), ProviderFailureUpstream, "http_error")
+		if readErr != nil {
+			failure = withProviderFailure(errors.Join(errors.New(failed.ErrorMessage), readErr), ProviderFailureStream, "body_read")
+			failed.ErrorMessage = failure.Error()
+		}
+		recordProviderFailure(&failed, failure)
+		return failed, nil
 	}
 
 	states := map[int]*anthropicStreamingBlockState{}
@@ -450,7 +457,7 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 		return response, err
 	}
 	if !terminalSeen {
-		applyRequestError(&response, errAnthropicStreamMissingTerminal)
+		applyRequestError(&response, withProviderFailure(errAnthropicStreamMissingTerminal, ProviderFailureStream, "missing_terminal"))
 		return response, errAnthropicStreamMissingTerminal
 	}
 	return response, nil
@@ -722,6 +729,7 @@ func processAnthropicStreamEvent(
 		} else {
 			response.ErrorMessage = "anthropic stream error"
 		}
+		recordProviderFailure(response, withProviderFailure(errors.New(response.ErrorMessage), ProviderFailureUpstream, "error_event"))
 		if emitTerminal {
 			pushAssistantMessageEvent(stream, AssistantMessageEvent{
 				Type:   AssistantMessageEventError,
