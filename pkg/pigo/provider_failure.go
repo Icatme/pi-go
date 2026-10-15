@@ -2,7 +2,6 @@ package pigo
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 )
 
@@ -46,8 +45,6 @@ func withProviderFailure(err error, kind, reason string) error {
 func recordProviderFailure(message *AssistantMessage, err error) {
 	failure := ProviderFailure{Kind: ProviderFailureSDK, Reason: "unclassified", Message: err.Error()}
 	var classified *providerFailureError
-	var syntax *json.SyntaxError
-	var fieldType *json.UnmarshalTypeError
 	switch {
 	case errors.Is(err, context.Canceled):
 		failure.Kind, failure.Reason = ProviderFailureSDK, "cancelled"
@@ -55,11 +52,9 @@ func recordProviderFailure(message *AssistantMessage, err error) {
 		failure.Kind, failure.Reason = ProviderFailureSDK, "timeout"
 	case errors.As(err, &classified):
 		failure.Kind, failure.Reason = classified.kind, classified.reason
-	case errors.As(err, &syntax):
-		failure.Kind, failure.Reason = ProviderFailureParse, "invalid_json"
-	case errors.As(err, &fieldType):
-		failure.Kind, failure.Reason = ProviderFailureParse, "field_type"
 	}
+	// A JSON error alone cannot identify the response boundary: local request
+	// encoding can wrap the same errors. Protocol readers classify at source.
 	appendAssistantMessageDiagnostic(message, createAssistantMessageDiagnostic(providerFailureDiagnostic, err,
 		map[string]any{"kind": failure.Kind, "reason": failure.Reason}))
 }

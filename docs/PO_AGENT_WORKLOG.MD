@@ -1919,3 +1919,11 @@
   hosted missing-message-stop regression: it fails with sdk_error/unclassified
   before the repair and passes after propagating the same typed error. Focused
   diagnostic/hosted/Anthropic/retry tests (0.359s) and pkg/pigo vet pass.
+- Pre-push consumer review reproduced a false response_parse_error for local
+  request serialization: an invalid RawMessage returned by OnPayload raises a
+  JSON syntax error before any HTTP request. Remove JSON-type guessing from
+  the generic error recorder; response readers retain explicit classification
+  at the decoding boundary. Extend the existing P1 diagnostics test to assert
+  sdk_error/unclassified, retained error text and zero dispatches. The new case
+  fails before the fix; focused protocol/HTTP/hosted/retry/callback tests
+  (2.627s) and pkg/pigo vet pass afterwards. Retry behavior remains unchanged.

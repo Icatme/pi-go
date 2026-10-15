@@ -126,6 +126,23 @@ func TestProviderFailureDiagnostics(t *testing.T) {
 		}
 	}
 
+	t.Run("local request encoding is not response parsing", func(t *testing.T) {
+		var calls atomic.Int32
+		client := &http.Client{Transport: observationRoundTripper(func(*http.Request) (*http.Response, error) {
+			calls.Add(1)
+			return nil, errors.New("unexpected dispatch")
+		})}
+		model := Model{API: "openai-completions", Provider: "commandcode", ID: "synthetic", BaseURL: "https://provider.invalid/v1"}
+		message := Complete(model, Context{}, ProviderStreamOptions{
+			APIKey: "test", HTTPClient: client, RequestContext: t.Context(),
+			OnPayload: func(any, Model) any { return json.RawMessage(`{`) },
+		})
+		failure, ok := ProviderFailureOf(message)
+		if !ok || failure.Kind != ProviderFailureSDK || failure.Reason != "unclassified" || failure.Message != message.ErrorMessage || message.StopReason != StopReasonError || calls.Load() != 0 {
+			t.Fatalf("local request encoding misclassified: %+v calls=%d", failure, calls.Load())
+		}
+	})
+
 	// Wrapping adds evidence without changing text or errors.Is semantics used
 	// by cancellation, timeout, retry and SSE-limit handling.
 	err := readSSEStream(failureReader{io.ErrUnexpectedEOF}, func(string, string) (bool, error) { return false, nil })
