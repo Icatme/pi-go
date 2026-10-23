@@ -1886,3 +1886,38 @@
   file-store regressions pass for 12 race-enabled iterations using Go 1.26.2
   (the CI toolchain); root all-package tests and vet pass with Go 1.26.4.
   Reference: https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile
+
+## 2026-10-23 — Explicit trusted skill catalogs
+
+- Add opt-in `agent/skills`, inspired by Pi coding-agent's metadata catalog and
+  on-demand SKILL.md loading. Keep skill discovery/read lifecycle out of the
+  single-agent loop and document that skills are guidance, not permissions.
+- Require explicit trusted roots, strict typed frontmatter, deterministic
+  first-valid-wins diagnostics, bounded text/discovery and confined resource
+  reads through pinned Go `os.Root` handles. Reload atomically publishes the next
+  index; fatal errors preserve the previous snapshot. No HOME scan, network,
+  execution, dependency installation, tenant policy or document business layer.
+- Add only yaml.v3 v3.0.1; reuse existing cloud cache for offline validation.
+- Focused package race tests and vet pass with Go 1.26.5 on Linux. Coverage includes
+  malformed metadata, catalog escaping, path and symlink confinement, duplicate
+  selection, limits, metadata changes, retained handles and concurrent reload.
+  No live models, CI, release/tag, or deployment performed. Windows/macOS runtime
+  behavior and downstream JZ integration remain unverified.
+- Existing `agent` tests also pass; Windows amd64 skill tests cross-compile.
+  Broader `agent/toolset` verification could not start with the offline cache
+  (missing wazero v1.12.0, x/oauth2 v0.35.0, x/sync v0.20.0); no claim of a
+  complete repository regression pass is made.
+
+### Compile-time FS skill snapshots
+
+- Add `NewFS` / immutable `FSCatalog` for trusted `embed.FS` skill bundles, sharing
+  the strict frontmatter parser and prompt formatter with the disk catalog.
+  Construction copies bounded text; subsequent reads never access the source.
+  Relative FS roots, text/entry/depth/aggregate limits, first-name diagnostics,
+  symlink/special-resource rejection and detached metadata are covered by tests.
+- Expose an application-assigned version label, not a digest or permission claim.
+  No runtime reload, remote install, execution, tenant logic, or real deployment.
+- MapFS and actual go:embed fixtures cover immutable reads after source changes,
+  disk/FS semantic parity, explicit-only skills, path rejection, all size limits,
+  invalid text, symlinks, bundle boundaries and concurrent reads. Linux race tests
+  and vet pass with the existing offline Go 1.26.5 toolchain.
