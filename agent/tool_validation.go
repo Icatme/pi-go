@@ -14,6 +14,9 @@ import (
 )
 
 func newToolArgumentValidator(tool ToolDefinition, argumentLimit int) (func(any) (any, error), error) {
+	if tool.MaxArgumentBytes < 0 {
+		return nil, fmt.Errorf("agent: negative argument byte limit for tool %q", tool.Name)
+	}
 	var resolved *jsonschema.Resolved
 	if len(tool.Parameters) > 0 {
 		encoded, err := json.Marshal(tool.Parameters)
@@ -38,6 +41,9 @@ func newToolArgumentValidator(tool ToolDefinition, argumentLimit int) (func(any)
 		if err := checkArgumentStrings(args); err != nil {
 			return nil, err
 		}
+		if err := checkToolArgumentBudget(args, tool.MaxArgumentBytes); err != nil {
+			return nil, err
+		}
 		validated := cloneAny(args)
 		if resolved != nil {
 			if object, ok := validated.(map[string]any); ok && tool.ParseArguments == nil {
@@ -56,6 +62,9 @@ func newToolArgumentValidator(tool ToolDefinition, argumentLimit int) (func(any)
 			if err := checkArgumentStrings(validated); err != nil {
 				return nil, err
 			}
+			if err := checkToolArgumentBudget(validated, tool.MaxArgumentBytes); err != nil {
+				return nil, err
+			}
 			instance := validated
 			if tool.ParseArguments != nil {
 				projected, err := projectJSONInstance(validated, argumentLimit)
@@ -70,6 +79,27 @@ func newToolArgumentValidator(tool ToolDefinition, argumentLimit int) (func(any)
 		}
 		return validated, nil
 	}, nil
+}
+
+func toolArgumentBudgetFailure() *ToolExecutionError {
+	return &ToolExecutionError{Code: ToolFailureResource, Reason: "argument_bytes", Message: "tool arguments exceed byte limit",
+		Execution: ToolExecutionInfo{Local: ToolLocalNotStarted, Remote: ToolRemoteNotDispatched}}
+}
+
+// The caller checks traversal/Unicode before this exact JSON-size check. Unlike
+// the child heap traversal budget, this includes JSON escaping and punctuation.
+func checkToolArgumentBudget(value any, limit int) *ToolExecutionError {
+	if limit == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return argumentTextFailure(err)
+	}
+	if len(raw) > limit {
+		return toolArgumentBudgetFailure()
+	}
+	return nil
 }
 
 func validateToolDefinitions(tools []ToolDefinition) error {

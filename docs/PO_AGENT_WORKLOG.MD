@@ -1988,3 +1988,30 @@
   No existing tag is moved and no release, binary packaging, paid provider
   call, deployment or UI acceptance is performed. Full repository/agent/runtime
   suites and non-Windows execution are outside this integration check.
+
+## 2026-10-23 - Port independent JZBeacon agent improvements
+
+- Add host-owned ToolDefinition.MaxArgumentBytes. Check raw JSON before parsing,
+  parsed and schema-normalized JSON, and before-hook mutations before approval
+  or execution. Direct/model/child calls share the existing lifecycle. Child
+  resource bounds remain independent; failure code/reason is resource/argument_bytes
+  with not-started/not-dispatched facts and parser/hook error causes preserved.
+- Add agent/strictschema as an opt-in closed-shape declaration converter and
+  optional-null omission normalizer. Freeze schemas, preserve scalar constraints,
+  empty values and numeric lexemes, enforce input/output bounds, and reject
+  ambiguous or unsupported shapes. It does not enable provider strict mode or
+  replace the ordinary schema/business validator. No dependency is added.
+- Extend session.CompactionOptions with ProtectedTailMessages. The existing
+  complete-turn planner retains the protected suffix and tool pairs, alongside
+  token retention and current system declarations, without rewriting a plan after
+  selection or mutating the durable branch.
+- Keep JZ-specific context epochs/CAS, tenant/source authorization, task plans,
+  memory-space ownership, result receipt deduplication, endpoint network policy,
+  relay-specific token estimation and published route output budgets in the host.
+  Complete-turn compaction and MCP catalog validation already exist in pi-go.
+- Windows Go 1.26.4, GOWORK=off: all agent/... tests passed; agent, agent/session
+  and agent/strictschema race tests passed; agent/... vet and diff checks passed.
+  Tests use local fakes only. Provider/live/full-repository suites were not run.
+- Work is isolated from the original pi-go checkout's existing edits. JZBeacon's
+  dependency pin and application code are unchanged; no local replace, release
+  tag, production operation or new SHA-based scheme is introduced.
