@@ -97,6 +97,14 @@ tools; saved data never grants permission.
 
 Runtime records live outside the model context. Forking a lane inherits its
 ancestor data, then writes independently; moving a lane requires a fresh binding.
+`CompactionOptions.ProtectedTailMessages` retains a caller-identified suffix of
+non-system messages, expanding to a complete turn boundary. Use it when the
+current run includes host context or multiple user turns that must stay verbatim.
+It combines with `KeepRecentTokens`; neither can weaken the other. A protected
+whole conversation yields no plan, while negative or oversized counts fail.
+The caller still owns token estimation, soft/hard request budgets, summarization
+and the conditional storage commit. No default model capacity is invented.
+
 Compaction retains system tool declarations and leaves runtime records in the
 branch. Its summary is projected as conversation data for the next run, without
 turning it into system authority. `toolset` reconnects and reconstructs executors

@@ -19,6 +19,11 @@ type MessageTokenEstimator func(agent.Message) int64
 type CompactionOptions struct {
 	KeepRecentTokens int64
 	EstimateTokens   MessageTokenEstimator
+	// ProtectedTailMessages retains at least this many non-system messages from
+	// the effective branch's end, expanding to a complete turn boundary. Use it
+	// to protect host-injected context and the current run even if they contain
+	// multiple user turns. Zero retains the ordinary newest-turn minimum.
+	ProtectedTailMessages int
 }
 
 // CompactionPlan is a pure, storage-independent cut of the effective branch
@@ -56,6 +61,9 @@ func PrepareCompaction(branch []Entry, options CompactionOptions) (*CompactionPl
 	if options.KeepRecentTokens < 0 {
 		return nil, invalidCompaction("keep recent tokens must be non-negative")
 	}
+	if options.ProtectedTailMessages < 0 {
+		return nil, invalidCompaction("protected tail count must be non-negative")
+	}
 	normalizedBranch, err := cloneValidated(branch)
 	if err != nil {
 		return nil, invalidCompaction("branch is not durable JSON: %v", err)
@@ -67,6 +75,9 @@ func PrepareCompaction(branch []Entry, options CompactionOptions) (*CompactionPl
 
 	effective := contextFromBranch(normalizedBranch)
 	conversation := withoutSystemMessages(effective.Messages)
+	if options.ProtectedTailMessages > len(conversation) {
+		return nil, invalidCompaction("protected tail exceeds conversation length")
+	}
 	starts, err := completeTurnStarts(conversation)
 	if err != nil {
 		return nil, err
@@ -80,6 +91,7 @@ func PrepareCompaction(branch []Entry, options CompactionOptions) (*CompactionPl
 		return nil, err
 	}
 	firstKept := starts[len(starts)-1]
+	protectedStart := len(conversation) - options.ProtectedTailMessages
 	retainedTokens := int64(0)
 	for turn := len(starts) - 1; turn >= 0; turn-- {
 		start := starts[turn]
@@ -91,7 +103,7 @@ func PrepareCompaction(branch []Entry, options CompactionOptions) (*CompactionPl
 		if estimateErr != nil {
 			return nil, estimateErr
 		}
-		if turn < len(starts)-1 && retainedTokens >= options.KeepRecentTokens {
+		if turn < len(starts)-1 && retainedTokens >= options.KeepRecentTokens && firstKept <= protectedStart {
 			break
 		}
 		firstKept = start

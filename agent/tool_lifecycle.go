@@ -50,10 +50,31 @@ func (e *Engine) prepareToolInvocation(ctx context.Context, definition AgentDefi
 	if err != nil {
 		return preparedToolCall{}, nil, err
 	}
+	if tool.MaxArgumentBytes > 0 {
+		if len(call.Arguments) > tool.MaxArgumentBytes {
+			emitToolExecutionStart(start, call, nil)
+			return fail(nil, toolArgumentBudgetFailure(), ToolFailureResource)
+		}
+		if call.ParsedArgs != nil {
+			if err := checkToolArgumentBudget(call.ParsedArgs, tool.MaxArgumentBytes); err != nil {
+				emitToolExecutionStart(start, call, nil)
+				return fail(nil, err, ToolFailureArgumentInvalid)
+			}
+		}
+	}
 	args, err := parseToolArguments(tool, call)
 	if budgetErr := checkArgumentBudget(args, argumentLimit); budgetErr != nil {
 		budgetErr.Err = err
 		args, err = nil, budgetErr
+	}
+	if tool.MaxArgumentBytes > 0 {
+		if textErr := checkArgumentStrings(args); textErr != nil {
+			textErr.Err = errors.Join(textErr.Err, err)
+			args, err = nil, textErr
+		} else if budgetErr := checkToolArgumentBudget(args, tool.MaxArgumentBytes); budgetErr != nil {
+			budgetErr.Err = errors.Join(budgetErr.Err, err)
+			args, err = nil, budgetErr
+		}
 	}
 	if err == nil {
 		args, err = validator(args)
@@ -73,6 +94,16 @@ func (e *Engine) prepareToolInvocation(ctx context.Context, definition AgentDefi
 		if budgetErr := checkArgumentBudget(executionArgs, argumentLimit); budgetErr != nil {
 			budgetErr.Err = beforeErr
 			return fail(nil, budgetErr, ToolFailureResource)
+		}
+		if tool.MaxArgumentBytes > 0 {
+			if err := checkArgumentStrings(executionArgs); err != nil {
+				err.Err = errors.Join(err.Err, beforeErr)
+				return fail(nil, err, ToolFailureArgumentInvalid)
+			}
+			if err := checkToolArgumentBudget(executionArgs, tool.MaxArgumentBytes); err != nil {
+				err.Err = errors.Join(err.Err, beforeErr)
+				return fail(nil, err, ToolFailureArgumentInvalid)
+			}
 		}
 		if beforeErr != nil {
 			return fail(executionArgs, beforeErr, ToolFailureHook)

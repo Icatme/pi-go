@@ -411,6 +411,11 @@ type ToolDefinition struct {
 	OutputSchema        map[string]any                `json:"output_schema,omitempty"`
 	ExecutionMode       ToolExecutionMode             `json:"execution_mode,omitempty"`
 	ParseArguments      func(ToolCall) (any, error)   `json:"-"`
+	// MaxArgumentBytes bounds raw arguments and JSON-encoded parsed/normalized
+	// arguments, including changes made by BeforeToolCall. Zero adds no per-tool
+	// limit; negative values are invalid. Child-call limits still apply separately.
+	// This is host policy, not a model-visible tool declaration.
+	MaxArgumentBytes int `json:"-"`
 	// ValidateResult checks the effective, after-hook result before publication.
 	// It opts into stricter boundaries without changing ordinary OutputSchema semantics.
 	ValidateResult func(ToolResult) error `json:"-"`

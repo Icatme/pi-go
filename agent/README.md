@@ -298,6 +298,18 @@ An after-hook panic becomes `hook` with reason `after_hook_panic`, discards
 unprocessed output and preserves already reported execution facts. Error-valued
 panics retain their original Go causes for trusted callers.
 
+Set `ToolDefinition.MaxArgumentBytes` to give individual tools different JSON
+argument limits. The bound applies before parsing and after parsing, schema
+coercion and before hooks, including hooks that block or fail. Oversized calls
+stop before approval or execution with `resource` / `argument_bytes`.
+Zero adds no per-tool bound; child-call limits remain independently enforced.
+This host policy stays outside model-visible declarations and must be supplied
+again with the current executable tools on restore.
+
+For transports requiring all properties, [strictschema](strictschema/README.md)
+provides an explicit required/nullable declaration and omission normalizer.
+It does not change the built-in providers' strict-mode capabilities.
+
 Raw arguments and serialized `ToolCall` values reject invalid UTF-8 and unpaired
 UTF-16 surrogate escapes before decoding. Go argument strings are checked before
 copying or marshaling; rejection uses `argument_invalid` / `invalid_unicode`

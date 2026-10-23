@@ -1988,3 +1988,54 @@
   No existing tag is moved and no release, binary packaging, paid provider
   call, deployment or UI acceptance is performed. Full repository/agent/runtime
   suites and non-Windows execution are outside this integration check.
+
+## 2026-10-23 - Port independent JZBeacon agent improvements
+
+- Add host-owned ToolDefinition.MaxArgumentBytes. Check raw JSON before parsing,
+  parsed and schema-normalized JSON, and before-hook mutations before approval
+  or execution. Direct/model/child calls share the existing lifecycle. Child
+  resource bounds remain independent; failure code/reason is resource/argument_bytes
+  with not-started/not-dispatched facts and parser/hook error causes preserved.
+- Add agent/strictschema as an opt-in closed-shape declaration converter and
+  optional-null omission normalizer. Freeze schemas, preserve scalar constraints,
+  empty values and numeric lexemes, enforce input/output bounds, and reject
+  ambiguous or unsupported shapes. It does not enable provider strict mode or
+  replace the ordinary schema/business validator. No dependency is added.
+- Extend session.CompactionOptions with ProtectedTailMessages. The existing
+  complete-turn planner retains the protected suffix and tool pairs, alongside
+  token retention and current system declarations, without rewriting a plan after
+  selection or mutating the durable branch.
+- Keep JZ-specific context epochs/CAS, tenant/source authorization, task plans,
+  memory-space ownership, result receipt deduplication, endpoint network policy,
+  relay-specific token estimation and published route output budgets in the host.
+  Complete-turn compaction and MCP catalog validation already exist in pi-go.
+- Windows Go 1.26.4, GOWORK=off: all agent/... tests passed; agent, agent/session
+  and agent/strictschema race tests passed; agent/... vet and diff checks passed.
+  Tests use local fakes only. Provider/live/full-repository suites were not run.
+- Work is isolated from the original pi-go checkout's existing edits. JZBeacon's
+  dependency pin and application code are unchanged; no local replace, release
+  tag, production operation or new SHA-based scheme is introduced.
+
+## 2026-10-23 - Fix PR 33 omission and preparation-error regressions
+
+- Reproduce both review findings with new failing regressions before changing
+  production code. The default anyOf validator deliberately coerces values in
+  branch order, so retain that existing runtime contract and fix the generated
+  nullable declaration: match exact null first, guarded by enum=[null]. This
+  keeps omitted scalars null and prevents empty strings, zero or false from
+  entering the null branch after failing their original constraints.
+- Cover raw and parsed default tool arguments, nested objects/arrays, empty
+  containers, required nulls and valid scalar zeros. Verify minLength, pattern,
+  numeric minimum, enum and const failures stop before approval or execution;
+  valid values and optional null omission still work.
+- Preserve parser and before-hook errors inside Unicode rejections by joining
+  their causes under the existing typed error. Keep the invalid_unicode reason,
+  not-started/not-dispatched facts and safe presentation. Direct and child-call
+  regressions verify both errors.Is chains and that host error text stays out
+  of the displayed error.
+- Windows Go 1.26.4, GOWORK=off: focused regressions pass after the fix;
+  go test -mod=readonly ./agent/... -count=1, race tests for agent, agent/session
+  and agent/strictschema, go vet -mod=readonly ./agent/... and git diff --check
+  pass. Provider/live, full-repository and non-Windows tests were not run.
+- Update the existing draft PR branch using a normal push and retain its
+  [skip ci] publication convention. No dependency, version or tag changes.
