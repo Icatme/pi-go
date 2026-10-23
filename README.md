@@ -1,55 +1,20 @@
 # pi-go
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/Icatme/pi-go.svg)](https://pkg.go.dev/github.com/Icatme/pi-go)
-[![GitHub release](https://img.shields.io/github/v/release/Icatme/pi-go)](https://github.com/Icatme/pi-go/releases)
 [![Go version](https://img.shields.io/github/go-mod/go-version/Icatme/pi-go)](go.mod)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-`pi-go` is a Go reimplementation of the [`pi.ai`](https://github.com/earendil-works/pi/tree/main/packages/ai) core package surface. It combines a provider-agnostic model runtime in `pkg/pigo`, a single-agent runtime in `agent`, and the `pigo` CLI while keeping provider protocol code out of the agent loop.
+Go libraries and a CLI for calling language models and building single-agent applications. `pi-go` reimplements the core semantics of [Pi AI](https://github.com/earendil-works/pi/tree/main/packages/ai), with a shared model/message API, streaming, tool calls, reasoning content, and cross-provider replay.
 
-## Highlights
+The provider layer (`pkg/pigo`) and agent runtime (`agent`) are separate. MCP connections, JavaScript tools, persistent sessions, and skill catalogs are optional packages.
 
-- One model and message surface across OpenAI Codex, OpenCode Go, Kimi Coding, Command Code, Anthropic, DeepSeek, Google, and Mistral
-- Blocking and streaming completion APIs with normalized cross-provider message replay
-- SSE and WebSocket transports, tool calls, reasoning content, usage accounting, and observer hooks
-- A separate single-agent runtime with message, tool, steering, follow-up, and snapshot lifecycles
-- Optional MCP tools and bounded JavaScript orchestration using embedded QuickJS WASM and a pure Go wazero host
-- A small CLI for provider login, model discovery, account quota queries, and prompts
-
-## Project Positioning
-
-The low-level `pkg/pigo` package is not an agent framework. It provides the model and provider pieces needed to:
-
-- describe models and provider capabilities
-- route requests through provider and API registries
-- execute `Complete`, `CompleteSimple`, `Stream`, and `StreamSimple`
-- normalize message history for cross-provider replay
-- expose incremental assistant events and final responses
-- validate tool arguments with a small built-in schema subset
-
-The optional `agent` package builds a single-agent loop, tool lifecycle, snapshots,
-steering, and follow-up behavior on that provider layer. It deliberately does not
-own graph or multi-agent orchestration.
-
-## Supported Providers
-
-Current primary provider scope:
-
-- `openai-codex` via OpenAI OAuth and the Responses-style API surface
-- `opencode-go` via an OpenCode Go API key and model-specific OpenAI Completions, OpenAI Responses, or Anthropic Messages routing
-- `kimi-coding` via Anthropic-style Messages semantics
-- `commandcode` via the Command Code Provider API, with Go-plan fallback to its generate protocol
-- `anthropic` via the Anthropic Messages API
-- `deepseek` via DeepSeek chat completions
-- `google` via the Gemini Generative AI API
-- `mistral` via the Mistral chat completions API
-
-Supporting provider and API modules also exist for shared protocol behavior used by the core library, but the repo is intentionally optimized around these providers.
+[Install](#install) · [Quick start](#quick-start) · [CLI](#cli) · [Packages](#packages) · [Examples](#examples) · [Documentation](docs/README.md)
 
 ## Install
 
-The repository currently requires Go 1.26.2 or newer.
+Requires **Go 1.26.2 or newer**.
 
-Add the core library to a Go module:
+Add the library to an existing Go module:
 
 ```powershell
 go get github.com/Icatme/pi-go@latest
@@ -62,376 +27,141 @@ go install github.com/Icatme/pi-go/cmd/pigo@latest
 pigo --help
 ```
 
-The `agent` package is part of this module:
+`agent` and the optional packages ship in the same module; no separate installation is needed.
+
+## Quick start
+
+Set a provider credential, then save the following as `main.go` in your Go module:
 
 ```powershell
-go get github.com/Icatme/pi-go/agent@latest
+$env:KIMI_API_KEY = "your-api-key"
 ```
-
-Import it with:
-
-```go
-import "github.com/Icatme/pi-go/agent"
-```
-
-## Quick Start
-
-Core library import path:
-
-```go
-import "github.com/Icatme/pi-go/pkg/pigo"
-```
-
-Basic request flow:
 
 ```go
 package main
 
-import "github.com/Icatme/pi-go/pkg/pigo"
-
-func main() {
-	model := pigo.GetModel("kimi-coding", "kimi-k2-thinking")
-	if model == nil {
-		panic("model not found")
-	}
-
-	result := pigo.CompleteSimple(*model, pigo.Context{
-		SystemPrompt: "You are a precise coding assistant.",
-		Messages: []pigo.Message{
-			pigo.UserMessage{Content: "Explain what this repository does."},
-		},
-	}, pigo.SimpleStreamOptions{
-		APIKey: "kimi-api-key",
-	})
-
-	_ = result
-}
-```
-
-Streaming flow:
-
-```go
-stream := pigo.StreamSimple(*model, pigo.Context{
-	Messages: []pigo.Message{pigo.UserMessage{Content: "hello"}},
-}, pigo.SimpleStreamOptions{APIKey: "kimi-api-key"})
-
-for event := range stream.Events() {
-	_ = event
-}
-
-final := stream.Result()
-_ = final
-```
-
-OpenAI Completions and Responses accept model and per-request sampling fields:
-
-```go
-model.SamplingParams = pigo.SamplingParams{"top_p": 0.95}
-model.SamplingParamsByThinkingLevel = pigo.SamplingParamsByThinkingLevel{
-	pigo.ModelThinkingLevelHigh: {"temperature": 0.8},
-}
-options := pigo.ProviderStreamOptions{
-	Reasoning: pigo.ThinkingLevelHigh,
-	SamplingParams: pigo.SamplingParams{"top_p": 0.5},
-}
-_ = options
-```
-
-Sampling fields merge per key: model defaults, then effective thinking-level
-overrides, then request `SamplingParams`. The merged fields override named
-`Temperature`/`TopP` fields, including explicit zero or null values. Responses
-validates the final temperature and top_p against its registered model capabilities.
-Protocol fields such as `model`, `reasoning`, `tools`, and `stream` are rejected
-in sampling maps; use the dedicated request options for those controls.
-Other APIs, including Codex, ignore these sampling maps. `Stream` and
-`StreamSimple` use the same precedence. Responses keeps the logical pi thinking
-level during option normalization and translates it at request serialization;
-a summary-only request uses `medium`.
-
-Codex SSE and WebSocket requests merge identity headers in this order: provider
-defaults, model headers, caller headers (case-insensitive). Callers can override
-`originator` and `User-Agent`; authorization and account headers remain derived
-from the resolved credential.
-Cached WebSocket sessions use the effective originator and User-Agent identity,
-and reuse requires both identity headers to match the handshake.
-
-## Architecture Overview
-
-| Path | Responsibility |
-| --- | --- |
-| [`pkg/pigo`](pkg/pigo) | Exported model, provider, protocol, streaming, and tool library |
-| [`agent`](agent) | Exported single-agent runtime and `prebuilt` helpers |
-| [`codemode`](codemode) | Bounded QuickJS WASM sandbox, discovery, and invocation-local JSON store |
-| [`agent/codemodetool`](agent/codemodetool) | Optional script tool with an explicit native/MCP leaf allowlist |
-| [`mcp`](mcp) | Managed HTTP/stdio connections, wire-bound catalogs and explicit OAuth |
-| [`agent/toolset`](agent/toolset) | Dynamic exposure, bounded discovery and trusted session restoration |
-| [`agent/mcpresources`](agent/mcpresources) | Bounded resource lists, text/images and explicit artifact export |
-| [`examples`](examples) | Runnable examples in a dependency-isolated nested module |
-| [`cmd/pigo`](cmd/pigo) | CLI entrypoint |
-| [`internal/cli`](internal/cli) | CLI-only login and credential-store logic |
-| [`docs`](docs) | Repository notes and supporting documentation |
-
-Core runtime pieces:
-
-- lazy provider registry for provider modules and model metadata
-- lazy API registry for stream dispatch by `model.API`
-- unified message/content model for replay and serialization
-- bounded stream event delivery with explicit droppable delta backpressure
-- shared HTTP/SSE transport utilities for OpenAI Responses-style providers
-- optional WebSocket transport for `openai-codex`
-- observer hooks for request completion/error and stream-finish accounting
-
-The [local MCP Codemode example](examples/mcp-codemode/README.md) uses a
-caller-owned SDK session and a deterministic model to generate one batch script,
-filter results inside the VM, and return bounded output. Applications select the
-leaf allowlist; importing the packages creates no connections. The
-[binding guide](agent/codemodetool/README.md) describes error facts, permission
-checks, and the `ToolExecutorFunc` signature change.
-
-The [managed session example](examples/mcp-managed/README.md) also demonstrates
-JSONL v2 branch transactions, compaction and separate-process resume of Codemode
-state and trusted tool selections. [Session integration](agent/session/README.md)
-documents the Storage API/format break and interrupted-execution contract.
-
-## Account Quota Queries
-
-Account balances and usage windows are an optional provider capability,
-independent of model generation and per-request token usage. `commandcode` is
-currently the only built-in provider with quota queries. Check support without
-network access with `pigo.SupportsQuotaQuery(provider)`; unsupported providers
-return `pigo.ErrQuotaUnsupported` from `pigo.QueryQuota`.
-
-```go
 import (
-    "context"
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"time"
 
-    "github.com/Icatme/pi-go/pkg/pigo"
+	"github.com/Icatme/pi-go/pkg/pigo"
 )
 
-func accountQuota(ctx context.Context, auth map[pigo.Provider]pigo.AuthConfig) (pigo.QuotaResult, error) {
-    return pigo.QueryQuota(ctx, "commandcode", pigo.QuotaQueryOptions{Auth: auth})
+func main() {
+	apiKey := os.Getenv("KIMI_API_KEY")
+	if apiKey == "" {
+		log.Fatal("set KIMI_API_KEY")
+	}
+	model := pigo.GetModel("kimi-coding", "kimi-k2-thinking")
+	if model == nil {
+		log.Fatal("model not found")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	result := pigo.CompleteSimple(*model, pigo.Context{
+		SystemPrompt: "You are a concise coding assistant.",
+		Messages: []pigo.Message{
+			pigo.UserMessage{Content: "Explain Go interfaces in three sentences."},
+		},
+	}, pigo.SimpleStreamOptions{
+		APIKey:         apiKey,
+		RequestContext: ctx,
+	})
+	if result.StopReason == pigo.StopReasonError || result.StopReason == pigo.StopReasonAborted {
+		log.Fatal(result.ErrorMessage)
+	}
+	for _, block := range result.Content {
+		if text, ok := block.(pigo.TextContent); ok {
+			fmt.Println(text.Text)
+		}
+	}
 }
 ```
 
-`QuotaQueryOptions.APIKey` overrides `Auth`. When neither an API key nor a
-provider auth entry is supplied, Command Code uses its normal
-environment/user-home lookup.
-`BaseURL` supplies an explicit trusted account API endpoint, and `HTTPClient`
-allows a caller-owned transport. Pass a context deadline to bound the complete
-query; otherwise it has a 15-second timeout. Queries do not refresh models,
-generate text, retry requests, or cache account snapshots.
-
-`QuotaResult` separates balances, rolling windows, subscription details, and
-unavailable sections. Amounts include a unit; a nil amount or timestamp means
-unknown, while a non-nil zero is a known normalized amount, including a
-depleted balance or exhausted window. Window remaining amounts are headroom
-under independent limits and must not be added to account
-balances. Different units must not be combined either. A window's optional
-`BalanceIDs` identifies the pools constrained by that window; nil means its
-pool scope is unreported or it is not a balance limit. A usable partial result
-has `Unavailable` issues and a nil error; authentication failures and invalid
-required responses return an error.
-
-A provider adds this capability by assigning a `QuotaQuerier` implementation to
-`ProviderModule.Quota`. Its `QueryQuota(context.Context, QuotaQueryOptions)`
-method returns the normalized snapshot and must support concurrent read-only
-calls. The contract follows cc-switch's explicit optional amounts and multiple
-usage entries ([reference source at `0d095555`](https://github.com/farion1231/cc-switch/blob/0d0955550323f72ee8f217bd5d1857c659b2161e/src-tauri/src/provider.rs#L136));
-provider adapters in pi-go use typed Go implementations.
-
-The Command Code adapter queries `/alpha/whoami`, `/alpha/billing/credits`, and
-`/alpha/billing/subscriptions` on its account API. These are the alpha endpoints
-used by the Command Code CLI; upstream changes can make sections unavailable.
-It reports three separate pools (`monthly`, `purchased`, and `free`), with each
-remaining amount clamped to zero when the upstream balance is negative. The
-unit is provider `credits`; their value can vary by plan and model, so the
-adapter does not convert them to USD. Five-hour and weekly windows identify
-only `monthly` in `BalanceIDs`: purchased credits bypass those limits. See the
-[Command Code usage policy](https://commandcode.ai/docs/resources/usage-limits).
-The adapter does not create an aggregate balance. Monthly allowance and
-spending remain unknown: it does not infer them from a plan name or query the
-separate usage-summary endpoint.
-
-## Testing
-
-Main package validation commands:
+Build and run it from PowerShell:
 
 ```powershell
-go test ./pkg/pigo/... -v -count=1
-.\scripts\test.ps1 -Coverage
-go vet ./pkg/pigo/...
-gofmt -l pkg/pigo/
+go build -o hello-pigo.exe .
+.\hello-pigo.exe
 ```
 
-Run all repository modules through the shared PowerShell entrypoint:
-
-```powershell
-.\scripts\test.ps1
-```
-
-Direct package checks for the merged agent runtime remain available with
-`go test ./agent/...`; the shared script tests the root and examples modules
-independently.
-
-For direct coverage commands, prefer a forced rebuild after package file moves or splits so the profile does not reuse stale cover metadata from the Go build cache:
-
-```powershell
-go test -a ./pkg/pigo/... -coverprofile=coverage.out -count=1
-go tool cover -func coverage.out
-```
-
-Race testing:
-
-```powershell
-go test ./pkg/pigo/... -race -count=1
-```
-
-Live tests are gated and skipped by default. Enable them explicitly with:
-
-```powershell
-$env:PIGO_LIVE_TEST = "1"
-```
-
-Some live paths also require credentials such as:
-
-- `OPENCODE_API_KEY`
-- `KIMI_API_KEY`
-- `COMMAND_CODE_API_KEY` (or `COMMANDCODE_API_KEY`)
-- test-only OpenAI Codex credentials in `01_auth.json`
-
-Support-file boundaries:
-
-- `.pigo/auth.json` is CLI-managed auth storage
-- `.pigo/.env` is local test/helper API-key input
-- `01_auth.json` is test-only and ignored by git
-- library runtime auth should normally be passed explicitly via options or auth config; `commandcode` additionally supports the upstream user-home auth files listed below
-
-The `commandcode` provider uses the 2026-10-14 public catalog (89 chat models),
-with capabilities and estimated prices from `pi-commandcode-provider` v0.7.7
-and the latest Gemini 4 Argon/Muse Wonder metadata from `command-code` 1.82.1.
-`pigo login commandcode` opens the browser-assisted login flow and
-stores the returned API key in `.pigo/auth.json`. Runtime lookup also accepts
-`COMMAND_CODE_API_KEY` (or `COMMANDCODE_API_KEY`), `SimpleStreamOptions.APIKey`, caller-supplied
-`AuthConfig`, and the supported Command Code/pi/OMP auth-file shapes under the
-user home directory: `.commandcode/auth.json`, `.omp/agent/auth.json`, and
-`.pi/agent/auth.json`.
-
-Discovery selects the wire protocol from `supported_endpoints`: Messages,
-then Responses, then Chat Completions. Models advertising only non-chat
-endpoints (such as `/systemone`) are excluded. The selected protocol is stored
-in `Model.Compat` as `CommandCodeCompat` and retained in the catalog cache.
-Catalogs or manually constructed models without endpoint metadata keep the
-Claude Messages / other-model Chat Completions selection.
-Only an HTTP 403 with
-`upgrade_required` selects `/alpha/generate`; authentication errors, network
-failures, rate limits, and other provider errors do not trigger that fallback.
-The selection is isolated by endpoint and credential.
-Models keep `API=commandcode-custom` for routing; returned assistant messages retain
-their actual wire API so reasoning signatures replay only across matching protocols.
-The Responses adapter preserves Command Code's incremental reasoning events,
-uses system-role prompts and omits optional reasoning controls for `off`.
-Requested reasoning levels are clamped to the model's advertised efforts on
-both native and generate routes (for example, Qwen 3.8 `high` selects `xhigh`).
-Claude signed thinking blocks are preserved for native replay even when their
-visible thinking text is empty.
-
-For Command Code `gpt-6-luna`, PNG inputs are converted to JPEG before sending
-to avoid an upstream PNG recognition defect observed on 2026-10-14. This applies
-to user and tool-result images on all routes: dimensions are preserved, JPEG
-quality is 95, and transparency is composited onto white. Conversion is lossy;
-the caller's original image data remains unchanged. Invalid PNGs fail locally.
-Local conversion limits are 32 MiB of PNG data, 64 Mi pixels, and 65535 pixels per
-side. Other models and image formats are sent unchanged.
-
-Unknown dynamic model capabilities remain unknown; their zero price estimate
-does not mean free usage. Prices are display snapshots, including context-based
-tiers; DeepSeek estimates use off-peak rates rather than live billing rates.
-Generated responses that
-report an upstream/network failure in their finish metadata are errors.
-Completed reasoning is not replayed through the generate protocol, and missing
-tool results are represented explicitly. `CMD_ZDR=1` (or `COMMANDCODE_ZDR=1`) requests strict zero data
-retention through the provider's `x-cmd-zdr` header.
-
-The CLI refreshes Command Code models from
-`https://api.commandcode.ai/provider/v1/models` before `models` and `ask`, then
-atomically caches the validated catalog in the Pi-compatible
-`~/.pi/agent/commandcode-models.json` format. `PI_CODING_AGENT_DIR` changes the
-agent directory and `COMMANDCODE_MODELS_CACHE` overrides the complete cache
-path. If live discovery is unavailable, a valid cache remains usable with a
-warning; the first offline load without a valid cache leaves Command Code
-unavailable without preventing other providers from loading.
-
-The `opencode-go` provider follows Pi's built-in OpenCode Go routing and reads
-`OPENCODE_API_KEY`. Its deterministic built-in catalog is the 2026-08-20
-snapshot of active, non-deprecated, tool-capable models from
-[`models.dev`](https://models.dev), which is also Pi's catalog source. OpenCode
-Go keys are managed at [`opencode.ai/auth`](https://opencode.ai/auth).
-
-Library callers can use `FetchCommandCodeModels` for a strict read-only live
-catalog, `LoadCommandCodeModels` for the live/cache selection, or
-`RefreshCommandCodeModelsWithResult` to apply that selection while retaining
-its source and warning. `RefreshCommandCodeModels` remains the concise wrapper
-for callers that only need the applied model slice. Override the endpoints with
-`COMMANDCODE_MODELS_URL` and `COMMANDCODE_API_BASE`. As in the upstream
-extension, newly discovered models without a local pricing entry use zero
-display cost until the pricing table is updated.
-
-OpenCode Go sends `x-opencode-session` when `SessionID` is provided, across all
-three wire protocols; an explicit caller header takes precedence. For native
-OpenAI GPT-5.6 models and GPT-6 Astra, long prompt caching uses
-`prompt_cache_options.ttl: "30m"`; disabling caching uses explicit mode without
-an automatic cache key. Earlier models retain their supported cache format.
-Custom Responses models opt in through `SupportsExplicitPromptCacheMode` and
-can disable `max_output_tokens` with `SupportsMaxOutputTokens`.
-
-The September 2026 catalog adds GPT-6 Astra and uses `deepseek-flash` for native
-DeepSeek V4.1 Flash, including image input. Retired `openai-codex` GPT-5.4 and
-GPT-5.4 mini entries are removed; the CLI and examples now default to GPT-5.5.
-The OpenAI API entries and other providers' DeepSeek model identifiers are
-independent and remain available. Astra supports `low` through `max`; Off is
-clamped to a supported level by the built-in agent backend.
+For incremental output, use `StreamSimple`. See [model calls and streaming](docs/model-runtime.md) for event handling, sampling options, and error diagnostics. To add a tool-execution loop, start with the [agent guide](agent/README.md).
 
 ## CLI
 
-Example commands:
+The CLI supports login, model discovery, prompts, and account quota queries:
 
 ```powershell
-.\scripts\build.ps1
-$env:OPENCODE_API_KEY = "your-opencode-go-key"
-.\bin\pigo.exe list
-.\bin\pigo.exe models openai-codex
-.\bin\pigo.exe login openai-codex
-.\bin\pigo.exe login commandcode
-.\bin\pigo.exe models commandcode
-.\bin\pigo.exe quota commandcode
-.\bin\pigo.exe quota --json commandcode
-.\bin\pigo.exe models opencode-go
-.\bin\pigo.exe ask --provider kimi-coding "hello"
-.\bin\pigo.exe ask --provider opencode-go --model kimi-k3 "hello"
-.\bin\pigo.exe ask --provider commandcode --model poolside/laguna-s-2.1-free "hello"
-.\bin\pigo.exe ask --provider openai-codex --model gpt-5.5 "hello"
+pigo login openai-codex
+pigo models openai-codex
+pigo ask --provider openai-codex --model gpt-5.5 "Explain this error message"
+
+pigo login commandcode
+pigo models commandcode
+pigo quota commandcode
+pigo quota --json commandcode
 ```
 
-Use `pigo quota [--json] <provider>` with flags before the provider. It reads
-CLI-managed `.pigo/auth.json` through the existing auth bridge and then uses
-the provider's normal credential lookup when no local entry is available.
-Human output keeps balances and windows separate, with `applies-to` for known
-window pool scopes; `--json` writes the full
-`QuotaResult` to stdout. Unavailable sections emit warnings to stderr while
-retaining a successful exit status for a usable snapshot. Fatal query errors
-and output failures return a nonzero exit status.
+`pigo list` lists available login providers. CLI credentials are stored in `.pigo/auth.json`; library applications supply their own credentials through request options or auth configuration.
 
-Build helpers:
+Primary providers are `openai-codex`, `opencode-go`, `kimi-coding`, `commandcode`, `anthropic`, `deepseek`, `google`, and `mistral`. See [providers and authentication](docs/providers.md) for routing, credential lookup, model discovery, and provider-specific behavior. See [account quota queries](docs/account-quotas.md) for balance and usage-window semantics.
 
-- `.\scripts\test.ps1` runs `go test ./...`
-- `.\scripts\build.ps1` runs tests and builds `bin/pigo.exe`
-- `.\scripts\build.ps1 -SkipTest` builds without running tests
-- `.\scripts\build.ps1 -Release` adds stripped release flags
-- `.\scripts\build.ps1 -GOOS linux -GOARCH amd64` cross-builds to `bin/pigo`
+## Packages
 
-## More Documentation
+| Package | Use it for |
+| --- | --- |
+| [`pkg/pigo`](pkg/pigo) | Model metadata, provider protocols, completions, streams, and message replay |
+| [`agent`](agent/README.md) | Single-agent loops, tool execution, steering, follow-ups, and snapshots |
+| [`agent/session`](agent/session/README.md) | Persistent conversation branches, replay, and compaction |
+| [`mcp`](mcp/README.md) | Managed HTTP/stdio MCP connections, catalogs, and explicit OAuth |
+| [`agent/toolset`](agent/toolset/README.md) | Dynamic tool exposure, discovery, and trusted session restoration |
+| [`codemode`](codemode/README.md) / [`agent/codemodetool`](agent/codemodetool/README.md) | Bounded JavaScript execution with QuickJS WASM and an explicit tool allowlist |
+| [`agent/skills`](agent/skills/README.md) | Trusted directory or embedded skill catalogs and bounded resource reads |
+| [`agent/strictschema`](agent/strictschema/README.md) | Required/nullable tool declarations and optional-null normalization |
 
-- [`agent/README.md`](agent/README.md): agent runtime concepts, package boundaries, and direct usage
-- [`agent/docs/runtime-contracts.md`](agent/docs/runtime-contracts.md): runtime state and event contracts
-- [`agent/docs/testing.md`](agent/docs/testing.md): agent validation and live-test entrypoints
-- [`examples`](examples): runnable integrations and sample applications
+`agent` depends on `pkg/pigo`; provider protocol code stays outside the agent loop. Applications own graph and multi-agent orchestration. The [documentation index](docs/README.md) also covers checkpoints, runtime contracts, MCP tools, and resources.
+
+## Examples
+
+Examples live in a separate Go module under `examples/`. Each guide includes its build and run commands.
+
+| Example | Demonstrates |
+| --- | --- |
+| [switch-chat](examples/switch-chat/README.md) | Agent presets, session persistence, and reflection |
+| [mattermost-chatbot](examples/mattermost-chatbot/README.md) | A Mattermost application with built-in tools |
+| [mcp-codemode](examples/mcp-codemode/README.md) | A caller-owned MCP session and deterministic model using bounded JavaScript tools |
+| [mcp-managed](examples/mcp-managed/README.md) | Managed MCP connections, JSONL sessions, compaction, and process restart |
+
+## Development
+
+From the repository root:
+
+```powershell
+$env:GOWORK = "off"
+$env:PIGO_LIVE_TEST = "0"
+$env:PI_GO_AGENT_LIVE_TEST = "0"
+$env:PI_GO_AGENT_EXAMPLE_LIVE = "0"
+.\scripts\test.ps1
+.\scripts\build.ps1 -SkipTest
+```
+
+The test script checks the root and examples modules independently. The build script creates `bin/pigo.exe` on Windows. See the [development guide](docs/development.md) for focused tests, race checks, coverage, cross-builds, and live-test controls.
+
+## Documentation
+
+- [Documentation index](docs/README.md) — guides and package references
+- [Model calls and streaming](docs/model-runtime.md) — completion APIs, events, options, and diagnostics
+- [Providers and authentication](docs/providers.md) — credentials, routing, and catalog behavior
+- [Account quota queries](docs/account-quotas.md) — balances, usage windows, and CLI output
+- [Release notes](docs/releases/) · [Source tags](https://github.com/Icatme/pi-go/tags) · [GitHub releases](https://github.com/Icatme/pi-go/releases)
+
+## License
+
+[MIT](LICENSE). The license retains the copyright notice for the original Pi AI
+code by Mario Zechner. Bundled QuickJS components retain their
+[upstream license notices](codemode/internal/assets/SOURCE.md).

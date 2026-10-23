@@ -2184,3 +2184,45 @@
 - Include the earlier preserved worklog entries in the authorized eight-file
   commit. Publish to master without moving the existing v0.17.0 source tag.
   Non-Windows execution and post-push remote CI are not verified here.
+
+## 2026-10-23 - Reorganize the README and documentation navigation
+
+- Reduce the root README from 437 to 160 lines, with installation, a complete
+  quick start, CLI usage, package responsibilities and runnable example links.
+  Replace the overlapping highlights/positioning sections with a short overview.
+- Move provider/authentication details, account quotas, model streaming/sampling
+  and development commands into four focused guides under docs/. Rebuild the
+  documentation index around guides, agent references, MCP and design notes.
+  Preserve the existing provider, quota and sampling contracts in their guides.
+- The quick start now reads an environment credential, bounds the request with
+  a context deadline, checks its stop reason and prints the text response.
+  The streaming guide handles events, final results and cancellation explicitly.
+- Documentation validation: 77 local links/anchors resolve; Markdown fences and
+  whitespace checks pass; all 14 PowerShell blocks parse. Four Go snippets
+  (quick start, streaming, sampling and quota) compile with GOWORK=off and
+  -mod=readonly. These snippets are not executed against live providers.
+  git diff --check passes. Full test suites are not rerun for this docs-only change.
+
+## 2026-10-23 - MIT licensing and v0.17.1 release preparation
+
+- Add the standard MIT license for Icatme and pi-go contributors, preserving
+  Mario Zechner's original Pi AI copyright notice. Add the README license
+  badge and section; retain the existing QuickJS upstream notices.
+- Include the preceding README/documentation reorganization in this release.
+  Advance pkg/pigo.Version and the examples module requirement to 0.17.1;
+  keep the published v0.17.0 tag intact. Add release notes for the 0.17 series.
+- Windows Go 1.26.4, GOWORK=off, all live gates disabled: root and examples
+  pass go test -mod=readonly -race ./... -count=1, go vet -mod=readonly ./...
+  and go mod verify. The MIT grant matches the upstream text. Local Markdown
+  links/anchors, code fences, whitespace and git diff --check pass. The four Go
+  documentation snippets were compiled during the preceding README update.
+- Prepare five CGO-disabled CLI archives from the clean release commit:
+  Windows amd64, Linux amd64/arm64 and macOS amd64/arm64. Package the root MIT
+  license, Go runtime license and the linked modules' license/notice files.
+  Gate publication on build metadata, archive contents, Unix executable modes
+  and the packaged Windows CLI version banner. SHA256SUMS.txt is included only
+  for download integrity; no additional source checksum scheme is introduced.
+- The authorized release uses a new annotated v0.17.1 tag and GitHub Release.
+  Download verification and the resulting publication status are reported on
+  the release page and in the task reply. Linux/macOS runtime acceptance and
+  live provider calls are separate from local cross-compilation evidence.
