@@ -2039,3 +2039,37 @@
   pass. Provider/live, full-repository and non-Windows tests were not run.
 - Update the existing draft PR branch using a normal push and retain its
   [skip ci] publication convention. No dependency, version or tag changes.
+
+## 2026-10-23 - Prepare minor version 0.17.0
+
+- Advance pkg/pigo.Version from 0.16.0 to 0.17.0 for the additive agent and
+  provider APIs merged since the previous version declaration. Add release
+  preparation notes covering argument bounds, strict-schema omission, protected
+  compaction tails and classified provider failures.
+- Retain the examples module's existing published-version requirement and its
+  local replacement, following the previous version-preparation convention.
+  Preserve all pre-existing uncommitted files and earlier worklog entries.
+- Windows Go 1.26.4, GOWORK=off: go test -mod=readonly ./internal/cli -count=1
+  passes; compile cmd/pigo and verify pigo --help reports pigo 0.17.0. Full
+  repository and live-provider suites are not rerun for this metadata update.
+- This request updates local version metadata and notes only; no commit, push,
+  Git tag, GitHub Release or binary publication is performed.
+
+## 2026-10-23 - Prepare v0.17.0 source tag publication
+
+- The user authorized committing and pushing the version update and creating
+  the annotated v0.17.0 tag. Scope the commit to the version constant, release
+  notes, examples module version and these version worklog entries. Preserve
+  the earlier local skills, dependency, CI and worklog edits outside this commit.
+- Advance the examples requirement to github.com/Icatme/pi-go v0.17.0 while
+  retaining the existing local replacement. Refresh the release notes for
+  source-tag publication; no GitHub Release or binary assets are included.
+- Validate an isolated snapshot of the committed baseline plus the two version
+  declarations, excluding unrelated local changes. Windows Go 1.26.4,
+  GOWORK=off, live-provider tests disabled: root and examples both pass
+  go test -mod=readonly ./... -count=1 and go vet -mod=readonly ./...;
+  examples resolves the expected local v0.17.0 module. The compiled CLI
+  reports pigo 0.17.0. Non-Windows execution and remote CI are not verified.
+- Publication uses one atomic push for master and the annotated tag, followed
+  by remote-ref verification. Normal Git commit/tag identities are checked
+  for this publication; no additional checksum scheme is introduced.
