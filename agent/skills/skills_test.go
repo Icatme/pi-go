@@ -87,9 +87,12 @@ func TestParse(t *testing.T) {
 	}{
 		{"normal", "---\nname: excel\ndescription: Sheets\n---\nbody", true},
 		{"empty-body-eof", "---\nname: excel\ndescription: Sheets\n---", true},
+		{"bom-empty-body-eof", "\uFEFF---\nname: excel\ndescription: Sheets\n---", true},
 		{"multiline", "---\nname: excel\ndescription: >\n  Make sheets\n  and charts\nmetadata:\n  x: y\n---\nbody", true},
 		{"crlf", "---\r\nname: excel\r\ndescription: Sheets\r\n---\r\nbody", true},
 		{"missing", "body", false},
+		{"double-bom", "\uFEFF\uFEFF---\nname: excel\ndescription: Sheets\n---\n", false},
+		{"leading-whitespace", " \uFEFF---\nname: excel\ndescription: Sheets\n---\n", false},
 		{"bad-name", "---\nname: Excel\ndescription: Sheets\n---\n", false},
 		{"empty-name", "---\ndescription: Sheets\n---\n", false},
 		{"duplicate", "---\nname: excel\nname: word\ndescription: Sheets\n---\n", false},
@@ -98,6 +101,7 @@ func TestParse(t *testing.T) {
 		{"empty", "---\nname: excel\ndescription: ' '\n---\n", false},
 		{"typed-bool", "---\nname: excel\ndescription: Sheets\ndisable-model-invocation: 'true'\n---\n", false},
 		{"alias", "---\nname: &n excel\ndescription: *n\n---\n", false},
+		{"merge", "---\nbase: &base\n  name: excel\n  description: Sheets\n<<: *base\n---\n", false},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {

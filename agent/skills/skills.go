@@ -18,7 +18,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Options specifies administrator-controlled directories. No default directories
@@ -247,7 +247,7 @@ var namePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 func parse(raw string) (Metadata, string, error) {
 	invalid := func() (Metadata, string, error) { return Metadata{}, "", errors.New("skills: invalid frontmatter") }
-	normalized := strings.ReplaceAll(raw, "\r\n", "\n")
+	normalized := strings.ReplaceAll(strings.TrimPrefix(raw, "\uFEFF"), "\r\n", "\n")
 	if !strings.HasPrefix(normalized, "---\n") {
 		return invalid()
 	}

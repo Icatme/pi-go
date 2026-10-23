@@ -57,6 +57,10 @@ are supported. Names/descriptions cannot use aliases; duplicate top-level fields
 are rejected. Unknown fields are ignored; notably `allowed-tools` does **not**
 grant anything. Invalid bundles produce diagnostics and are excluded.
 
+An optional UTF-8 BOM is accepted at the start of `SKILL.md`. `Read` returns the
+body with CRLF normalized to LF; a BOM inside the body is preserved.
+`ReadResource` preserves the original text bytes, including BOM and line endings.
+
 `disable-model-invocation: true` omits a skill from `Prompt`, not `List` or `Read`.
 The host must require explicit selection before exposing such a skill to a model.
 Command parsing (for example `/skill:spreadsheet`), user/tenant selection and
@@ -110,8 +114,9 @@ without moving business-specific dependencies into pi-go.
 This implements the portable SKILL.md and progressive-loading concepts, not the
 entire Pi coding-agent package manager. Unlike Pi's permissive warnings, invalid
 names/types are rejected, symlink discovery is disabled, and roots are explicit.
-No existing pi-go API changes. The only added dependency is `gopkg.in/yaml.v3`
-v3.0.1 for standard YAML parsing rather than a partial homegrown parser.
+No existing pi-go API changes. YAML parsing uses `go.yaml.in/yaml/v3` v3.0.5,
+the [YAML organization's maintained successor](https://github.com/yaml/go-yaml)
+to the archived `gopkg.in/yaml.v3` module.
 
 References:
 - https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/skills.md

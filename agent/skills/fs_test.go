@@ -74,29 +74,60 @@ func TestFSImmutableAndDisabled(t *testing.T) {
 	}
 }
 func TestFSParity(t *testing.T) {
-	root := t.TempDir()
-	p := bundle(t, root, "a", "a", "Work", "", "instructions")
-	if e := os.WriteFile(filepath.Join(p, "ref.md"), []byte("reference"), 0600); e != nil {
-		t.Fatal(e)
-	}
-	disk := catalog(t, Options{Roots: []string{root}})
-	memory := fsCatalog(t, fstest.MapFS{"a/SKILL.md": mapBundle("a", "Work", "", "instructions"), "a/ref.md": {Data: []byte("reference")}}, FSOptions{})
-	a, b := disk.List(), memory.List()
-	a[0].Location = ""
-	b[0].Location = ""
-	if !reflect.DeepEqual(a, b) || disk.Prompt() != memory.Prompt() {
-		t.Fatal(a, b)
-	}
-	for _, c := range []interface {
-		Read(string) (string, error)
-		ReadResource(string, string) (string, error)
-	}{disk, memory} {
-		if body, e := c.Read("a"); e != nil || body != "instructions" {
-			t.Fatal(body, e)
-		}
-		if body, e := c.ReadResource("a", "ref.md"); e != nil || body != "reference" {
-			t.Fatal(body, e)
-		}
+	for _, tt := range []struct {
+		name, prefix, newline string
+	}{
+		{"lf", "", "\n"},
+		{"crlf", "", "\r\n"},
+		{"bom-lf", "\uFEFF", "\n"},
+		{"bom-crlf", "\uFEFF", "\r\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			const wantBody = "\uFEFFinstructions\nsecond line\uFEFF\n"
+			raw := tt.prefix + strings.ReplaceAll("---\nname: a\ndescription: Work\n---\n"+wantBody, "\n", tt.newline)
+			reference := "\uFEFFreference" + tt.newline
+			root := t.TempDir()
+			path := filepath.Join(root, "a")
+			if err := os.Mkdir(path, 0700); err != nil {
+				t.Fatal(err)
+			}
+			for name, data := range map[string]string{"SKILL.md": raw, "ref.md": reference} {
+				if err := os.WriteFile(filepath.Join(path, name), []byte(data), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			disk := catalog(t, Options{Roots: []string{root}})
+			memory := fsCatalog(t, fstest.MapFS{"a/SKILL.md": {Data: []byte(raw)}, "a/ref.md": {Data: []byte(reference)}}, FSOptions{})
+			for name, c := range map[string]interface {
+				List() []Metadata
+				Diagnostics() []Diagnostic
+				Read(string) (string, error)
+				ReadResource(string, string) (string, error)
+			}{"disk": disk, "fs": memory} {
+				t.Run(name, func(t *testing.T) {
+					if len(c.List()) != 1 || len(c.Diagnostics()) != 0 {
+						t.Fatalf("list = %+v, diagnostics = %+v", c.List(), c.Diagnostics())
+					}
+					if body, err := c.Read("a"); err != nil || body != wantBody {
+						t.Fatalf("Read = %q, %v; want %q", body, err, wantBody)
+					}
+					for path, want := range map[string]string{"SKILL.md": raw, "ref.md": reference} {
+						if body, err := c.ReadResource("a", path); err != nil || body != want {
+							t.Fatalf("ReadResource(%q) = %q, %v; want %q", path, body, err, want)
+						}
+					}
+				})
+			}
+			if t.Failed() {
+				return
+			}
+			a, b := disk.List(), memory.List()
+			a[0].Location = ""
+			b[0].Location = ""
+			if !reflect.DeepEqual(a, b) || disk.Prompt() != memory.Prompt() {
+				t.Fatal(a, b)
+			}
+		})
 	}
 }
 func TestFSValidation(t *testing.T) {

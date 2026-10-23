@@ -2040,6 +2040,92 @@
 - Update the existing draft PR branch using a normal push and retain its
   [skip ci] publication convention. No dependency, version or tag changes.
 
+## 2026-10-23 - Resolve the five skills review findings
+
+- Reproduce the UTF-8 BOM failure in both disk and FS catalogs before changing
+  production code. Strip exactly one leading BOM before checking frontmatter;
+  preserve BOM characters in the body and preserve all resource bytes. Expand
+  disk/FS parity tests across LF, CRLF, BOM+LF and BOM+CRLF, including raw
+  SKILL.md reads. Cover BOM with an empty body, misplaced/repeated BOMs and YAML
+  merge-key rejection without weakening the existing strict metadata checks.
+- Replace archived gopkg.in/yaml.v3 with go.yaml.in/yaml/v3 v3.0.5 from the
+  [YAML organization](https://github.com/yaml/go-yaml). Maintenance checked on
+  2026-10-23: the selected stable version was released on 2026-07-26, the v3
+  branch was updated on 2026-10-13, and the repository is active. Its Go 1.16
+  minimum and pure-Go implementation fit this module; the Node API is unchanged.
+  v3 is the maintained stable/security-fix line; v4 remains a release candidate.
+  The alternative goccy/go-yaml had no repository update within six months,
+  so it was not selected. Open-issue searches found no Windows/Go 1.26 matches;
+  local compatibility is established by the Windows checks below, not that search.
+- Retain and verify the already-integrated Windows reload/close regression and
+  embedded-resource byte comparison. Failed reload keeps the previous snapshot,
+  Close releases Windows handles, and embedded CRLF resources remain unchanged.
+- Tidy removes the old YAML and check.v1 entries from the root module. Root and
+  examples resolve their complete dependency graphs with -mod=readonly. The
+  examples module retains its existing indirect YAML dependencies and versions.
+  Add these graph checks to CI and include agent/skills in the existing five-OS
+  race matrix. Only standard Go dependency checksum entries change; no custom
+  content hashes or version/tag changes are introduced.
+- Windows Go 1.26.4, GOWORK=off, live-model tests disabled: agent/skills race
+  tests pass; root and examples both pass full go test -mod=readonly -count=1
+  ./..., go vet -mod=readonly ./..., go list -mod=readonly -m all, go mod verify
+  and go mod tidy -diff. The examples tidy comparison required local LF
+  normalization of checkout-only CRLF, with no dependency/content diff.
+  git diff --check passes. Linux/macOS execution and the CI matrix were not run.
+
+## 2026-10-23 - Review latest PR 33 after repository synchronization
+
+- Fetch origin and confirm local master already matches origin/master. Preserve
+  all eight pre-existing modified paths. Review the latest open draft PR 33 in
+  its existing clean checkout; do not modify its production code or PR state.
+- Reproduce a strictschema integration defect: the default agent validator
+  coerces optional null scalars into empty strings, zero or false before
+  Normalize can remove them. With an optional minLength=1 string, an explicit
+  empty string is instead coerced to null and omitted, allowing execution that
+  the original schema rejects. The regression test uses a custom raw parser
+  and therefore misses the ordinary parser path.
+- Reproduce lost error identity when a before hook both mutates an argument to
+  invalid Unicode and returns a sentinel error. MaxArgumentBytes=0 preserves
+  errors.Is; enabling the new limit drops the hook cause in the Unicode check.
+  The corresponding post-parser Unicode branch also replaces the original error.
+- Windows Go 1.26.4, GOWORK=off: agent/... tests and vet pass, as do race tests
+  for agent, agent/session and agent/strictschema and the PR diff whitespace
+  check. Standalone local executables reproduce both findings without changing
+  the reviewed checkout. The PR has no remote CI results; live providers,
+  non-Windows execution and full-repository tests were not run in this review.
+
+## 2026-10-23 - Re-review and merge PR 33
+
+- Re-review the complete latest PR diff, the exact-null omission declaration,
+  parser/hook error chains, argument limits and protected compaction boundary.
+  No remaining blocking findings. Confirm the reviewed head is unchanged from
+  the previously passing three-package race run and includes current master.
+- On Windows Go 1.26.4 with GOWORK=off, focused strictschema/argument-budget/
+  protected-compaction regressions pass. Both root and examples modules also
+  pass go test -mod=readonly ./... -count=1 and go vet -mod=readonly ./... with
+  live-provider tests explicitly disabled. PR diff whitespace checks pass.
+- Update the PR validation evidence, mark the draft ready and merge through
+  GitHub with an expected-head guard under the user's authorization. Confirm
+  GitHub reports merged, remote master contains the reviewed head and the merge
+  tree exactly equals the tested tree. No source changes were needed this pass.
+- Pre-merge remote CI had no results. Non-Windows execution, live providers,
+  post-merge remote CI and a full-repository race suite are not verified here.
+  Preserve the primary checkout's existing eight modified paths; its local
+  master remains at its prior commit rather than rewriting uncommitted work.
+
+## 2026-10-23 - Synchronize local master while preserving local edits
+
+- Fetch origin and fast-forward local master to the merged PR 33. Only the
+  shared worklog overlaps the eight existing modified files, so temporarily
+  stash that path and keep the other seven files in place.
+- Resolve the worklog append conflict by retaining all incoming and local
+  entries. Restore the original unstaged state and verify the other seven
+  files byte-for-byte against the pre-sync snapshot.
+- Confirm local master matches origin/master, the index has no staged or
+  unresolved changes and git diff --check passes. Keep the existing stashes;
+  remove only this synchronization's temporary stash after verification.
+  This operation does not commit or push the preserved local work.
+
 ## 2026-10-23 - Prepare minor version 0.17.0
 
 - Advance pkg/pigo.Version from 0.16.0 to 0.17.0 for the additive agent and
@@ -2073,3 +2159,28 @@
 - Publication uses one atomic push for master and the annotated tag, followed
   by remote-ref verification. Normal Git commit/tag identities are checked
   for this publication; no additional checksum scheme is introduced.
+
+## 2026-10-23 - Review and publish the remaining skills changes
+
+- Review all eight remaining modified paths before the authorized commit/push.
+  No blocking findings. The parser removes exactly one initial UTF-8 BOM before
+  checking the frontmatter delimiter; body BOMs and raw resource text remain
+  intact. Disk/FS parity covers LF, CRLF, optional leading BOM and raw reads;
+  malformed metadata, duplicate BOMs, aliases and merge keys remain rejected.
+- Recheck the YAML dependency against upstream sources: the original repository
+  is archived; the YAML organization fork is active, with recent main-branch
+  work on 2026-10-22 and v3.0.5 released on 2026-07-26. Its Go 1.16 minimum
+  fits this module. v3 receives security fixes only; the current v4 version is
+  still v4.0.0-rc.6, so keep the stable v3 API for this focused change. The
+  alternative goccy/go-yaml's latest commit is dated 2026-04-07, over six months
+  ago. Upstream v3 CI is Linux-based; Windows compatibility is checked locally.
+  Sources: https://github.com/yaml/go-yaml/blob/main/README.md and
+  https://github.com/yaml/go-yaml/releases/tag/v3.0.5.
+- Windows Go 1.26.4, GOWORK=off, live-provider tests disabled: skills race tests
+  pass. Root and examples both pass go test -mod=readonly ./... -count=1,
+  go vet -mod=readonly ./..., go list -mod=readonly -m all, go mod verify and
+  go mod tidy -diff. Changed Go files are gofmt-clean and diff checks pass.
+  No production code or regression-test repairs were needed during this review.
+- Include the earlier preserved worklog entries in the authorized eight-file
+  commit. Publish to master without moving the existing v0.17.0 source tag.
+  Non-Windows execution and post-push remote CI are not verified here.

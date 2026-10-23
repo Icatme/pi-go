@@ -23,6 +23,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Module graph
+        run: go list -mod=readonly -m all
       - name: Provider race tests
         run: go test -mod=readonly -count=1 -race ./pkg/pigo
       - name: All packages
@@ -32,6 +34,7 @@ jobs:
       - name: Examples
         working-directory: examples
         run: |
+          go list -mod=readonly -m all
           go test -mod=readonly -count=1 ./...
           go vet -mod=readonly ./...
 
@@ -57,7 +60,7 @@ jobs:
             go.sum
             examples/go.sum
       - name: Sandbox and common execution contract
-        run: go test -mod=readonly -count=1 -race ./codemode/... ./mcp ./agent ./agent/mcptools ./agent/mcpresources ./agent/codemodetool ./agent/toolset ./agent/session
+        run: go test -mod=readonly -count=1 -race ./codemode/... ./mcp ./agent ./agent/mcptools ./agent/mcpresources ./agent/codemodetool ./agent/toolset ./agent/session ./agent/skills
       - name: Compile local MCP example
         working-directory: examples
         run: go build -mod=readonly -o mcp-codemode-example.exe ./mcp-codemode
