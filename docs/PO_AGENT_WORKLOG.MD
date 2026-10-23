@@ -1887,6 +1887,46 @@
   (the CI toolchain); root all-package tests and vet pass with Go 1.26.4.
   Reference: https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile
 
+## 2026-10-15 - Preserve provider failure origin for relay diagnostics
+
+- Repair the error-origin loss at the SDK boundary. ProviderFailureOf reads a
+  structured provider_failure diagnostic from AssistantMessage; the diagnostic
+  survives cloning, streamed terminal errors and Context JSON persistence.
+  Native Chat Completions, Responses and Anthropic Messages identify explicit
+  upstream HTTP/error events, interrupted response reads/missing terminal
+  events, and response decoding failures. Local callbacks, cancellation and
+  unclassified SDK failures remain distinct from upstream failures.
+- Preserve original SDK error text and add interrupted HTTP error-body evidence.
+  Error wrappers keep errors.Is/As identity. Retry predicates, counters, delays,
+  output/usage guards and configured budgets are unchanged; diagnostics are
+  evidence only and never grant retry permission.
+- P1 regression extends protocol failure coverage because prior stream/result
+  tests did not assert error origin and persistence together. Cover the reported
+  HTTP-200 ambiguity, malformed JSON/field types/finish reasons, EOF, DONE without
+  a terminal event, reader failures, non-2xx and interrupted error bodies across
+  the three native protocols. Existing retry and HTTP evidence tests also pass.
+- Verified: focused pkg/pigo ProviderFailure, ProviderHTTP, HTTPStreamClient,
+  OpenAI Responses/Completions, Anthropic, stream retry and callback contracts
+  (2.759s), plus go vet ./pkg/pigo. No whole-repository tests/race or paid live
+  model requests. No dependency or source-version changes.
+- User authorizes pushing this repair to an independent source branch so
+  ai-relay can pin a downloadable immutable commit. Formal release/tag and
+  production deployment are outside this step.
+- Final source audit found that the Anthropic hosted continuation boundary
+  returned an untyped missing-terminal error after recording its typed version,
+  so the outer error handler overwrote the diagnostic. Extend the existing
+  hosted missing-message-stop regression: it fails with sdk_error/unclassified
+  before the repair and passes after propagating the same typed error. Focused
+  diagnostic/hosted/Anthropic/retry tests (0.359s) and pkg/pigo vet pass.
+- Pre-push consumer review reproduced a false response_parse_error for local
+  request serialization: an invalid RawMessage returned by OnPayload raises a
+  JSON syntax error before any HTTP request. Remove JSON-type guessing from
+  the generic error recorder; response readers retain explicit classification
+  at the decoding boundary. Extend the existing P1 diagnostics test to assert
+  sdk_error/unclassified, retained error text and zero dispatches. The new case
+  fails before the fix; focused protocol/HTTP/hosted/retry/callback tests
+  (2.627s) and pkg/pigo vet pass afterwards. Retry behavior remains unchanged.
+
 ## 2026-10-23 — Explicit trusted skill catalogs
 
 - Add opt-in `agent/skills`, inspired by Pi coding-agent's metadata catalog and
@@ -1921,3 +1961,30 @@
   disk/FS semantic parity, explicit-only skills, path rejection, all size limits,
   invalid text, symlinks, bundle boundaries and concurrent reads. Linux race tests
   and vet pass with the existing offline Go 1.26.5 toolchain.
+
+## 2026-10-23 - Integrate provider diagnostics for downstream upgrades
+
+- The latest master declares version 0.16.0, but its published module omitted
+  the three provider-diagnostic fixes already consumed by ai-relay. A temporary
+  consumer modfile reproduced undefined ProviderFailureOf and failure-kind
+  constants. The user explicitly authorizes integrating and pushing these
+  existing fixes before updating ai-relay to a downloadable module revision.
+- Merge the provider-failure-diagnostics branch into current master. Resolve
+  the worklog-only conflict by retaining both dated entries. Provider production
+  code matches the previously consumed diagnostics branch; the new skill
+  catalog APIs and version declaration remain intact.
+- Integration tests exposed fixture assumptions. Stream/complete comparisons
+  now ignore per-call diagnostic timestamps on a copied slice while retaining
+  every diagnostic field. Embedded skill resources compare with the actual
+  embedded bytes, including Windows CRLF. Reload failure uses a missing empty
+  root on all platforms; Unix still checks reads across rename, and Windows
+  checks rename after Close to prove successful and failed reloads release
+  their handles. The two skills failures reproduce on unmodified master.
+- Windows Go 1.26.5, GOWORK=off: focused diagnostics, hosted continuation and
+  fixture regressions pass; full pkg/pigo and agent/skills race tests pass;
+  package vet, module verification and tidy-diff pass. Tidy adds missing sums
+  for yaml.v3's existing test dependency without changing module versions.
+- Publication is an ordinary master fast-forward containing both histories.
+  No existing tag is moved and no release, binary packaging, paid provider
+  call, deployment or UI acceptance is performed. Full repository/agent/runtime
+  suites and non-Windows execution are outside this integration check.

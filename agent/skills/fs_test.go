@@ -35,7 +35,11 @@ func TestEmbeddedFS(t *testing.T) {
 	if body, e := c.Read("report"); e != nil || !strings.Contains(body, "references/format.md") {
 		t.Fatal(body, e)
 	}
-	if body, e := c.ReadResource("report", "references/format.md"); e != nil || body != "Use the approved report structure.\n" {
+	want, err := embeddedSkills.ReadFile("testdata/embedded/report/references/format.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body, e := c.ReadResource("report", "references/format.md"); e != nil || body != string(want) {
 		t.Fatal(body, e)
 	}
 	if filepath.IsAbs(c.List()[0].Location) {

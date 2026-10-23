@@ -3,6 +3,7 @@ package pigo
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -136,9 +137,15 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 		notifyAnthropicResponse(anthropicOptions.OnResponse, model, httpResponse)
 
 		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
-			body, _ := io.ReadAll(httpResponse.Body)
+			body, readErr := io.ReadAll(httpResponse.Body)
 			response.StopReason = StopReasonError
 			response.ErrorMessage = parseAnthropicError(body, httpResponse.Status)
+			failure := withProviderFailure(errors.New(response.ErrorMessage), ProviderFailureUpstream, "http_error")
+			if readErr != nil {
+				failure = withProviderFailure(errors.Join(errors.New(response.ErrorMessage), readErr), ProviderFailureStream, "body_read")
+				response.ErrorMessage = failure.Error()
+			}
+			recordProviderFailure(&response, failure)
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
 			return
@@ -169,7 +176,7 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 		}
 
 		if !terminalSeen {
-			applyRequestError(&response, errAnthropicStreamMissingTerminal)
+			applyRequestError(&response, withProviderFailure(errAnthropicStreamMissingTerminal, ProviderFailureStream, "missing_terminal"))
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
 		}

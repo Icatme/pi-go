@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -190,8 +191,9 @@ func TestLimitsAndText(t *testing.T) {
 }
 func TestReloadAndClose(t *testing.T) {
 	root := t.TempDir()
+	emptyRoot := t.TempDir()
 	path := bundle(t, root, "a", "a", "Old", "", "old")
-	c := catalog(t, Options{Roots: []string{root}})
+	c := catalog(t, Options{Roots: []string{root, emptyRoot}})
 	bundle(t, root, "a", "a", "New", "", "new")
 	if _, e := c.Read("a"); e == nil {
 		t.Fatal("stale metadata")
@@ -203,10 +205,17 @@ func TestReloadAndClose(t *testing.T) {
 	if e != nil || body != "new" {
 		t.Fatal(body, e)
 	}
-	if e := os.Rename(root, root+"-moved"); e != nil {
+	// Windows keeps directories with open Root handles in place. Removing an
+	// empty configured root makes reload fail on every supported platform.
+	if e := os.Remove(emptyRoot); e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { os.RemoveAll(root + "-moved") })
+	if runtime.GOOS != "windows" {
+		if e := os.Rename(root, root+"-moved"); e != nil {
+			t.Fatal(e)
+		}
+		t.Cleanup(func() { os.RemoveAll(root + "-moved") })
+	}
 	if e := c.Reload(); e == nil {
 		t.Fatal("reload missing root succeeded")
 	}
@@ -223,6 +232,14 @@ func TestReloadAndClose(t *testing.T) {
 	}
 	if e := c.Reload(); !errors.Is(e, fs.ErrClosed) {
 		t.Fatal(e)
+	}
+	if runtime.GOOS == "windows" {
+		// Successful rename proves both the replaced snapshot and the failed
+		// reload released their handles when the catalog closed.
+		if e := os.Rename(root, root+"-moved"); e != nil {
+			t.Fatal(e)
+		}
+		t.Cleanup(func() { os.RemoveAll(root + "-moved") })
 	}
 }
 func TestConcurrentReload(t *testing.T) {

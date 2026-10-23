@@ -2852,6 +2852,9 @@ func TestCompleteSimpleKimiCodingHostedRejectsStreamWithoutMessageStop(t *testin
 	if response.StopReason != StopReasonError {
 		t.Fatalf("expected hosted truncated stream to fail, got %+v", response)
 	}
+	if failure, ok := ProviderFailureOf(response); !ok || failure.Kind != ProviderFailureStream || failure.Reason != "missing_terminal" {
+		t.Fatalf("hosted continuation lost failure origin: %+v", failure)
+	}
 	if !strings.Contains(response.ErrorMessage, "message_stop") {
 		t.Fatalf("expected missing terminal event error, got %q", response.ErrorMessage)
 	}

@@ -10,6 +10,7 @@ func applyRequestError(response *AssistantMessage, err error) {
 	if err == nil {
 		return
 	}
+	recordProviderFailure(response, err)
 
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		response.StopReason = StopReasonAborted

@@ -2,6 +2,7 @@ package pigo
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -32,6 +33,22 @@ func readSSEStreamLimit(reader io.Reader, onEvent func(string, string) (bool, er
 			return false, nil
 		}
 		stop, err := onEvent(eventName, data.String())
+		// Only callback failures are parsing failures. Reader failures below
+		// are interrupted delivery; explicit upstream events keep their kind.
+		if err != nil {
+			kind, reason := ProviderFailureParse, "event_decode"
+			var syntax *json.SyntaxError
+			var fieldType *json.UnmarshalTypeError
+			switch {
+			case isProviderStreamEventCallbackError(err):
+				kind, reason = ProviderFailureSDK, "event_callback"
+			case errors.As(err, &syntax):
+				reason = "invalid_json"
+			case errors.As(err, &fieldType):
+				reason = "field_type"
+			}
+			err = withProviderFailure(err, kind, reason)
+		}
 		eventName = ""
 		data.Reset()
 		hasData = false
@@ -54,7 +71,7 @@ func readSSEStreamLimit(reader io.Reader, onEvent func(string, string) (bool, er
 			value := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			// Count a separator even for empty data lines; they must not bypass the bound.
 			if len(value) >= maxBytes-eventBytes {
-				return ErrSSEEventTooLarge
+				return withProviderFailure(ErrSSEEventTooLarge, ProviderFailureParse, "sse_event_too_large")
 			}
 			eventBytes += len(value) + 1
 			if hasData {
@@ -66,9 +83,9 @@ func readSSEStreamLimit(reader io.Reader, onEvent func(string, string) (bool, er
 	}
 	if err := scanner.Err(); err != nil {
 		if errors.Is(err, bufio.ErrTooLong) {
-			return ErrSSEEventTooLarge
+			return withProviderFailure(ErrSSEEventTooLarge, ProviderFailureParse, "sse_event_too_large")
 		}
-		return err
+		return withProviderFailure(err, ProviderFailureStream, "body_read")
 	}
 	_, err := dispatch()
 	return err

@@ -219,7 +219,7 @@ type providerErrorBody struct {
 func (b *providerErrorBody) Read(p []byte) (int, error) {
 	n, err := b.reader.Read(p)
 	if err == io.EOF && b.err != nil {
-		return n, b.err
+		return n, withProviderFailure(b.err, ProviderFailureStream, "body_read")
 	}
 	return n, err
 }

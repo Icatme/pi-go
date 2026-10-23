@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +59,10 @@ func runOpenAICodexFixture(t *testing.T, modelID string, sseBody string) openAIC
 
 func normalizeAssistantForComparison(message AssistantMessage) AssistantMessage {
 	message.Timestamp = time.Time{}
+	message.Diagnostics = slices.Clone(message.Diagnostics)
+	for i := range message.Diagnostics {
+		message.Diagnostics[i].Timestamp = time.Time{}
+	}
 	return message
 }
 
