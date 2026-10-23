@@ -1907,3 +1907,17 @@
   Broader `agent/toolset` verification could not start with the offline cache
   (missing wazero v1.12.0, x/oauth2 v0.35.0, x/sync v0.20.0); no claim of a
   complete repository regression pass is made.
+
+### Compile-time FS skill snapshots
+
+- Add `NewFS` / immutable `FSCatalog` for trusted `embed.FS` skill bundles, sharing
+  the strict frontmatter parser and prompt formatter with the disk catalog.
+  Construction copies bounded text; subsequent reads never access the source.
+  Relative FS roots, text/entry/depth/aggregate limits, first-name diagnostics,
+  symlink/special-resource rejection and detached metadata are covered by tests.
+- Expose an application-assigned version label, not a digest or permission claim.
+  No runtime reload, remote install, execution, tenant logic, or real deployment.
+- MapFS and actual go:embed fixtures cover immutable reads after source changes,
+  disk/FS semantic parity, explicit-only skills, path rejection, all size limits,
+  invalid text, symlinks, bundle boundaries and concurrent reads. Linux race tests
+  and vet pass with the existing offline Go 1.26.5 toolchain.

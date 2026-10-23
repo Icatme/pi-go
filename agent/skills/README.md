@@ -119,3 +119,55 @@ References:
 
 Validation: `go test -race ./agent/skills` and `go vet ./agent/skills`.
 No live-model/service tests are necessary for this filesystem-only package.
+
+## Compile-time bundles with `embed.FS`
+
+Applications that require skill changes to go through source review and binary
+redeployment should use `NewFS`, not writable roots or the disk catalog:
+
+```go
+//go:embed builtin
+var bundledSkills embed.FS
+
+catalog, err := skills.NewFS(bundledSkills, skills.FSOptions{
+    Roots: []string{"builtin"},
+    Version: "document-skills-v1",
+})
+if err != nil { return err }
+```
+
+`FSCatalog` has `List`, `Diagnostics`, `Prompt`, `Read`, and `ReadResource` with
+matching signatures, plus `Version`. It has no `Reload` or `Close`. Construction
+copies the approved UTF-8 text and metadata; no source filesystem is retained or
+accessed on subsequent calls. Mutating a `fstest.MapFS` after construction cannot
+change the catalog. A changed embedded skill requires rebuilding and deploying
+the application; command routing and permission checks still belong to the host.
+
+The `Version` option is the application's stable build/content label. It is not a
+cryptographic digest or a permission token; the application must update it when
+appropriate. No content hashes are recomputed during reads. Prompts remain
+metadata-only even though text is held in memory, preserving progressive loading
+into the model's context. Automatic invocation exclusions are identical to the
+disk catalog and must still be enforced by the embedding host.
+
+FS roots use slash-separated `fs.ValidPath` syntax, defaulting to `.`; absolute
+paths, backslashes, colons and traversal are rejected. Locations are relative FS
+paths, not host filesystem paths. Bundle resource trees are copied, including
+nested files, but are not discovered as separate skills. Only regular UTF-8 text
+without NUL is supported: binary templates/assets must use a separate artifact
+mechanism. No scripts are executed even when their source text is bundled.
+
+Defaults: 256 KiB per file, 16 MiB total text, 4096 scanned entries, and 16 levels
+across discovery and resources. Total text has a hard configurable maximum of
+256 MiB. Invalid metadata and duplicate names produce diagnostics; invalid text,
+unreadable files, resource symlinks/special files, or exceeded limits fail
+construction. Review diagnostics at startup to detect a missing intended skill.
+Unlike the disk catalog, resource text is validated during construction, not on
+its first read. There is no mutable metadata/read mismatch in an FS snapshot.
+
+The supplied `fs.FS` implementation is trusted code. Path validation is not a
+sandbox for an arbitrary implementation, `os.DirFS`, or a backend that hides
+symlinks or performs network requests. Prefer `go:embed` for compile-time-only
+policy. Symlinks identified during discovery are skipped with diagnostics;
+symlinks identified inside an accepted bundle are rejected. Do not pass user-
+controlled external backends to implement an embedded-only policy.

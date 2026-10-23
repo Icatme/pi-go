@@ -140,9 +140,11 @@ func (c *Catalog) Diagnostics() []Diagnostic {
 
 // Prompt advertises only automatically invocable skills. The application must
 // supply a permission-checked reader; a skill is not an executable tool.
-func (c *Catalog) Prompt() string {
+func (c *Catalog) Prompt() string { return formatPrompt(c.List()) }
+
+func formatPrompt(metadata []Metadata) string {
 	var b strings.Builder
-	for _, m := range c.List() {
+	for _, m := range metadata {
 		if m.DisableModelInvocation {
 			continue
 		}
