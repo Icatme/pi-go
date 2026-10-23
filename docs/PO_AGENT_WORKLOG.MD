@@ -2015,3 +2015,27 @@
 - Work is isolated from the original pi-go checkout's existing edits. JZBeacon's
   dependency pin and application code are unchanged; no local replace, release
   tag, production operation or new SHA-based scheme is introduced.
+
+## 2026-10-23 - Fix PR 33 omission and preparation-error regressions
+
+- Reproduce both review findings with new failing regressions before changing
+  production code. The default anyOf validator deliberately coerces values in
+  branch order, so retain that existing runtime contract and fix the generated
+  nullable declaration: match exact null first, guarded by enum=[null]. This
+  keeps omitted scalars null and prevents empty strings, zero or false from
+  entering the null branch after failing their original constraints.
+- Cover raw and parsed default tool arguments, nested objects/arrays, empty
+  containers, required nulls and valid scalar zeros. Verify minLength, pattern,
+  numeric minimum, enum and const failures stop before approval or execution;
+  valid values and optional null omission still work.
+- Preserve parser and before-hook errors inside Unicode rejections by joining
+  their causes under the existing typed error. Keep the invalid_unicode reason,
+  not-started/not-dispatched facts and safe presentation. Direct and child-call
+  regressions verify both errors.Is chains and that host error text stays out
+  of the displayed error.
+- Windows Go 1.26.4, GOWORK=off: focused regressions pass after the fix;
+  go test -mod=readonly ./agent/... -count=1, race tests for agent, agent/session
+  and agent/strictschema, go vet -mod=readonly ./agent/... and git diff --check
+  pass. Provider/live, full-repository and non-Windows tests were not run.
+- Update the existing draft PR branch using a normal push and retain its
+  [skip ci] publication convention. No dependency, version or tag changes.

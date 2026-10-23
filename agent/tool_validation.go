@@ -184,7 +184,7 @@ func argumentTextFailure(err error) *ToolExecutionError {
 		Execution: ToolExecutionInfo{Local: ToolLocalNotStarted, Remote: ToolRemoteNotDispatched}}
 }
 
-func checkArgumentStrings(value any) error {
+func checkArgumentStrings(value any) *ToolExecutionError {
 	if err := jsontext.ValidateStrings(value); err != nil {
 		return argumentTextFailure(err)
 	}

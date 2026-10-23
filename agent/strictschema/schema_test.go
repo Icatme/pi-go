@@ -141,3 +141,130 @@ func TestStrictSchemaRetainsNumericLexemes(t *testing.T) {
 		t.Fatal("schema constraint rounded", string(declaration))
 	}
 }
+
+func TestStrictSchemaDefaultToolArguments(t *testing.T) {
+	tests := []struct {
+		name       string
+		parameters string
+		arguments  string
+		want       string
+	}{
+		{
+			name:       "omit null scalars",
+			parameters: `{"type":"object","properties":{"text":{"type":"string"},"number":{"type":"number"},"integer":{"type":"integer"},"flag":{"type":"boolean"}},"additionalProperties":false}`,
+			arguments:  `{"text":null,"number":null,"integer":null,"flag":null}`,
+			want:       `{}`,
+		},
+		{
+			name:       "keep empty and zero scalars",
+			parameters: `{"type":"object","properties":{"text":{"type":"string"},"number":{"type":"number"},"integer":{"type":"integer"},"flag":{"type":"boolean"}},"additionalProperties":false}`,
+			arguments:  `{"text":"","number":0,"integer":0,"flag":false}`,
+			want:       `{"flag":false,"integer":0,"number":0,"text":""}`,
+		},
+		{
+			name:       "nested omission and required null",
+			parameters: `{"type":"object","properties":{"explicit":{"type":"null"},"items":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"flag":{"type":"boolean"}},"additionalProperties":false}},"nested":{"type":"object","properties":{"number":{"type":"number"}},"additionalProperties":false}},"required":["explicit"],"additionalProperties":false}`,
+			arguments:  `{"explicit":null,"items":[{"text":null,"flag":null},{"text":"","flag":false}],"nested":{"number":null}}`,
+			want:       `{"explicit":null,"items":[{},{"flag":false,"text":""}],"nested":{}}`,
+		},
+		{
+			name:       "omit containers",
+			parameters: `{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"nested":{"type":"object","properties":{},"additionalProperties":false}},"additionalProperties":false}`,
+			arguments:  `{"items":null,"nested":null}`,
+			want:       `{}`,
+		},
+		{
+			name:       "keep empty containers",
+			parameters: `{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"nested":{"type":"object","properties":{},"additionalProperties":false}},"additionalProperties":false}`,
+			arguments:  `{"items":[],"nested":{}}`,
+			want:       `{"items":[],"nested":{}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, parsed := range []bool{false, true} {
+				prepared, err := strictschema.New(schema(t, tt.parameters), strictschema.Options{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var got json.RawMessage
+				tool := agent.ToolDefinition{Name: "write", Parameters: prepared.Parameters(),
+					Execute: func(_ context.Context, in agent.ToolExecutionContext) (agent.ToolResult, error) {
+						raw, err := json.Marshal(in.Args)
+						if err != nil {
+							return agent.ToolResult{}, err
+						}
+						got, err = prepared.Normalize(raw)
+						return agent.ToolResult{}, err
+					}}
+				call := agent.ToolCall{Name: tool.Name, Arguments: json.RawMessage(tt.arguments)}
+				if parsed {
+					call.ParsedArgs = schema(t, tt.arguments)
+				}
+				out := agent.RunToolCall(t.Context(), call, agent.RunToolCallOptions{Tools: []agent.ToolDefinition{tool}})
+				if out.Err != nil || string(got) != tt.want {
+					t.Errorf("parsed=%v: got %s, want %s; error: %v", parsed, got, tt.want, out.Err)
+				}
+			}
+		})
+	}
+}
+
+func TestStrictSchemaDefaultToolArgumentsRetainConstraints(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		field   string
+		invalid string
+		valid   string
+	}{
+		{"minLength", `{"type":"string","minLength":1}`, `""`, `"x"`},
+		{"pattern", `{"type":"string","pattern":"^x$"}`, `""`, `"x"`},
+		{"integer minimum", `{"type":"integer","minimum":1}`, `0`, `1`},
+		{"number minimum", `{"type":"number","minimum":0.5}`, `0`, `1`},
+		{"string enum", `{"type":"string","enum":["x"]}`, `""`, `"x"`},
+		{"boolean enum", `{"type":"boolean","enum":[true]}`, `false`, `true`},
+		{"const", `{"type":"string","const":"x"}`, `""`, `"x"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			original := schema(t, `{"type":"object","properties":{"value":`+tt.field+`},"additionalProperties":false}`)
+			prepared, err := strictschema.New(original, strictschema.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, value := range []string{tt.invalid, tt.valid, `null`} {
+				calls, gates := 0, 0
+				var got json.RawMessage
+				tool := agent.ToolDefinition{Name: "write", Parameters: prepared.Parameters(),
+					Execute: func(_ context.Context, in agent.ToolExecutionContext) (agent.ToolResult, error) {
+						calls++
+						raw, err := json.Marshal(in.Args)
+						if err != nil {
+							return agent.ToolResult{}, err
+						}
+						got, err = prepared.Normalize(raw)
+						return agent.ToolResult{}, err
+					}}
+				out := agent.RunToolCall(t.Context(), agent.ToolCall{Name: tool.Name, Arguments: json.RawMessage(`{"value":` + value + `}`)}, agent.RunToolCallOptions{
+					Tools: []agent.ToolDefinition{tool},
+					ToolGate: func(context.Context, agent.BeforeToolCallContext) (agent.ToolGateResult, error) {
+						gates++
+						return agent.ToolGateResult{Action: agent.ToolGateActionAllow}, nil
+					},
+				})
+				if value == tt.invalid {
+					if out.Err == nil || calls != 0 || gates != 0 || out.Execution.Local != agent.ToolLocalNotStarted {
+						t.Errorf("invalid %s reached approval/execution: calls=%d gates=%d outcome=%+v", value, calls, gates, out)
+					}
+					continue
+				}
+				want := `{"value":` + value + `}`
+				if value == `null` {
+					want = `{}`
+				}
+				if out.Err != nil || calls != 1 || string(got) != want {
+					t.Errorf("valid %s changed: got %s, want %s; error: %v", value, got, want, out.Err)
+				}
+			}
+		})
+	}
+}

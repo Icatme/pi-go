@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/Icatme/pi-go/internal/jsontext"
 )
 
 func TestToolArgumentBudgetBoundaries(t *testing.T) {
@@ -127,5 +129,66 @@ func assertArgumentBudgetRejected(t *testing.T, out ToolCallOutcome) {
 	t.Helper()
 	if out.Err == nil || out.Failure == nil || out.Failure.Code != ToolFailureResource || out.Failure.Reason != "argument_bytes" || out.Execution.Local != ToolLocalNotStarted || out.Execution.Remote != ToolRemoteNotDispatched {
 		t.Fatalf("unexpected budget outcome: %+v", out)
+	}
+}
+
+func TestToolArgumentBudgetPreservesUnicodeRejectionCauses(t *testing.T) {
+	for _, stage := range []string{"parser", "hook"} {
+		for _, path := range []string{"direct", "child"} {
+			t.Run(stage+"/"+path, func(t *testing.T) {
+				cause := errors.New("host preparation failed")
+				calls, gates := 0, 0
+				tool := ToolDefinition{Name: "write", MaxArgumentBytes: 1024,
+					Execute: func(context.Context, ToolExecutionContext) (ToolResult, error) {
+						calls++
+						return ToolResult{}, nil
+					}}
+				invalid := string([]byte{0xff})
+				if stage == "parser" {
+					tool.ParseArguments = func(ToolCall) (any, error) {
+						return map[string]any{"value": invalid}, cause
+					}
+				}
+				options := RunToolCallOptions{Tools: []ToolDefinition{tool},
+					BeforeToolCall: func(_ context.Context, in BeforeToolCallContext) (BeforeToolCallResult, error) {
+						if stage == "hook" && in.ToolCall.Name == tool.Name {
+							in.Args.(map[string]any)["value"] = invalid
+							return BeforeToolCallResult{}, cause
+						}
+						return BeforeToolCallResult{}, nil
+					},
+					ToolGate: func(_ context.Context, in BeforeToolCallContext) (ToolGateResult, error) {
+						if in.ToolCall.Name == tool.Name {
+							gates++
+						}
+						return ToolGateResult{Action: ToolGateActionAllow}, nil
+					}}
+				call := ToolCall{Name: tool.Name, Arguments: json.RawMessage(`{"value":"ok"}`)}
+				var out ToolCallOutcome
+				if path == "child" {
+					parent := ToolDefinition{Name: "parent", ChildTools: []ToolDefinition{tool},
+						Execute: func(ctx context.Context, in ToolExecutionContext) (ToolResult, error) {
+							out = in.ChildCaller.Call(ctx, call)
+							return ToolResult{}, nil
+						}}
+					options.Tools = []ToolDefinition{parent}
+					if result := RunToolCall(t.Context(), ToolCall{Name: parent.Name}, options); result.Err != nil {
+						t.Fatal(result.Err)
+					}
+				} else {
+					out = RunToolCall(t.Context(), call, options)
+				}
+				if !errors.Is(out.Err, cause) || !errors.Is(out.Err, jsontext.ErrInvalidUnicode) {
+					t.Errorf("lost preparation or Unicode cause: %v", out.Err)
+				}
+				if out.Err != nil && strings.Contains(out.Err.Error(), cause.Error()) {
+					t.Errorf("host error leaked into presentation: %v", out.Err)
+				}
+				if out.Failure == nil || out.Failure.Code != ToolFailureArgumentInvalid || out.Failure.Reason != "invalid_unicode" ||
+					out.Execution.Local != ToolLocalNotStarted || out.Execution.Remote != ToolRemoteNotDispatched || calls != 0 || gates != 0 {
+					t.Fatalf("invalid arguments reached approval/execution: calls=%d gates=%d outcome=%+v", calls, gates, out)
+				}
+			})
+		}
 	}
 }

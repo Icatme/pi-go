@@ -182,7 +182,12 @@ func convert(schema map[string]any, depth, limit int) (*node, error) {
 				if plan.kind == "null" {
 					return nil, fmt.Errorf("strictschema: optional null property %q has ambiguous omission", name)
 				}
-				properties[name] = map[string]any{"anyOf": []any{child, map[string]any{"type": "null"}}}
+				// Match omission before a coercing validator turns null into a
+				// scalar zero value. The enum prevents the null branch itself
+				// from coercing an empty string, zero or false into omission.
+				properties[name] = map[string]any{"anyOf": []any{
+					map[string]any{"type": "null", "enum": []any{nil}}, child,
+				}}
 			}
 			names = append(names, name)
 		}

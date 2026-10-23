@@ -7,6 +7,11 @@ executing the original business tool. It removes only those optional nulls,
 including in nested objects and arrays; empty values, zero, false and required
 nulls remain intact. Numeric lexemes are preserved.
 
+The nullable declaration matches an exact null before trying the original
+property schema. This also preserves omission with the agent's default coercing
+validator: null stays null, and empty strings, zero and false cannot enter the
+null branch to bypass the original property's constraints.
+
 ```go
 prepared, err := strictschema.New(originalParameters, strictschema.Options{
     MaxSchemaBytes: 8192,

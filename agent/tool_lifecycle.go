@@ -69,6 +69,7 @@ func (e *Engine) prepareToolInvocation(ctx context.Context, definition AgentDefi
 	}
 	if tool.MaxArgumentBytes > 0 {
 		if textErr := checkArgumentStrings(args); textErr != nil {
+			textErr.Err = errors.Join(textErr.Err, err)
 			args, err = nil, textErr
 		} else if budgetErr := checkToolArgumentBudget(args, tool.MaxArgumentBytes); budgetErr != nil {
 			budgetErr.Err = errors.Join(budgetErr.Err, err)
@@ -96,6 +97,7 @@ func (e *Engine) prepareToolInvocation(ctx context.Context, definition AgentDefi
 		}
 		if tool.MaxArgumentBytes > 0 {
 			if err := checkArgumentStrings(executionArgs); err != nil {
+				err.Err = errors.Join(err.Err, beforeErr)
 				return fail(nil, err, ToolFailureArgumentInvalid)
 			}
 			if err := checkToolArgumentBudget(executionArgs, tool.MaxArgumentBytes); err != nil {
