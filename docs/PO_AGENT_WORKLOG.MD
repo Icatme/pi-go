@@ -2226,3 +2226,14 @@
   Download verification and the resulting publication status are reported on
   the release page and in the task reply. Linux/macOS runtime acceptance and
   live provider calls are separate from local cross-compilation evidence.
+
+## 2026-10-28 — Owner-requested manual-only GitHub CI
+
+- Removed automatic push and pull_request triggers from the sole Go tests
+  workflow after the owner explicitly requested disabling automatic GitHub CI.
+  Retained workflow_dispatch and all existing jobs/permissions unchanged; no
+  manual run is dispatched. This applies only to pi-go, not account-wide settings.
+- Parsed both YAML versions and verified that only the event triggers change.
+  The configuration-only commit precedes release-candidate integration; GitHub
+  evaluates push workflows from the pushed tip, whose triggers exclude push.
+  No skip marker or temporary workflow-disable/re-enable race is used.

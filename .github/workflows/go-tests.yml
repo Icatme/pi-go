@@ -1,10 +1,8 @@
 name: Go tests
 
+# Automatic CI disabled by owner request; run only when explicitly requested.
 on:
-  pull_request:
-    branches: [master, 'codex/mcp-*']
-  push:
-    branches: [master, 'fix/relay-http-evidence', 'codex/mcp-*']
+  workflow_dispatch:
 
 permissions:
   contents: read
