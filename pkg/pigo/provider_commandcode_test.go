@@ -58,7 +58,7 @@ func TestCommandCodeModelPricingIsComplete(t *testing.T) {
 		"claude-sonnet-5":            {Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5},
 		"gpt-5.6-terra":              {Input: 2, Output: 12, CacheRead: 0.2, CacheWrite: 2.5},
 		"Qwen/Qwen3.7-Max":           {Input: 2.5, Output: 7.5, CacheRead: 0.5, CacheWrite: 3.13},
-		"xiaomi/mimo-v2.5":           {Input: 0.14, Output: 0.28, CacheRead: 0.0028},
+		"xiaomi/mimo-v2.6-flash":     {Input: 0.14, Output: 0.28, CacheRead: 0.0028},
 		"poolside/laguna-s-2.1-free": {},
 	}
 	for modelID, want := range tests {

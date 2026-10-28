@@ -21,7 +21,7 @@ import (
 
 const (
 	commandCodeDefaultBaseURL       = "https://api.commandcode.ai"
-	commandCodeCLIVersion           = "1.82.1"
+	commandCodeCLIVersion           = "1.88.0"
 	commandCodeDefaultMaxTokens     = 64_000
 	commandCodeDefaultMaxRetryDelay = 60_000
 	commandCodeBaseRetryDelay       = 500

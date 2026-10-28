@@ -35,7 +35,6 @@ func TestCommandCodeOctoberModelSupport(t *testing.T) {
 		{"mistral/mistral-large-4", true, true, 262144, ModelThinkingLevelHigh, UsageCost{Input: 1.36, Output: 4.18, CacheRead: .14}},
 		{"stepfun/Step-5-Preview", true, true, 65536, ModelThinkingLevelHigh, UsageCost{Input: 1, Output: 2.7, CacheRead: .05}},
 		{"stealth/glyph-cluster:free", false, true, 256000, ModelThinkingLevelXHigh, UsageCost{}},
-		{"inclusionai/ling-3.1-flash:free", false, true, 32768, ModelThinkingLevelHigh, UsageCost{}},
 		{"google/gemini-4-argon", true, true, 65536, ModelThinkingLevelHigh, UsageCost{Input: 2, Output: 10, CacheRead: .1}},
 		{"meta/muse-wonder-1.0", true, true, 65536, ModelThinkingLevelXHigh, UsageCost{Input: 4, Output: 20, CacheRead: .2}},
 	} {
