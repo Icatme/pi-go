@@ -2299,3 +2299,21 @@
   differ. The sole workflow remains manual-only; no run is dispatched.
 - This resolves the CI configuration blocker, not the release credential gap.
   A tag, release assets and downstream module resolution remain separate gates.
+
+## 2026-10-28 - Publish the v0.17.2 source tag
+
+- Fast-forward the clean local master to the reviewed remote integration.
+  Keep the prepared package and examples versions at 0.17.2; update the release
+  notes from candidate status to source-tag distribution.
+- Windows Go 1.26.4, GOWORK=off, all live-provider gates disabled: focused
+  CommandCode catalog and Responses error-evidence regression tests pass.
+  Root and examples both pass go test -mod=readonly ./... -count=1,
+  go vet -mod=readonly ./... and go mod verify. Full provider race tests pass;
+  a compiled CLI reports pigo 0.17.2. git diff --check passes.
+- Publication uses an atomic push of master and a new annotated v0.17.2 tag,
+  followed by remote-ref and direct Go-module resolution checks. Existing
+  public tags remain intact. No additional source or artifact hashes are added.
+- This request publishes the source tag without a GitHub Release or binary
+  downloads. GitHub CI remains manual-only and no workflow is dispatched.
+  Non-Windows execution, live providers and downstream deployment are outside
+  these local validation results.
