@@ -2227,6 +2227,58 @@
   the release page and in the task reply. Linux/macOS runtime acceptance and
   live provider calls are separate from local cross-compilation evidence.
 
+## 2026-10-28 — CommandCode v0.7.10 selective catalog sync
+
+- Compared upstream `patlux/pi-commandcode-provider` at
+  `63c8e5ccea73850266c34e655d3a76039316d4aa` (v0.7.10 / CLI 1.88.0)
+  against pi-go master `d831f6c39848d326962d82b2f8cf0f5b3805c295`.
+  Updated the CLI snapshot header and seven newly documented model capability
+  entries; added eight upstream reviewed display prices. Existing prices and
+  tiers remain unchanged. This is an estimate snapshot, not current billing.
+- Removed the two retired free Ling entries and MiMo 2.5/2.5 Pro from built-in
+  models, capabilities and estimated prices. No alias from a retired/free model
+  to a paid model is introduced. Existing user configurations and cached catalogs
+  are not deleted; a stale cache can still contain retired IDs until refresh.
+  Newly documented models remain discovery-only:
+  no guessed native endpoint, context limit or automatic model switch is added.
+  Kimi K3.1 Pro remains text-only/non-reasoning with unknown capabilities until
+  upstream publishes metadata. DeepSeek `off` keeps pi-go's existing normalized
+  mapping rather than forwarding an `off` reasoning parameter.
+- This is not a 502 fix claim. JZ uses relay-owned native adapter contracts;
+  no generate fallback, retry count, auth, quota query or relay contract changes
+  are included. Upstream v0.7.8's JS iterator fallback and quota cancellation
+  mechanisms are not copied blindly into Go. pi-go's public QueryQuota already
+  supplies one default 15-second context deadline; custom transports ignoring
+  context are not newly claimed as covered.
+- Regression coverage checks discovered model capabilities/prices/header,
+  endpoint preservation, conservative unknown capabilities, no implicit model
+  enablement and retired metadata removal. Live provider/model calls, CI,
+  release and deployment are not part of this batch.
+- Cloud offline validation (Go 1.26.10, live flags disabled): CommandCode focused
+  tests and root `go test -mod=readonly -count=1 ./...` passed. After adding the
+  JSON discovery regression, full provider `-race` passed (28.800s) and root
+  `go vet -mod=readonly ./...` passed. Independent source review accepted the
+  final changes. Windows and real providers were not run. Publication is a
+  non-CI-matching branch only: a PR targeting master would trigger the existing
+  workflow, so no PR, merge, release or downstream dependency bump is performed.
+
+## 2026-10-28 — v0.17.2 combined release candidate
+
+- Combined reviewed catalog commit `271976a438687c22dfe3f672ad1ec674b9fa5446`
+  and Responses diagnostic commit `77484dac232f820cc8e973d94adfdc7c00a931a8`.
+  Prepared package/examples version 0.17.2 and candidacy/compatibility notes.
+- Go 1.26.10 cloud offline validation: root tests and vet, provider race tests
+  (29.253s), module verification, examples tests and vet passed. Independent
+  combined source review found no blocking issue. Live calls and Windows/macOS
+  execution were not performed. The candidate is not evidence of a resolved
+  real-world 502 or deployed downstream applications.
+- Publication remains blocked by the no-CI requirement: master PR/push triggers
+  the existing workflow. No workflow was disabled and no feature-branch tag was
+  substituted for mainline integration. The current connector also lacks tag/
+  release upload operations, and the cloud GitHub CLI is not authenticated.
+  This candidate branch is not a published version and must not be used as a
+  claim that v0.17.2 already resolves through the module proxy.
+
 ## 2026-10-28 — Owner-requested manual-only GitHub CI
 
 - Removed automatic push and pull_request triggers from the sole Go tests
@@ -2237,3 +2289,13 @@
   The configuration-only commit precedes release-candidate integration; GitHub
   evaluates push workflows from the pushed tip, whose triggers exclude push.
   No skip marker or temporary workflow-disable/re-enable race is used.
+
+## 2026-10-28 — Final candidate and manual-only CI integration
+
+- Combined the reviewed v0.17.2 candidate with CI-only master commit
+  `028cb4e2305b78719487853447e34947f6c82d1e`, preserving both parent histories.
+  Compared the final source tree: runtime and tests are unchanged from the
+  candidate validated above; only CI configuration and status documentation
+  differ. The sole workflow remains manual-only; no run is dispatched.
+- This resolves the CI configuration blocker, not the release credential gap.
+  A tag, release assets and downstream module resolution remain separate gates.

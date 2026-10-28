@@ -1,8 +1,8 @@
 package pigo
 
-// Capability snapshot from pi-commandcode-provider v0.7.7 (command-code@1.79.2),
-// plus Gemini 4 Argon and Muse Wonder from command-code@1.82.1, 2026-10-14.
-// https://github.com/patlux/pi-commandcode-provider/tree/v0.7.7/src
+// Capability snapshot from pi-commandcode-provider v0.7.10 (command-code@1.88.0).
+// https://github.com/patlux/pi-commandcode-provider/tree/63c8e5ccea73850266c34e655d3a76039316d4aa/src
+// New models are enabled by endpoint discovery, not this metadata snapshot.
 type commandCodeModelMetadata struct {
 	Input           []InputType
 	Reasoning       bool
@@ -23,6 +23,7 @@ var commandCodeModelCatalog = map[string]commandCodeModelMetadata{
 	"Qwen/Qwen3.8-Flash":                    {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "xhigh"}, MaxOutputTokens: 65536},
 	"Qwen/Qwen3.8-Max":                      {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "xhigh"}, MaxOutputTokens: 65536},
 	"Qwen/Qwen3.8-Max-0902":                 {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "xhigh"}, MaxOutputTokens: 65536},
+	"Qwen/Qwen3.8-Max-Prime":                {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "xhigh"}, MaxOutputTokens: 131072},
 	"Qwen/Qwen3.8-Omni-Flash":               {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "xhigh"}, MaxOutputTokens: 131072},
 	"claude-fable-5":                        {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh", "max"}, MaxOutputTokens: 65536},
 	"claude-fable-5-1":                      {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh", "max"}, MaxOutputTokens: 65536},
@@ -59,15 +60,16 @@ var commandCodeModelCatalog = map[string]commandCodeModelMetadata{
 	"gpt-6-luna":                            {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh", "max"}, MaxOutputTokens: 65536},
 	"gpt-6-sol":                             {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh", "max"}, MaxOutputTokens: 65536},
 	"gpt-6.1-sol":                           {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh", "max"}, MaxOutputTokens: 65536},
-	"inclusionai/ling-3.0-flash-sante:free": {Input: []InputType{"text"}, Reasoning: true, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 32768},
-	"inclusionai/ling-3.1-flash:free":       {Input: []InputType{"text"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high"}, MaxOutputTokens: 32768},
+	"inclusionai/ling-3.1-flash":            {Input: []InputType{"text"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high"}, MaxOutputTokens: 32768},
 	"meituan/LongCat-2.0":                   {Input: []InputType{"text"}, Reasoning: true, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 65536},
 	"meta/muse-spark-1.1":                   {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh"}, MaxOutputTokens: 65536},
 	"meta/muse-spark-1.2":                   {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh"}, MaxOutputTokens: 65536},
 	"meta/muse-spark-1.2-contributor":       {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh"}, MaxOutputTokens: 65536},
 	"meta/muse-spark-1.3":                   {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh", "max"}, MaxOutputTokens: 65536},
 	"meta/muse-spark-1.3-contributor":       {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh"}, MaxOutputTokens: 65536},
+	"meta/muse-spark-open":                  {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high"}, MaxOutputTokens: 65536},
 	"meta/muse-wonder-1.0":                  {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh"}, MaxOutputTokens: 65536},
+	"minimax/minimax-m3.1-flash":            {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh", "max"}, MaxOutputTokens: 65536},
 	"mistral/mistral-large-4":               {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high"}, MaxOutputTokens: 262144},
 	"moonshotai/Kimi-K2.5":                  {Input: []InputType{"text", "image"}, Reasoning: false, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 65536},
 	"moonshotai/Kimi-K2.6":                  {Input: []InputType{"text", "image"}, Reasoning: false, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 65536},
@@ -75,7 +77,10 @@ var commandCodeModelCatalog = map[string]commandCodeModelMetadata{
 	"moonshotai/Kimi-K2.7-Code-Highspeed":   {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 65536},
 	"moonshotai/Kimi-K3":                    {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "high", "max"}, MaxOutputTokens: 65536},
 	"nvidia/nemotron-3-ultra-550b-a55b":     {Input: []InputType{"text"}, Reasoning: true, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 65536},
+	"nvidia/nemotron-3.5-super-vl":          {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high"}, MaxOutputTokens: 65536},
+	"ornith/ornith-1.5-122b":                {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 65536},
 	"poolside/laguna-s-2.1-free":            {Input: []InputType{"text"}, Reasoning: true, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 32768},
+	"reflection/beam:free":                  {Input: []InputType{"text"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh", "max"}, MaxOutputTokens: 131072},
 	"sakana/fugu-ultra":                     {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"high", "xhigh"}, MaxOutputTokens: 65536},
 	"stealth/glyph-cluster:free":            {Input: []InputType{"text"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh"}, MaxOutputTokens: 256000},
 	"stepfun/Step-3.5-Flash":                {Input: []InputType{"text"}, Reasoning: true, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 65536},
@@ -88,8 +93,6 @@ var commandCodeModelCatalog = map[string]commandCodeModelMetadata{
 	"xai/grok-4.5":                          {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high"}, MaxOutputTokens: 65536},
 	"xai/grok-4.6":                          {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh"}, MaxOutputTokens: 65536},
 	"xai/grok-4.7":                          {Input: []InputType{"text", "image"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "medium", "high", "xhigh"}, MaxOutputTokens: 65536},
-	"xiaomi/mimo-v2.5":                      {Input: []InputType{"text", "image"}, Reasoning: false, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 65536},
-	"xiaomi/mimo-v2.5-pro":                  {Input: []InputType{"text"}, Reasoning: false, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 65536},
 	"xiaomi/mimo-v2.6-flash":                {Input: []InputType{"text", "image"}, Reasoning: false, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 65536},
 	"xiaomi/mimo-v2.6-pro":                  {Input: []InputType{"text", "image"}, Reasoning: false, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 65536},
 	"xiaomi/mimo-v2.6-pro-ultraspeed":       {Input: []InputType{"text", "image"}, Reasoning: false, Efforts: []ModelThinkingLevel{}, MaxOutputTokens: 65536},
@@ -102,13 +105,19 @@ var commandCodeModelCatalog = map[string]commandCodeModelMetadata{
 	"zai-org/GLM-5.3":                       {Input: []InputType{"text"}, Reasoning: true, Efforts: []ModelThinkingLevel{"low", "high", "max"}, MaxOutputTokens: 65536},
 }
 
-// Estimated USD per million tokens from the v0.7.7 pricing snapshot (2026-10-09).
-// DeepSeek uses documented off-peak rates; this is not a live billing quote.
+// Estimated USD per million tokens; not a live billing quote.
+// Existing v0.7.7 prices retained; new models from v0.7.10 reviewed snapshot (2026-10-23).
+// DeepSeek uses documented off-peak rates.
 // https://commandcode.ai/docs/resources/pricing-limits
-// Latest additions checked 2026-10-14:
-// https://commandcode.ai/models/gemini-4-argon
-// https://commandcode.ai/models/muse-wonder-1-0
 var commandCodeModelCosts = map[string]UsageCost{
+	"reflection/beam:free":                  {Input: 0, Output: 0, CacheRead: 0, CacheWrite: 0},
+	"ornith/ornith-1.5-122b":                {Input: 0.16, Output: 0.64, CacheRead: 0.02, CacheWrite: 0},
+	"inclusionai/ling-3.1-flash":            {Input: 0.3, Output: 0.9, CacheRead: 0.06, CacheWrite: 0},
+	"moonshotai/Kimi-K3.1-Pro":              {Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 0},
+	"minimax/minimax-m3.1-flash":            {Input: 0.15, Output: 0.6, CacheRead: 0.015, CacheWrite: 0},
+	"Qwen/Qwen3.8-Max-Prime":                {Input: 4, Output: 12, CacheRead: 0.5, CacheWrite: 5},
+	"nvidia/nemotron-3.5-super-vl":          {Input: 0.2, Output: 0.5, CacheRead: 0.04, CacheWrite: 0},
+	"meta/muse-spark-open":                  {Input: 1.25, Output: 4.25, CacheRead: 0.15, CacheWrite: 0},
 	"MiniMaxAI/MiniMax-M2.5":                {Input: 0.3, Output: 1.2, CacheRead: 0.03, CacheWrite: 0},
 	"MiniMaxAI/MiniMax-M2.7":                {Input: 0.3, Output: 1.2, CacheRead: 0.06, CacheWrite: 0},
 	"MiniMaxAI/MiniMax-M3":                  {Input: 0.3, Output: 1.2, CacheRead: 0.06, CacheWrite: 0},
@@ -157,8 +166,6 @@ var commandCodeModelCosts = map[string]UsageCost{
 	"gpt-6-luna":                            {Input: 0.1, Output: 0.5, CacheRead: 0.01, CacheWrite: 0.125},
 	"gpt-6-sol":                             {Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5},
 	"gpt-6.1-sol":                           {Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5},
-	"inclusionai/ling-3.0-flash-sante:free": {Input: 0, Output: 0, CacheRead: 0, CacheWrite: 0},
-	"inclusionai/ling-3.1-flash:free":       {Input: 0, Output: 0, CacheRead: 0, CacheWrite: 0},
 	"meituan/LongCat-2.0":                   {Input: 0.3, Output: 1.2, CacheRead: 0.006, CacheWrite: 0},
 	"meta/muse-spark-1.1":                   {Input: 1.25, Output: 4.25, CacheRead: 0.15, CacheWrite: 0},
 	"meta/muse-spark-1.2":                   {Input: 1.25, Output: 4.25, CacheRead: 0.15, CacheWrite: 0},
@@ -186,8 +193,6 @@ var commandCodeModelCosts = map[string]UsageCost{
 	"xai/grok-4.5":                          {Input: 2, Output: 6, CacheRead: 0.5, CacheWrite: 0},
 	"xai/grok-4.6":                          {Input: 2, Output: 6, CacheRead: 0.5, CacheWrite: 0},
 	"xai/grok-4.7":                          {Input: 2, Output: 6, CacheRead: 0.5, CacheWrite: 0},
-	"xiaomi/mimo-v2.5":                      {Input: 0.14, Output: 0.28, CacheRead: 0.0028, CacheWrite: 0},
-	"xiaomi/mimo-v2.5-pro":                  {Input: 0.435, Output: 0.87, CacheRead: 0.0036, CacheWrite: 0},
 	"xiaomi/mimo-v2.6-flash":                {Input: 0.14, Output: 0.28, CacheRead: 0.0028, CacheWrite: 0},
 	"xiaomi/mimo-v2.6-pro":                  {Input: 0.435, Output: 0.87, CacheRead: 0.0036, CacheWrite: 0},
 	"xiaomi/mimo-v2.6-pro-ultraspeed":       {Input: 4.35, Output: 8.7, CacheRead: 0.036, CacheWrite: 0},
