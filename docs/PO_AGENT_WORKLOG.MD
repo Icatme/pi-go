@@ -2261,3 +2261,20 @@
   final changes. Windows and real providers were not run. Publication is a
   non-CI-matching branch only: a PR targeting master would trigger the existing
   workflow, so no PR, merge, release or downstream dependency bump is performed.
+
+## 2026-10-28 — v0.17.2 combined release candidate
+
+- Combined reviewed catalog commit `271976a438687c22dfe3f672ad1ec674b9fa5446`
+  and Responses diagnostic commit `77484dac232f820cc8e973d94adfdc7c00a931a8`.
+  Prepared package/examples version 0.17.2 and candidacy/compatibility notes.
+- Go 1.26.10 cloud offline validation: root tests and vet, provider race tests
+  (29.253s), module verification, examples tests and vet passed. Independent
+  combined source review found no blocking issue. Live calls and Windows/macOS
+  execution were not performed. The candidate is not evidence of a resolved
+  real-world 502 or deployed downstream applications.
+- Publication remains blocked by the no-CI requirement: master PR/push triggers
+  the existing workflow. No workflow was disabled and no feature-branch tag was
+  substituted for mainline integration. The current connector also lacks tag/
+  release upload operations, and the cloud GitHub CLI is not authenticated.
+  This candidate branch is not a published version and must not be used as a
+  claim that v0.17.2 already resolves through the module proxy.
