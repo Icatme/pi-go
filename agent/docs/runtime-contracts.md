@@ -346,6 +346,15 @@ calling `Wait`; `Wait` intentionally participates in backpressure. `Close`
 cancels the invocation, drains outstanding events, and waits for shutdown. Both
 `Wait` and `Close` are safe to call repeatedly or concurrently.
 
+A successful `StreamModel.Stream` call must return a non-nil `AssistantStream`,
+including a non-nil underlying value for pointer/map/slice/channel/function
+implementations. A nil or typed-nil stream with no error is rejected before any
+stream method is invoked and reported through the existing runtime error path.
+If `Stream` returns an error, that original error remains authoritative. This
+is a malformed model-adapter contract failure, not evidence of an upstream HTTP
+502 or a reason to retry a business action. Arbitrary adapter panics are not
+recovered by this validation.
+
 Every `AssistantStream` implementation must provide `Close`. The engine selects
 between model updates and context cancellation, then calls `Close` before
 `Wait`. Event-loop, wait, and close failures are joined and normalized into one
