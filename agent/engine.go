@@ -881,7 +881,7 @@ eventLoop:
 		var ok bool
 		select {
 		case <-ctx.Done():
-			eventErr = ctx.Err()
+			eventErr = errors.Join(eventErr, ctx.Err())
 			break eventLoop
 		case event, ok = <-events:
 			if !ok {
@@ -906,7 +906,13 @@ eventLoop:
 			}
 			continue
 		}
-		if event.Type == AssistantEventDone || event.Type == AssistantEventError {
+		if event.Type == AssistantEventError {
+			// A stream may carry its original cause only on the terminal event,
+			// while Wait returns the provider's error message with a nil Go error.
+			eventErr = errors.Join(eventErr, event.Err)
+			continue
+		}
+		if event.Type == AssistantEventDone {
 			continue
 		}
 		if !started {
