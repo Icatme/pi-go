@@ -18,10 +18,14 @@ Multi-turn conversation does not require another agent engine:
 `session.RunBinding.RunWithHooks` composes native steering/follow-up hooks with
 its journal without introducing another runtime. See the
 [session contract](session/README.md#steering-and-follow-up-during-a-durable-run).
-There is not yet an automatic durable `turnloop` adapter: dequeued inputs and
-streamed events are not commit receipts, and unknown remote tool outcomes must
-not be replayed automatically. A host must retain input receipts and reconcile
-failures; JSONL locks do not provide a distributed session owner.
+`turnloop.Config.PrepareInvocation` can prepare a fresh session binding before
+each invocation; see the [composition contract](turnloop/README.md). The binding
+owns restored history, while the loop owns bounded in-memory input admission.
+Dequeued inputs and streamed events are not commit receipts, and unknown remote
+tool outcomes must not be replayed automatically. A host must retain input
+receipts, validate session routing and reconcile failures; JSONL locks do not
+provide a distributed session owner. Checkpoint approval remains a separate
+contract, not an automatic session resume path.
 
 Keep business identity, permissions, approval policy, domain tools and UI/event
 mapping in the consuming application. Keep generic message control, tool-loop
