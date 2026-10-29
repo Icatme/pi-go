@@ -2,6 +2,32 @@
 
 This document defines the stable runtime contract for `pi-go/agent`.
 
+## Runtime Failure Reporting
+
+`Agent.Prompt` and `Continue` retain their existing lifecycle contract: execution
+failures are encoded in assistant terminal messages and `State.Error`, rather
+than returned as Go errors. Admission and invalid-continuation errors are still
+returned directly.
+
+When an original Go runtime cause is available, the assistant's terminal
+`EventMessageEnd.Err` preserves it, including joined stream read/wait/close and
+cancellation causes. This supports `errors.Is` and `errors.As` for live callers.
+`Err` is Go-only (`json:"-"`); snapshots, JSON events and replay preserve message
+error text/stop reason, not the original typed cause. Provider-only error or
+aborted messages can have no Go cause and remain failures even with empty text.
+
+The convenience `ChatAgent.Chat` and `PrintStream` return the current
+interaction's terminal error, retaining typed causes where available. Partial
+text may accompany a failure and must not be treated as a completed answer.
+Results are captured before another interaction can reset state. `PrintStream`
+continues to prioritize a writer callback error and cancels/drains its own run.
+
+`AsyncChat` and `AsyncChatWithChunks` keep their text-only channel signatures.
+Their returned error reports synchronous admission failure only; a runtime
+failure can close the channel after partial or no output. Callers needing a
+terminal error must use `Chat` or `PrintStream`, not infer success from channel
+closure. The text-only APIs do not inject error strings into assistant content.
+
 ## Message Model
 
 The canonical runtime envelope is [`Message`](../types.go).
@@ -372,8 +398,13 @@ results.
 
 Once an input is handed to the engine it belongs to the returned snapshot and
 is never automatically retried, even if the invocation later fails. A Runner
-error stops the loop, preserves its returned snapshot, and reports only still
-queued inputs as unhandled; `Result.StopMode` is empty when no explicit or
+error or assistant-reported terminal failure stops the loop after the event
+stream is drained and tool results have settled. Underlying terminal errors
+remain inspectable through `errors.Is`/`errors.As`; provider failures without
+an underlying cause wrap `turnloop.ErrAssistantFailure`. Only events from the
+current invocation determine failure, not old errors in restored history.
+Cancellation never suppresses an independent failure. The loop preserves its
+returned snapshot and reports only still queued inputs as unhandled; `Result.StopMode` is empty when no explicit or
 parent-context stop became effective. Suspended initial snapshots are rejected:
 pending tool approval remains the separate `agent/checkpoint` workflow.
 

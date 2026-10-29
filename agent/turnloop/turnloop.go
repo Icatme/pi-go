@@ -35,6 +35,8 @@ const (
 )
 
 var (
+	// ErrAssistantFailure indicates an assistant-reported terminal failure with no underlying error cause.
+	ErrAssistantFailure = errors.New("agent/turnloop: assistant failed")
 	// ErrQueueFull indicates that the bounded waiting queue retained its existing
 	// inputs and rejected the newest input.
 	ErrQueueFull = errors.New("agent/turnloop: queue full")
@@ -68,7 +70,7 @@ type Config struct {
 type Result struct {
 	Snapshot  agent.AgentSnapshot
 	Unhandled []Input
-	// StopMode is empty when an ordinary Runner error, rather than a completed
+	// StopMode is empty when a Runner or assistant failure, rather than a completed
 	// stop request or parent cancellation, terminated the loop.
 	StopMode StopMode
 }
@@ -234,7 +236,10 @@ func (l *TurnLoop) Stop(mode StopMode) error {
 
 // Wait waits for loop termination. Canceling ctx only cancels this waiter; it
 // does not stop the TurnLoop. Every successful return is cloned independently
-// with agent.Runner's in-memory ownership semantics.
+// with agent.Runner's in-memory ownership semantics. Assistant-reported failures
+// stop the loop after tool results settle, preserving inputs not yet delivered.
+// Underlying errors remain available through errors.Is/errors.As; a provider
+// failure without an error cause wraps ErrAssistantFailure. No inputs are retried.
 func (l *TurnLoop) Wait(ctx context.Context) (Result, error) {
 	if ctx == nil {
 		return Result{}, errors.New("agent/turnloop: nil wait context")
@@ -352,12 +357,19 @@ func (l *TurnLoop) run(snapshot agent.AgentSnapshot) {
 			GetSteeringMessages: l.getSteeringMessages,
 			GetFollowUpMessages: l.getFollowUpMessages,
 		})
+		var assistantErr error
 		for event := range stream.Events() {
+			if failure := assistantFailure(event); failure != nil {
+				assistantErr = errors.Join(assistantErr, failure)
+			}
 			if l.onEvent != nil {
 				l.onEvent(event)
 			}
 		}
 		next, runErr := stream.Wait()
+		if assistantErr != nil {
+			runErr = errors.Join(runErr, assistantErr)
+		}
 		snapshot = next
 
 		l.mu.Lock()
@@ -549,4 +561,24 @@ func cancellationOnly(err error, accepted ...error) bool {
 		}
 	}
 	return false
+}
+
+// assistantFailure reads only events from the current invocation, not old
+// failures in its conversation history. MessageEnd happens before error tool
+// results are settled; the caller must still drain and Wait before stopping.
+func assistantFailure(event agent.AgentEvent) error {
+	if event.Type != agent.EventMessageEnd || event.Message == nil || event.Message.Role != agent.RoleAssistant {
+		return nil
+	}
+	message := event.Message
+	if message.StopReason != agent.StopReasonError && message.StopReason != agent.StopReasonAborted && message.ErrorMessage == "" {
+		return nil
+	}
+	if event.Err != nil {
+		return event.Err
+	}
+	if message.ErrorMessage != "" {
+		return fmt.Errorf("%w: %s", ErrAssistantFailure, message.ErrorMessage)
+	}
+	return fmt.Errorf("%w: stop reason %s", ErrAssistantFailure, message.StopReason)
 }

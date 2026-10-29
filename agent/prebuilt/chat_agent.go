@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"reflect"
 	"strings"
 	"sync"
@@ -81,6 +82,7 @@ func (c *ChatAgent) ThreadID() string {
 
 // Chat appends a user message, runs one agent interaction, and returns the final assistant text.
 // Concurrent interactions return core.ErrAlreadyRunning; they are not queued.
+// A runtime failure returns an error, possibly alongside partial assistant text.
 func (c *ChatAgent) Chat(ctx context.Context, message string) (string, error) {
 	if !c.runMu.TryLock() {
 		return "", core.ErrAlreadyRunning
@@ -91,10 +93,17 @@ func (c *ChatAgent) Chat(ctx context.Context, message string) (string, error) {
 
 // chat requires the caller to hold runMu.
 func (c *ChatAgent) chat(ctx context.Context, message string) (string, error) {
+	var terminalErr error
+	unsubscribe := c.agent.Subscribe(func(event core.AgentEvent) {
+		if err := assistantTerminalError(event); err != nil {
+			terminalErr = errors.Join(terminalErr, err)
+		}
+	})
+	defer unsubscribe()
 	if err := c.agent.PromptText(ctx, message); err != nil {
 		return "", err
 	}
-	return latestAssistantText(c.agent.State().Messages), nil
+	return latestAssistantText(c.agent.State().Messages), terminalErr
 }
 
 // PrintStream streams the response chunks to a writer-like callback.
@@ -103,7 +112,7 @@ func (c *ChatAgent) chat(ctx context.Context, message string) (string, error) {
 func (c *ChatAgent) PrintStream(ctx context.Context, message string, write func(string) error) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	chunks, err := c.AsyncChat(runCtx, message)
+	chunks, result, err := c.asyncChat(runCtx, message)
 	if err != nil {
 		return err
 	}
@@ -116,23 +125,37 @@ func (c *ChatAgent) PrintStream(ctx context.Context, message string, write func(
 			return err
 		}
 	}
-	return nil
+	return <-result
 }
 
 // AsyncChat streams assistant text deltas for one user message.
+// The text-only channel cannot report runtime failures; use Chat or PrintStream
+// when a terminal error is required. The returned error is for admission only.
 // Concurrent interactions are rejected synchronously with core.ErrAlreadyRunning.
 func (c *ChatAgent) AsyncChat(ctx context.Context, message string) (<-chan string, error) {
+	output, _, err := c.asyncChat(ctx, message)
+	return output, err
+}
+
+// asyncChat captures this interaction's result before releasing admission.
+func (c *ChatAgent) asyncChat(ctx context.Context, message string) (<-chan string, <-chan error, error) {
 	if !c.runMu.TryLock() {
-		return nil, core.ErrAlreadyRunning
+		return nil, nil, core.ErrAlreadyRunning
 	}
 	output := make(chan string, 64)
+	result := make(chan error, 1)
 
 	go func() {
 		defer close(output)
+		defer close(result)
 		defer c.runMu.Unlock()
 
 		var sawDelta bool
+		var terminalErr error
 		unsubscribe := c.agent.Subscribe(func(event core.AgentEvent) {
+			if err := assistantTerminalError(event); err != nil {
+				terminalErr = errors.Join(terminalErr, err)
+			}
 			switch event.Type {
 			case core.EventMessageUpdate:
 				if event.Message == nil || event.Message.Role != core.RoleAssistant {
@@ -167,13 +190,16 @@ func (c *ChatAgent) AsyncChat(ctx context.Context, message string) (<-chan strin
 
 		// Admission is already reserved above, before returning the stream.
 		// The private Agent cannot be started by another ChatAgent interaction.
-		_ = c.agent.PromptText(ctx, message)
+		promptErr := c.agent.PromptText(ctx, message)
+		result <- errors.Join(promptErr, terminalErr)
 	}()
 
-	return output, nil
+	return output, result, nil
 }
 
 // AsyncChatWithChunks streams the final response in word-sized chunks.
+// The text-only channel may contain partial output on failure and cannot report
+// terminal errors; use Chat or PrintStream when a terminal error is required.
 // Concurrent interactions are rejected synchronously with core.ErrAlreadyRunning.
 func (c *ChatAgent) AsyncChatWithChunks(ctx context.Context, message string) (<-chan string, error) {
 	if !c.runMu.TryLock() {
@@ -185,10 +211,8 @@ func (c *ChatAgent) AsyncChatWithChunks(ctx context.Context, message string) (<-
 		defer close(output)
 		defer c.runMu.Unlock()
 
-		response, err := c.chat(ctx, message)
-		if err != nil {
-			return
-		}
+		// Preserve the text-only API: deliver any partial text, without an error channel.
+		response, _ := c.chat(ctx, message)
 
 		words := splitIntoWords(response)
 		for i, word := range words {
@@ -267,6 +291,31 @@ func (c *ChatAgent) ClearTools() {
 func (c *ChatAgent) refreshTools() {
 	tools := append(cloneToolDefinitions(c.baseTools), cloneToolDefinitions(c.dynamicTools)...)
 	c.agent.SetTools(tools)
+}
+
+// assistantTerminalError preserves the live cause when available. Provider-only
+// terminal messages have no typed cause, but are still failures even without text.
+func assistantTerminalError(event core.AgentEvent) error {
+	if event.Type != core.EventMessageEnd || event.Message == nil || event.Message.Role != core.RoleAssistant {
+		return nil
+	}
+	if event.Err != nil {
+		return event.Err
+	}
+	message := event.Message
+	if message.StopReason == core.StopReasonAborted {
+		if message.ErrorMessage != "" {
+			return errors.New(message.ErrorMessage)
+		}
+		return errors.New("assistant generation aborted")
+	}
+	if message.ErrorMessage != "" {
+		return errors.New(message.ErrorMessage)
+	}
+	if message.StopReason == core.StopReasonError {
+		return errors.New("assistant generation failed")
+	}
+	return nil
 }
 
 func latestAssistantText(messages []core.Message) string {

@@ -552,7 +552,7 @@ func (a *Agent) handleRuntimeError(ctx context.Context, snapshot AgentSnapshot, 
 		a.processLoopEvent(AgentEvent{Type: EventTurnStart})
 	}
 	a.processLoopEvent(AgentEvent{Type: EventMessageStart, Message: &errorMessage})
-	a.processLoopEvent(AgentEvent{Type: EventMessageEnd, Message: &errorMessage})
+	a.processLoopEvent(AgentEvent{Type: EventMessageEnd, Message: &errorMessage, Err: runErr})
 	a.processLoopEvent(AgentEvent{Type: EventTurnEnd, Message: &errorMessage})
 	a.processLoopEvent(AgentEvent{
 		Type:     EventAgentEnd,
