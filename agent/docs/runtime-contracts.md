@@ -10,8 +10,9 @@ than returned as Go errors. Admission and invalid-continuation errors are still
 returned directly.
 
 When an original Go runtime cause is available, the assistant's terminal
-`EventMessageEnd.Err` preserves it, including joined stream read/wait/close and
-cancellation causes. This supports `errors.Is` and `errors.As` for live callers.
+`EventMessageEnd.Err` preserves it, including original `AssistantEventError.Err` causes and joined stream
+read/wait/close and cancellation causes. A later success-shaped final message
+does not erase an earlier error event with a Go cause. This supports `errors.Is` and `errors.As` for live callers.
 `Err` is Go-only (`json:"-"`); snapshots, JSON events and replay preserve message
 error text/stop reason, not the original typed cause. Provider-only error or
 aborted messages can have no Go cause and remain failures even with empty text.
