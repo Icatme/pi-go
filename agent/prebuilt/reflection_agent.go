@@ -114,7 +114,7 @@ func (e *ModelReflectionEvaluator) Evaluate(ctx context.Context, input Reflectio
 	messages = append(messages, cloneReflectionMessage(input.Draft))
 	messages = append(messages, core.NewUserTextMessage(reflectionEvaluationInstruction(input.Iteration)))
 	agent.ReplaceMessages(messages)
-	if err := agent.Continue(ctx); err != nil {
+	if err := continueReflectionAgent(ctx, agent); err != nil {
 		return ReflectionEvaluation{}, fmt.Errorf("prebuilt: reflection evaluation failed: %w", err)
 	}
 
@@ -202,7 +202,7 @@ func (a *ReflectionAgent) Run(ctx context.Context, messages []core.Message) (Ref
 			return result, err
 		}
 		generator.ReplaceMessages(generatorMessages)
-		if err := generator.Continue(ctx); err != nil {
+		if err := continueReflectionAgent(ctx, generator); err != nil {
 			return result, fmt.Errorf("prebuilt: reflection generation iteration %d failed: %w", iteration, err)
 		}
 
@@ -279,13 +279,28 @@ func normalizeReflectionConfig(config ReflectionAgentConfig) (ReflectionAgentCon
 	return config, nil
 }
 
+// Native Agent.Continue reports admission errors directly and runtime failures
+// through terminal events. Retain those causes rather than rebuilding errors
+// from the persisted message prose. Imported history has no live event cause.
+func continueReflectionAgent(ctx context.Context, agent *core.Agent) error {
+	var terminalErr error
+	unsubscribe := agent.Subscribe(func(event core.AgentEvent) {
+		if event.Type == core.EventMessageEnd && event.Err != nil {
+			terminalErr = errors.Join(terminalErr, event.Err)
+		}
+	})
+	defer unsubscribe()
+	err := agent.Continue(ctx)
+	return errors.Join(err, terminalErr)
+}
+
 func finalReflectionAssistant(messages []core.Message, phase string) (core.Message, string, error) {
 	if len(messages) == 0 || messages[len(messages)-1].Role != core.RoleAssistant {
 		return core.Message{}, "", fmt.Errorf("prebuilt: %s produced no final assistant message", phase)
 	}
 
 	message := cloneReflectionMessage(messages[len(messages)-1])
-	if strings.TrimSpace(message.ErrorMessage) != "" {
+	if message.ErrorMessage != "" {
 		return core.Message{}, "", fmt.Errorf("prebuilt: %s failed: %s", phase, message.ErrorMessage)
 	}
 	if message.StopReason != core.StopReasonStop {
