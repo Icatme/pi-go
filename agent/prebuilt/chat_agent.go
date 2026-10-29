@@ -157,6 +157,12 @@ func (c *ChatAgent) asyncChat(ctx context.Context, message string) (<-chan strin
 				terminalErr = errors.Join(terminalErr, err)
 			}
 			switch event.Type {
+			case core.EventMessageStart:
+				if event.Message != nil && event.Message.Role == core.RoleAssistant {
+					// Delta fallback belongs to one assistant message, not the
+					// whole interaction (which can contain several tool turns).
+					sawDelta = false
+				}
 			case core.EventMessageUpdate:
 				if event.Message == nil || event.Message.Role != core.RoleAssistant {
 					return
