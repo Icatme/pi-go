@@ -81,3 +81,54 @@ binding. Tenant, user, session and lane routing must be validated by the host
 before preparation. This interface does not automatically provide cross-tenant
 or cross-session isolation; the binding's own scope checks are not a substitute
 for correct host routing.
+
+## Optional per-admission receipts
+
+`Push` remains admission-only. `PushTracked` admits the same cloned input but
+also returns a receipt unique to that admission; duplicate `Message.ID` values
+are **not** deduplicated. Rejected admissions return a nil receipt and the same
+queue/delivery/stopping errors as `Push`.
+
+```go
+receipt, err := loop.PushTracked(turnloop.Input{
+    Delivery: turnloop.DeliverySteering,
+    Message: agent.NewUserTextMessage("Use the updated amount"),
+})
+if err != nil { /* input was not admitted */ }
+result, waitErr := receipt.Wait(ctx)
+if waitErr != nil { /* this waiter stopped; the input was not withdrawn */ }
+// Inspect result.Disposition and result.Err. A nil result.Err is NOT a
+// business-success or storage-commit acknowledgment.
+```
+
+- `Unhandled`: input was never handed off. Its error is the preparation/start/
+  stop cause that prevented delivery. A failed start without hook reads restores
+  the reserved batch to its exact original queue positions, including receipts.
+- `HandedOff`: a normal `(stream, nil)` invocation accepted this input, initially
+  or through a control hook. This does **not** prove the model used the input,
+  performed its business task, or committed it to storage. All receipts handed
+  to that invocation share its final error and observed `EventAgentStart` RunID.
+- `Uncertain`: the invocation violated its start contract by polling hooks and
+  returning no stream, or returning both stream and error. Consumed inputs are
+  not replayed or included in `Unhandled`; the host must reconcile them.
+
+`Receipt.Wait` waits for this input's final disposition and its invocation to
+settle (event drain plus stream `Wait`), **not** for the whole loop to stop.
+`ReceiptResult.Err` preserves the raw invocation error, including cancellation
+that an explicit `StopImmediate` can normalize to nil in `TurnLoop.Wait`.
+The second return value only reports waiting/invalid-handle errors. A canceled
+wait does not cancel a run or withdraw input. Completed results remain readable
+by concurrent waiters, even with an already-canceled wait context. A zero-value
+or nil receipt is invalid. RunID is empty if no start event was observed; cleanup
+of an invalid stream+error result does not synthesize one.
+
+Receipts retain no input or snapshot; delivered receipts share one completion
+future per invocation. The loop keeps no growing list of delivered receipts.
+Keeping completed receipts is the caller's responsibility. Receipts are process-
+local, not durable inbox/outbox records or exactly-once execution guarantees.
+Use session commit status and actual storage separately for recovery.
+
+Do not wait for an invocation's receipt from its synchronous `OnEvent`, model,
+tool, journal or hook callback: settlement requires those callbacks to return.
+Handle receipts from outside the invocation or use a separately cancelable
+waiter. Cancellation and shutdown still require cooperative callbacks.
