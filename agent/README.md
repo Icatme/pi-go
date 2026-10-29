@@ -3,6 +3,32 @@
 `agent` is a standalone single-agent runtime. It is intentionally separate from
 `prebuilt/` so the core runtime and higher-level helpers keep clear boundaries.
 
+## Choosing a conversation layer
+
+Multi-turn conversation does not require another agent engine:
+
+| Need | Existing layer | Ownership |
+| --- | --- | --- |
+| Stateful in-memory conversation, steer, follow-up, abort | `agent.Agent` / `prebuilt.PiAgent` | One Agent owns its snapshot and input queues. |
+| Simple chat/text convenience methods | `prebuilt.ChatAgent` | Wraps the same Agent; not a durable session or approval runtime. |
+| Bounded concurrent ingress and graceful/immediate stop | `agent/turnloop` | Owns admission and serial Runner invocations; its queue is in memory. |
+| Durable history, branch CAS and tool journal | `agent/session` + `agent.Runner` | Prepare a fresh host-bound RunBinding for every invocation. |
+| Explicit pending-tool approvals | `agent/checkpoint` | Separate approval/resume contract; not a replacement for session journaling. |
+
+`session.RunBinding.RunWithHooks` composes native steering/follow-up hooks with
+its journal without introducing another runtime. See the
+[session contract](session/README.md#steering-and-follow-up-during-a-durable-run).
+There is not yet an automatic durable `turnloop` adapter: dequeued inputs and
+streamed events are not commit receipts, and unknown remote tool outcomes must
+not be replayed automatically. A host must retain input receipts and reconcile
+failures; JSONL locks do not provide a distributed session owner.
+
+Keep business identity, permissions, approval policy, domain tools and UI/event
+mapping in the consuming application. Keep generic message control, tool-loop
+semantics and storage composition here. Persisted history never grants current
+authority, and steering is a boundary operation, not a hard interruption of a
+model call or side-effectful tool.
+
 ## Project Goals
 
 Core goals:

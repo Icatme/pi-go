@@ -125,6 +125,21 @@ func (b *RunBinding) TrustedScope(snapshot agent.AgentSnapshot) (RuntimeScope, b
 // Run delegates to the existing Runner. Drain Events before Wait; only a
 // successful Wait confirms all completed tool batches were durably committed.
 func (b *RunBinding) Run(ctx context.Context, runner *agent.Runner, prompts []agent.Message) (*agent.RunStream, error) {
+	return b.RunWithHooks(ctx, runner, prompts, agent.LoopHooks{})
+}
+
+// RunWithHooks composes invocation-local Runner hooks with this binding's
+// journal. Journal must be nil: callers cannot replace the binding's commit
+// boundary. Steering and follow-up retain the ordinary Runner semantics; input
+// retrieval and emitted events are not durable commit receipts. Hooks are not
+// persisted, retried, or restored by a later PrepareRun.
+//
+// A suspending ToolGate leaves an unfinished intent. Session does not support
+// checkpoint resume; reconcile external effects before another run.
+func (b *RunBinding) RunWithHooks(ctx context.Context, runner *agent.Runner, prompts []agent.Message, hooks agent.LoopHooks) (*agent.RunStream, error) {
+	if hooks.Journal != nil {
+		return nil, errors.New("session: runtime journal is owned by the binding")
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if runner == nil || b.used {
@@ -134,7 +149,8 @@ func (b *RunBinding) Run(ctx context.Context, runner *agent.Runner, prompts []ag
 		return nil, ErrScopeMismatch
 	}
 	b.used = true
-	return runner.RunWithHooks(ctx, b.snapshot, prompts, agent.LoopHooks{Journal: b}), nil
+	hooks.Journal = b
+	return runner.RunWithHooks(ctx, b.snapshot, prompts, hooks), nil
 }
 
 func (b *RunBinding) LoadState(tool, namespace string) (json.RawMessage, error) {

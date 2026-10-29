@@ -599,7 +599,7 @@ func testRuntimeCanceledAssistant(t *testing.T, point string, gated bool, mode a
 	var stream *agent.RunStream
 	if gated {
 		gateCalls := 0
-		stream = runner.RunWithHooks(ctx, binding.snapshot, []agent.Message{agent.NewUserTextMessage("write")}, agent.LoopHooks{Journal: binding, ToolGate: func(context.Context, agent.BeforeToolCallContext) (agent.ToolGateResult, error) {
+		stream, err = binding.RunWithHooks(ctx, runner, []agent.Message{agent.NewUserTextMessage("write")}, agent.LoopHooks{ToolGate: func(context.Context, agent.BeforeToolCallContext) (agent.ToolGateResult, error) {
 			gateCalls++
 			if strings.HasPrefix(point, "gate") {
 				if gateCalls == 1 {
@@ -689,13 +689,16 @@ func TestRuntimeApprovalFailureFinalizesUnexecutedBatch(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				stream := runner.RunWithHooks(t.Context(), binding.snapshot, []agent.Message{agent.NewUserTextMessage("write")}, agent.LoopHooks{Journal: binding, ToolGate: func(context.Context, agent.BeforeToolCallContext) (agent.ToolGateResult, error) {
+				stream, err := binding.RunWithHooks(t.Context(), runner, []agent.Message{agent.NewUserTextMessage("write")}, agent.LoopHooks{ToolGate: func(context.Context, agent.BeforeToolCallContext) (agent.ToolGateResult, error) {
 					approvals++
 					if approvals == 1 {
 						return agent.ToolGateResult{Action: previous}, nil
 					}
 					return agent.ToolGateResult{}, cause
 				}})
+				if err != nil {
+					t.Fatal(err)
+				}
 				for range stream.Events() {
 				}
 				snapshot, err := stream.Wait()
