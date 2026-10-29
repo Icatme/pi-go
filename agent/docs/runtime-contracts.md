@@ -343,6 +343,10 @@ terminal assistant message so message lifecycle events stay balanced.
 The optional `agent/turnloop` child package owns a single persistent snapshot
 and serializes independent `Runner` invocations. It is an application boundary,
 not a graph runtime and not durable storage.
+The optional `Config.PrepareInvocation` delegates initial state and commits to
+a host-owned invocation; `session.RunBinding` implements this interface directly.
+See [session composition](../turnloop/README.md) for input ownership, startup
+failure, and commit-failure contracts.
 
 - `QueueCapacity` must be positive and bounds the shared waiting queue across
   all delivery classes; an input already handed to an active Runner is no

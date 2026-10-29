@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"github.com/Icatme/pi-go/agent"
@@ -57,12 +58,27 @@ type Input struct {
 	Message  agent.Message
 }
 
+// Invocation owns one run's initial snapshot. session.RunBinding implements it.
+// Implementations must use the supplied Runner and preserve its control hooks;
+// they may add their own journal. Returning
+// (nil, error) means no run was started and no hooks were called. A started run
+// must return (stream, nil); its eventual failure belongs to stream.Wait.
+// Implementations must honor ctx and must not retry or replay an invocation.
+type Invocation interface {
+	RunWithHooks(context.Context, *agent.Runner, []agent.Message, agent.LoopHooks) (*agent.RunStream, error)
+}
+
 // Config configures a TurnLoop.
 type Config struct {
-	Definition    agent.AgentDefinition
-	Initial       agent.AgentSnapshot
-	QueueCapacity int
-	OnEvent       agent.EventSink
+	// PrepareInvocation optionally restores host-owned state before each run,
+	// outside the loop mutex and before input is taken from the queue. Initial
+	// must be zero when set. A preparation failure stops without consuming input.
+	// The callback must honor cancellation; unused bindings need no loop cleanup.
+	PrepareInvocation func(context.Context) (Invocation, error)
+	Definition        agent.AgentDefinition
+	Initial           agent.AgentSnapshot
+	QueueCapacity     int
+	OnEvent           agent.EventSink
 }
 
 // Result is the terminal state of a TurnLoop, cloned with the same in-memory
@@ -85,6 +101,7 @@ const (
 
 type invocationState struct {
 	completedTurns      int
+	hookPolled          bool
 	skipInitialSteering bool
 }
 
@@ -93,22 +110,23 @@ type invocationState struct {
 type TurnLoop struct {
 	mu sync.Mutex
 
-	runner         *agent.Runner
-	queueCapacity  int
-	queue          []Input
-	steeringMode   agent.QueueMode
-	followUpMode   agent.QueueMode
-	maxTurns       int
-	originalFinish agent.FinishTurnHook
-	onEvent        agent.EventSink
-	active         *invocationState
-	accepting      bool
-	finished       bool
-	requestedStop  StopMode
-	stopSource     stopSource
-	parentErr      error
-	terminalResult Result
-	terminalErr    error
+	runner            *agent.Runner
+	prepareInvocation func(context.Context) (Invocation, error)
+	queueCapacity     int
+	queue             []Input
+	steeringMode      agent.QueueMode
+	followUpMode      agent.QueueMode
+	maxTurns          int
+	originalFinish    agent.FinishTurnHook
+	onEvent           agent.EventSink
+	active            *invocationState
+	accepting         bool
+	finished          bool
+	requestedStop     StopMode
+	stopSource        stopSource
+	parentErr         error
+	terminalResult    Result
+	terminalErr       error
 
 	runtimeCtx    context.Context
 	runtimeCancel context.CancelCauseFunc
@@ -126,6 +144,9 @@ func New(ctx context.Context, config Config) (*TurnLoop, error) {
 		return nil, fmt.Errorf("agent/turnloop: queue capacity must be positive: %d", config.QueueCapacity)
 	}
 
+	if config.PrepareInvocation != nil && !reflect.ValueOf(config.Initial).IsZero() {
+		return nil, errors.New("agent/turnloop: Initial must be zero with PrepareInvocation")
+	}
 	definition, err := config.Definition.Validate()
 	if err != nil {
 		return nil, err
@@ -142,18 +163,19 @@ func New(ctx context.Context, config Config) (*TurnLoop, error) {
 
 	runtimeCtx, runtimeCancel := context.WithCancelCause(ctx)
 	loop := &TurnLoop{
-		queueCapacity:  config.QueueCapacity,
-		steeringMode:   definition.SteeringMode,
-		followUpMode:   definition.FollowUpMode,
-		maxTurns:       definition.MaxTurns,
-		originalFinish: definition.FinishTurn,
-		onEvent:        config.OnEvent,
-		accepting:      true,
-		runtimeCtx:     runtimeCtx,
-		runtimeCancel:  runtimeCancel,
-		parentCtx:      ctx,
-		wake:           make(chan struct{}, 1),
-		done:           make(chan struct{}),
+		queueCapacity:     config.QueueCapacity,
+		prepareInvocation: config.PrepareInvocation,
+		steeringMode:      definition.SteeringMode,
+		followUpMode:      definition.FollowUpMode,
+		maxTurns:          definition.MaxTurns,
+		originalFinish:    definition.FinishTurn,
+		onEvent:           config.OnEvent,
+		accepting:         true,
+		runtimeCtx:        runtimeCtx,
+		runtimeCancel:     runtimeCancel,
+		parentCtx:         ctx,
+		wake:              make(chan struct{}, 1),
+		done:              make(chan struct{}),
 	}
 	definition.FinishTurn = loop.finishTurn
 	runner, err := agent.NewRunner(definition)
@@ -336,6 +358,27 @@ func (l *TurnLoop) run(snapshot agent.AgentSnapshot) {
 			continue
 		}
 
+		var invocation Invocation
+		if l.prepareInvocation != nil {
+			l.mu.Unlock()
+			prepared, err := l.prepareInvocation(l.runtimeCtx)
+			if err == nil && nilInvocation(prepared) {
+				err = errors.New("agent/turnloop: PrepareInvocation returned nil invocation")
+			}
+			l.mu.Lock()
+			l.reconcileParentCancellationLocked()
+			if l.finishInvocationLocked(snapshot, err) {
+				l.mu.Unlock()
+				return
+			}
+			invocation = prepared
+		}
+		// Keep original relative positions, not just the selected prompt batch:
+		// QueueModeAll can remove matching inputs across other delivery classes.
+		var originalQueue []Input
+		if invocation != nil {
+			originalQueue = append([]Input(nil), l.queue...)
+		}
 		input := l.queue[0]
 		l.queue[0] = Input{}
 		l.queue = l.queue[1:]
@@ -350,13 +393,42 @@ func (l *TurnLoop) run(snapshot agent.AgentSnapshot) {
 				prompts = append(prompts, l.takeDeliveryLocked(DeliveryFollowUp, agent.QueueModeAll)...)
 			}
 		}
+		remainingBeforeStart := len(l.queue)
 		l.active = &invocationState{skipInitialSteering: input.Delivery == DeliverySteering}
 		l.mu.Unlock()
 
-		stream := l.runner.RunWithHooks(l.runtimeCtx, snapshot, prompts, agent.LoopHooks{
-			GetSteeringMessages: l.getSteeringMessages,
-			GetFollowUpMessages: l.getFollowUpMessages,
-		})
+		hooks := agent.LoopHooks{GetSteeringMessages: l.getSteeringMessages, GetFollowUpMessages: l.getFollowUpMessages}
+		var stream *agent.RunStream
+		var startErr error
+		if invocation == nil {
+			stream = l.runner.RunWithHooks(l.runtimeCtx, snapshot, prompts, hooks)
+		} else {
+			stream, startErr = invocation.RunWithHooks(l.runtimeCtx, l.runner, cloneValue(prompts), hooks)
+			if stream == nil && startErr == nil {
+				startErr = errors.New("agent/turnloop: invocation returned neither stream nor error")
+			}
+		}
+		if startErr != nil {
+			// A non-nil stream means execution may have started: cancel and settle it,
+			// never return its prompts as unhandled or automatically replay them.
+			if stream != nil {
+				_ = stream.Close()
+				next, waitErr := stream.Wait()
+				snapshot = next
+				startErr = errors.Join(startErr, waitErr, errors.New("agent/turnloop: invocation returned both stream and error"))
+			}
+			l.mu.Lock()
+			if stream == nil && !l.active.hookPolled {
+				l.queue = append(originalQueue, l.queue[remainingBeforeStart:]...)
+			} else if stream == nil {
+				startErr = errors.Join(startErr, errors.New("agent/turnloop: invocation called hooks before returning a start error"))
+			}
+			l.reconcileParentCancellationLocked()
+			l.active = nil
+			l.finishInvocationLocked(snapshot, startErr)
+			l.mu.Unlock()
+			return
+		}
 		var assistantErr error
 		for event := range stream.Events() {
 			if failure := assistantFailure(event); failure != nil {
@@ -375,36 +447,7 @@ func (l *TurnLoop) run(snapshot agent.AgentSnapshot) {
 		l.mu.Lock()
 		l.reconcileParentCancellationLocked()
 		l.active = nil
-		mode := l.requestedStop
-		source := l.stopSource
-		parentErr := l.parentErr
-		if runErr != nil {
-			terminalErr := runErr
-			resultMode := StopMode("")
-			switch {
-			case source == stopSourceParent:
-				resultMode = StopImmediate
-				if cancellationOnly(runErr, context.Cause(l.runtimeCtx)) {
-					terminalErr = parentErr
-				} else if parentErr != nil {
-					terminalErr = errors.Join(runErr, parentErr)
-				}
-			case mode == StopImmediate && source == stopSourceExplicit && cancellationOnly(runErr, context.Cause(l.runtimeCtx)):
-				resultMode = StopImmediate
-				terminalErr = nil
-			case mode == StopImmediate:
-				resultMode = StopImmediate
-			}
-			l.finishLocked(snapshot, terminalErr, resultMode)
-			l.mu.Unlock()
-			return
-		}
-		if mode == StopImmediate {
-			terminalErr := error(nil)
-			if source == stopSourceParent {
-				terminalErr = parentErr
-			}
-			l.finishLocked(snapshot, terminalErr, StopImmediate)
+		if l.finishInvocationLocked(snapshot, runErr) {
 			l.mu.Unlock()
 			return
 		}
@@ -429,6 +472,9 @@ func (l *TurnLoop) finishTurn(ctx context.Context, input agent.AgentTurnContext)
 func (l *TurnLoop) getSteeringMessages(context.Context) ([]agent.Message, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.active != nil {
+		l.active.hookPolled = true
+	}
 	if !l.mayDequeueLocked() {
 		return nil, nil
 	}
@@ -442,6 +488,9 @@ func (l *TurnLoop) getSteeringMessages(context.Context) ([]agent.Message, error)
 func (l *TurnLoop) getFollowUpMessages(context.Context) ([]agent.Message, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.active != nil {
+		l.active.hookPolled = true
+	}
 	if !l.mayDequeueLocked() {
 		return nil, nil
 	}
@@ -581,4 +630,53 @@ func assistantFailure(event agent.AgentEvent) error {
 		return fmt.Errorf("%w: %s", ErrAssistantFailure, message.ErrorMessage)
 	}
 	return fmt.Errorf("%w: stop reason %s", ErrAssistantFailure, message.StopReason)
+}
+
+// finishInvocationLocked applies the same terminal policy to preparation,
+// synchronous start failures, and completed runs. Caller holds mu.
+func (l *TurnLoop) finishInvocationLocked(snapshot agent.AgentSnapshot, runErr error) bool {
+	mode := l.requestedStop
+	source := l.stopSource
+	parentErr := l.parentErr
+	if runErr != nil {
+		terminalErr := runErr
+		resultMode := StopMode("")
+		switch {
+		case source == stopSourceParent:
+			resultMode = StopImmediate
+			if cancellationOnly(runErr, context.Cause(l.runtimeCtx)) {
+				terminalErr = parentErr
+			} else if parentErr != nil {
+				terminalErr = errors.Join(runErr, parentErr)
+			}
+		case mode == StopImmediate && source == stopSourceExplicit && cancellationOnly(runErr, context.Cause(l.runtimeCtx)):
+			resultMode = StopImmediate
+			terminalErr = nil
+		case mode == StopImmediate:
+			resultMode = StopImmediate
+		}
+		l.finishLocked(snapshot, terminalErr, resultMode)
+		return true
+	}
+	if mode == StopImmediate {
+		terminalErr := error(nil)
+		if source == stopSourceParent {
+			terminalErr = parentErr
+		}
+		l.finishLocked(snapshot, terminalErr, StopImmediate)
+		return true
+	}
+	return false
+}
+
+func nilInvocation(invocation Invocation) bool {
+	if invocation == nil {
+		return true
+	}
+	value := reflect.ValueOf(invocation)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	}
+	return false
 }
