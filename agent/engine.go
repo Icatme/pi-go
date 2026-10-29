@@ -817,6 +817,21 @@ func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapsh
 	}
 }
 
+// nilAssistantStream rejects malformed adapters before invoking any stream
+// method, including typed nil implementations stored in a non-nil interface.
+func nilAssistantStream(stream AssistantStream) bool {
+	if stream == nil {
+		return true
+	}
+	value := reflect.ValueOf(stream)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
 func (e *Engine) generateAssistant(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, tools []ToolDefinition, emit EventSink) (Message, []ToolDefinition, error) {
 	modelMessages := cloneMessages(snapshot.Messages)
 	hasSystemTranscript := GetCurrentSystemMessage(modelMessages) != nil
@@ -869,6 +884,10 @@ func (e *Engine) generateAssistant(ctx context.Context, definition AgentDefiniti
 	})
 	if err != nil {
 		return Message{}, nil, err
+	}
+
+	if nilAssistantStream(stream) {
+		return Message{}, nil, errors.New("agent: model adapter returned nil AssistantStream without error")
 	}
 
 	started := false
