@@ -612,8 +612,9 @@ func cancellationOnly(err error, accepted ...error) bool {
 	return false
 }
 
-// assistantFailure reads only events from the current invocation, not old
-// failures in its conversation history. MessageEnd happens before error tool
+// assistantFailure requires model origin for message-only failure fallback;
+// replayed input messages cannot manufacture a current failure. Typed runtime
+// causes remain intact regardless of origin. MessageEnd happens before error tool
 // results are settled; the caller must still drain and Wait before stopping.
 func assistantFailure(event agent.AgentEvent) error {
 	if event.Type != agent.EventMessageEnd || event.Message == nil || event.Message.Role != agent.RoleAssistant {
@@ -625,6 +626,9 @@ func assistantFailure(event agent.AgentEvent) error {
 	}
 	if event.Err != nil {
 		return event.Err
+	}
+	if !event.ModelResponse {
+		return nil
 	}
 	if message.ErrorMessage != "" {
 		return fmt.Errorf("%w: %s", ErrAssistantFailure, message.ErrorMessage)

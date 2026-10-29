@@ -339,6 +339,22 @@ between model updates and context cancellation, then calls `Close` before
 `Wait`. Event-loop, wait, and close failures are joined and normalized into one
 terminal assistant message so message lifecycle events stay balanced.
 
+## Message event origin
+
+`AgentEvent.ModelResponse` (`model_response` in JSON, omitted when false) is
+set by `Engine.generateAssistant` on its message start/update/end events.
+Input prompts, steering/follow-up inputs, system declarations, tool results,
+and synthesized Agent runtime-error messages leave it false. The engine never
+reads this flag from message metadata or payload. It describes runtime event
+origin, not authorization, tenant identity, or a trust credential. Serialized
+or externally supplied events are not authenticated by this flag.
+
+Consumers must not classify an input assistant message with an old error stop
+reason as a new model failure. `turnloop` uses the explicit origin flag for its
+no-cause terminal fallback; original typed `Err` causes remain available even
+on synthesized runtime errors. No role, message text, or metadata heuristic is
+used to infer model origin. Replayed messages do not become new model output.
+
 ## External Input Turn Loop Contract
 
 The optional `agent/turnloop` child package owns a single persistent snapshot
