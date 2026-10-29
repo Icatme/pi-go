@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	core "github.com/Icatme/pi-go/agent"
@@ -43,6 +44,9 @@ func WithMaxIterations(maxIterations int) ChatAgentOption {
 // ChatAgent is a session-oriented single-agent wrapper.
 // Convenience APIs stay here, but the underlying behavior should reuse agent.Agent directly.
 type ChatAgent struct {
+	// runMu reserves an interaction before async setup and until its listener and output are finished.
+	runMu        sync.Mutex
+	toolsMu      sync.Mutex
 	agent        *core.Agent
 	baseTools    []core.ToolDefinition
 	dynamicTools []core.ToolDefinition
@@ -76,7 +80,17 @@ func (c *ChatAgent) ThreadID() string {
 }
 
 // Chat appends a user message, runs one agent interaction, and returns the final assistant text.
+// Concurrent interactions return core.ErrAlreadyRunning; they are not queued.
 func (c *ChatAgent) Chat(ctx context.Context, message string) (string, error) {
+	if !c.runMu.TryLock() {
+		return "", core.ErrAlreadyRunning
+	}
+	defer c.runMu.Unlock()
+	return c.chat(ctx, message)
+}
+
+// chat requires the caller to hold runMu.
+func (c *ChatAgent) chat(ctx context.Context, message string) (string, error) {
 	if err := c.agent.PromptText(ctx, message); err != nil {
 		return "", err
 	}
@@ -84,6 +98,8 @@ func (c *ChatAgent) Chat(ctx context.Context, message string) (string, error) {
 }
 
 // PrintStream streams the response chunks to a writer-like callback.
+// A callback failure cancels and drains this interaction before returning.
+// Cleanup requires the model and tools to cooperate with context cancellation.
 func (c *ChatAgent) PrintStream(ctx context.Context, message string, write func(string) error) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -93,6 +109,10 @@ func (c *ChatAgent) PrintStream(ctx context.Context, message string, write func(
 	}
 	for chunk := range chunks {
 		if err := write(chunk); err != nil {
+			cancel()
+			// Wait for this stream to release its listener and admission before reuse.
+			for range chunks {
+			}
 			return err
 		}
 	}
@@ -100,11 +120,16 @@ func (c *ChatAgent) PrintStream(ctx context.Context, message string, write func(
 }
 
 // AsyncChat streams assistant text deltas for one user message.
+// Concurrent interactions are rejected synchronously with core.ErrAlreadyRunning.
 func (c *ChatAgent) AsyncChat(ctx context.Context, message string) (<-chan string, error) {
+	if !c.runMu.TryLock() {
+		return nil, core.ErrAlreadyRunning
+	}
 	output := make(chan string, 64)
 
 	go func() {
 		defer close(output)
+		defer c.runMu.Unlock()
 
 		var sawDelta bool
 		unsubscribe := c.agent.Subscribe(func(event core.AgentEvent) {
@@ -140,6 +165,8 @@ func (c *ChatAgent) AsyncChat(ctx context.Context, message string) (<-chan strin
 		})
 		defer unsubscribe()
 
+		// Admission is already reserved above, before returning the stream.
+		// The private Agent cannot be started by another ChatAgent interaction.
 		_ = c.agent.PromptText(ctx, message)
 	}()
 
@@ -147,13 +174,18 @@ func (c *ChatAgent) AsyncChat(ctx context.Context, message string) (<-chan strin
 }
 
 // AsyncChatWithChunks streams the final response in word-sized chunks.
+// Concurrent interactions are rejected synchronously with core.ErrAlreadyRunning.
 func (c *ChatAgent) AsyncChatWithChunks(ctx context.Context, message string) (<-chan string, error) {
+	if !c.runMu.TryLock() {
+		return nil, core.ErrAlreadyRunning
+	}
 	output := make(chan string, 64)
 
 	go func() {
 		defer close(output)
+		defer c.runMu.Unlock()
 
-		response, err := c.Chat(ctx, message)
+		response, err := c.chat(ctx, message)
 		if err != nil {
 			return
 		}
@@ -180,12 +212,16 @@ func (c *ChatAgent) AsyncChatWithChunks(ctx context.Context, message string) (<-
 
 // SetTools replaces dynamic tools while preserving base tools from construction time.
 func (c *ChatAgent) SetTools(newTools []core.ToolDefinition) {
+	c.toolsMu.Lock()
+	defer c.toolsMu.Unlock()
 	c.dynamicTools = cloneToolDefinitions(newTools)
 	c.refreshTools()
 }
 
 // AddTool adds or replaces one dynamic tool by name.
 func (c *ChatAgent) AddTool(tool core.ToolDefinition) {
+	c.toolsMu.Lock()
+	defer c.toolsMu.Unlock()
 	for i := range c.dynamicTools {
 		if c.dynamicTools[i].Name == tool.Name {
 			c.dynamicTools[i] = cloneToolDefinition(tool)
@@ -199,6 +235,8 @@ func (c *ChatAgent) AddTool(tool core.ToolDefinition) {
 
 // RemoveTool removes one dynamic tool by name.
 func (c *ChatAgent) RemoveTool(toolName string) bool {
+	c.toolsMu.Lock()
+	defer c.toolsMu.Unlock()
 	for i := range c.dynamicTools {
 		if c.dynamicTools[i].Name != toolName {
 			continue
@@ -212,15 +250,20 @@ func (c *ChatAgent) RemoveTool(toolName string) bool {
 
 // GetTools returns a copy of the dynamic tool list.
 func (c *ChatAgent) GetTools() []core.ToolDefinition {
+	c.toolsMu.Lock()
+	defer c.toolsMu.Unlock()
 	return cloneToolDefinitions(c.dynamicTools)
 }
 
 // ClearTools removes all dynamic tools.
 func (c *ChatAgent) ClearTools() {
+	c.toolsMu.Lock()
+	defer c.toolsMu.Unlock()
 	c.dynamicTools = nil
 	c.refreshTools()
 }
 
+// refreshTools requires the caller to hold toolsMu.
 func (c *ChatAgent) refreshTools() {
 	tools := append(cloneToolDefinitions(c.baseTools), cloneToolDefinitions(c.dynamicTools)...)
 	c.agent.SetTools(tools)
