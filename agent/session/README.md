@@ -62,6 +62,34 @@ The resulting exact branch version is used for the final commit.
 When a later run first introduces a system prompt or static tools, its system
 declaration is appended without changing the already committed conversation.
 
+### Steering and follow-up during a durable run
+
+Use `binding.RunWithHooks(ctx, runner, prompts, hooks)` to combine native
+`agent.LoopHooks` with the session journal. Set `GetSteeringMessages` and/or
+`GetFollowUpMessages` to the host's input source; leave `Journal` nil. A non-nil
+journal is rejected before the single-use binding is consumed, rather than
+silently replacing either journal. The existing `Run` is equivalent to empty
+hooks. This is composition of the same Runner, not another Agent loop.
+
+Steering is polled at the Runner's ordinary boundaries; it does not interrupt an
+in-flight model call or tool batch. Follow-up is polled once steering and tools
+are exhausted. Accepted messages are appended to the canonical transcript and
+committed before the corresponding model request. A fresh `PrepareRun` restores
+that committed history; callbacks themselves are never stored or replayed.
+
+The host owns input admission, queue bounds, receipts, and cancellation. Retrieving
+an input is **not** confirmation that it was committed: scope revocation, a hook
+error or a branch conflict may stop the run. Keep input IDs/receipts at the host
+boundary, inspect `Wait`, and reconcile rather than automatically replaying
+side-effectful work. `RunStream.Close` cooperatively cancels and drains a run; it
+does not erase already committed messages or roll back tools.
+
+`ToolGate` and `ResolveDefinition` retain ordinary Runner behavior. In particular,
+a suspending gate leaves a durable pending intent and `PrepareRun` returns
+`ErrInterrupted`. This does not add checkpoint resume support; do not route the
+snapshot to checkpoint resume to bypass session ownership. Reconcile actual
+external effects before an explicit recovery decision.
+
 Sequential top-level tools receive `ToolExecutionContext.State`. Codemode loads
 a disposable store from it and stages a bounded versioned snapshot. A script's
 state is accepted only if execution, the parent after hook and final validator
