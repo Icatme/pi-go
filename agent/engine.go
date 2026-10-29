@@ -928,9 +928,22 @@ eventLoop:
 	closeErr := stream.Close()
 	finalMessage, waitErr := stream.Wait()
 	streamErr := errors.Join(eventErr, waitErr, closeErr)
+	terminalErr := streamErr
+
 	if streamErr != nil {
 		if finalMessage.Role == "" && len(finalMessage.Parts) == 0 && len(finalMessage.ToolCalls) == 0 && started {
 			finalMessage = cloneMessage(lastPartial)
+		}
+		// Preserve an independent provider terminal failure alongside transport causes.
+		// Do not reinterpret a matching cancellation message as a new non-cancel error.
+		if isErrorAssistantMessage(finalMessage) {
+			providerError := finalMessage.ErrorMessage
+			if providerError == "" && finalMessage.StopReason == StopReasonError {
+				providerError = "assistant generation failed"
+			}
+			if providerError != "" && providerError != streamErr.Error() {
+				terminalErr = errors.Join(errors.New(providerError), streamErr)
+			}
 		}
 		if !isErrorAssistantMessage(finalMessage) {
 			finalMessage.StopReason = StopReasonError
@@ -957,7 +970,7 @@ eventLoop:
 	if !started {
 		emitEvent(emit, AgentEvent{Type: EventMessageStart, Message: &finalMessage})
 	}
-	emitEvent(emit, AgentEvent{Type: EventMessageEnd, Message: &finalMessage})
+	emitEvent(emit, AgentEvent{Type: EventMessageEnd, Message: &finalMessage, Err: terminalErr})
 	return finalMessage, tools, nil
 }
 
