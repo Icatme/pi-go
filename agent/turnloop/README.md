@@ -132,3 +132,11 @@ Do not wait for an invocation's receipt from its synchronous `OnEvent`, model,
 tool, journal or hook callback: settlement requires those callbacks to return.
 Handle receipts from outside the invocation or use a separately cancelable
 waiter. Cancellation and shutdown still require cooperative callbacks.
+
+Control polls check cancellation while holding the queue mutex, rather than
+waiting for the parent watcher to run. If cancellation is already visible,
+steering/follow-up inputs remain queued and the hook returns the context error.
+This also applies to a host invocation's narrower child context: it fails that
+invocation without labeling the failure as a parent stop. Inputs already handed
+off are not returned or replayed. Graceful stop still permits control polling;
+explicit immediate-stop normalization and raw receipt errors remain unchanged.
