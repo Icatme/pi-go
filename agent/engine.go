@@ -889,6 +889,10 @@ eventLoop:
 			}
 		}
 
+		if event.Message.Role != "" && event.Message.Role != RoleAssistant {
+			eventErr = errors.Join(eventErr, event.Err, fmt.Errorf("agent: model stream event has invalid role %q; expected assistant", event.Message.Role))
+			break eventLoop
+		}
 		partial := cloneMessage(event.Message)
 		partial.ThinkingLevel = snapshot.ThinkingLevel
 		if partial.Role == "" {
@@ -934,6 +938,12 @@ eventLoop:
 	closeErr := stream.Close()
 	finalMessage, waitErr := stream.Wait()
 	streamErr := errors.Join(eventErr, waitErr, closeErr)
+	if finalMessage.Role != "" && finalMessage.Role != RoleAssistant {
+		streamErr = errors.Join(streamErr, fmt.Errorf("agent: model stream final message has invalid role %q; expected assistant", finalMessage.Role))
+		// Reject the malformed envelope, rather than granting model output a
+		// host/system/tool role or treating its tool calls as valid intent.
+		finalMessage = Message{}
+	}
 	terminalErr := streamErr
 
 	if streamErr != nil {

@@ -42,6 +42,18 @@ The canonical runtime envelope is [`Message`](../types.go).
 - `RoleCustom` is allowed in runtime state, but must be mapped by `ConvertToLLM`
   before model execution if the selected model cannot consume it directly.
 
+### Model Output Roles
+
+`AssistantStream` produces assistant messages only. An omitted role retains
+its existing default of `RoleAssistant`; any other non-empty role in a stream
+event or final message is a runtime contract failure. The engine rejects the
+malformed envelope, finalizes the stream with `Close` and `Wait`, and emits a
+balanced assistant error lifecycle. It does not accept the envelope as host
+input, append a model-supplied system declaration, or execute its tool calls.
+Original event/wait/close causes remain in the terminal error chain. Valid
+partial output observed before the failure may remain in the error response.
+This validation does not restrict the roles allowed in host-owned history.
+
 ### Parts
 
 - `PartTypeText` carries plain text in `Part.Text`.
