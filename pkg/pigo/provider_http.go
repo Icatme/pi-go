@@ -29,6 +29,8 @@ var ErrProviderErrorBodyTooLarge = errors.New("provider error body exceeds limit
 // HTTPObservation describes one RoundTrip, not an entire redirect or retry sequence.
 // Error identifiers are bounded. Err preserves the original error chain and must not be logged as trusted metadata.
 // Redirect observations are delivered when their body finishes or is closed.
+// A successful response is observed at headers and, if its body later fails to
+// read, once more with the original read error. Observations are not attempt counts.
 // Observe may run concurrently when the client is shared. A callback must be concurrency-safe.
 type HTTPObservation struct {
 	Delivery           HTTPDelivery
@@ -168,6 +170,9 @@ func (t *providerHTTPTransport) RoundTrip(request *http.Request) (*http.Response
 		if !observation.ErrorBodyTruncated && readErr == nil {
 			observation.ErrorType, observation.ErrorCode = providerErrorIdentifiers(body)
 		}
+	}
+	if response.StatusCode >= 200 && response.StatusCode < 300 && response.Body != nil && t.policy.Observe != nil {
+		response.Body = &providerObservedBody{ReadCloser: response.Body, observe: t.policy.Observe, observation: observation}
 	}
 	t.observe(observation)
 	return response, nil

@@ -102,7 +102,7 @@ func TestProviderHTTPMetadataAndSuccessfulStreams(t *testing.T) {
 		if got.Delivery != HTTPDeliveryResponseReceived || got.StatusCode != status {
 			t.Fatalf("observation=%+v", got)
 		}
-		if status == 200 && (body.read != 0 || body.closed || response.Body != body) {
+		if status == 200 && (body.read != 0 || body.closed) {
 			t.Fatal("successful stream consumed eagerly")
 		}
 		if status == 429 && (got.ErrorCode != "insufficient_quota" || got.ErrorType != "rate_limit_error") {
