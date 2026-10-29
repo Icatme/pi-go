@@ -799,7 +799,7 @@ func admitBeforeRun(t *testing.T, loop *TurnLoop, inputs ...Input) {
 		if !validDelivery(input.Delivery) {
 			t.Fatalf("invalid test delivery %q", input.Delivery)
 		}
-		loop.queue = append(loop.queue, cloneValue(input))
+		loop.queue = append(loop.queue, queuedInput{Input: cloneValue(input)})
 	}
 	loop.notify()
 }

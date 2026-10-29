@@ -99,7 +99,13 @@ const (
 	stopSourceParent
 )
 
+type queuedInput struct {
+	Input
+	receipt *Receipt
+}
+
 type invocationState struct {
+	future              *receiptFuture
 	completedTurns      int
 	hookPolled          bool
 	skipInitialSteering bool
@@ -113,7 +119,7 @@ type TurnLoop struct {
 	runner            *agent.Runner
 	prepareInvocation func(context.Context) (Invocation, error)
 	queueCapacity     int
-	queue             []Input
+	queue             []queuedInput
 	steeringMode      agent.QueueMode
 	followUpMode      agent.QueueMode
 	maxTurns          int
@@ -197,6 +203,20 @@ func New(ctx context.Context, config Config) (*TurnLoop, error) {
 // admission. When the queue is full, the newest input is rejected with
 // ErrQueueFull.
 func (l *TurnLoop) Push(input Input) error {
+	return l.push(input, nil)
+}
+
+// PushTracked admits input exactly like Push and returns an optional settlement
+// receipt. Rejected inputs return a nil receipt. Message.ID is not a deduplication key.
+func (l *TurnLoop) PushTracked(input Input) (*Receipt, error) {
+	receipt := &Receipt{ready: make(chan struct{})}
+	if err := l.push(input, receipt); err != nil {
+		return nil, err
+	}
+	return receipt, nil
+}
+
+func (l *TurnLoop) push(input Input, receipt *Receipt) error {
 	if !validDelivery(input.Delivery) {
 		return ErrInvalidDelivery
 	}
@@ -212,7 +232,7 @@ func (l *TurnLoop) Push(input Input) error {
 		l.mu.Unlock()
 		return ErrQueueFull
 	}
-	l.queue = append(l.queue, detached)
+	l.queue = append(l.queue, queuedInput{Input: detached, receipt: receipt})
 	l.mu.Unlock()
 	l.notify()
 	return nil
@@ -343,13 +363,13 @@ func (l *TurnLoop) run(snapshot agent.AgentSnapshot) {
 		l.mu.Lock()
 		l.reconcileParentCancellationLocked()
 		if l.requestedStop == StopImmediate {
-			l.finishLocked(snapshot, l.parentErr, StopImmediate)
+			l.finishLocked(snapshot, l.parentErr, StopImmediate, l.stopReceiptError(l.parentErr))
 			l.mu.Unlock()
 			return
 		}
 		if len(l.queue) == 0 {
 			if l.requestedStop == StopGraceful {
-				l.finishLocked(snapshot, nil, StopGraceful)
+				l.finishLocked(snapshot, nil, StopGraceful, nil)
 				l.mu.Unlock()
 				return
 			}
@@ -375,26 +395,29 @@ func (l *TurnLoop) run(snapshot agent.AgentSnapshot) {
 		}
 		// Keep original relative positions, not just the selected prompt batch:
 		// QueueModeAll can remove matching inputs across other delivery classes.
-		var originalQueue []Input
+		var originalQueue []queuedInput
 		if invocation != nil {
-			originalQueue = append([]Input(nil), l.queue...)
+			originalQueue = append([]queuedInput(nil), l.queue...)
 		}
 		input := l.queue[0]
-		l.queue[0] = Input{}
+		l.queue[0] = queuedInput{}
 		l.queue = l.queue[1:]
+		// Reserved inputs are not handed off until the start result is known.
+		reserved := []*Receipt{input.receipt}
 		prompts := []agent.Message{input.Message}
 		switch input.Delivery {
 		case DeliverySteering:
 			if l.steeringMode == agent.QueueModeAll {
-				prompts = append(prompts, l.takeDeliveryLocked(DeliverySteering, agent.QueueModeAll)...)
+				prompts = append(prompts, l.takeDeliveryLocked(DeliverySteering, agent.QueueModeAll, &reserved)...)
 			}
 		case DeliveryFollowUp:
 			if l.followUpMode == agent.QueueModeAll {
-				prompts = append(prompts, l.takeDeliveryLocked(DeliveryFollowUp, agent.QueueModeAll)...)
+				prompts = append(prompts, l.takeDeliveryLocked(DeliveryFollowUp, agent.QueueModeAll, &reserved)...)
 			}
 		}
 		remainingBeforeStart := len(l.queue)
-		l.active = &invocationState{skipInitialSteering: input.Delivery == DeliverySteering}
+		future := newReceiptFuture()
+		l.active = &invocationState{future: future, skipInitialSteering: input.Delivery == DeliverySteering}
 		l.mu.Unlock()
 
 		hooks := agent.LoopHooks{GetSteeringMessages: l.getSteeringMessages, GetFollowUpMessages: l.getFollowUpMessages}
@@ -423,14 +446,29 @@ func (l *TurnLoop) run(snapshot agent.AgentSnapshot) {
 			} else if stream == nil {
 				startErr = errors.Join(startErr, errors.New("agent/turnloop: invocation called hooks before returning a start error"))
 			}
+			if stream != nil || l.active.hookPolled {
+				for _, receipt := range reserved {
+					receipt.bind(future)
+				}
+				future.settle(ReceiptResult{Disposition: DispositionUncertain, Err: startErr})
+			}
 			l.reconcileParentCancellationLocked()
 			l.active = nil
 			l.finishInvocationLocked(snapshot, startErr)
 			l.mu.Unlock()
 			return
 		}
+		for _, receipt := range reserved {
+			receipt.bind(future)
+		}
+		reserved = nil
+		originalQueue = nil
+		var runID string
 		var assistantErr error
 		for event := range stream.Events() {
+			if runID == "" && event.Type == agent.EventAgentStart {
+				runID = event.RunID
+			}
 			if failure := assistantFailure(event); failure != nil {
 				assistantErr = errors.Join(assistantErr, failure)
 			}
@@ -443,6 +481,7 @@ func (l *TurnLoop) run(snapshot agent.AgentSnapshot) {
 			runErr = errors.Join(runErr, assistantErr)
 		}
 		snapshot = next
+		future.settle(ReceiptResult{Disposition: DispositionHandedOff, RunID: runID, Err: runErr})
 
 		l.mu.Lock()
 		l.reconcileParentCancellationLocked()
@@ -482,7 +521,7 @@ func (l *TurnLoop) getSteeringMessages(context.Context) ([]agent.Message, error)
 		l.active.skipInitialSteering = false
 		return nil, nil
 	}
-	return l.takeDeliveryLocked(DeliverySteering, l.steeringMode), nil
+	return l.takeDeliveryLocked(DeliverySteering, l.steeringMode, nil), nil
 }
 
 func (l *TurnLoop) getFollowUpMessages(context.Context) ([]agent.Message, error) {
@@ -494,10 +533,10 @@ func (l *TurnLoop) getFollowUpMessages(context.Context) ([]agent.Message, error)
 	if !l.mayDequeueLocked() {
 		return nil, nil
 	}
-	if messages := l.takeDeliveryLocked(DeliverySteering, l.steeringMode); len(messages) != 0 {
+	if messages := l.takeDeliveryLocked(DeliverySteering, l.steeringMode, nil); len(messages) != 0 {
 		return messages, nil
 	}
-	return l.takeDeliveryLocked(DeliveryFollowUp, l.followUpMode), nil
+	return l.takeDeliveryLocked(DeliveryFollowUp, l.followUpMode, nil), nil
 }
 
 func (l *TurnLoop) mayDequeueLocked() bool {
@@ -507,7 +546,7 @@ func (l *TurnLoop) mayDequeueLocked() bool {
 	return l.maxTurns <= 0 || l.active.completedTurns < l.maxTurns
 }
 
-func (l *TurnLoop) takeDeliveryLocked(delivery Delivery, mode agent.QueueMode) []agent.Message {
+func (l *TurnLoop) takeDeliveryLocked(delivery Delivery, mode agent.QueueMode, reserved *[]*Receipt) []agent.Message {
 	limit := 1
 	if mode == agent.QueueModeAll {
 		limit = len(l.queue)
@@ -521,6 +560,11 @@ func (l *TurnLoop) takeDeliveryLocked(delivery Delivery, mode agent.QueueMode) [
 	for _, input := range l.queue {
 		if input.Delivery == delivery && len(messages) < limit {
 			messages = append(messages, input.Message)
+			if reserved != nil {
+				*reserved = append(*reserved, input.receipt)
+			} else {
+				input.receipt.bind(l.active.future)
+			}
 			continue
 		}
 		remaining = append(remaining, input)
@@ -533,12 +577,19 @@ func (l *TurnLoop) takeDeliveryLocked(delivery Delivery, mode agent.QueueMode) [
 	return messages
 }
 
-func (l *TurnLoop) finishLocked(snapshot agent.AgentSnapshot, terminalErr error, mode StopMode) {
+func (l *TurnLoop) finishLocked(snapshot agent.AgentSnapshot, terminalErr error, mode StopMode, receiptErr error) {
+	unhandled := make([]Input, len(l.queue))
+	future := newReceiptFuture()
+	future.settle(ReceiptResult{Disposition: DispositionUnhandled, Err: receiptErr})
+	for i, input := range l.queue {
+		unhandled[i] = input.Input
+		input.receipt.bind(future)
+	}
 	l.accepting = false
 	l.finished = true
 	l.terminalResult = Result{
 		Snapshot:  cloneValue(snapshot),
-		Unhandled: cloneValue(l.queue),
+		Unhandled: cloneValue(unhandled),
 		StopMode:  mode,
 	}
 	l.queue = nil
@@ -655,7 +706,7 @@ func (l *TurnLoop) finishInvocationLocked(snapshot agent.AgentSnapshot, runErr e
 		case mode == StopImmediate:
 			resultMode = StopImmediate
 		}
-		l.finishLocked(snapshot, terminalErr, resultMode)
+		l.finishLocked(snapshot, terminalErr, resultMode, l.stopReceiptError(runErr))
 		return true
 	}
 	if mode == StopImmediate {
@@ -663,7 +714,7 @@ func (l *TurnLoop) finishInvocationLocked(snapshot agent.AgentSnapshot, runErr e
 		if source == stopSourceParent {
 			terminalErr = parentErr
 		}
-		l.finishLocked(snapshot, terminalErr, StopImmediate)
+		l.finishLocked(snapshot, terminalErr, StopImmediate, l.stopReceiptError(runErr))
 		return true
 	}
 	return false
@@ -679,4 +730,17 @@ func nilInvocation(invocation Invocation) bool {
 		return value.IsNil()
 	}
 	return false
+}
+
+// stopReceiptError preserves the cause before the public loop control-flow
+// policy may normalize an explicit immediate cancellation to a nil Wait error.
+// Caller holds mu.
+func (l *TurnLoop) stopReceiptError(err error) error {
+	if l.parentErr != nil {
+		return errors.Join(err, l.parentErr)
+	}
+	if err == nil && l.requestedStop == StopImmediate {
+		return context.Canceled
+	}
+	return err
 }
