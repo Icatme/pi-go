@@ -508,11 +508,18 @@ func (l *TurnLoop) finishTurn(ctx context.Context, input agent.AgentTurnContext)
 	return agent.AgentTurnDecision{}, nil
 }
 
-func (l *TurnLoop) getSteeringMessages(context.Context) ([]agent.Message, error) {
+func (l *TurnLoop) getSteeringMessages(ctx context.Context) ([]agent.Message, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.active != nil {
 		l.active.hookPolled = true
+	}
+	// A parent cancellation may be visible before watchParent is scheduled.
+	// Also honor a host-owned invocation's narrower context without treating
+	// that local cancellation as a global parent stop.
+	l.reconcileParentCancellationLocked()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if !l.mayDequeueLocked() {
 		return nil, nil
@@ -524,11 +531,18 @@ func (l *TurnLoop) getSteeringMessages(context.Context) ([]agent.Message, error)
 	return l.takeDeliveryLocked(DeliverySteering, l.steeringMode, nil), nil
 }
 
-func (l *TurnLoop) getFollowUpMessages(context.Context) ([]agent.Message, error) {
+func (l *TurnLoop) getFollowUpMessages(ctx context.Context) ([]agent.Message, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.active != nil {
 		l.active.hookPolled = true
+	}
+	// A parent cancellation may be visible before watchParent is scheduled.
+	// Also honor a host-owned invocation's narrower context without treating
+	// that local cancellation as a global parent stop.
+	l.reconcileParentCancellationLocked()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if !l.mayDequeueLocked() {
 		return nil, nil
