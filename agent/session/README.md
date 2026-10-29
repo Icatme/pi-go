@@ -115,6 +115,47 @@ commit failure the loop stops before another model request, while `Wait` returns
 the final observed snapshot and error for host reconciliation. A failed commit
 does not roll back a remote operation.
 
+## Read-only acknowledgment status
+
+`binding.CommitStatus()` returns a consistent, detached view of this binding's
+last acknowledged or restored state: `Version`, `Messages`, `Pending`,
+`Initialized`, `Invalidated`, and `Commits`. It checks the current trusted scope
+on every read. An invalidated binding remains inspectable while scope matches;
+a scope mismatch returns no transcript. Serialization failure is a read error
+and does not invalidate the binding. Reads serialize with `Record` on the binding
+mutex. Scope providers and custom storage callbacks must not reenter methods
+on the same binding; its mutex is not reentrant.
+
+This is **not a fresh storage read or a disk-durability receipt**. The version is
+the last branch version returned successfully by storage (or loaded at prepare).
+`Messages` is a JSON projection of the effective runtime prefix, not a literal
+list of stored message entries: restored compaction can prepend a synthetic
+summary message. Go-only fields such as `ToolResult.ChildCalls` are omitted;
+JSON-compatible nested data is detached, with numbers represented using
+`json.Number`. For exact stored entries, inspect `Session.ReadBranch`.
+
+`Initialized` may come from restored runtime records. `Commits` counts only
+successful `CompareAppend` calls by this binding, excluding restored baseline
+and no-op records; it starts at zero for every fresh binding. Neither field is
+a persistent global sequence or proof that the current input has executed.
+The view does not refresh when another writer advances or moves the lane.
+
+Keep processing and storage acknowledgment as separate dimensions:
+
+- Input can be acknowledged before a model request fails. The input remains
+  confirmed even though the run failed to produce an answer.
+- A failed storage call invalidates the binding without advancing its reported
+  version or prefix. The write may nevertheless have reached storage before
+  acknowledgment was lost. `Invalidated` does **not** prove it was absent.
+  Reopen/inspect actual storage and reconcile external effects before recovery.
+- A memory-storage acknowledgment survives only in that storage object. JSONL
+  uses its existing successful write/flush/sync contract; custom storage defines
+  its own persistence guarantees. No API here strengthens those guarantees.
+
+This query adds no callbacks, background polling, automatic retries, input
+identity enforcement, or business authorization. Host-generated input IDs may
+help correlation but are not deduplication keys enforced by the runtime.
+
 ## Restart, branches and limits
 
 `PrepareRun` validates the saved host identity and authorization epoch against

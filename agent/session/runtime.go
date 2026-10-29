@@ -60,6 +60,7 @@ type RunBinding struct {
 	messages                           []agent.Message
 	states                             map[runtimeStateKey]json.RawMessage
 	pending, initialized, used, failed bool
+	commits                            uint64
 }
 
 // PrepareRun restores data from the actual branch, including records preceding
@@ -114,6 +115,44 @@ func (s *Session) PrepareRun(lane string, options RuntimeOptions) (*RunBinding, 
 	return b, nil
 }
 
+// CommitStatus is this binding's last storage-acknowledged or restored view.
+// It is not a fresh storage read or a guarantee of disk durability.
+type CommitStatus struct {
+	Version BranchVersion
+	// Messages is a detached JSON projection of the effective runtime prefix.
+	// A restored compaction summary can be projected as a synthetic message;
+	// this is not a literal list of persisted message entries. Go-only fields
+	// such as ToolResult.ChildCalls are omitted, as in the storage JSON view.
+	Messages []agent.Message
+	Pending  bool
+	// Initialized can come from restored runtime records, not only this run.
+	Initialized bool
+	// Invalidated means this binding cannot continue after a record failure.
+	// A failed write may still have reached storage; inspect/reopen storage
+	// before recovery rather than treating the last acknowledged view as proof
+	// that a later batch was not written.
+	Invalidated bool
+	// Commits counts successful writes by this binding, excluding restored
+	// baseline data and no-op records. It is not a persistent sequence number.
+	Commits uint64
+}
+
+// CommitStatus returns a consistent detached view after checking current scope.
+// Invalidated bindings remain readable for reconciliation if scope still matches.
+// Serialization errors are read errors and do not invalidate the binding.
+func (b *RunBinding) CommitStatus() (CommitStatus, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.currentScope() != b.scope {
+		return CommitStatus{}, ErrScopeMismatch
+	}
+	messages, err := cloneValidated(b.messages)
+	if err != nil {
+		return CommitStatus{}, err
+	}
+	return CommitStatus{Version: b.version, Messages: messages, Pending: b.pending, Initialized: b.initialized, Invalidated: b.failed, Commits: b.commits}, nil
+}
+
 // TrustedScope proves that a snapshot originated from this host-bound branch.
 // The ephemeral token is not restored from disk or projected to the model.
 func (b *RunBinding) TrustedScope(snapshot agent.AgentSnapshot) (RuntimeScope, bool) {
@@ -123,7 +162,8 @@ func (b *RunBinding) TrustedScope(snapshot agent.AgentSnapshot) (RuntimeScope, b
 }
 
 // Run delegates to the existing Runner. Drain Events before Wait; only a
-// successful Wait confirms all completed tool batches were durably committed.
+// successful Wait confirms storage acknowledged all completed tool batches.
+// Persistence guarantees depend on the configured storage implementation.
 func (b *RunBinding) Run(ctx context.Context, runner *agent.Runner, prompts []agent.Message) (*agent.RunStream, error) {
 	return b.RunWithHooks(ctx, runner, prompts, agent.LoopHooks{})
 }
@@ -184,17 +224,24 @@ func (b *RunBinding) Record(ctx context.Context, record agent.JournalRecord) (er
 	if err = ctx.Err(); err != nil {
 		return err
 	}
-	if len(record.Messages) < len(b.messages) {
+	// Materialize the JSON view once before validation and writing. Storage
+	// entries and the acknowledged prefix must use the same detached values;
+	// caller-owned pointers or custom JSON marshalers cannot change it later.
+	messages, err := cloneValidated(record.Messages)
+	if err != nil {
+		return err
+	}
+	if len(messages) < len(b.messages) {
 		return errors.New("session: journal transcript shrank")
 	}
 	for i, saved := range b.messages {
 		left, e1 := json.Marshal(saved)
-		right, e2 := json.Marshal(record.Messages[i])
+		right, e2 := json.Marshal(messages[i])
 		if e1 != nil || e2 != nil || !bytes.Equal(left, right) {
 			return errors.New("session: journal transcript prefix changed")
 		}
 	}
-	if b.initialized && len(record.Messages) == len(b.messages) && record.Pending == b.pending && len(record.State) == 0 {
+	if b.initialized && len(messages) == len(b.messages) && record.Pending == b.pending && len(record.State) == 0 {
 		return nil
 	}
 	// Validate a detached candidate before the storage write.
@@ -241,8 +288,8 @@ func (b *RunBinding) Record(ctx context.Context, record agent.JournalRecord) (er
 	if len(data) > 16<<20 {
 		return errors.New("session: runtime record exceeds byte limit")
 	}
-	entries := make([]NewEntry, 0, len(record.Messages)-len(b.messages)+1)
-	for _, message := range record.Messages[len(b.messages):] {
+	entries := make([]NewEntry, 0, len(messages)-len(b.messages)+1)
+	for _, message := range messages[len(b.messages):] {
 		entries = append(entries, NewEntry{Type: EntryTypeMessage, Message: &message})
 	}
 	entries = append(entries, NewEntry{Type: EntryTypeCustom, Custom: &CustomData{CustomType: runtimeRecordType, Payload: data}})
@@ -250,7 +297,8 @@ func (b *RunBinding) Record(ctx context.Context, record agent.JournalRecord) (er
 	if err != nil {
 		return err
 	}
-	b.version, b.messages, b.states, b.pending, b.initialized = version, cloneMessages(record.Messages), candidate.states, record.Pending, true
+	b.version, b.messages, b.states, b.pending, b.initialized = version, messages, candidate.states, record.Pending, true
+	b.commits++
 	return nil
 }
 
