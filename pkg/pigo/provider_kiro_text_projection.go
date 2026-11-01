@@ -43,13 +43,13 @@ func projectKiroTextConversation(ctx Context, modelID string, allowSystemLowerin
 	if modelID == "" || !utf8.ValidString(modelID) || len(modelID) > 256 || maxMessages < 1 || maxTextBytes < 1 || len(ctx.Messages) == 0 || len(ctx.Messages) > maxMessages || len(ctx.Messages)%2 == 0 || len(ctx.Tools) != 0 || len(ctx.HostedTools) != 0 {
 		return kiroTextProjection{}, errKiroTextProjection
 	}
-	if ctx.SystemPrompt != "" && (!allowSystemLowering || !utf8.ValidString(ctx.SystemPrompt)) {
+	if ctx.SystemPrompt != "" && (!allowSystemLowering || len(ctx.SystemPrompt) > maxTextBytes || !utf8.ValidString(ctx.SystemPrompt)) {
 		return kiroTextProjection{}, errKiroTextProjection
 	}
 	used := 0
 	remainingBlocks := maxKiroTextProjectionBlocks
 	consume := func(text string) bool {
-		if !utf8.ValidString(text) || len(text) > maxTextBytes-used {
+		if len(text) > maxTextBytes-used || !utf8.ValidString(text) {
 			return false
 		}
 		used += len(text)
