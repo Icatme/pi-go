@@ -49,7 +49,8 @@ func collectKiroOfflineResponse(ctx context.Context, reader io.Reader, limits ki
 	if ctx == nil || reader == nil || limits.TotalPayloadBytes < 2 || limits.TextBytes < 1 || limits.Events < 1 || limits.Tools < 1 || limits.ArgumentBytes < 2 {
 		return zero, errKiroOfflineResponse
 	}
-	decoder, err := newKiroEventStreamDecoder(kiroOfflineContextReader{ctx:ctx, reader:reader}, limits.MessageBytes)
+	guardedReader := &kiroOfflineContextReader{ctx:ctx, reader:reader}
+	decoder, err := newKiroEventStreamDecoder(guardedReader, limits.MessageBytes)
 	if err != nil { return zero, errKiroOfflineResponse }
 	assembler, err := newKiroToolAssembler(limits.ArgumentBytes, limits.MessageBytes, limits.Events, limits.Tools)
 	if err != nil { return zero, errKiroOfflineResponse }
@@ -67,6 +68,7 @@ func collectKiroOfflineResponse(ctx context.Context, reader io.Reader, limits ki
 		if ctx.Err() != nil { return zero, errKiroOfflineCancelled }
 		frame, err := decoder.next()
 		if ctx.Err() != nil { return zero, errKiroOfflineCancelled }
+		if guardedReader.failure != nil { return zero, errKiroOfflineResponse }
 		// Only the exact sentinel proves no bytes of another prelude were
 		// read. A wrapped/joined EOF can accompany partial data or another
 		// failure and must never authorize releasing staged results.
@@ -142,11 +144,16 @@ func collectKiroOfflineResponse(ctx context.Context, reader io.Reader, limits ki
 	return kiroOfflineResponse{Parts: parts, Usage: usage, StopReason: decision.Reason}, nil
 }
 
-type kiroOfflineContextReader struct { ctx context.Context; reader io.Reader }
-func (r kiroOfflineContextReader) Read(p []byte) (int, error) {
+type kiroOfflineContextReader struct { ctx context.Context; reader io.Reader; failure error }
+func (r *kiroOfflineContextReader) Read(p []byte) (int, error) {
 	if r.ctx.Err() != nil { return 0, errKiroOfflineCancelled }
+	if r.failure != nil { return 0, r.failure }
 	n, err := r.reader.Read(p)
 	if r.ctx.Err() != nil { return n, errKiroOfflineCancelled }
+	// io.ReadFull can discard an error accompanying a full requested buffer.
+	// Preserve every non-exact-EOF failure independently of that API so a final
+	// complete frame plus a transport error can never authorize completion.
+	if err != nil && err != io.EOF { r.failure = err }
 	return n, err
 }
 
