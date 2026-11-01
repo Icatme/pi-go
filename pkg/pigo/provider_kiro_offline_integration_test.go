@@ -25,6 +25,7 @@ func TestKiroOfflineIntegrationToolRoundTrip(t *testing.T) {
   response,err:=collectKiroOfflineResponse(context.Background(),kiroFragmentReader{bytes.NewReader(wire)},kiroOfflineTestLimits())
   if err!=nil || response.StopReason!=StopReasonToolUse || len(response.Parts)!=1 || response.Parts[0].Tool==nil { t.Fatalf("response: %#v %v",response,err) }
   evidence:=response.Parts[0].Tool
+  if evidence.ID!="roundtrip-1" || evidence.Name!="lookup" { t.Fatalf("wire identity rewritten: %#v",evidence) }
   call:=ToolCall{ID:evidence.ID,Name:evidence.Name,RawArguments:string(evidence.Arguments)}
   ctx.Messages=append(ctx.Messages,
    AssistantMessage{StopReason:response.StopReason,Content:[]ContentBlock{call}},
