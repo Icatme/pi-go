@@ -37,12 +37,36 @@ this function. The function will not silently override potentially edited maps,
 round large numbers through float64 or call arbitrary nested marshalers. Raw
 JSON is strictly checked for object shape/duplicates/Unicode and copied.
 
+`ToolCall.RawArguments` is ephemeral wire evidence marked `json:"-"` in pi-go;
+it is not included in persisted conversation history. Restored tool-call history
+without that evidence is therefore unsupported by this projection. Do not
+re-serialize a parsed map (especially float64 values) and label it original raw
+arguments: original number precision, spelling and duplicate-key evidence may
+already be lost. Do not merely clear `Arguments` to pass validation. Selecting
+raw evidence requires a deliberate host-level provenance decision that it is
+still authoritative and has not been superseded by edited/validated arguments;
+otherwise reject the replay rather than fabricate evidence.
+
+A future evidence-retention design should use a versioned sidecar bound to the
+session, message, call ID and provider, with a hash of the original byte content.
+Its provenance must explicitly identify provider-wire evidence, not JSON rebuilt
+from a parsed float map. Editing arguments must invalidate that evidence; replay
+must verify the corresponding identities and byte hash before trusting it. A
+hash binds content but does not by itself establish trusted provenance. Saving
+such potentially sensitive arguments requires prior authorization and a privacy
+review. This draft implements no sidecar persistence or credential recording.
+
 Returned DTOs can be serialized with encoding/json without invoking custom host
 methods. The schema and argument byte buffers do not alias caller-owned input.
 Text-block boundaries collapse by concatenation, but no separators are invented.
 Non-nil ToolResultMessage.Details is rejected, not silently dropped or serialized
 as human/model text. Text appearing after a tool block is rejected because the
 wire Content+Calls shape cannot preserve that interleaving.
+
+This function is not a concurrency-safe snapshot operation. During the entire
+call, the caller must ensure no other goroutine changes `ctx`, its nested message
+or tool fields, or the schema map and its raw byte buffers. Returned JSON-buffer
+isolation does not make concurrent mutation of the inputs safe.
 
 ## Deliberately unsupported
 
@@ -61,8 +85,9 @@ No payload truncation or synthetic content repairs are performed.
 ## Validation and remaining gate
 
 Unit-test sources cover empty result carriers, raw integers above 2^53, input
-buffer isolation, error results, unsupported forms and budget rejection. A
-panicking custom Tool.Parameters marshaler fixture ensures it must never be
+buffer isolation, error results, multiple tool groups with ordered multi-call
+results, missing raw evidence, mismatched schema keys, unsupported forms and
+budget rejection. A panicking custom Tool.Parameters marshaler fixture ensures it must never be
 called. These tests have **not run**: no approved Go compiler/gofmt is available.
 
 Before merge, run formatting, targeted tests, race/full tests with authorized
