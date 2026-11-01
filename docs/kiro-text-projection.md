@@ -20,6 +20,8 @@ These are community observations, not official API support guarantees.
 - Reject tools, results, hosted execution, images, reasoning, signed text,
   dynamic system messages, incomplete/error assistant turns, unknown content,
   empty turns and unsupported order. No repair, reordering, padding or dropping.
+  Assistant history requires explicit `StopReasonStop`; missing completion state
+  is rejected. Whitespace-only turns are rejected without trimming accepted text.
 - `Context.SystemPrompt` is **rejected by default**. Only explicit
   `allowSystemLowering=true` prepends it once to the first user as
   `system + "\n\n" + user`. `SystemPromptLowered=true` marks this semantic
@@ -32,6 +34,7 @@ These are community observations, not official API support guarantees.
 - Caller-provided limits bound message count and aggregate decoded UTF-8 text
   bytes (including lowered system prompt/separator). They do not bound all heap
   allocations or JSON-escaped wire length. Model ID is limited to 256 UTF-8 bytes.
+  An additional aggregate limit of 4096 content blocks bounds empty-block work.
 - Input objects are not mutated, and failed projection returns no partial output.
 
 Upstream has historically inserted placeholders and relocated displaced tool
