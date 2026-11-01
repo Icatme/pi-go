@@ -1003,6 +1003,8 @@ func finalizeOpenAICompletionsResponse(response *AssistantMessage, stream *Assis
 	for _, index := range indices {
 		toolState := state.ToolCalls[index]
 		toolCall := openAICompletionsToolCallFromState(toolState)
+		toolCall.RawArguments = toolState.Arguments
+		response.Content[toolState.ContentIndex] = toolCall
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallEnd, ContentIndex: toolState.ContentIndex, ToolCall: toolCall, Partial: *response})
 	}
 	stream.push(AssistantMessageEvent{Type: AssistantMessageEventDone, Reason: response.StopReason, Message: *response})
