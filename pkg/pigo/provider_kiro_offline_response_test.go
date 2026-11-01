@@ -177,3 +177,22 @@ func TestKiroOfflineWrappedEOFNeverAuthorizesCompletion(t *testing.T) {
 		}
 	}
 }
+
+type kiroOfflineFullReadErrorReader struct { reader *bytes.Reader; failure error }
+func (r *kiroOfflineFullReadErrorReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 && r.reader.Len() == 0 { return n, r.failure }
+	return n, err
+}
+
+func TestKiroOfflineFullFrameReadErrorCannotBeSwallowed(t *testing.T) {
+	frames := append(kiroOfflineToolFrames(), kiroOfflineEvent("metadataEvent", `{"stopReason":"TOOL_USE"}`))
+	wire := kiroOfflineJoin(frames...)
+	for _, failure := range []error{errors.New("private-transport-fixture"), errors.Join(io.EOF, errors.New("private-wrapped-fixture"))} {
+		reader := &kiroOfflineFullReadErrorReader{reader:bytes.NewReader(wire), failure:failure}
+		r, err := collectKiroOfflineResponse(context.Background(), reader, kiroOfflineTestLimits())
+		if err == nil || !reflect.DeepEqual(r, kiroOfflineResponse{}) || bytes.Contains([]byte(err.Error()), []byte("private-")) {
+			t.Fatalf("full-read error released staged tools: %#v, %v", r, err)
+		}
+	}
+}
