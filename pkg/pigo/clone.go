@@ -97,13 +97,8 @@ func cloneBlocks(blocks []ContentBlock) []ContentBlock {
 		case ImageContent:
 			out = append(out, value)
 		case ToolCall:
-			out = append(out, ToolCall{
-				ID:               value.ID,
-				Name:             value.Name,
-				Namespace:        value.Namespace,
-				Arguments:        cloneMap(value.Arguments),
-				ThoughtSignature: value.ThoughtSignature,
-			})
+			value.Arguments = cloneMap(value.Arguments)
+			out = append(out, value)
 		}
 	}
 	return out

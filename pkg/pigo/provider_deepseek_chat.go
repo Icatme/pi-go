@@ -502,6 +502,8 @@ func finalizeDeepSeekChatResponse(response *AssistantMessage, stream *AssistantM
 	}
 	for _, toolState := range state.ToolCalls {
 		toolCall := deepSeekToolCallFromState(toolState)
+		toolCall.RawArguments = toolState.Arguments
+		response.Content[toolState.Index] = toolCall
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallEnd, ContentIndex: toolState.Index, ToolCall: toolCall, Partial: *response})
 	}
 	if response.StopReason == "" {

@@ -208,7 +208,7 @@ func TestCommandCodeGenerateStreamsToolArguments(t *testing.T) {
 		fmt.Fprintln(w, `{"type":"tool-input-delta","id":"call","delta":"{\"path\":"}`)
 		fmt.Fprintln(w, `{"type":"tool-input-delta","id":"call","delta":"\"a.go\"}"}`)
 		fmt.Fprintln(w, `{"type":"tool-input-end","id":"call"}`)
-		fmt.Fprintln(w, `{"type":"tool-call","toolCallId":"call","toolName":"read","input":{"path":"final.go"}}`)
+		fmt.Fprintln(w, `{"type":"tool-call","toolCallId":"call","toolName":"read","input":{"path":"final.go","id":9007199254740993,"dup":1,"dup":2}}`)
 		fmt.Fprintln(w, `{"type":"finish","finishReason":"tool-calls"}`)
 	}))
 	defer server.Close()
@@ -224,12 +224,17 @@ func TestCommandCodeGenerateStreamsToolArguments(t *testing.T) {
 			deltas++
 		case AssistantMessageEventToolCallEnd:
 			ends++
+			if event.ToolCall.RawArguments != result.Content[0].(ToolCall).RawArguments {
+				t.Errorf("end event lost raw arguments: %q", event.ToolCall.RawArguments)
+			}
 		}
 	}
 	if starts != 1 || deltas != 2 || ends != 1 || result.StopReason != StopReasonToolUse || len(result.Content) != 1 {
 		t.Fatalf("events=%+v result=%+v", events, result)
 	}
-	if call := result.Content[0].(ToolCall); call.Arguments["path"] != "final.go" {
+	call := result.Content[0].(ToolCall)
+	const wantRaw = `{"path":"final.go","id":9007199254740993,"dup":1,"dup":2}`
+	if call.Arguments["path"] != "final.go" || call.RawArguments != wantRaw || call.Arguments["id"] != float64(9007199254740992) {
 		t.Fatalf("final arguments not authoritative: %+v", call)
 	}
 }

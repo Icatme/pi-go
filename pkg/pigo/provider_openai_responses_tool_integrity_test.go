@@ -1,6 +1,7 @@
 package pigo
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -135,5 +136,38 @@ func TestResponsesToolCallIntegrityAcrossTransports(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestResponsesPreservesTerminalArgumentSource(t *testing.T) {
+	const raw = `{"number":9007199254740993,"x":0,"x":1}`
+	state := openAIResponsesStreamingState{}
+	response := AssistantMessage{}
+	stream := newAssistantMessageEventStream()
+	for _, frame := range []map[string]any{
+		responsesToolEvent("response.output_item.added", "fc_a", "call_a", "example", "", 0),
+		responsesToolEvent("response.output_item.done", "fc_a", "call_a", "example", raw, 0),
+	} {
+		data, err := json.Marshal(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := processOpenAIResponsesStreamEvent(string(data), Model{}, &response, stream, &state, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stream.finish(response)
+	for event := range stream.Events() {
+		if event.Type == AssistantMessageEventToolCallEnd && event.ToolCall.RawArguments != raw {
+			t.Fatalf("end: %q", event.ToolCall.RawArguments)
+		}
+	}
+	call := stream.Result().Content[0].(ToolCall)
+	if call.RawArguments != raw || call.Arguments["number"] != float64(9007199254740992) {
+		t.Fatalf("call=%+v", call)
+	}
+	data, err := json.Marshal(call)
+	if err != nil || strings.Contains(string(data), "RawArguments") || strings.Contains(string(data), "9007199254740993") {
+		t.Fatalf("unexpected serialized evidence: %s err=%v", data, err)
 	}
 }

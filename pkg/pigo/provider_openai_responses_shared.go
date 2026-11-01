@@ -927,7 +927,7 @@ func emitOpenAIResponsesItemLifecycle(response *AssistantMessage, stream *Assist
 			stream.push(AssistantMessageEvent{
 				Type:         AssistantMessageEventToolCallDelta,
 				ContentIndex: contentIndex,
-				Delta:        mustJSON(typed.Arguments),
+				Delta:        typed.RawArguments,
 				Partial:      *response,
 			})
 			stream.push(AssistantMessageEvent{
@@ -1114,6 +1114,7 @@ func finalizeOpenAIResponsesStreamItem(
 		}
 		block, _ := response.Content[call.ContentIndex].(ToolCall)
 		block.Arguments = arguments
+		block.RawArguments = argumentsJSON
 		block.ID = combineOpenAIResponsesToolCallID(item.CallID, item.ID)
 		block.Name = item.Name
 		block.Namespace = item.Namespace
@@ -1227,10 +1228,11 @@ func parseOpenAIResponsesResponseOutput(items []openAIResponsesResponseItem) []C
 				id = item.CallID + "|" + item.ID
 			}
 			blocks = append(blocks, ToolCall{
-				ID:        id,
-				Name:      item.Name,
-				Namespace: item.Namespace,
-				Arguments: arguments,
+				ID:           id,
+				Name:         item.Name,
+				Namespace:    item.Namespace,
+				Arguments:    arguments,
+				RawArguments: item.Arguments,
 			})
 		}
 	}

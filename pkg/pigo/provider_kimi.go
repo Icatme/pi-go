@@ -674,6 +674,7 @@ func processAnthropicStreamEvent(
 			})
 		case ToolCall:
 			if state.PartialJSON != "" {
+				block.RawArguments = state.PartialJSON
 				block.Arguments = parseStreamingJSONObject(state.PartialJSON)
 				response.Content[state.ContentIndex] = block
 			}
@@ -1337,9 +1338,10 @@ func parseAnthropicResponseContent(blocks []anthropicResponseBlock) []ContentBlo
 				_ = json.Unmarshal(block.Input, &input)
 			}
 			result = append(result, ToolCall{
-				ID:        block.ID,
-				Name:      block.Name,
-				Arguments: input,
+				ID:           block.ID,
+				Name:         block.Name,
+				Arguments:    input,
+				RawArguments: string(block.Input),
 			})
 		}
 	}

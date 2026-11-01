@@ -403,7 +403,7 @@ func readCommandCodeStream(reader io.Reader, model Model, options ProviderStream
 		if err := observeProviderStreamEvent(data, model, options); err != nil {
 			return err
 		}
-		finished, err := processCommandCodeStreamEvent(value, model, response, stream, state)
+		finished, err := processCommandCodeStreamEvent(value, data, model, response, stream, state)
 		if err != nil {
 			return err
 		}
@@ -432,7 +432,7 @@ func parseCommandCodeStreamLine(line string) (map[string]any, bool) {
 	return event, true
 }
 
-func processCommandCodeStreamEvent(event map[string]any, model Model, response *AssistantMessage, stream *AssistantMessageEventStream, state *commandCodeStreamState) (bool, error) {
+func processCommandCodeStreamEvent(event map[string]any, data string, model Model, response *AssistantMessage, stream *AssistantMessageEventStream, state *commandCodeStreamState) (bool, error) {
 	switch anyString(event["type"]) {
 	case "text-delta":
 		endCommandCodeThinking(response, stream, state)
@@ -498,14 +498,11 @@ func processCommandCodeStreamEvent(event map[string]any, model Model, response *
 	case "tool-call":
 		endCommandCodeText(response, stream, state)
 		endCommandCodeThinking(response, stream, state)
-		arguments := commandCodeRecord(event["input"])
-		if len(arguments) == 0 {
-			arguments = commandCodeRecord(event["args"])
+		arguments, raw, err := commandCodeToolArguments(event, data)
+		if err != nil {
+			return false, err
 		}
-		if len(arguments) == 0 {
-			arguments = commandCodeRecord(event["arguments"])
-		}
-		toolCall := ToolCall{ID: anyString(event["toolCallId"]), Name: anyString(event["toolName"]), Arguments: arguments}
+		toolCall := ToolCall{ID: anyString(event["toolCallId"]), Name: anyString(event["toolName"]), Arguments: arguments, RawArguments: raw}
 		index := len(response.Content)
 		if active := state.toolInputs[toolCall.ID]; active != nil {
 			index = active.index
@@ -853,6 +850,32 @@ func mapCommandCodeFinishReason(reason string) StopReason {
 	default:
 		return StopReasonStop
 	}
+}
+
+// Preserve the raw spelling of the selected alias whether the provider sends
+// an object directly or embeds it in a JSON string.
+func commandCodeToolArguments(event map[string]any, data string) (map[string]any, string, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(data), &fields); err != nil {
+		return nil, "", err
+	}
+	var raw string
+	arguments := map[string]any{}
+	for _, key := range []string{"input", "args", "arguments"} {
+		if event[key] == nil {
+			continue
+		}
+		arguments = commandCodeRecord(event[key])
+		if value, ok := event[key].(string); ok {
+			raw = value
+		} else {
+			raw = string(fields[key])
+		}
+		if len(arguments) > 0 {
+			break
+		}
+	}
+	return arguments, raw, nil
 }
 
 func commandCodeRecord(value any) map[string]any {

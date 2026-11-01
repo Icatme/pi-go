@@ -235,13 +235,7 @@ func cloneAssistantMessageEvent(event AssistantMessageEvent) AssistantMessageEve
 	cloned.Partial = cloneAssistantMessage(event.Partial)
 	cloned.Message = cloneAssistantMessage(event.Message)
 	cloned.Error = cloneAssistantMessage(event.Error)
-	cloned.ToolCall = ToolCall{
-		ID:               event.ToolCall.ID,
-		Name:             event.ToolCall.Name,
-		Namespace:        event.ToolCall.Namespace,
-		Arguments:        cloneMap(event.ToolCall.Arguments),
-		ThoughtSignature: event.ToolCall.ThoughtSignature,
-	}
+	cloned.ToolCall.Arguments = cloneMap(event.ToolCall.Arguments)
 	return cloned
 }
 

@@ -2317,3 +2317,12 @@
   downloads. GitHub CI remains manual-only and no workflow is dispatched.
   Non-Windows execution, live providers and downstream deployment are outside
   these local validation results.
+
+## 2026-11-01 — Exact JSON evidence for completed tool calls
+
+- Added optional original argument JSON on completed tool calls from Responses,
+  OpenAI chat completions, DeepSeek chat, Anthropic Messages and Command Code.
+  The in-memory evidence survives event/result cloning. Existing argument maps
+  and serialized conversation formats keep their existing representation.
+- Added local transport regressions for large integers and duplicate keys in
+  terminal arguments, including a Responses call with no argument delta.
