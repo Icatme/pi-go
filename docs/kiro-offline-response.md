@@ -82,3 +82,7 @@ go test ./...
 
 Do not enable a provider or make live calls until actual Go validation, permitted
 identity/auth/endpoint contracts and the documented compatibility gaps are resolved.
+
+Consecutive (0, nil) reads are limited to 100, then sticky io.ErrNoProgress
+causes a zero response. Positive reads reset the counter. This does not interrupt
+a blocked reader or add a time limit. Regression source added; Go not run.

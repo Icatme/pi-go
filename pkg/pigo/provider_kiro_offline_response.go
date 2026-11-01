@@ -144,11 +144,18 @@ func collectKiroOfflineResponse(ctx context.Context, reader io.Reader, limits ki
 	return kiroOfflineResponse{Parts: parts, Usage: usage, StopReason: decision.Reason}, nil
 }
 
-type kiroOfflineContextReader struct { ctx context.Context; reader io.Reader; failure error }
+type kiroOfflineContextReader struct { ctx context.Context; reader io.Reader; failure error; emptyReads int }
 func (r *kiroOfflineContextReader) Read(p []byte) (int, error) {
 	if r.ctx.Err() != nil { return 0, errKiroOfflineCancelled }
 	if r.failure != nil { return 0, r.failure }
-	n, err := r.reader.Read(p)
+	if len(p) == 0 { return 0, nil }
+ n, err := r.reader.Read(p)
+ // A broken reader must not spin forever inside io.ReadFull. This is a
+ // consecutive empty-read budget, not a timeout for a blocking Read.
+ if n == 0 && err == nil {
+  r.emptyReads++
+  if r.emptyReads >= 100 { r.failure = io.ErrNoProgress; return 0, r.failure }
+ } else { r.emptyReads = 0 }
 	if r.ctx.Err() != nil { return n, errKiroOfflineCancelled }
 	// io.ReadFull can discard an error accompanying a full requested buffer.
 	// Preserve every non-exact-EOF failure independently of that API so a final

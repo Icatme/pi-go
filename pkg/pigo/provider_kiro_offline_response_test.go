@@ -196,3 +196,31 @@ func TestKiroOfflineFullFrameReadErrorCannotBeSwallowed(t *testing.T) {
 		}
 	}
 }
+
+type kiroOfflineEmptyReader struct { reads int }
+func (r *kiroOfflineEmptyReader) Read(p []byte) (int,error) { r.reads++; return 0,nil }
+func TestKiroOfflineReaderNoProgressIsTerminal(t *testing.T) {
+ r := &kiroOfflineEmptyReader{}
+ got, err := collectKiroOfflineResponse(context.Background(), r, kiroOfflineTestLimits())
+ if err == nil || !reflect.DeepEqual(got,kiroOfflineResponse{}) || r.reads != 100 { t.Fatalf("unbounded empty reader: %d, %#v, %v",r.reads,got,err) }
+ guard := &kiroOfflineContextReader{ctx:context.Background(), reader:r}
+ for i:=0; i<100; i++ { guard.Read(make([]byte,1)) }
+ before:=r.reads
+ if _, err:=guard.Read(make([]byte,1)); !errors.Is(err,io.ErrNoProgress) || r.reads!=before { t.Fatal("no-progress not sticky") }
+}
+
+type kiroOfflineIntermittentReader struct { calls int }
+func (r *kiroOfflineIntermittentReader) Read(p []byte) (int,error) {
+ r.calls++
+ if r.calls%100 != 0 { return 0,nil }
+ p[0]='x'; return 1,nil
+}
+func TestKiroOfflinePositiveReadResetsEmptyBudget(t *testing.T) {
+ source:=&kiroOfflineIntermittentReader{}
+ guard:=&kiroOfflineContextReader{ctx:context.Background(),reader:source}
+ for i:=0; i<200; i++ {
+  n,err:=guard.Read(make([]byte,1))
+  if err!=nil { t.Fatalf("transient empty reads failed at %d: %v",i,err) }
+  if (i+1)%100==0 && (n!=1 || guard.emptyReads!=0) { t.Fatal("positive read did not reset budget") }
+ }
+}
