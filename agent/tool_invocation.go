@@ -17,12 +17,13 @@ type ToolInvocation struct {
 
 // LoadOrCreate retains one resource per comparable host-owned key. Factories
 // run once under the holder lock and must not recursively access this holder.
-// A failed factory does not populate the key.
+// A failed factory does not populate the key. Comparability is checked on the
+// actual value, including dynamic values stored in nested interface fields.
 func (i *ToolInvocation) LoadOrCreate(key any, create func() (any, error)) (any, error) {
 	if i == nil {
 		return nil, fmt.Errorf("agent: tool invocation is unavailable")
 	}
-	if key == nil || !reflect.TypeOf(key).Comparable() || create == nil {
+	if key == nil || !reflect.ValueOf(key).Comparable() || create == nil {
 		return nil, fmt.Errorf("agent: invocation resource requires a comparable key and factory")
 	}
 	i.mu.Lock()
