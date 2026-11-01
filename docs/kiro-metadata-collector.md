@@ -33,6 +33,8 @@ fields; this draft deliberately chooses a stricter conflict policy.
   Sign and percentage upper bound are checked exactly in decimal spelling
   before float conversion. Negative signs (including -0) and exponent notation
   are deliberately rejected, preventing underflow/rounding from bypassing bounds.
+  Ancillary positive decimal values below float64 range may round to zero; this
+  is documented loss in auxiliary estimates, never in integer token counts.
 - Unknown fields, credits/metering payloads, wrong shapes, nested duplicate keys
   and malformed JSON fail closed. `stopDetails` must be an object but is discarded
   rather than stored/logged. No model content or raw error body is returned.
@@ -53,6 +55,9 @@ Tests cover split metadata, exact integers above 2^53, zero presence, alias-free
 snapshots, conflicting terminal reasons/counts, floating-point-rounding conflicts,
 wrong numeric types/ranges, credits separation, size/count budgets and sticky
 failure. Fuzz source checks terminal-state invariants.
+Additional regression sources cover MaxInt64, `50` versus `50.0`, discarded
+stopDetails, success-state rollback, both detached scalar pointers and long
+decimal byte budgets. These are written tests, not executed evidence.
 
 Go compilation, formatting, tests, fuzz and race checks have **not run**. No
 toolchain was installed and no CI/live calls were initiated. Before merge:
