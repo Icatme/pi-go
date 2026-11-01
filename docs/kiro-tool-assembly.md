@@ -25,8 +25,8 @@ before future code reuse.
 ## Accepted subset
 
 1. The caller supplies only payloads of classified `toolUseEvent` frames.
-2. A start requires both nonempty name and ID. Identity strings are at most
-   256 UTF-8 bytes. Only one tool can be active. Repeated identity must match.
+2. A start requires both nonempty name and ID. Names are at most 256 UTF-8 bytes; IDs use the shared receive/replay
+   subset: 1–64 ASCII characters from [A-Za-z0-9_.:-], without repair. Only one tool can be active. Repeated identity must match.
 3. Continuations may omit identity only while that sole tool is active.
 4. Input is a string fragment or object. Empty object is a placeholder. Raw
    fragments preserve bytes and large numeric values; completed arguments must
