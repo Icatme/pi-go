@@ -86,3 +86,27 @@ identity/auth/endpoint contracts and the documented compatibility gaps are resol
 Consecutive (0, nil) reads are limited to 100, then sticky io.ErrNoProgress
 causes a zero response. Positive reads reset the counter. This does not interrupt
 a blocked reader or add a time limit. Regression source added; Go not run.
+
+## Reasoning, usage and ordering: deliberately not a replay adapter
+
+Reasoning parts retain exact event order and each event's text/signature pairing.
+A signature-only part is not assigned to another part, signatures are not checked,
+and fragments are not flattened into assistant history. There is no evidence here
+for safe signed-block reconstruction or for replay of redacted/private reasoning.
+The upstream community parser is not a complete official protocol contract.
+
+This subset treats token fields as partial snapshots, not deltas: identical repeats are idempotent,
+different repeats are rejected, and disjoint fields merge. Missing counts stay
+absent (distinct from reported zero); wire totalTokens is retained without forcing
+an invented sum of input/output/cache counts. Credits and capacity percentages
+are not converted into billable tokens. This implementation does not aggregate
+multiple turns or retries; those require separate trustworthy invocation IDs and
+an explicit usage ledger contract.
+
+Usage-only metadata may precede content. Once a stopReason is seen, only consistent
+metadata can follow, and a late contradiction rolls back the entire buffered
+response including tools. These are conservative subset rules, not claims that
+all upstream event orders conform. The result is still inert event evidence:
+turning it into a persisted or replayable pi-go assistant is unsupported, notably
+when reasoning is present or text follows tools. New cross-component test sources
+cover these boundaries; they remain unexecuted without the approved Go toolchain.

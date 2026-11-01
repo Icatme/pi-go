@@ -224,3 +224,53 @@ func TestKiroOfflinePositiveReadResetsEmptyBudget(t *testing.T) {
   if (i+1)%100==0 && (n!=1 || guard.emptyReads!=0) { t.Fatal("positive read did not reset budget") }
  }
 }
+
+// Preserve event-level provenance; a signature-only fragment is not attached to
+// an earlier/later thought by a heuristic and is never made replay-ready.
+func TestKiroOfflineReasoningFragmentsRemainOrderedOpaque(t *testing.T) {
+ wire:=kiroOfflineJoin(
+  kiroOfflineEvent("reasoningContentEvent", `{"text":"first"}`),
+  kiroOfflineEvent("reasoningContentEvent", `{"text":"second","signature":"paired"}`),
+  kiroOfflineEvent("reasoningContentEvent", `{"signature":"standalone"}`),
+  kiroOfflineEvent("assistantResponseEvent", `{"content":"answer"}`),
+  kiroOfflineEvent("metadataEvent", `{"stopReason":"END_TURN"}`),
+ )
+ got,err:=collectKiroOfflineResponse(context.Background(),bytes.NewReader(wire),kiroOfflineTestLimits())
+ want:=[]kiroOfflinePart{
+  {Kind:"reasoning",Text:"first"},
+  {Kind:"reasoning",Text:"second",Signature:"paired"},
+  {Kind:"reasoning",Signature:"standalone"},
+  {Kind:"text",Text:"answer"},
+ }
+ if err!=nil || !reflect.DeepEqual(got.Parts,want) { t.Fatalf("reasoning provenance: %#v, %v",got,err) }
+}
+
+func TestKiroOfflineUsageSnapshotsMergeWithoutAccumulation(t *testing.T) {
+ wire:=kiroOfflineJoin(
+  kiroOfflineEvent("metadataEvent", `{"tokenUsage":{"uncachedInputTokens":3,"cacheReadInputTokens":0}}`),
+  kiroOfflineEvent("assistantResponseEvent", `{"content":"answer"}`),
+  kiroOfflineEvent("metadataEvent", `{"stopReason":"END_TURN","tokenUsage":{"uncachedInputTokens":3}}`),
+  kiroOfflineEvent("metadataEvent", `{"tokenUsage":{"outputTokens":2,"totalTokens":99}}`),
+  kiroOfflineEvent("metadataEvent", `{"tokenUsage":{"outputTokens":2}}`),
+ )
+ got,err:=collectKiroOfflineResponse(context.Background(),bytes.NewReader(wire),kiroOfflineTestLimits())
+ want:=map[string]int64{"uncachedInputTokens":3,"cacheReadInputTokens":0,"outputTokens":2,"totalTokens":99}
+ if err!=nil || !reflect.DeepEqual(got.Usage.TokenCounts,want) { t.Fatalf("snapshot merge/sum: %#v, %v",got,err) }
+ if _,present:=got.Usage.TokenCounts["cacheWriteInputTokens"];present { t.Fatal("invented missing count") }
+}
+
+func TestKiroOfflineTerminalOrderingAndLateFailureRollBack(t *testing.T) {
+ for _,late:=range [][]byte{
+  kiroOfflineEvent("assistantResponseEvent", `{"content":"late"}`),
+  kiroOfflineEvent("reasoningContentEvent", `{"signature":"late"}`),
+  kiroOfflineEvent("toolUseEvent", `{"name":"lookup","toolUseId":"next","stop":true}`),
+  kiroOfflineEvent("metadataEvent", `{"tokenUsage":{"outputTokens":2}}`),
+  kiroOfflineEvent("metadataEvent", `{"tokenUsage":{"unknown":1}}`),
+  kiroOfflineEvent("metadataEvent", `{"stopReason":"END_TURN"}`),
+ } {
+  frames:=kiroOfflineToolFrames()
+  frames=append(frames,kiroOfflineEvent("metadataEvent", `{"stopReason":"TOOL_USE","tokenUsage":{"outputTokens":1}}`),late)
+  got,err:=collectKiroOfflineResponse(context.Background(),bytes.NewReader(kiroOfflineJoin(frames...)),kiroOfflineTestLimits())
+  if err==nil || !reflect.DeepEqual(got,kiroOfflineResponse{}) { t.Fatalf("late contradiction leaked tools: %#v, %v",got,err) }
+ }
+}
