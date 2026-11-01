@@ -17,6 +17,9 @@ provider registration, request DTOs or tool execution. No live calls are made.
   Require a valid explicit metadata stop reason and the #52 final decision.
   Only exact `io.EOF` is clean; wrapped/joined EOF remains an error because it
   can accompany a partially read new prelude or another reader failure.
+  The reader adapter also retains non-EOF errors independently: io.ReadFull can
+  otherwise swallow an error returned alongside an exactly full buffer. A full
+  final frame accompanied by a transport error must still fail without output.
 - Tools require explicit stop and complete valid object arguments. No EOF flush.
   TOOL_USE must agree with staged tools; MAX_TOKENS discards tools. The returned
   inert calls still require host schema validation and normal authorization.
@@ -65,6 +68,8 @@ EOF, cancellation, reader ownership, error redaction and all resource budgets.
 
 Static review caught wrapped EOF incorrectly being treated as clean completion;
 the implementation now uses exact sentinel comparison and includes regressions.
+Independent follow-up review caught io.ReadFull swallowing full-buffer errors;
+a sticky reader failure guard and ordinary/wrapped full-read tests now cover it.
 This is review evidence only. **Go compile/gofmt/tests/race/fuzz have not run.**
 No compiler was installed, no CI dispatched, no credentials or live services used.
 
