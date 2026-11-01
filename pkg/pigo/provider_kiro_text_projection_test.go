@@ -36,21 +36,24 @@ func TestKiroTextProjectionSystemRequiresOptIn(t *testing.T) {
 
 func TestKiroTextProjectionRejectsUnsupportedWithoutRepair(t *testing.T) {
 	u := UserMessage{Content: "user"}
-	a := AssistantMessage{Content: []ContentBlock{TextContent{Text: "answer"}}}
+	a := AssistantMessage{Content: []ContentBlock{TextContent{Text: "answer"}}, StopReason: StopReasonStop}
 	var nilUser *UserMessage
 	cases := []Context{
 		{}, {Messages: []Message{u, u}}, {Messages: []Message{a}},
 		{Messages: []Message{u, u, u}}, {Messages: []Message{nilUser}},
 		{Messages: []Message{UserMessage{Content: ""}}},
+		{Messages: []Message{UserMessage{Content: " \n\t"}}},
+		{Messages: []Message{u, AssistantMessage{Content: a.Content}, u}},
 		{Messages: []Message{UserMessage{Content: []ContentBlock{ImageContent{Data: "fixture"}}}}},
-		{Messages: []Message{u, AssistantMessage{Content: []ContentBlock{ThinkingContent{Thinking: "fixture"}}}, u}},
-		{Messages: []Message{u, AssistantMessage{Content: []ContentBlock{ToolCall{ID: "fixture", Name: "lookup"}}}, u}},
+		{Messages: []Message{u, AssistantMessage{Content: []ContentBlock{ThinkingContent{Thinking: "fixture"}}, StopReason: StopReasonStop}, u}},
+		{Messages: []Message{u, AssistantMessage{Content: []ContentBlock{ToolCall{ID: "fixture", Name: "lookup"}}, StopReason: StopReasonStop}, u}},
 		{Messages: []Message{u, ToolResultMessage{ToolCallID: "fixture"}, u}},
 		{Messages: []Message{u, SystemMessage{Content: "dynamic"}, u}},
 		{Messages: []Message{u}, Tools: []Tool{{Name: "lookup"}}},
 		{Messages: []Message{u}, HostedTools: []HostedTool{{Name: "hosted"}}},
 		{Messages: []Message{u, AssistantMessage{Content: a.Content, StopReason: StopReasonError}, u}},
-		{Messages: []Message{u, AssistantMessage{Content: []ContentBlock{TextContent{Text: "signed", TextSignature: "fixture"}}}, u}},
+		{Messages: []Message{u, AssistantMessage{Content: []ContentBlock{TextContent{Text: "signed", TextSignature: "fixture"}}, StopReason: StopReasonStop}, u}},
+		{Messages: []Message{u, AssistantMessage{Content: []ContentBlock{TextContent{Text: " \n\t"}}, StopReason: StopReasonStop}, u}},
 		{Messages: []Message{UserMessage{Content: "\xff"}}},
 	}
 	for index, ctx := range cases {
@@ -76,7 +79,7 @@ func TestKiroTextProjectionBudgets(t *testing.T) {
 func TestKiroTextProjectionSystemOnceAndPointerAssistant(t *testing.T) {
 	ctx := Context{SystemPrompt: "s", Messages: []Message{
 		UserMessage{Content: "u"},
-		&AssistantMessage{Content: []ContentBlock{TextContent{Text: "a"}}},
+		&AssistantMessage{Content: []ContentBlock{TextContent{Text: "a"}}, StopReason: StopReasonStop},
 		UserMessage{Content: "next"},
 	}}
 	p, err := projectKiroTextConversation(ctx, "fixture-model", true, 3, 9)
@@ -87,5 +90,31 @@ func TestKiroTextProjectionSystemOnceAndPointerAssistant(t *testing.T) {
 	ctx = Context{Messages: []Message{UserMessage{Content: []ContentBlock{nilText}}}}
 	if _, err := projectKiroTextConversation(ctx, "fixture-model", false, 1, 9); err == nil {
 		t.Fatal("nil text block accepted")
+	}
+}
+
+func TestKiroTextProjectionBoundsEmptyBlocks(t *testing.T) {
+	blocks := make([]ContentBlock, maxKiroTextProjectionBlocks+1)
+	for i := range blocks {
+		blocks[i] = TextContent{}
+	}
+	blocks[len(blocks)-1] = TextContent{Text: "x"}
+	ctx := Context{Messages: []Message{UserMessage{Content: blocks}}}
+	if _, err := projectKiroTextConversation(ctx, "fixture-model", false, 1, 1); err == nil {
+		t.Fatal("empty blocks bypassed block-count budget")
+	}
+	blocks[0] = TextContent{Text: "x"}
+	ctx.Messages = []Message{
+		UserMessage{Content: blocks[:2048]},
+		AssistantMessage{Content: blocks[:2048], StopReason: StopReasonStop},
+		UserMessage{Content: []ContentBlock{TextContent{Text: "x"}}},
+	}
+	if _, err := projectKiroTextConversation(ctx, "fixture-model", false, 3, 3); err == nil {
+		t.Fatal("block-count budget was not aggregate across messages")
+	}
+	ctx.Messages = []Message{UserMessage{Content: "  keep surrounding whitespace  "}}
+	p, err := projectKiroTextConversation(ctx, "fixture-model", false, 1, 100)
+	if err != nil || p.Current.Content != "  keep surrounding whitespace  " {
+		t.Fatal("nonempty content was trimmed or rejected")
 	}
 }
