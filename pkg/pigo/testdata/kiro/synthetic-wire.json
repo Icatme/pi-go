@@ -1,0 +1,258 @@
+{
+  "schema_version": 1,
+  "provenance": "Hand-authored synthetic payloads; Python stdlib Smithy framing; no captured traffic or credentials. Event vocabulary observed in community source, not official service guarantee.",
+  "cases": [
+    {
+      "name": "text_unicode",
+      "frames": [
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "assistantResponseEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"content\":\"hello 中\"}",
+          "wire_hex": "000000830000005cf1b908f40d3a6d6573736167652d747970650700056576656e740b3a6576656e742d74797065070016617373697374616e74526573706f6e73654576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b22636f6e74656e74223a2268656c6c6f20e4b8ad227d2a8ca9e3",
+          "expected": "event"
+        },
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "metadataEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"stopReason\":\"end_turn\",\"tokenUsage\":{\"uncachedInputTokens\":3,\"outputTokens\":2}}",
+          "wire_hex": "000000b400000053720771f30d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000d6d657461646174614576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b2273746f70526561736f6e223a22656e645f7475726e222c22746f6b656e5573616765223a7b22756e636163686564496e707574546f6b656e73223a332c226f7574707574546f6b656e73223a327d7dad4cf0ff",
+          "expected": "event"
+        }
+      ],
+      "expected_state": "text once; usage from tokenUsage; preserve raw stop reason"
+    },
+    {
+      "name": "tool_fragmented",
+      "frames": [
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "toolUseEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"name\":\"lookup\",\"toolUseId\":\"fixture-1\",\"input\":\"\"}",
+          "wire_hex": "0000009600000052be013d010d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000c746f6f6c5573654576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b226e616d65223a226c6f6f6b7570222c22746f6f6c5573654964223a22666978747572652d31222c22696e707574223a22227d751d167c",
+          "expected": "event"
+        },
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "toolUseEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"input\":\"{\\\"q\\\":\"}",
+          "wire_hex": "0000007500000052d175800e0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000c746f6f6c5573654576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b22696e707574223a227b5c22715c223a227d9207694c",
+          "expected": "event"
+        },
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "toolUseEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"input\":\"\\\"demo\\\"}\"}",
+          "wire_hex": "0000007700000052abb5d36e0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000c746f6f6c5573654576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b22696e707574223a225c2264656d6f5c227d227d65d373f0",
+          "expected": "event"
+        },
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "toolUseEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"stop\":true}",
+          "wire_hex": "0000006f00000052fb250f2d0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000c746f6f6c5573654576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b2273746f70223a747275657d720fc391",
+          "expected": "event"
+        }
+      ],
+      "expected_state": "one structured tool call with exact concatenated arguments; no execution in provider"
+    },
+    {
+      "name": "orphan_tool_fragment",
+      "frames": [
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "toolUseEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"input\":\"{}\"}",
+          "wire_hex": "000000700000005219950f7e0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000c746f6f6c5573654576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b22696e707574223a227b7d227d81fe52b1",
+          "expected": "event"
+        }
+      ],
+      "expected_state": "protocol error; do not invent tool identity"
+    },
+    {
+      "name": "incomplete_tool",
+      "frames": [
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "toolUseEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"name\":\"lookup\",\"toolUseId\":\"fixture-2\",\"input\":\"{\"}",
+          "wire_hex": "0000009700000052836114b10d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000c746f6f6c5573654576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b226e616d65223a226c6f6f6b7570222c22746f6f6c5573654964223a22666978747572652d32222c22696e707574223a227b227d49269e90",
+          "expected": "event"
+        }
+      ],
+      "expected_state": "incomplete stream error at EOF; no executable call"
+    },
+    {
+      "name": "unknown_tool_shaped_event",
+      "frames": [
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "futureEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"name\":\"lookup\",\"toolUseId\":\"fixture-3\",\"input\":\"{}\"}",
+          "wire_hex": "00000097000000511a68450b0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000b6675747572654576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b226e616d65223a226c6f6f6b7570222c22746f6f6c5573654964223a22666978747572652d33222c22696e707574223a227b7d227dbb9f9b16",
+          "expected": "event"
+        }
+      ],
+      "expected_state": "unknown event; never infer executable tools by payload shape"
+    },
+    {
+      "name": "quoted_tool_is_text",
+      "frames": [
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "assistantResponseEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"content\":\"Example: <tool_use>{\\\"name\\\":\\\"lookup\\\",\\\"input\\\":{}}</tool_use>\"}",
+          "wire_hex": "000000ba0000005c5d88d2030d3a6d6573736167652d747970650700056576656e740b3a6576656e742d74797065070016617373697374616e74526573706f6e73654576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b22636f6e74656e74223a224578616d706c653a203c746f6f6c5f7573653e7b5c226e616d655c223a5c226c6f6f6b75705c222c5c22696e7075745c223a7b7d7d3c2f746f6f6c5f7573653e227dc62d15fe",
+          "expected": "event"
+        }
+      ],
+      "expected_state": "ordinary text; no prose-to-tool fallback"
+    },
+    {
+      "name": "credits_not_tokens",
+      "frames": [
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "meteringEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"usage\":0.25,\"unit\":\"credit\"}",
+          "wire_hex": "00000081000000531bc646050d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000d6d65746572696e674576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b227573616765223a302e32352c22756e6974223a22637265646974227defb4211b",
+          "expected": "event"
+        },
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "metadataEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"tokenUsage\":{\"outputTokens\":7}}",
+          "wire_hex": "0000008400000053d326c9750d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000d6d657461646174614576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b22746f6b656e5573616765223a7b226f7574707574546f6b656e73223a377d7de6577822",
+          "expected": "event"
+        }
+      ],
+      "expected_state": "0.25 credits is not token usage; outputTokens=7"
+    },
+    {
+      "name": "throttle_after_visible_text",
+      "frames": [
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "assistantResponseEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"content\":\"partial\"}",
+          "wire_hex": "000000810000005c8b795b940d3a6d6573736167652d747970650700056576656e740b3a6576656e742d74797065070016617373697374616e74526573706f6e73654576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b22636f6e74656e74223a227061727469616c227d6ca66388",
+          "expected": "event"
+        },
+        {
+          "headers": {
+            ":message-type": "exception",
+            ":exception-type": "ThrottlingException",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"message\":\"synthetic throttle\",\"reason\":\"USER_REQUEST_RATE_EXCEEDED\",\"retryAfterMilliseconds\":500}",
+          "wire_hex": "000000d40000006123e2573e0d3a6d6573736167652d74797065070009657863657074696f6e0f3a657863657074696f6e2d747970650700135468726f74746c696e67457863657074696f6e0d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b226d657373616765223a2273796e746865746963207468726f74746c65222c22726561736f6e223a22555345525f524551554553545f524154455f4558434545444544222c22726574727941667465724d696c6c697365636f6e6473223a3530307d2d58351b",
+          "expected": "error"
+        }
+      ],
+      "expected_state": "partial text followed by error; no automatic replay"
+    },
+    {
+      "name": "monthly_quota",
+      "frames": [
+        {
+          "headers": {
+            ":message-type": "exception",
+            ":exception-type": "throttlingError",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"message\":\"synthetic quota\",\"reason\":\"MONTHLY_REQUEST_COUNT\"}",
+          "wire_hex": "000000ab0000005d770f5ca70d3a6d6573736167652d74797065070009657863657074696f6e0f3a657863657074696f6e2d7479706507000f7468726f74746c696e674572726f720d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b226d657373616765223a2273796e7468657469632071756f7461222c22726561736f6e223a224d4f4e54484c595f524551554553545f434f554e54227d849c1d9e",
+          "expected": "error"
+        }
+      ],
+      "expected_state": "non-retryable quota error; never account fallback"
+    },
+    {
+      "name": "invalid_payload_json",
+      "frames": [
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "assistantResponseEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{",
+          "wire_hex": "0000006d0000005c665d714a0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d74797065070016617373697374616e74526573706f6e73654576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b7019defc",
+          "expected": "invalid_json"
+        }
+      ],
+      "expected_state": "valid framing but invalid JSON must fail event layer"
+    },
+    {
+      "name": "reasoning_and_signature",
+      "frames": [
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "reasoningContentEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"text\":\"synthetic reasoning\",\"signature\":\"fixture-not-auth-token\"}",
+          "wire_hex": "000000ae0000005b568c76e20d3a6d6573736167652d747970650700056576656e740b3a6576656e742d74797065070015726561736f6e696e67436f6e74656e744576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b2274657874223a2273796e74686574696320726561736f6e696e67222c227369676e6174757265223a22666978747572652d6e6f742d617574682d746f6b656e227da652375a",
+          "expected": "event"
+        }
+      ],
+      "expected_state": "retain reasoning/signature separately; do not flatten into visible text or log"
+    },
+    {
+      "name": "wrong_content_type_field",
+      "frames": [
+        {
+          "headers": {
+            ":message-type": "event",
+            ":event-type": "assistantResponseEvent",
+            ":content-type": "application/json"
+          },
+          "payload_utf8": "{\"content\":123}",
+          "wire_hex": "0000007b0000005c89fd13680d3a6d6573736167652d747970650700056576656e740b3a6576656e742d74797065070016617373697374616e74526573706f6e73654576656e740d3a636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e7b22636f6e74656e74223a3132337d27bad88c",
+          "expected": "event"
+        }
+      ],
+      "expected_state": "schema error; never coerce numeric content into text"
+    }
+  ]
+}
