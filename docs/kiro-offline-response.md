@@ -110,3 +110,10 @@ all upstream event orders conform. The result is still inert event evidence:
 turning it into a persisted or replayable pi-go assistant is unsupported, notably
 when reasoning is present or text follows tools. New cross-component test sources
 cover these boundaries; they remain unexecuted without the approved Go toolchain.
+
+The independent Python-generated 12-case/18-frame wire corpus now has a Go
+consumer test, TestKiroIndependentWireCorpus. It checks exact headers/payload,
+every split point, one-byte reads, all truncated prefixes and a low-bit flip at every byte position. Corpus classification hints are deliberately not treated as
+terminal-state expectations (one old stop reason is lowercase). Python stdlib
+revalidation of all lengths, both CRCs, headers and payloads passed on
+2026-11-01; the new Go test itself has not been compiled or run.
