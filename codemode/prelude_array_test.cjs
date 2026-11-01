@@ -74,3 +74,45 @@ test('inherited descriptor value cannot disguise an accessor', async () => {
     assert.deepEqual(result.calls, []);
   }
 });
+
+for (const [name, expression, expected] of [
+  ['cyclic object', 'const a={};a.self=a;', 'unsupported_json'],
+  ['cyclic array', 'const a=[];a[0]=a;', 'unsupported_json'],
+  ['sparse inherited index', 'const a=[,1];Object.defineProperty(Array.prototype,"0",{value:9,writable:true});', 'unsupported_json'],
+  ['array index accessor', 'const a=[];Object.defineProperty(a,"0",{enumerable:true,get(){throw Error("getter ran")}});', 'unsupported_json'],
+  ['object accessor', 'const a={};Object.defineProperty(a,"x",{enumerable:true,get(){throw Error("getter ran")}});', 'unsupported_json'],
+  ['NaN', 'const a={x:NaN};', 'unsafe_number'],
+  ['infinity', 'const a={x:Infinity};', 'unsafe_number'],
+  ['unsafe integer', 'const a={x:9007199254740992};', 'unsafe_number'],
+  ['BigInt', 'const a={x:1n};', 'unsupported_json'],
+  ['undefined value', 'const a={x:undefined};', 'unsupported_json'],
+  ['custom prototype', 'const a=Object.create({x:1});a.y=2;', 'unsupported_json'],
+  ['depth cap', 'const a={};let p=a;for(let i=0;i<129;i++){p.next={};p=p.next;}', 'json_limit'],
+]) {
+  test('JSON boundary: ' + name, async () => {
+    const result = await run(expression + 'try{await tools.echo(a);return "accepted"}catch(e){return e.code}');
+    assert.equal(result.value, expected);
+    assert.deepEqual(result.calls, []);
+  });
+}
+
+test('shared acyclic objects are copied without false cycle rejection', async () => {
+  const result = await run('const shared={x:1};text([shared,shared])');
+  assert.deepEqual(result.calls, [['text', '[{"x":1},{"x":1}]']]);
+});
+
+test('null-prototype objects and __proto__ data keys remain intact', async () => {
+  const result = await run('const a=Object.create(null);a.__proto__="data";a.value=1;text(a)');
+  assert.deepEqual(result.calls, [['text', '{"__proto__":"data","value":1}']]);
+});
+
+test('array prototype toJSON cannot replace validated content', async () => {
+  const result = await run('Array.prototype.toJSON=()=>[NaN];text([0.1,19.99])');
+  assert.deepEqual(result.calls, [['text', '[0.1,19.99]']]);
+});
+
+test('JSON node cap rejects before host admission', async () => {
+  const result = await run('const a=Array.from({length:65536},()=>null);try{await tools.echo(a)}catch(e){return e.code}');
+  assert.equal(result.value, 'json_limit');
+  assert.deepEqual(result.calls, []);
+});
