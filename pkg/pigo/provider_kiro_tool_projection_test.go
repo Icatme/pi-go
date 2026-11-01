@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -142,4 +143,19 @@ func TestKiroToolProjectionMultipleGroupsAndTools(t *testing.T) {
 	if len(specs) != 2 || specs[0].Specification.Name != "lookup" || specs[1].Specification.Name != "summarize" {
 		t.Fatalf("current tool catalog changed: %#v", specs)
 	}
+}
+
+// Synthetic receive -> inert host result -> history, never tool execution.
+func TestKiroReceivedToolIdentityRoundTrip(t *testing.T) {
+ for _, id := range []string{"aA0_.:-", strings.Repeat("x", 64)} {
+  a := kiroTestAssembler(t)
+  payload, _ := json.Marshal(map[string]any{"name":"lookup", "toolUseId":id, "input":map[string]any{}, "stop":true})
+  tool, err := a.accept(payload)
+  if err != nil || tool == nil { t.Fatalf("receive: %v", err) }
+  ctx, schemas := kiroToolProjectionFixture()
+  ctx.Messages[1] = AssistantMessage{StopReason:StopReasonToolUse, Content:[]ContentBlock{ToolCall{ID:tool.ID, Name:tool.Name, RawArguments:string(tool.Arguments)}}}
+  ctx.Messages[2] = ToolResultMessage{ToolCallID:tool.ID, ToolName:tool.Name, Content:[]ContentBlock{TextContent{Text:"synthetic result"}}}
+  projected, err := projectKiroToolConversation(ctx, "fixture-model", schemas, 10, 10, 4096)
+  if err != nil || projected.Current.Context == nil || len(projected.Current.Context.Results) != 1 || projected.Current.Context.Results[0].ID != id || projected.History[1].Assistant.Calls[0].ID != id { t.Fatalf("roundtrip identity: %#v, %v", projected, err) }
+ }
 }

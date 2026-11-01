@@ -115,13 +115,5 @@ func inspectKiroToolHistoryGroups(ctx Context, maxMessages, maxCalls int) ([]kir
 // The community mapper hashes non-native IDs. This strict subset rejects them
 // instead; a future explicit replay mapping must prove call/result consistency.
 func kiroNativeHistoryToolID(id string) bool {
-	if len(id) == 0 || len(id) > 64 {
-		return false
-	}
-	for _, c := range []byte(id) {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == ':' || c == '-') {
-			return false
-		}
-	}
-	return true
+	return kiroNativeToolID(id)
 }
