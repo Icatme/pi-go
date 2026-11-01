@@ -17,6 +17,10 @@ policy, then explicitly transfers raw tool evidence into a new synthetic history
 with a fabricated tool result. It checks original IDs, large-integer spelling,
 success/error result status and empty result-carrier text. No tool is executed.
 A text-only test connects the text projection and offline response in two turns.
+The success/error loop changes only the fabricated tool-result business status;
+it does not simulate service exceptions. Exception/truncation/terminal-conflict
+zero-result cases remain in #57's component/coordinator test sources, not the
+new round-trip tests. None of those Go tests have been executed.
 
 A negative persistence check demonstrates that json serialization omits
 ToolCall.RawArguments. Restored tool history is still rejected. It must not be
