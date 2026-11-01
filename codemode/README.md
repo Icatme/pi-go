@@ -94,7 +94,10 @@ Opaque objects/allocations owned by a Go tool remain the tool's responsibility.
 
 Nonfinite numbers, BigInt, unsafe integers (outside +/-9007199254740991),
 JSON precision loss, unsupported object/accessor values and cycles are
-rejected. Invalid UTF-8 and unpaired UTF-16 surrogate escapes are rejected in
+rejected. Enumerable named array properties (including noncanonical indices like
+`01`) are rejected before serialization instead of being silently discarded.
+Dense arrays remain supported; non-enumerable properties retain ordinary JSON
+omission behavior. Invalid UTF-8 and unpaired UTF-16 surrogate escapes are rejected in
 JSON string values and keys before decoding; valid surrogate pairs and U+FFFD
 remain supported. `ValidateJSON` exposes this boundary before parsing into
 JavaScript; `*JSONError` supplies `unsafe_number` or `invalid_unicode` codes.
@@ -127,3 +130,14 @@ arbitrary Go goroutines.
 
 The artifact, exact source/ABI digest, MIT notices, maintenance/platform checks
 and stack rationale are in [internal/assets/SOURCE.md](internal/assets/SOURCE.md).
+
+
+### Offline serialization regression checks
+
+The auxiliary command `node --test codemode/prelude_array_test.cjs` loads the
+actual prelude with Node's VM and a fake host. It checks named-array-property
+rejection, descriptor own-value validation, mutation resistance and unchanged
+dense arrays. It does not execute tools or validate the embedded QuickJS/WASM
+runtime. The corresponding Go integration tests are in
+`prelude_array_test.go`; run `go test ./codemode` with the supported Go toolchain
+before considering the fix integrated.
