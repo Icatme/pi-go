@@ -77,3 +77,69 @@ func TestKiroToolProjectionBudgetsAndErrorResult(t *testing.T) {
 		t.Fatalf("error result not preserved: %#v, %v", p, err)
 	}
 }
+
+func TestKiroToolProjectionRejectsMissingRawAndMismatchedSchemaKey(t *testing.T) {
+	ctx, schemas := kiroToolProjectionFixture()
+	assistant := ctx.Messages[1].(AssistantMessage)
+	call := assistant.Content[1].(ToolCall)
+	// Persisted ToolCall history omits RawArguments (json:"-"). A parsed map
+	// cannot establish the original wire spelling or its numeric precision.
+	call.RawArguments = ""
+	call.Arguments = map[string]any{"id": float64(9007199254740992)}
+	assistant.Content[1] = call
+	ctx.Messages[1] = assistant
+	if p, err := projectKiroToolConversation(ctx, "fixture-model", schemas, 10, 10, 4096); err == nil || !reflect.DeepEqual(p, kiroToolProjection{}) {
+		t.Fatalf("missing raw evidence accepted: %#v, %v", p, err)
+	}
+
+	ctx, schemas = kiroToolProjectionFixture()
+	schemas["wrong-name"] = schemas["lookup"]
+	delete(schemas, "lookup")
+	// Matching map/catalog sizes must not stand in for matching tool names.
+	if len(schemas) != len(ctx.Tools) {
+		t.Fatal("fixture must preserve schema/catalog count equality")
+	}
+	if p, err := projectKiroToolConversation(ctx, "fixture-model", schemas, 10, 10, 4096); err == nil || !reflect.DeepEqual(p, kiroToolProjection{}) {
+		t.Fatalf("wrong schema key accepted: %#v, %v", p, err)
+	}
+}
+
+func TestKiroToolProjectionMultipleGroupsAndTools(t *testing.T) {
+	ctx, schemas := kiroToolProjectionFixture()
+	ctx.Tools = append(ctx.Tools, Tool{Name: "summarize", Description: "second fixture tool"})
+	schemas["summarize"] = json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`)
+	ctx.Messages = append(ctx.Messages,
+		&AssistantMessage{StopReason: StopReasonToolUse, Content: []ContentBlock{
+			TextContent{Text: "checking both"},
+			ToolCall{ID: "fixture-2", Name: "lookup", RawArguments: `{"id":9007199254740995}`},
+			&ToolCall{ID: "fixture-3", Name: "summarize", RawArguments: `{"text":"fixture"}`},
+		}},
+		&ToolResultMessage{ToolCallID: "fixture-2", ToolName: "lookup", Content: []ContentBlock{TextContent{Text: "second result"}}},
+		ToolResultMessage{ToolCallID: "fixture-3", ToolName: "summarize", IsError: true, Content: []ContentBlock{TextContent{Text: "third result"}}},
+	)
+	p, err := projectKiroToolConversation(ctx, "fixture-model", schemas, 6, 3, 4096)
+	if err != nil || len(p.History) != 4 || p.Current.Context == nil {
+		t.Fatalf("multi-group projection: %#v, %v", p, err)
+	}
+	for index, entry := range p.History {
+		if (index%2 == 0 && entry.User == nil) || (index%2 == 1 && entry.Assistant == nil) {
+			t.Fatalf("history does not alternate at %d: %#v", index, entry)
+		}
+	}
+	firstCarrier := p.History[2].User
+	if firstCarrier.Content != "" || firstCarrier.Context == nil || len(firstCarrier.Context.Results) != 1 || firstCarrier.Context.Results[0].ID != "fixture-1" || len(firstCarrier.Context.Tools) != 0 {
+		t.Fatalf("first group/carrier changed: %#v", firstCarrier)
+	}
+	secondAssistant := p.History[3].Assistant
+	if secondAssistant.Content != "checking both" || len(secondAssistant.Calls) != 2 || secondAssistant.Calls[0].ID != "fixture-2" || secondAssistant.Calls[1].ID != "fixture-3" || string(secondAssistant.Calls[0].Input) != `{"id":9007199254740995}` {
+		t.Fatalf("second group call order/precision changed: %#v", secondAssistant)
+	}
+	results := p.Current.Context.Results
+	if p.Current.Content != "" || len(results) != 2 || results[0].ID != "fixture-2" || results[1].ID != "fixture-3" || results[0].Status != "success" || results[1].Status != "error" {
+		t.Fatalf("final result carrier changed: %#v", p.Current)
+	}
+	specs := p.Current.Context.Tools
+	if len(specs) != 2 || specs[0].Specification.Name != "lookup" || specs[1].Specification.Name != "summarize" {
+		t.Fatalf("current tool catalog changed: %#v", specs)
+	}
+}
