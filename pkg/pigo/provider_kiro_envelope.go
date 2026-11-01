@@ -8,15 +8,18 @@ import (
 )
 
 var errKiroEnvelope = errors.New("kiro event stream: invalid or unsupported event envelope")
+var errKiroEnvelopeException = errors.New("kiro event stream: service exception")
 
 // kiroEnvelope is a classified envelope, NOT a validated application event.
-// Payload stays raw: duplicate keys, field schemas, numeric ranges, tool identity
+// Ordinary-event payload stays raw; exception bodies are discarded. Duplicate
+// keys, field schemas, numeric ranges, tool identity
 // and lifecycle must be checked by a future event consumer before any output.
 // This type has no conversion to pi-go output or executable tool calls.
 type kiroEnvelope struct {
 	Kind    string
 	Name    string
 	Payload json.RawMessage
+	PayloadValid bool // UTF-8 JSON object syntax only; never field-schema validity.
 }
 
 // classifyKiroEnvelope intentionally rejects unknown vocabulary instead of
@@ -30,10 +33,6 @@ func classifyKiroEnvelope(message kiroEventStreamMessage) (kiroEnvelope, error) 
 	}
 	kind, ok := stringHeader(":message-type")
 	if !ok {
-		return kiroEnvelope{}, errKiroEnvelope
-	}
-	contentType, ok := stringHeader(":content-type")
-	if !ok || contentType != "application/json" {
 		return kiroEnvelope{}, errKiroEnvelope
 	}
 	var name string
@@ -59,6 +58,20 @@ func classifyKiroEnvelope(message kiroEventStreamMessage) (kiroEnvelope, error) 
 		// be treated as successful events. Do not echo untrusted error bodies.
 		return kiroEnvelope{}, errKiroEnvelope
 	}
+	// Preserve only known exception identity even with absent content-type or
+	// unreadable body. This is terminal, never a successful event. Do not retain
+	// or echo service error bodies, even when their JSON syntax is valid.
+	if isKiroKnownExceptionName(name) {
+		payload := bytes.TrimSpace(message.Payload)
+		valid := utf8.Valid(message.Payload) && json.Valid(message.Payload) && len(payload) >= 2 && payload[0] == '{'
+		return kiroEnvelope{Kind: "exception", Name: name, PayloadValid: valid}, errKiroEnvelopeException
+	}
+	// Ordinary events remain a strict subset. Upstream fixtures may omit this
+	// header; those frames are deliberately rejected until compatibility review.
+	contentType, ok := stringHeader(":content-type")
+	if !ok || contentType != "application/json" {
+		return kiroEnvelope{}, errKiroEnvelope
+	}
 	// Validate before trimming: Unicode whitespace such as NBSP is not JSON
 	// whitespace and must not make an invalid wire payload appear valid.
 	if !utf8.Valid(message.Payload) || !json.Valid(message.Payload) {
@@ -68,12 +81,7 @@ func classifyKiroEnvelope(message kiroEventStreamMessage) (kiroEnvelope, error) 
 	if len(payload) < 2 || payload[0] != '{' {
 		return kiroEnvelope{}, errKiroEnvelope
 	}
-	// Error members sometimes arrive with event framing. Normalize them so a
-	// future consumer cannot mistake a known error for successful content.
-	if isKiroKnownExceptionName(name) {
-		kind = "exception"
-	}
-	return kiroEnvelope{Kind: kind, Name: name, Payload: payload}, nil
+	return kiroEnvelope{Kind: kind, Name: name, Payload: payload, PayloadValid: true}, nil
 }
 
 func isKiroKnownEventName(name string) bool {
