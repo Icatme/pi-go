@@ -59,7 +59,7 @@ func TestKiroEnvelopeSyntheticCorpus(t *testing.T) {
 					t.Fatal(err)
 				}
 				_, err = classifyKiroEnvelope(message)
-				wantError := tc.Name == "unknown_tool_shaped_event" || tc.Name == "invalid_payload_json"
+				wantError := tc.Name == "unknown_tool_shaped_event" || tc.Name == "invalid_payload_json" || message.Headers[":message-type"].Value == "exception"
 				if (err != nil) != wantError {
 					t.Fatalf("classification error = %v, wantError = %v", err, wantError)
 				}
@@ -78,6 +78,7 @@ func TestKiroEnvelopeRejectsMalformed(t *testing.T) {
 	}
 	for _, mutate := range []func(*kiroEventStreamMessage){
 		func(m *kiroEventStreamMessage) { delete(m.Headers, ":message-type") },
+		func(m *kiroEventStreamMessage) { delete(m.Headers, ":content-type") },
 		func(m *kiroEventStreamMessage) { m.Headers[":message-type"] = kiroEventStreamHeader{Type: 0, Value: true} },
 		func(m *kiroEventStreamMessage) { m.Headers[":content-type"] = kiroEventStreamHeader{Type: 7, Value: "text/plain"} },
 		func(m *kiroEventStreamMessage) { m.Headers[":exception-type"] = kiroEventStreamHeader{Type: 7, Value: "error"} },
@@ -91,12 +92,12 @@ func TestKiroEnvelopeRejectsMalformed(t *testing.T) {
 	}
 }
 
-func TestKiroEnvelopeExceptionAliasesAndRawPayload(t *testing.T) {
+func TestKiroEnvelopeExceptionAliasesAreTerminalAndRedacted(t *testing.T) {
 	for _, name := range []string{"error", "throttlingError", "validationError", "serviceUnavailableError", "InternalServerException", "ThrottlingException", "ValidationException", "ServiceUnavailableException"} {
 		for _, kind := range []string{"event", "exception"} {
 			payload := []byte(` {"message":"fixture"} `)
 			e, err := classifyKiroEnvelope(kiroTestEnvelopeMessage(kind, name, payload))
-			if err != nil || e.Kind != "exception" || e.Name != name || !bytes.Equal(e.Payload, bytes.TrimSpace(payload)) {
+			if !errors.Is(err, errKiroEnvelopeException) || e.Kind != "exception" || e.Name != name || len(e.Payload) != 0 || !e.PayloadValid {
 				t.Fatalf("%s/%s: %#v, %v", kind, name, e, err)
 			}
 		}
@@ -104,6 +105,21 @@ func TestKiroEnvelopeExceptionAliasesAndRawPayload(t *testing.T) {
 	for _, kind := range []string{"error", "unknown"} {
 		if _, err := classifyKiroEnvelope(kiroTestEnvelopeMessage(kind, "error", []byte("{}"))); !errors.Is(err, errKiroEnvelope) {
 			t.Fatal("unsupported message kind accepted")
+		}
+	}
+}
+
+func TestKiroEnvelopeHeaderOnlyExceptionPreservesKnownType(t *testing.T) {
+	for _, payload := range [][]byte{nil, []byte("not-json-secret-fixture"), []byte("[]"), []byte("{\"message\":\"fixture\"}")} {
+		m := kiroTestEnvelopeMessage("exception", "ThrottlingException", payload)
+		delete(m.Headers, ":content-type")
+		e, err := classifyKiroEnvelope(m)
+		if !errors.Is(err, errKiroEnvelopeException) || e.Name != "ThrottlingException" || e.Kind != "exception" || len(e.Payload) != 0 {
+			t.Fatalf("lost header identity or retained body: %#v, %v", e, err)
+		}
+		wantValid := bytes.HasPrefix(payload, []byte("{"))
+		if e.PayloadValid != wantValid {
+			t.Fatalf("payload validity = %v, want %v", e.PayloadValid, wantValid)
 		}
 	}
 }
