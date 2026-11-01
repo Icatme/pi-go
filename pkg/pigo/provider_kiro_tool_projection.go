@@ -68,7 +68,7 @@ func projectKiroToolConversation(ctx Context, modelID string, schemas map[string
 	for _, group := range groups { byIndex[group.AssistantIndex] = group }
 	remaining := maxBytes
 	consume := func(value string) bool {
-		if !utf8.ValidString(value) || len(value) > remaining { return false }
+		if len(value) > remaining || !utf8.ValidString(value) { return false }
 		remaining -= len(value)
 		return true
 	}

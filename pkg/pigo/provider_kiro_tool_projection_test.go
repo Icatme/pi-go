@@ -159,3 +159,13 @@ func TestKiroReceivedToolIdentityRoundTrip(t *testing.T) {
   if err != nil || projected.Current.Context == nil || len(projected.Current.Context.Results) != 1 || projected.Current.Context.Results[0].ID != id || projected.History[1].Assistant.Calls[0].ID != id { t.Fatalf("roundtrip identity: %#v, %v", projected, err) }
  }
 }
+
+func BenchmarkKiroToolProjectionOversizeDescription(b *testing.B) {
+ ctx,schemas:=kiroToolProjectionFixture()
+ ctx.Tools[0].Description=strings.Repeat("x",1<<20)
+ b.ReportAllocs()
+ b.ResetTimer()
+ for i:=0;i<b.N;i++ {
+  if _,err:=projectKiroToolConversation(ctx,"fixture-model",schemas,10,10,64);err==nil { b.Fatal("over-budget description accepted") }
+ }
+}
