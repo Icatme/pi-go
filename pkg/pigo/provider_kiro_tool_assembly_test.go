@@ -2,6 +2,8 @@ package pigo
 
 import (
 	"errors"
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -152,4 +154,18 @@ func FuzzKiroToolAssembly(f *testing.F) {
 		}
 		_ = a.finish()
 	})
+}
+
+func TestKiroToolAssemblyNativeIDBoundary(t *testing.T) {
+ for _, id := range []string{"", "中", "a/b", strings.Repeat("x", 65)} {
+  a := kiroTestAssembler(t)
+  payload, _ := json.Marshal(map[string]any{"name":"lookup", "toolUseId":id, "input":map[string]any{}, "stop":true})
+  if tool, err := a.accept(payload); err == nil || tool != nil { t.Fatalf("accepted unsupported ID %q", id) }
+ }
+ for _, id := range []string{"aA0_.:-", strings.Repeat("x", 64)} {
+  a := kiroTestAssembler(t)
+  payload, _ := json.Marshal(map[string]any{"name":"lookup", "toolUseId":id, "input":map[string]any{}, "stop":true})
+  tool, err := a.accept(payload)
+  if err != nil || tool == nil || tool.ID != id { t.Fatalf("native ID rejected: %q, %v", id, err) }
+ }
 }
