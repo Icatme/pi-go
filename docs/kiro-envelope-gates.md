@@ -62,3 +62,18 @@ Kiro provider is made. After approval, run `gofmt`, `go test ./pkg/pigo -run
 'TestKiro(EventStream|Envelope)' -count=1`, both existing fuzz targets, race tests
 and the full repository suite. Do not enable provider registration based on
 static review alone.
+
+
+## Review corrections: terminal exceptions and compatibility subset
+
+Known service exception names are classified before body/content-type checks.
+They return `errKiroEnvelopeException` plus the allowlisted exception name and a
+syntax-only `PayloadValid` flag; the body is never retained, even when valid.
+This preserves header-only error identity without treating exceptions as
+successful events or exposing service error text. Consumers must treat every
+non-nil error as terminal, while optionally retaining the safe known name.
+
+Ordinary events still require `:content-type: application/json`. The pinned
+community fixture encoder often omits that header, so this is an explicit
+compatibility gap, not proof that those upstream frames are malformed. A missing
+header rejection test now pins the strict subset. No Go checks have run.
