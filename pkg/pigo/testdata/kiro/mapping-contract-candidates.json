@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "provenance": "Original synthetic acceptance proposals, not captured requests, not Go test results, not official Kiro contract. Community field/stop vocabulary observed at dd93f2e884b60cecd85c7fb4a818fb6d64ba3dba.",
+  "request_cases": [
+    {
+      "name": "text_user_turn",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "fixture hello"
+          }
+        ]
+      },
+      "expected_policy": {
+        "current_text": "fixture hello",
+        "invented_text": false,
+        "history_reordered": false,
+        "origin_identity": "unresolved permitted identity; do not impersonate official CLI"
+      }
+    },
+    {
+      "name": "tool_result_only_turn",
+      "input": {
+        "messages": [
+          {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "id": "fixture-1",
+                "name": "lookup",
+                "arguments": {
+                  "q": "demo"
+                }
+              }
+            ]
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "fixture-1",
+            "content": "synthetic result"
+          }
+        ]
+      },
+      "expected_policy": {
+        "current_text": "",
+        "tool_results_preserved": true,
+        "placeholder_prompt": false,
+        "host_schema_authorization_required": true
+      }
+    },
+    {
+      "name": "orphan_result",
+      "input": {
+        "messages": [
+          {
+            "role": "toolResult",
+            "toolCallId": "unknown",
+            "content": "synthetic result"
+          }
+        ]
+      },
+      "expected_policy": {
+        "outcome": "reject unsupported history before transport",
+        "fabricated_tool_call": false,
+        "silently_dropped_result": false
+      }
+    },
+    {
+      "name": "interrupted_tool_result",
+      "input": {
+        "messages": [
+          {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "id": "fixture-2",
+                "name": "lookup",
+                "arguments": {}
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": "stop and reconsider"
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "fixture-2",
+            "content": "late result"
+          }
+        ]
+      },
+      "expected_policy": {
+        "outcome": "preserve chronology if representable; otherwise explicit unsupported-history error",
+        "automatic_relocation": false
+      }
+    },
+    {
+      "name": "image_only",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "data": "synthetic-placeholder-not-an-image"
+              }
+            ]
+          }
+        ]
+      },
+      "expected_policy": {
+        "outcome": "unsupported until verified image mapping",
+        "synthetic_user_prompt": false
+      }
+    },
+    {
+      "name": "reasoning_history",
+      "input": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "synthetic private reasoning",
+                "signature": "synthetic-not-auth"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": "next"
+          }
+        ]
+      },
+      "expected_policy": {
+        "outcome": "typed reasoning replay contract unresolved",
+        "flatten_to_text": false,
+        "raw_reasoning_log": false
+      }
+    },
+    {
+      "name": "historical_unknown_tool",
+      "input": {
+        "messages": [
+          {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "id": "fixture-3",
+                "name": "old_tool",
+                "arguments": {}
+              }
+            ]
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "fixture-3",
+            "content": "old result"
+          }
+        ],
+        "current_tools": []
+      },
+      "expected_policy": {
+        "outcome": "explicit unsupported-history policy until schema retention agreed",
+        "fabricate_tool_schema": false,
+        "make_old_tool_executable": false
+      }
+    }
+  ],
+  "completion_cases": [
+    {
+      "raw_stop_reason": "END_TURN",
+      "expected_policy": "terminal normal response only after all open tools reconciled"
+    },
+    {
+      "raw_stop_reason": "MAX_TOKENS",
+      "expected_policy": "length termination; never execute incomplete arguments"
+    },
+    {
+      "raw_stop_reason": "TOOL_USE",
+      "expected_policy": "only validated completed calls, after whole-response safety checks"
+    },
+    {
+      "raw_stop_reason": "CONTENT_FILTERED",
+      "expected_policy": "terminal refusal; discard staged tools, no retry"
+    },
+    {
+      "raw_stop_reason": "MODEL_CONTEXT_WINDOW_EXCEEDED",
+      "expected_policy": "terminal context overflow; no identical automatic replay"
+    },
+    {
+      "raw_stop_reason": "PAUSE_TURN",
+      "expected_policy": "unsupported pause; no automatic continuation"
+    },
+    {
+      "raw_stop_reason": "",
+      "expected_policy": "EOF/context percentage alone is not verified completion"
+    },
+    {
+      "raw_stop_reason": "future_reason",
+      "expected_policy": "unsupported terminal reason; preserve diagnostic enum without body"
+    }
+  ],
+  "implementation_status": "Request mapper and response completion state machine not implemented; this file is not consumed by tests."
+}
