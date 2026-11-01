@@ -65,7 +65,7 @@ func (a *kiroToolAssembler) accept(payload []byte) (*kiroAssembledTool, error) {
 	}
 	if hasName {
 		var name, id string
-		if json.Unmarshal(nameRaw, &name) != nil || json.Unmarshal(idRaw, &id) != nil || name == "" || id == "" || len(name) > 256 || len(id) > 256 {
+		if json.Unmarshal(nameRaw, &name) != nil || json.Unmarshal(idRaw, &id) != nil || name == "" || len(name) > 256 || !kiroNativeToolID(id) {
 			return nil, a.fail()
 		}
 		if a.active != nil {
@@ -150,4 +150,17 @@ func (a *kiroToolAssembler) fail() error {
 	a.active = nil
 	a.terminal = errKiroToolAssembly
 	return a.terminal
+}
+
+// kiroNativeToolID is shared by receive and replay: no hashing or repair.
+func kiroNativeToolID(id string) bool {
+	if len(id) == 0 || len(id) > 64 {
+		return false
+	}
+	for _, c := range []byte(id) {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == ':' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
