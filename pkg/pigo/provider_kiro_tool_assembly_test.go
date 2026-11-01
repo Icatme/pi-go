@@ -169,3 +169,15 @@ func TestKiroToolAssemblyNativeIDBoundary(t *testing.T) {
   if err != nil || tool == nil || tool.ID != id { t.Fatalf("native ID rejected: %q, %v", id, err) }
  }
 }
+
+func TestKiroToolAssemblyRejectsLateEmptyObjectPlaceholder(t *testing.T) {
+ for _,initial:=range []string{
+  `{"name":"lookup","toolUseId":"fixture","input":{"a":1}}`,
+  `{"name":"lookup","toolUseId":"fixture","input":"{\"a\":1}"}`,
+ } {
+  a:=kiroTestAssembler(t)
+  if tool,err:=a.accept([]byte(initial));err!=nil || tool!=nil { t.Fatalf("start: %#v, %v",tool,err) }
+  if tool,err:=a.accept([]byte(`{"input":{},"stop":true}`));err==nil || tool!=nil { t.Fatal("late object silently ignored") }
+  if tool,err:=a.accept([]byte(`{"stop":true}`));err==nil || tool!=nil { t.Fatal("failure was not sticky") }
+ }
+}

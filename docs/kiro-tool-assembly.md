@@ -28,7 +28,7 @@ before future code reuse.
 2. A start requires both nonempty name and ID. Names are at most 256 UTF-8 bytes; IDs use the shared receive/replay
    subset: 1–64 ASCII characters from [A-Za-z0-9_.:-], without repair. Only one tool can be active. Repeated identity must match.
 3. Continuations may omit identity only while that sole tool is active.
-4. Input is a string fragment or object. Empty object is a placeholder. Raw
+4. Input is a string fragment or object. Leading empty objects are placeholders. Raw
    fragments preserve bytes and large numeric values; completed arguments must
    be one JSON object with no duplicate keys at any depth. Unpaired UTF-16
    escape sequences are rejected before Go can silently replace them with U+FFFD.
@@ -79,3 +79,14 @@ go test ./...
 ```
 
 No CI workflow was dispatched and no toolchain installed for this work.
+
+## Late empty-object boundary
+
+Only leading empty input objects are supported as placeholders. After nonempty
+argument bytes have accumulated, a later object {} is rejected, including when
+paired with stop. This is a deliberate fail-closed subset, not a claim of official
+protocol invalidity. Pinned upstream tests show only the initial placeholder;
+the community parser's permissive branch ordering is not a replacement/merge
+contract. No existing argument bytes are silently discarded or overwritten.
+A regression source checks both object and string initial arguments plus sticky
+failure. Go validation remains unexecuted.
