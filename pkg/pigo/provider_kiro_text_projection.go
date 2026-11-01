@@ -8,6 +8,8 @@ import (
 
 var errKiroTextProjection = errors.New("kiro: unsupported text conversation projection")
 
+const maxKiroTextProjectionBlocks = 4096
+
 type kiroTextUserInput struct {
 	Content string `json:"content"`
 	ModelID string `json:"modelId"`
@@ -45,6 +47,7 @@ func projectKiroTextConversation(ctx Context, modelID string, allowSystemLowerin
 		return kiroTextProjection{}, errKiroTextProjection
 	}
 	used := 0
+	remainingBlocks := maxKiroTextProjectionBlocks
 	consume := func(text string) bool {
 		if !utf8.ValidString(text) || len(text) > maxTextBytes-used {
 			return false
@@ -82,14 +85,14 @@ func projectKiroTextConversation(ctx Context, modelID string, allowSystemLowerin
 				}
 			case []ContentBlock:
 				var valid bool
-				text, valid = kiroProjectionText(content, consume)
+				text, valid = kiroProjectionText(content, consume, &remainingBlocks)
 				if !valid {
 					return kiroTextProjection{}, errKiroTextProjection
 				}
 			default:
 				return kiroTextProjection{}, errKiroTextProjection
 			}
-			if text == "" {
+			if strings.TrimSpace(text) == "" {
 				return kiroTextProjection{}, errKiroTextProjection
 			}
 			if index == 0 && ctx.SystemPrompt != "" {
@@ -107,11 +110,11 @@ func projectKiroTextConversation(ctx Context, modelID string, allowSystemLowerin
 			}
 		} else {
 			assistant, ok := message.(AssistantMessage)
-			if !ok || len(assistant.HostedToolExecutions) != 0 || assistant.ErrorMessage != "" || (assistant.StopReason != "" && assistant.StopReason != StopReasonStop) {
+			if !ok || len(assistant.HostedToolExecutions) != 0 || assistant.ErrorMessage != "" || assistant.StopReason != StopReasonStop {
 				return kiroTextProjection{}, errKiroTextProjection
 			}
-			text, valid := kiroProjectionText(assistant.Content, consume)
-			if !valid || text == "" {
+			text, valid := kiroProjectionText(assistant.Content, consume, &remainingBlocks)
+			if !valid || strings.TrimSpace(text) == "" {
 				return kiroTextProjection{}, errKiroTextProjection
 			}
 			projection.History = append(projection.History, kiroTextHistoryEntry{Assistant: &kiroTextAssistantResponse{Content: text}})
@@ -120,7 +123,11 @@ func projectKiroTextConversation(ctx Context, modelID string, allowSystemLowerin
 	return projection, nil
 }
 
-func kiroProjectionText(blocks []ContentBlock, consume func(string) bool) (string, bool) {
+func kiroProjectionText(blocks []ContentBlock, consume func(string) bool, remainingBlocks *int) (string, bool) {
+	if len(blocks) > *remainingBlocks {
+		return "", false
+	}
+	*remainingBlocks -= len(blocks)
 	var text strings.Builder
 	for _, block := range blocks {
 		if pointer, ok := block.(*TextContent); ok {
