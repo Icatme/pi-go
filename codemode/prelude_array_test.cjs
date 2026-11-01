@@ -1,4 +1,5 @@
-// Auxiliary offline prelude checks under Node; NOT QuickJS/WASM integration.
+// Offline prelude checks: Node VM by default, pinned QuickJS asset when selected.
+// Neither mode exercises the Go/wazero host bridge or real tools.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -6,6 +7,7 @@ const test = require('node:test');
 const source = fs.readFileSync(process.env.PRELUDE_SOURCE || __dirname + '/prelude.js', 'utf8');
 
 async function run(code) {
+  if (process.env.QUICKJS_ASSET) return require("./prelude_quickjs_audit.cjs")(source, code);
   const calls = [];
   const context = vm.createContext({
     __pigo_host: (...args) => {
