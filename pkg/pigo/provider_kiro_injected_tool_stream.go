@@ -40,7 +40,37 @@ func runKiroInjectedCompletedStream(ctx context.Context, conversation Context, s
 }
 
 func runKiroInjectedCompletedAttempt(ctx context.Context, conversation Context, schemas map[string]json.RawMessage, config kiroInjectedToolStreamConfig, kind kiroCredentialKind, token string, roundTrip func(*http.Request) (*http.Response, error), allowText bool) (*AssistantMessageEventStream, error) {
-	if ctx == nil || ctx.Err() != nil || roundTrip == nil || !kiroHTTPResponseLimitsValid(config.Response) || !kiroTextModelIdentityValid(config.Model) || config.Model.ID != config.Request.Identity.ModelID || config.MaxBytes < 2 || config.MaxBytes > 1<<20 || config.MaxTools < 1 || config.MaxTools > 128 || config.MaxEventBytes < 1 || config.MaxEventBytes > assistantMessageEventByteBudget || (!allowText && len(conversation.Tools) < 1) || len(conversation.Tools) > 128 {
+	names, err := validateKiroCompletedAttempt(ctx, conversation, config, allowText)
+	if err != nil {
+		return nil, err
+	}
+	if roundTrip == nil {
+		return nil, errKiroInjectedToolStream
+	}
+	request, err := newKiroOfflineRequestWithToken(ctx, conversation, schemas, config.Request, kind, token)
+	if err != nil {
+		return nil, errKiroInjectedToolStream
+	}
+	return executeKiroCompletedRequest(ctx, request, config, names, roundTrip, allowText)
+}
+
+// runKiroScopedCompletedStream takes a fresh, explicitly injected credential for
+// this single buffered attempt. Structural validation and serialization happen
+// before source invocation. No token is retained, refreshed or discovered.
+func runKiroScopedCompletedStream(ctx context.Context, conversation Context, schemas map[string]json.RawMessage, config kiroInjectedToolStreamConfig, source kiroCredentialSource, roundTrip func(*http.Request) (*http.Response, error)) (*AssistantMessageEventStream, error) {
+	names, err := validateKiroCompletedAttempt(ctx, conversation, config, true)
+	if err != nil || source == nil || roundTrip == nil {
+		return nil, errKiroInjectedToolStream
+	}
+	request, err := newKiroOfflineRequestWithCredentialSource(ctx, conversation, schemas, config.Request, source)
+	if err != nil {
+		return nil, errKiroInjectedToolStream
+	}
+	return executeKiroCompletedRequest(ctx, request, config, names, roundTrip, true)
+}
+
+func validateKiroCompletedAttempt(ctx context.Context, conversation Context, config kiroInjectedToolStreamConfig, allowText bool) ([]string, error) {
+	if ctx == nil || ctx.Err() != nil || !kiroHTTPResponseLimitsValid(config.Response) || !kiroTextModelIdentityValid(config.Model) || config.Model.ID != config.Request.Identity.ModelID || config.MaxBytes < 2 || config.MaxBytes > 1<<20 || config.MaxTools < 1 || config.MaxTools > 128 || config.MaxEventBytes < 1 || config.MaxEventBytes > assistantMessageEventByteBudget || (!allowText && len(conversation.Tools) < 1) || len(conversation.Tools) > 128 {
 		return nil, errKiroInjectedToolStream
 	}
 	// Reject an obviously impossible budget before any potentially billable call.
@@ -60,10 +90,10 @@ func runKiroInjectedCompletedAttempt(ctx context.Context, conversation Context, 
 	if len(names) > 0 && kiroAllowedToolNames(names) == nil {
 		return nil, errKiroInjectedToolStream
 	}
-	request, err := newKiroOfflineRequestWithToken(ctx, conversation, schemas, config.Request, kind, token)
-	if err != nil {
-		return nil, errKiroInjectedToolStream
-	}
+	return names, nil
+}
+
+func executeKiroCompletedRequest(ctx context.Context, request *http.Request, config kiroInjectedToolStreamConfig, names []string, roundTrip func(*http.Request) (*http.Response, error), allowText bool) (*AssistantMessageEventStream, error) {
 	response, err := executeKiroPreparedAttempt(request, roundTrip, config.Response, nil)
 	if err != nil || ctx.Err() != nil {
 		return nil, errKiroInjectedToolStream
