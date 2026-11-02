@@ -42,3 +42,10 @@ pigo Diagnostics into agent Message metadata. This change guarantees preservatio
 at the pigo API/queue boundary, NOT durable end-to-end agent/session retention.
 A separate explicit bridge is needed. No live service/account test, CI, merge,
 deployment, token/cost estimate or execution authorization is implied.
+
+## Later agent bridge
+
+The original agent-adapter gap above is superseded by
+`kiro-agent-context-observations.md`: a strict bounded whitelist now preserves
+only context observation values in agent metadata. Other pigo diagnostics remain
+unmapped; there is no general error/raw-object persistence.

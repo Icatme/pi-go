@@ -43,6 +43,8 @@ func RegisterKiroSessionAgentFixtureForTest(source, tenant string, exchange func
 				}
 			case "text":
 				wire = kiroOfflineJoin(kiroOfflineEvent("assistantResponseEvent", `{"content":"registered fixture complete"}`), kiroOfflineEvent("metadataEvent", `{"stopReason":"END_TURN"}`))
+			case "context-text":
+				wire = kiroOfflineJoin(kiroOfflineEvent("contextUsageEvent", `{"contextUsagePercentage":42.5}`), kiroOfflineEvent("assistantResponseEvent", `{"content":"registered fixture complete"}`), kiroOfflineEvent("metadataEvent", `{"stopReason":"END_TURN"}`))
 			default:
 				return nil, fmt.Errorf("unsupported local fixture scenario")
 			}

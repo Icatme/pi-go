@@ -390,6 +390,7 @@ func convertPigoAssistantMessage(message pigo.AssistantMessage) Message {
 		ThinkingLevel: ThinkingLevel(message.ThinkingLevel),
 		StopReason:    fromPigoStopReason(message.StopReason),
 		ErrorMessage:  message.ErrorMessage,
+		Metadata:      pigoContextObservationMetadata(message),
 	}
 }
 

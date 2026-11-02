@@ -216,3 +216,59 @@ func TestKiroRegisteredAgentDefaultAutoTransportIsRejected(t *testing.T) {
 		t.Fatal("auto was silently accepted")
 	}
 }
+
+func TestKiroRegisteredAgentContextMetadataPersistsButNeverReplays(t *testing.T) {
+	source := fmt.Sprintf("public-context-%d", kiroAgentFixtureSequence.Add(1))
+	calls := 0
+	provider, cleanup, err := pigo.RegisterKiroSessionAgentFixtureForTest(source, "local-test-tenant", func(_ context.Context, body []byte) (string, error) {
+		calls++
+		if bytes.Contains(body, []byte("kiro_context_usage")) || bytes.Contains(body, []byte("percentage")) {
+			t.Error("observation replayed into model request")
+		}
+		return "context-text", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	definition := agent.AgentDefinition{Transport: agent.TransportSSE, DefaultModel: agent.ModelRef{Provider: string(provider), Model: "fixture-model"}}
+	snapshot, err := agent.NewEngine().Run(context.Background(), definition, &agent.AgentSnapshot{SessionID: "local-session"}, []agent.Message{agent.NewUserTextMessage("hello")}, nil)
+	if err != nil || snapshot.Error != "" {
+		t.Fatal("initial context observation", err)
+	}
+	check := func(snapshot *agent.AgentSnapshot, want int) {
+		count := 0
+		for _, message := range snapshot.Messages {
+			if message.Role != agent.RoleAssistant {
+				continue
+			}
+			observations, ok := message.Metadata["kiro_context_usage"].([]any)
+			if !ok || len(observations) != 1 {
+				t.Fatal("missing durable observation")
+			}
+			observation := observations[0].(map[string]any)
+			if observation["percentage"] != 42.5 || observation["source_event"] != "contextUsageEvent" {
+				t.Fatal("observation changed")
+			}
+			count++
+		}
+		if count != want {
+			t.Fatal("assistant observation count", count)
+		}
+	}
+	check(snapshot, 1)
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored agent.AgentSnapshot
+	if json.Unmarshal(encoded, &restored) != nil {
+		t.Fatal("restore")
+	}
+	check(&restored, 1)
+	next, err := agent.NewEngine().Run(context.Background(), definition, &restored, []agent.Message{agent.NewUserTextMessage("again")}, nil)
+	if err != nil || next.Error != "" || calls != 2 {
+		t.Fatal("restored continuation", err, calls)
+	}
+	check(next, 2)
+}
