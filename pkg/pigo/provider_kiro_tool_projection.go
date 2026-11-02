@@ -56,9 +56,9 @@ type kiroToolProjection struct {
 // projectKiroToolConversation builds only inert conversation DTOs, not a full
 // sendable request. Origin/profile/auth/transport are intentionally absent.
 // Schemas must be explicitly supplied as raw JSON; Tool.Parameters is never
-// marshaled. RawArguments must be present and Arguments nil, so the caller must
-// explicitly select original wire evidence instead of silently overriding a
-// possibly edited arguments map. All returned raw JSON is copied.
+// marshaled. RawArguments must be present; a nonnil Arguments map must pass
+// bounded dual-evidence equality rather than silently overriding edits or
+// precision loss. Original raw JSON is replayed and copied.
 func projectKiroToolConversation(ctx Context, modelID string, schemas map[string]json.RawMessage, maxMessages, maxCalls, maxBytes int) (kiroToolProjection, error) {
 	bad := kiroToolProjection{}
 	if ctx.SystemPrompt != "" || modelID == "" || len(modelID) > 256 || !utf8.ValidString(modelID) || maxBytes < 2 || len(ctx.Messages) == 0 || len(ctx.Tools) == 0 || len(schemas) != len(ctx.Tools) {
@@ -160,10 +160,10 @@ func projectKiroToolConversation(ctx Context, modelID string, schemas map[string
 					}
 					text.WriteString(b.Text)
 				case ToolCall:
-					if b.Arguments != nil || b.RawArguments == "" || !consume(b.ID) || !consume(b.Name) || !consume(b.RawArguments) {
+					if b.RawArguments == "" || !consume(b.ID) || !consume(b.Name) || !consume(b.RawArguments) {
 						return bad, errKiroToolProjection
 					}
-					if _, err := decodeKiroJSONObject([]byte(b.RawArguments), maxBytes); err != nil {
+					if !kiroToolArgumentEvidenceMatches(b.RawArguments, b.Arguments, maxBytes) {
 						return bad, errKiroToolProjection
 					}
 					assistant.Calls = append(assistant.Calls, kiroToolWireCall{Name: b.Name, ID: b.ID, Input: json.RawMessage(b.RawArguments)})

@@ -31,12 +31,13 @@ name. Tool.Parameters is deliberately not marshaled; arbitrary caller-owned
 JSON marshaler/validator code is never invoked. This is explicit schema input,
 not automatic conversion or a promise that the schema is valid JSON Schema.
 
-Each tool call requires nonempty RawArguments **and Arguments==nil**. If the host
-has both a parsed map and raw evidence (normal provider output often does), it
-must explicitly decide which authoritative representation to project outside
-this function. The function will not silently override potentially edited maps,
-round large numbers through float64 or call arbitrary nested marshalers. Raw
-JSON is strictly checked for object shape/duplicates/Unicode and copied.
+Each tool call requires nonempty RawArguments. Arguments may be nil (raw-only)
+or a supported plain JSON tree that passes strict dual-evidence equality. Raw
+JSON remains the wire source, including original numeric spelling. Parsed maps
+are never re-serialized to reconstruct original evidence. Edits, float64 precision
+loss, unsupported types, duplicate keys and invalid Unicode reject the whole
+projection. See [dual tool evidence](kiro-tool-argument-evidence.md) for numeric
+comparison/traversal limits and the supported parsed-value subset.
 
 `ToolCall.RawArguments` is ephemeral wire evidence marked `json:"-"` in pi-go;
 it is not included in persisted conversation history. Restored tool-call history
@@ -75,7 +76,7 @@ isolation does not make concurrent mutation of the inputs safe.
   #53's separate text-only opt-in policy is not silently imported here.
 - Images, reasoning/signatures, output schemas, constrained
   sampling, hosted tools/executions and namespace/provider ID repair.
-- Missing raw argument evidence, nonnil parsed argument maps, unknown/duplicate
+- Missing raw argument evidence, conflicting/unsupported parsed maps, unknown/duplicate
   schemas, interrupted tool groups or non-alternating projected turns.
 
 Caller message/call budgets and #55 catalog/block limits apply. Aggregate text,
