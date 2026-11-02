@@ -85,9 +85,18 @@ func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantM
 	if err := ValidateResponseFormat(model, options.ResponseFormat); err != nil {
 		return streamAPIUnavailable(model, err.Error())
 	}
-	apiModule := resolveAPIModule(model.API)
+	record := resolveAPIRecord(model.API)
+	var apiModule *APIModule
+	if record != nil {
+		apiModule = &record.module
+	}
 	if providerModule := resolveProviderModule(model.Provider); providerModule != nil && providerModule.NormalizeOptions != nil {
 		options = providerModule.NormalizeOptions(model, options)
+	}
+	if apiModule != nil && record.validation.ValidateOptions != nil {
+		if err := record.validation.ValidateOptions(model, options); err != nil {
+			return streamAPIUnavailable(model, "api options rejected")
+		}
 	}
 	options.HTTPClient = providerHTTPClient(options.HTTPClient)
 	if apiModule != nil && apiModule.Stream != nil {
@@ -108,8 +117,17 @@ func StreamSimple(model Model, ctx Context, options SimpleStreamOptions) *Assist
 	if err := ValidateResponseFormat(model, options.ResponseFormat); err != nil {
 		return streamAPIUnavailable(model, err.Error())
 	}
+	record := resolveAPIRecord(model.API)
+	var apiModule *APIModule
+	if record != nil {
+		apiModule = &record.module
+	}
+	if apiModule != nil && record.validation.ValidateSimpleOptions != nil {
+		if err := record.validation.ValidateSimpleOptions(model, options); err != nil {
+			return streamAPIUnavailable(model, "api options rejected")
+		}
+	}
 	options.HTTPClient = providerHTTPClient(options.HTTPClient)
-	apiModule := resolveAPIModule(model.API)
 	if apiModule != nil && apiModule.StreamSimple != nil {
 		return managedAssistantStream(options.RequestContext, func(requestCtx context.Context) *AssistantMessageEventStream {
 			options.RequestContext = requestCtx
