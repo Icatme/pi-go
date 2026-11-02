@@ -93,14 +93,34 @@ The merged Codemode prelude's offline contract suite passed 30/30 in Node VM
 and 30/30 with the repository-pinned QuickJS WASM asset. These runs exercise
 synthetic host callbacks, not the Go/wazero bridge, real tools or Kiro service.
 
-A fresh Linux Go 1.26.2 offline attempt at the explicit compatibility probe and
-root race suite was blocked during dependency setup: the available cache lacks,
-among others, jsonschema-go v0.4.3 and openai-go/v3 v3.35.0. GOPROXY/GOSUMDB were
-off and no dependency download was performed. Two dependency-free packages ran,
-but this is **not** a passing root suite or compatibility probe. Examples and vet
-were not rerun. The next execution step requires an already complete authorized
-cache or separate download permission; it is not a reason to trigger CI or claim
-the historical Windows release validation was rerun here.
+The initial Linux Go 1.26.2 offline attempt was blocked at dependency setup.
+After explicit authorization, the root and examples modules' locked dependencies
+were downloaded through proxy.golang.org, without changing go.mod/go.sum. Tests
+then ran with GOPROXY/GOSUMDB off, live flags disabled and GOTOOLCHAIN=local:
+
+- Explicit `agent/testdata/compat_toolcall` probe passed (0.005s).
+- Root `go test -mod=readonly -count=1 -race ./...` and `go vet -mod=readonly ./...`
+  passed (pigo 41.280s, agent 3.948s, codemode 30.425s).
+- Separate examples module race and vet passed (mcp-managed 21.122s).
+- `go mod verify` passed in both modules. No new CI run was requested.
+
+These are fresh Linux checks, not a rerun of the historical Windows matrix or
+real-service validation. This docs-only follow-up changes no production code.
+
+### Bounded downstream probe
+
+The existing ai-relay source snapshot was checked against its current
+`main@e55591b70b53485fe02764727264382a73796e84`: all 220 tracked file blobs
+matched. A temporary modfile replaced only pi-go with the merged source above;
+the consumer's own go.mod remains pinned to v0.17.3 and was not edited.
+
+With its required existing Go 1.26.10 toolchain and downloads/live/DSN disabled,
+focused provider/pigo and relay race tests passed (22.705s and 2.267s), as did
+focused vet. A broader
+attempt also passed ten available packages, but the complete consumer suite was
+blocked at setup by uncached jwt/v5 v5.3.1 and pgx/v5 v5.11.0. This does not prove all
+downstream packages build, validate database behavior or perform an upgrade.
+No other project's dependencies were downloaded for this probe.
 
 See [refresh audit](kiro-refresh-audit.md),
 [caller-owned runtime handoff](kiro-refresh-runtime-handoff.md),
