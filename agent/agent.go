@@ -290,15 +290,26 @@ func (a *Agent) State() AgentState {
 }
 
 // ReplaceMessages replaces the current message history.
+// During an active run it makes no change. Use TryReplaceMessages to observe rejection.
 func (a *Agent) ReplaceMessages(messages []Message) {
+	_ = a.TryReplaceMessages(messages)
+}
+
+// TryReplaceMessages replaces the current message history, or returns ErrAlreadyRunning
+// without changing state when a run is active.
+func (a *Agent) TryReplaceMessages(messages []Message) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.running {
+		return ErrAlreadyRunning
+	}
 	normalized := normalizeMessages(messages)
 	a.snapshot.Messages = normalized
 	a.snapshot.SystemPrompt = GetCurrentSystemPrompt(normalized)
 	a.state.SystemPrompt = a.snapshot.SystemPrompt
 	a.state.Messages = cloneMessages(normalized)
 	a.state.StreamMessage = nil
+	return nil
 }
 
 // AppendMessage appends one message to the current history.
@@ -366,13 +377,24 @@ func (a *Agent) SetTools(tools []ToolDefinition) {
 }
 
 // SetSessionID updates the session identifier used by future model requests.
+// During an active run it makes no change. Use TrySetSessionID to observe rejection.
 func (a *Agent) SetSessionID(sessionID string) {
+	_ = a.TrySetSessionID(sessionID)
+}
+
+// TrySetSessionID updates the session identifier used by future model requests, or returns ErrAlreadyRunning
+// without changing state when a run is active.
+func (a *Agent) TrySetSessionID(sessionID string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.running {
+		return ErrAlreadyRunning
+	}
 	a.snapshot.SessionID = sessionID
 	a.definition.SessionID = sessionID
 	a.activeDefinition.SessionID = sessionID
 	a.state.SessionID = sessionID
+	return nil
 }
 
 // SetTransport updates the preferred model transport.
@@ -420,9 +442,19 @@ func (a *Agent) SetAfterToolCall(hook AfterToolCallHook) {
 }
 
 // ClearMessages removes all conversation history.
+// During an active run it makes no change. Use TryClearMessages to observe rejection.
 func (a *Agent) ClearMessages() {
+	_ = a.TryClearMessages()
+}
+
+// TryClearMessages removes all conversation history, or returns ErrAlreadyRunning
+// without changing state when a run is active.
+func (a *Agent) TryClearMessages() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.running {
+		return ErrAlreadyRunning
+	}
 	a.snapshot.Messages = nil
 	a.snapshot.SystemPrompt = ""
 	a.state.SystemPrompt = ""
@@ -430,6 +462,7 @@ func (a *Agent) ClearMessages() {
 	a.state.StreamMessage = nil
 	a.snapshot.Error = ""
 	a.state.Error = ""
+	return nil
 }
 
 // Reset clears conversation state and queues while retaining the replayed system baseline.
