@@ -893,6 +893,7 @@ func (e *Engine) generateAssistant(ctx context.Context, definition AgentDefiniti
 	started := false
 	var lastPartial Message
 	var eventErr error
+	errorEventSeen := false
 	events := stream.Events()
 eventLoop:
 	for {
@@ -925,11 +926,12 @@ eventLoop:
 		if event.Type == AssistantEventStart {
 			if !started {
 				started = true
-				emitEvent(emit, AgentEvent{Type: EventMessageStart, Message: &partial})
+				emitEvent(emit, AgentEvent{Type: EventMessageStart, ModelResponse: true, Message: &partial})
 			}
 			continue
 		}
 		if event.Type == AssistantEventError {
+			errorEventSeen = true
 			// A stream may carry its original cause only on the terminal event,
 			// while Wait returns the provider's error message with a nil Go error.
 			eventErr = errors.Join(eventErr, event.Err)
@@ -940,23 +942,30 @@ eventLoop:
 		}
 		if !started {
 			started = true
-			emitEvent(emit, AgentEvent{Type: EventMessageStart, Message: &partial})
+			emitEvent(emit, AgentEvent{Type: EventMessageStart, ModelResponse: true, Message: &partial})
 		}
 		emitEvent(emit, AgentEvent{
-			Type:         EventMessageUpdate,
-			Message:      &partial,
-			Delta:        event.Delta,
-			UpdateType:   event.Type,
-			ContentIndex: event.ContentIndex,
-			Reason:       event.Reason,
-			ToolCall:     cloneToolCallPtr(event.ToolCall),
-			Err:          event.Err,
+			Type:          EventMessageUpdate,
+			ModelResponse: true,
+			Message:       &partial,
+			Delta:         event.Delta,
+			UpdateType:    event.Type,
+			ContentIndex:  event.ContentIndex,
+			Reason:        event.Reason,
+			ToolCall:      cloneToolCallPtr(event.ToolCall),
+			Err:           event.Err,
 		})
 	}
 
 	closeErr := stream.Close()
 	finalMessage, waitErr := stream.Wait()
 	streamErr := errors.Join(eventErr, waitErr, closeErr)
+	// An error terminal event is failure evidence even without a Go cause.
+	// Preserve consistent provider error/abort messages without inventing a
+	// new cause, but never allow a contradictory successful Wait to revive it.
+	if errorEventSeen && streamErr == nil && !isErrorAssistantMessage(finalMessage) {
+		streamErr = errors.New("agent: model stream reported terminal error before successful final message")
+	}
 	if finalMessage.Role != "" && finalMessage.Role != RoleAssistant {
 		streamErr = errors.Join(streamErr, fmt.Errorf("agent: model stream final message has invalid role %q; expected assistant", finalMessage.Role))
 		// Reject the malformed envelope, rather than granting model output a
@@ -1003,9 +1012,9 @@ eventLoop:
 	snapshot.Messages = append(snapshot.Messages, finalMessage)
 
 	if !started {
-		emitEvent(emit, AgentEvent{Type: EventMessageStart, Message: &finalMessage})
+		emitEvent(emit, AgentEvent{Type: EventMessageStart, ModelResponse: true, Message: &finalMessage})
 	}
-	emitEvent(emit, AgentEvent{Type: EventMessageEnd, Message: &finalMessage, Err: terminalErr})
+	emitEvent(emit, AgentEvent{Type: EventMessageEnd, ModelResponse: true, Message: &finalMessage, Err: terminalErr})
 	return finalMessage, tools, nil
 }
 
@@ -1508,6 +1517,14 @@ func cloneToolCalls(calls []ToolCall) []ToolCall {
 	return cloned
 }
 
+// Tool arguments distinguish an absent object from an explicitly empty edit.
+func cloneToolArgumentMap(arguments map[string]any) map[string]any {
+	if arguments != nil && len(arguments) == 0 {
+		return map[string]any{}
+	}
+	return cloneStringAnyMap(arguments)
+}
+
 func cloneToolCall(call ToolCall) ToolCall {
 	var arguments []byte
 	if len(call.Arguments) > 0 {
@@ -1519,7 +1536,7 @@ func cloneToolCall(call ToolCall) ToolCall {
 		Name:             call.Name,
 		Namespace:        call.Namespace,
 		Arguments:        arguments,
-		ParsedArgs:       cloneStringAnyMap(call.ParsedArgs),
+		ParsedArgs:       cloneToolArgumentMap(call.ParsedArgs),
 		ThoughtSignature: call.ThoughtSignature,
 	}
 }
@@ -1851,7 +1868,7 @@ func parseToolArguments(tool ToolDefinition, call ToolCall) (any, error) {
 		if err := checkArgumentStrings(call.ParsedArgs); err != nil {
 			return nil, err
 		}
-		return cloneStringAnyMap(call.ParsedArgs), nil
+		return cloneToolArgumentMap(call.ParsedArgs), nil
 	}
 	if len(call.Arguments) == 0 {
 		return map[string]any{}, nil

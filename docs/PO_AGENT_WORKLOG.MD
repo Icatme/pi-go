@@ -2326,3 +2326,342 @@
   and serialized conversation formats keep their existing representation.
 - Added local transport regressions for large integers and duplicate keys in
   terminal arguments, including a Responses call with no argument delta.
+
+## 2026-11-02 — Kiro watchlist and tested development integration
+
+- Carry #50's explicit upstream/plugin watchlist into the Kiro development stack,
+  preserving its source commit as an additional remote merge parent. Existing
+  instructions and other plugin baselines are unchanged; Kiro implementation
+  wording now points to docs/kiro-followup-status.md instead of saying absent.
+- Read-only upstream main remains dd93f2e (package version 0.12.3), dated
+  2026-10-29 22:21:36 UTC. No new main delta observed; tag-list API unavailable.
+- Latest code at #111 includes independent synthetic Go/race tests of scoped
+  credentials, explicit buffered/live-text registration and internal mixed
+  text/tool worker. Final code full-repository race and vet passed with Go1.26.2;
+  this documentation integration leaves code blobs unchanged.
+- Draft branches only: no master merge, release/deployment, automatic login,
+  real credential/service/tool calls or CI dispatch. Community protocol evidence
+  and fake tests do not prove service authorization, account/model availability,
+  actual billing or complete upstream compatibility. See status document for
+  exact tests, source links and remaining public mixed-Agent integration.
+
+## 2026-11-02 — Explicit incremental text/tools registration
+
+- Upstream baseline remains pi-provider-kiro dd93f2e / package0.12.3 (main checked
+  at 05:09 UTC; no new main delta). Added a distinct public incremental config,
+  options and API registration; existing buffered/live-text modes retain behavior.
+- Uses live provisional text plus completed-only tool lifecycle. Actual no-tools
+  and tool-enabled fake Agent tests now cover Auto/session opt-in, permission deny,
+  cancellation upon ToolCallEnd, truncation/late Close, exact9007199254740993 raw
+  argument replay and execution. All tools/services in tests are local fakes.
+- Official Go1.26.2, cached deps, live flags disabled: focused registration/Agent
+  race repeated three times passed1.172s; final code full-repository race passed
+  (pigo30.590s), go vet, gofmt and diff checks passed. Parent review was independent
+  static inspection, not a second execution. See incremental registration doc.
+- This remains a draft development branch, not master/release/deployment. No
+  real credentials, service calls, CI dispatch or automatic login/model setup.
+  Preview text cannot be revoked; a tool lifecycle event is never authorization
+  without complete successful result and current schema/permission/context checks.
+
+## 2026-11-02 — Offline refresh response semantics
+
+- Compared pinned pi-provider-kiro dd93f2e src/oauth.ts and test/oauth.test.ts.
+  Independently implemented supplied-response parsing for IDC, desktop and
+  external-IDP families, keeping exact scope and actual expiry separate from
+  refresh-after. Unknown/new fields and missing expiry deliberately reject.
+- No credentials discovered, sources replaced, endpoints called, timers started,
+  persistent access created, CLI/IDE data read/written or real refresh performed.
+  Only omitted desktop/IdP refresh fields retain caller's old token; null/empty
+  reject. IDC needs rotation evidence. Secrets are excluded from JSON/fmt output.
+- Official Go1.26.2 offline/cache-only: focused refresh race x3 passed1.052s;
+  full repository race passed (pigo30.731s), go vet/gofmt/diff checks passed.
+  Parent review was static, not independently executed. Synthetic tests cover
+  expiry bounds/overflow, scope/family conflict, unknown fields and redaction.
+- Still a draft-only internal parser, not automatic OAuth/login or proof of
+  endpoint/account/billing compatibility. No CI or real service calls.
+
+## 2026-11-02 — Scoped offline catalog selection
+
+- Kept pinned management/models baseline dd93f2e. Bound parsed catalog evidence
+  to caller-asserted profile/region and observation time; selection requires
+  explicit current time/maxAge and alias versus exact-service-ID namespace.
+- No fetch/cache/default model/registry/entitlement claim. A concrete alias can
+  equal another record's service ID despite unique aliases, so lookup never
+  guesses namespace. Returned limits/schema/metadata are detached; no properties
+  or prices inferred from missing fields. Catalog JSON/fmt hides private state.
+- Official Go1.26.2 offline/cache-only: final focused race x3 passed1.080s;
+  full-repository race passed (pigo30.947s), vet/gofmt/diff checks passed. Four
+  original tests cover scope/freshness boundaries, explicit namespace ambiguity,
+  nil limits, 16 concurrent mutable return copies and invalid observations.
+  Parent review was static only. No live credentials/service/CI or deployment.
+
+## 2026-11-02 — Offline scoped management request assembly
+
+- Compared dd93f2e management.ts requestManagement/ListAvailableModels wire shape.
+  Added a construct-only GET for explicit region/profile/origin/UA, safe query
+  escaping and one explicit scoped credential callback. No default network,
+  profile/region discovery, token inference, retries or registry changes.
+- Existing User-Agent validation is extracted unchanged for both request paths.
+  Management requests intentionally omit POST target/content and runtime headers.
+  Returned headers/URL remain sensitive and must not be logged or redirected.
+- Go1.26.2 cached dependencies/live flags disabled: focused catalog/client-header
+  race x3 passed1.041s; full repository race passed (pigo31.546s), vet/gofmt/diff
+  checks passed. Three original tests exercise all auth families, malformed
+  inputs, scope/cancellation/error and callback option-mutation isolation.
+  Parent review was static only. No real credential/service/CI/merge/deployment.
+
+## 2026-11-02 — Injected catalog response pipeline
+
+- Joined explicit scoped management request to one injected executor and bounded
+  JSON response handling, then Close-validated explicit clock and scoped catalog.
+  No default network, profile probes, retry/cache/automatic model registration.
+- HTTP200/MIME/UTF8/encoding/length guards, maxBytes+1 EOF probe, sticky reader
+  errors and no-progress limit apply. Response+transport error still closes body;
+  Close failure/cancellation discard catalog. No raw errors or tokens logged.
+- Go1.26.2 offline/cache-only: final focused race x3 passed1.042s; final full
+  repository race passed (pigo31.108s), vet/gofmt/diff checks passed. Four original
+  tests cover blocked Close ordering, status/header/length/read failures, exact
+  budget, final bytes+error/wrappedEOF, nil response/body and clock rejection.
+  Parent review was static, not a second execution. All I/O is injected fake.
+- Scope/timestamp are assertions and executor must cooperate with cancellation;
+  no real service/account/billing validation, CI, merge or deployment.
+
+## 2026-11-02 — Explicit public catalog observations (draft, stacked on #117)
+
+- Baseline: pi-provider-kiro v0.12.3 dd93f2e; independently authored public-facing
+  cases extend management/models scenario coverage, without copying upstream code.
+- Added explicit FetchKiroModelCatalog config with required injected scope/auth/
+  executor/clock/limits; opaque immutable catalog and observation values; Models
+  and explicit alias/service Select require exact scope and freshness. Detached
+  raw getters preserve metadata/numeric evidence, absent limits stay absent.
+- Shared prior scoped guard/clone semantics; no automatic registration/cache/
+  login/refresh/default model/network. Scope/time are caller assertions, not
+  entitlement. Runtime service-ID routing and real service acceptance remain open.
+- Three external-package Go tests cover no registration, callback lifecycle and
+  redaction, Close-before-clock, nil/zero values, deep-copy/concurrent getters,
+  scope/age rejection, exact large integers, missing limits and opaque formatting.
+- Actual validation: official Go 1.26.2 cloud, cached dependencies, live flags off;
+  final focused public/scoped race x3 passed (1.047s); final full repository
+  go test -race ./... passed (pigo 31.687s; other packages passed/cached);
+  go vet ./..., gofmt and git diff --check passed. Parent independent static
+  review found no definite blocker; it did not independently execute tests.
+- No CI dispatch, real account/network/tool execution, master merge or deployment.
+  See kiro-public-catalog-observation.md for public API ownership/trust boundaries.
+
+## 2026-11-02 — Explicit catalog service-ID to runtime regression (draft)
+
+- Stacked on #118; no production implementation change. Independently authored
+  scenario from the upstream dd93f2e distinction between host alias and kiroModelId.
+- Synthetic catalog intentionally has overlapping alias/service namespaces.
+  Public Select(ServiceID) feeds caller-owned Model.ID; public registration and
+  StreamSimple preserve exact ID in current/history wire paths and final result.
+  Catalog/runtime are each invoked once; registration invokes neither callback.
+- Documentation now explains manual ServiceID mapping and explicitly excludes
+  automatic alias resolution, per-dispatch catalog freshness, capability defaults,
+  entitlement, model registration and real endpoint compatibility guarantees.
+- Actual official cloud Go 1.26.2/cached dependencies/live flags disabled:
+  final catalog-runtime/public focused race x3 passed 1.042s; full repository
+  go test -race ./... passed (pigo30.407s, others passed/cached); go vet ./...,
+  gofmt and diff check passed. Parent independent static review found no definite
+  blocker; no independent execution by reviewer. No real service or CI dispatch.
+
+## 2026-11-02 — IDC-only offline refresh request (draft)
+
+- Baseline community oauth.ts dd93f2e442–467 plus official AWS CreateToken docs
+  read on 2026-11-02. Independently implemented standard-partition regional OIDC
+  JSON POST with explicit clientId/clientSecret/refreshToken/refresh_token grant.
+- Required explicit UA, context and encoded-byte budget; no arbitrary endpoint,
+  China/GovCloud/isolated suffix guessing, default client, executor, credential
+  source, token import, refresh execution or persistence. Region syntax does not
+  prove endpoint availability/account authorization. This is an internal helper.
+- Input options JSON/fmt hide secrets; fixed errors; request body intentionally
+  contains secrets and must not be logged/persisted/redirected. GetBody absent
+  removes only convenience replay, not a transport-enforced retry guarantee.
+- Three original tests cover exact fields/URL/headers, escaping and exact byte
+  budget, secret-free diagnostics, invalid inputs/partitions and cancellation.
+- Official cloud Go1.26.2, cached dependencies/live flags off: focused IDC race x3
+  passed1.032s; full repository race passed(pigo31.276s, other packages passed/
+  cached); vet/gofmt/diff passed. Independent parent static review found no definite
+  blocker, not independently run. No CI/master merge/deploy/live service calls.
+- Follow-up: request and prior response parser remain disconnected; any sender,
+  source mutation, client registration or actual login requires separate review.
+
+## 2026-11-02 — Injected IDC attempt, fake-only (draft)
+
+- Stacked on #120. Joins strict request and response components with exactly one
+  explicitly injected executor call; no default client, redirect/retry, login,
+  client registration, source mutation, credential persistence or live call.
+- Validates scope-region and policy before executor; reuses existing bounded JSON
+  transport reader for status/MIME/encoding/length/EOF/Close. Clock/parser run only
+  after successful Close; all failures return zero secret result and fixed error.
+- Four original test functions cover input snapshot mutation, exact request,
+  close-gated rotation/expiry, blocked Close withholding result, response+error,
+  302/401/header/length/budget/read/close/cancel/JSON/missing-rotation/clock failures
+  and preflight preventing executor. Rejected response bodies are not read.
+- Sources retained: official AWS CreateToken and community dd93f2e. Required IDC
+  rotation remains a documented conservative difference from optional official
+  refreshToken. Callback behavior is trusted, cooperative; plaintext memory is
+  not zeroized and bodies must never be logged/redirected. No account proof.
+- Actual official cloud Go1.26.2/cached deps/live disabled: final focused race x3
+  passed1.035s; full repository race passed(pigo30.669s, others passed/cached);
+  vet/gofmt/diff passed. Parent independent static review found no definite
+  blocker, not independently executed. No CI/master merge/deployment.
+
+## 2026-11-02 — Explicit caller-owned public IDC refresh (draft)
+
+- Stacked on #121. Public RefreshKiroIDC requires explicit scope/client inputs,
+  request/response budgets, lifetime/skew, clock and executor. Opaque result getters
+  return copied in-memory credentials/rotation/expiry only. No defaults, source
+  updates, persistence, login, registration, retries or live service calls.
+- Public typed error exposes ExecutorInvoked only: false means this helper did
+  not invoke it; true means server-side rotation outcome may be unknown even if
+  no/partial/all body was read or response/Close/parse/clock failed. Not a sent flag
+  or retry-safe classification. No raw error retained, no old-token validity claim.
+- Three original external-package tests cover success/getters/ownership, opaque
+  fmt/JSON (callback config deliberately not JSON-serializable), errors.As/nil/zero values,
+  preflight no dispatch, and each indeterminate rotation stage with single call.
+- Final official cloud Go1.26.2/cached dependencies/live flags off: focused public
+  IDC race x3 passed1.038s; final full repository race passed(pigo31.042s, others
+  passed/cached); vet/gofmt/diff passed. Independent parent static review found
+  no definite blocker; it did not independently run tests. No CI/master/deploy.
+- Required response rotation remains a conservative IDC subset. Executor must
+  not redirect/retry/log and must honor cancellation; plaintext is not zeroized.
+  Real endpoint/account/client compatibility remains unverified.
+
+## 2026-11-02 — Confirmed refresh expiry-anchor correction / #122 audit
+
+- A new reproducer FAILED against the prior implementation: fake Close advanced
+  clock by ten minutes and ExpiresAt became06:10 instead of conservative06:00.
+  RFC6749§5.1 lifetime is from response generation, not client Close completion.
+- Fixed only IDC attempt timing: validated clock before executor, second clock
+  after successful Close, reject backward/invalid/end>=expiry; parse anchored to
+  start. The pure parser and exported struct layout remain unchanged. Clock's
+  success-path invocation count changes1→2 and is explicitly documented.
+- Post-dispatch expiry/time failures retain ExecutorInvoked=true (rotation may
+  already have happened); pre-clock invalid/error/cancel are false with0 executor.
+  RefreshAfter may already be due, never extends expiry. Trusted same-clock
+  semantics are required; this is conservative, not actual server timestamp proof.
+- Added Close-delay reproducer and external boundary matrix for prezero/error/
+  year/cancel, ending backward/exact-expired/beyond/within; updated existing
+  callback-count tests. Fixed stale 'no public API' docs and recorded a scoped
+  audit of rotation omission, extension fields, secrets and real-service gaps.
+- Final official cloud Go1.26.2, cached dependencies/live disabled: focused IDC
+  race x3 passed1.055s; full repository race passed(pigo30.711s, others passed/
+  cached); vet/gofmt/diff passed. Independent child confirmed defect and static
+  correction review, no separate test run. No CI/master merge/deploy/live calls.
+
+## 2026-11-02 — Explicit successful IDC omission retention (draft)
+
+- Sources: official AWS CreateToken optional refreshToken and RFC6749§6 optional
+  replacement. Added separate RefreshKiroIDCWithOptions and controlled
+  WithKiroIDCRetainMissingRefreshToken; zero/duplicate option rejects before any
+  callback. Strict old entry and no-option behavior/config layout remain unchanged.
+- Only fully validated successful responses with genuinely absent refreshToken
+  retain the exact request-token snapshot. Explicit null/empty/duplicate/invalid
+  or transport/Close/clock/expiry failures still zero-return. Explicit returned
+  token wins even if identical; RetainedRefreshToken reports provenance only.
+- No source manager/lock/cache/storage/login. Caller must serialize same-generation
+  refresh across processes and fence late results against the actual generation;
+  a failed/unknown attempt never proves old-token validity or retry safety.
+- Three original external test functions compare strict/no-option/opt-in field
+  cases and late failures, no-callback invalid options, and16 independent fake
+  tokens concurrently with no global state. This is not same-token concurrency
+  safety. Independent child static review found no blocker; existing docs updated
+  to distinguish default strict path from new explicit retention option.
+- Actual official cloud Go1.26.2/cached dependencies/live off: focused response/
+  attempt/public/retention race x3 passed1.064s; full repository race passed
+  (pigo30.456s, others passed/cached); vet/gofmt/diff passed. Reviewer did not
+  independently execute. No real account/service/CI/master merge/deployment.
+
+## 2026-11-02 — Offline desktop refresh request subset (draft)
+
+- Pinned community oauth.ts dd93f2e endpoint constant/desktop branch supplies
+  POST prod.<region>.auth.desktop.kiro.dev/refreshToken with JSON refreshToken.
+  This is not official public API guarantee or proof of service-use permission.
+- Independently implemented internal constructor, bounded safe hostname shape,
+  asserted profile scope, explicit UA/token/context/escaped-byte budget. No default
+  desktop impersonation, arbitrary URL, IDC secrets, bearer header, executor,
+  discovery/login/CLI/desktop launch, persistence or real service request.
+- Three original tests cover exact URL/method/headers/one body field, escaped byte
+  budget, redaction, invalid inputs, cancellation and value snapshot ownership.
+  Secret body must not be logged/redirected; GetBody=nil not transport enforcement.
+- Actual official cloud Go1.26.2, cached deps/live off: focused desktop request
+  race x3 passed1.036s; repository race passed(pigo30.714s, others passed/cached);
+  vet/gofmt/diff passed. Independent child static review no blocker, no independent
+  execution. No CI/master merge/deploy. Desktop attempt remains next separate step.
+
+## 2026-11-02 — Single injected desktop refresh attempt (draft)
+
+- Stacked on #125; exact pinned desktop family, no official API guarantee.
+  Connects explicit request to shared bounded JSON/HTTP reader and existing desktop
+  parser; no new network client, login, token discovery/source update/persistence.
+- Preflight/start-clock before executor; one explicit invocation; successful Close
+  before end-clock/parser. Anchors expiry to start, rejects rollback/exact-expiry.
+  Bool means executor invoked, not sent/receipt/retry safety. Every returned failure
+  after invocation is true+zero result, including profile mismatch/Close/time.
+- Returned profile must match asserted scope; absence is not account proof.
+  Rotation absence retains exact prior token under existing desktop semantics;
+  null/empty reject and explicit rotation wins. No same-generation source locking.
+- Three original table-driven tests cover exact body/snapshot/scope/rotation/
+  Close-delay expiry, profile mismatch/null, token null/empty, transport/redirect/
+  headers/length/budget/Close/cancel/clock/expiry failures and preflight no invocation.
+- Official cloud Go1.26.2, cached deps/live off: focused desktop attempt race x3
+  passed1.039s; full repo race passed(pigo30.585s, others passed/cached); vet/gofmt/
+  diff passed. Independent child static review no blocker, not independent run.
+  No real credential/service/desktop/CI/master merge/deploy operation occurred.
+
+## 2026-11-02 — Explicit caller-owned public desktop refresh (draft)
+
+- Stacked on #126; public RefreshKiroDesktop config supplies all scope/token/UA/
+  budget/time/executor inputs. Opaque result and typed ExecutorInvoked error carry
+  no implicit source/cache/login/store. Scope/retention are not identity/validity
+  guarantees. The community endpoint is not an official third-party API promise.
+- Three original external tests cover actual wrapper fake wire, omission/rotation/
+  explicitly returned same token provenance, profile/expiry, secret getters/copies,
+  fmt/JSON/zero/errors.As, no-dispatch and post-dispatch unknown failures and Close.
+- The added same-token test initially had an incorrect expected NEW value and
+  failed; corrected only that test expectation. Production parser correctly
+  returned the explicitly supplied old value with retained=false throughout.
+- Final official cloud Go1.26.2/cached dependencies/live off: focused public
+  desktop race x3 passed1.041s; full repository race passed(pigo30.858s, others
+  passed/cached); vet/gofmt/diff passed. Independent child static review found no
+  blocker, not independently executed. Prior pre-final runs are not final passes.
+- No real service/account/desktop/credentials, CI dispatch, master merge or deploy.
+  Caller controls generation serialization and must prohibit retries/redirects/
+  secret logging; arbitrary callback behavior remains trusted/cooperative.
+
+## 2026-11-02 — Caller-owned refresh/runtime handoff and convergence (test-only)
+
+- Stacked on #127; no production change. Both public IDC/desktop refresh APIs feed
+  a caller-authored expiry-check Credentials callback into public registration/
+  StreamSimple. Synthetic frames/fixture helpers only support data construction.
+- Six scenarios assert access only in Authorization, no access in JSON or other
+  headers/URL, no refresh/client secrets in runtime URL/body/headers; wrong scope
+  and exact expiry suppress runtime. Valid-then-expired second request does not
+  renew implicitly. One refresh only; registration invokes no source or executor.
+- Independent child review found a coverage wording gap, not a production leak:
+  added explicit non-Authorization access-header/URL assertions and corrected the
+  helper description before final tests. No concurrency blocker found.
+- Final official cloud Go1.26.2/cached deps/live off: focused handoff race x3
+  passed1.041s; final repository race passed(pigo30.588s, others passed/cached);
+  vet/gofmt/diff passed. Independent review was static, not separately run.
+- Read-only upstream main rechecked06:43UTC: stilldd93f2e/v0.12.3 committed
+  2026-10-29T22:21:36Z. No new main delta. Existing tag-list gap is not hidden.
+- Added convergence review: connected APIs/test limits, live/identity/executor/
+  raw-persisted-history/IdP/extension gaps, and integrated review before further
+  features. No real service/account, source store, CI/master merge/deploy.
+
+## 2026-11-02 — v0.18.0 integration and release validation
+
+- Integrated the original heads of 91 open PRs from the Kiro and runtime stacks.
+  Reconciled the Kiro retry formatting branches and the earlier adapter design.
+- Review reproduced three defects. Kiro now checks the original conversation
+  before a generic clone can lose content, Agent records context usage only
+  on successful completion, and Codemode copies JSON without invoking an
+  inherited descriptor getter. Added regressions through the public entry points.
+- Windows amd64, Go 1.26.4, live flags off. Root and examples passed uncached
+  race tests, vet and module verification. The external ToolCall compatibility
+  probe passed. The Codemode prelude suite passed all 30 cases in both Node VM
+  and the pinned QuickJS WASM runtime.
+- Updated package and examples versions and documented the AgentEvent and
+  ToolCall migration points. Kiro endpoint and account behavior remain unverified.

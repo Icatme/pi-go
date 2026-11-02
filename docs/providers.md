@@ -15,6 +15,20 @@
 
 Supporting provider and API modules also exist for shared protocol behavior used by the core library, but the repo is intentionally optimized around these providers.
 
+## Kiro for Go applications
+
+Applications can register a buffered, incremental text, or incremental text-and-tool
+adapter. Supply the region, profile, request IDs, credentials and HTTP executor.
+Catalog lookup and IDC or desktop token refresh are separate calls. The application
+owns credential storage and decides when to refresh.
+
+For Agent tool conversations that resume from a snapshot, choose the caller-authored
+history option so the next request uses the saved argument object. Direct callers
+that require original wire arguments can use strict registration. The integration
+has been exercised with synthetic HTTP streams. Real account and endpoint behavior
+is unverified. See the [registration guide](kiro-explicit-incremental-registration.md)
+and [Agent history migration](kiro-agent-authored-compatibility.md).
+
 ## Credentials and local files
 
 - `.pigo/auth.json` is CLI-managed auth storage

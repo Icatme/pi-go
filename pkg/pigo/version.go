@@ -1,4 +1,4 @@
 package pigo
 
 // Version is the current package version.
-const Version = "0.17.3"
+const Version = "0.18.0"

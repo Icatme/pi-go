@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -341,9 +343,9 @@ func convertPigoAssistantEvent(event pigo.AssistantMessageEvent) AssistantEvent 
 	case pigo.AssistantMessageEventDone:
 		converted.Message = convertPigoAssistantMessage(event.Message)
 	case pigo.AssistantMessageEventError:
-		converted.Message = convertPigoAssistantMessage(event.Error)
+		converted.Message = convertPigoAssistantSnapshot(event.Error)
 	default:
-		converted.Message = convertPigoAssistantMessage(event.Partial)
+		converted.Message = convertPigoAssistantSnapshot(event.Partial)
 	}
 
 	if event.ToolCall.Name != "" || event.ToolCall.ID != "" {
@@ -355,6 +357,12 @@ func convertPigoAssistantEvent(event pigo.AssistantMessageEvent) AssistantEvent 
 }
 
 func convertPigoAssistantMessage(message pigo.AssistantMessage) Message {
+	converted := convertPigoAssistantSnapshot(message)
+	converted.Metadata = pigoContextObservationMetadata(message)
+	return converted
+}
+
+func convertPigoAssistantSnapshot(message pigo.AssistantMessage) Message {
 	parts := make([]Part, 0, len(message.Content))
 	toolCalls := make([]ToolCall, 0, len(message.Content))
 	for _, block := range message.Content {
@@ -393,15 +401,17 @@ func convertPigoAssistantMessage(message pigo.AssistantMessage) Message {
 }
 
 func convertPigoToolCall(call pigo.ToolCall) ToolCall {
-	return ToolCall{
+	converted := ToolCall{
 		ID:               call.ID,
 		OriginalID:       call.ID,
 		Name:             call.Name,
 		Namespace:        call.Namespace,
 		Arguments:        marshalRawJSON(call.Arguments),
-		ParsedArgs:       cloneStringAnyMap(call.Arguments),
+		ParsedArgs:       cloneToolArgumentMap(call.Arguments),
 		ThoughtSignature: call.ThoughtSignature,
 	}
+
+	return converted
 }
 
 func providerToolCallID(call ToolCall) string {
@@ -412,15 +422,24 @@ func providerToolCallID(call ToolCall) string {
 }
 
 func toolCallArgumentsMap(call ToolCall) map[string]any {
-	if len(call.ParsedArgs) > 0 {
-		return cloneStringAnyMap(call.ParsedArgs)
+	// Match execution precedence, including an explicitly empty parsed object.
+	if call.ParsedArgs != nil {
+		return cloneToolArgumentMap(call.ParsedArgs)
 	}
 	if len(call.Arguments) == 0 {
 		return nil
 	}
 
+	if checkRawArgumentUnicode(call.Arguments) != nil {
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(call.Arguments))
+	decoder.UseNumber()
 	var parsed map[string]any
-	if err := json.Unmarshal(call.Arguments, &parsed); err != nil {
+	if err := decoder.Decode(&parsed); err != nil {
+		return nil
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
 		return nil
 	}
 	return parsed

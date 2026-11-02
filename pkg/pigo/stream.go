@@ -76,18 +76,36 @@ func newAssistantMessageEventStream() *AssistantMessageEventStream {
 	return stream
 }
 
-func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+func prepareStreamContext(record *apiModuleRecord, model Model, ctx Context) (Context, error) {
+	if record != nil && record.acceptsAuthoringContext {
+		return ctx, nil
+	}
 	ctx = contextFromTranscript(NormalizeContext(ctx))
-	if _, err := resolveContextToolSampling(model, ctx); err != nil {
+	_, err := resolveContextToolSampling(model, ctx)
+	return ctx, err
+}
+
+func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	record := resolveAPIRecord(model.API)
+	ctx, err := prepareStreamContext(record, model, ctx)
+	if err != nil {
 		return streamAPIUnavailable(model, err.Error())
 	}
 	options.Headers = mergeRequestHeaders(model.Headers, options.Headers)
 	if err := ValidateResponseFormat(model, options.ResponseFormat); err != nil {
 		return streamAPIUnavailable(model, err.Error())
 	}
-	apiModule := resolveAPIModule(model.API)
+	var apiModule *APIModule
+	if record != nil {
+		apiModule = &record.module
+	}
 	if providerModule := resolveProviderModule(model.Provider); providerModule != nil && providerModule.NormalizeOptions != nil {
 		options = providerModule.NormalizeOptions(model, options)
+	}
+	if apiModule != nil && record.validation.ValidateOptions != nil {
+		if err := record.validation.ValidateOptions(model, options); err != nil {
+			return streamAPIUnavailable(model, "api options rejected")
+		}
 	}
 	options.HTTPClient = providerHTTPClient(options.HTTPClient)
 	if apiModule != nil && apiModule.Stream != nil {
@@ -100,16 +118,25 @@ func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantM
 }
 
 func StreamSimple(model Model, ctx Context, options SimpleStreamOptions) *AssistantMessageEventStream {
-	ctx = contextFromTranscript(NormalizeContext(ctx))
-	if _, err := resolveContextToolSampling(model, ctx); err != nil {
+	record := resolveAPIRecord(model.API)
+	ctx, err := prepareStreamContext(record, model, ctx)
+	if err != nil {
 		return streamAPIUnavailable(model, err.Error())
 	}
 	options.Headers = mergeRequestHeaders(model.Headers, options.Headers)
 	if err := ValidateResponseFormat(model, options.ResponseFormat); err != nil {
 		return streamAPIUnavailable(model, err.Error())
 	}
+	var apiModule *APIModule
+	if record != nil {
+		apiModule = &record.module
+	}
+	if apiModule != nil && record.validation.ValidateSimpleOptions != nil {
+		if err := record.validation.ValidateSimpleOptions(model, options); err != nil {
+			return streamAPIUnavailable(model, "api options rejected")
+		}
+	}
 	options.HTTPClient = providerHTTPClient(options.HTTPClient)
-	apiModule := resolveAPIModule(model.API)
 	if apiModule != nil && apiModule.StreamSimple != nil {
 		return managedAssistantStream(options.RequestContext, func(requestCtx context.Context) *AssistantMessageEventStream {
 			options.RequestContext = requestCtx

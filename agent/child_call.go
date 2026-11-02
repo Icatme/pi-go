@@ -227,7 +227,7 @@ func (s *childCallScope) Call(ctx context.Context, original ToolCall) ToolCallOu
 		return s.reject(ticket, call, err, ToolFailureArgumentInvalid)
 	}
 	call.Arguments = append(call.Arguments, original.Arguments...)
-	call.ParsedArgs = cloneStringAnyMap(original.ParsedArgs)
+	call.ParsedArgs = cloneToolArgumentMap(original.ParsedArgs)
 	callCtx, cancel := context.WithCancel(s.ctx)
 	stop := context.AfterFunc(ctx, cancel)
 	defer stop()

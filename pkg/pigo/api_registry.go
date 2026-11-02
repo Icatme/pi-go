@@ -16,10 +16,27 @@ type APIModule struct {
 	Capabilities ModelCapabilities
 }
 
+// APIOptionValidation supplies optional pure/read-only preflight callbacks.
+// Errors produce a fixed redacted failure. Validation is not execution permission.
+type APIOptionValidation struct {
+	ValidateOptions       func(Model, ProviderStreamOptions) error
+	ValidateSimpleOptions func(Model, SimpleStreamOptions) error
+}
+
+// Keep public APIModule's layout unchanged. Module and validation are resolved
+// as one generation so unregister/re-register cannot swap the guard.
+type apiModuleRecord struct {
+	module     APIModule
+	validation APIOptionValidation
+	// The adapter bounds and serializes the original context before handing it
+	// to a transport. Generic transcript cloning would discard wire evidence.
+	acceptsAuthoringContext bool
+}
+
 type APIModuleFactory func() APIModule
 
 var (
-	apiRegistry            = NewRegistry[API, APIModule]()
+	apiRegistry            = NewRegistry[API, apiModuleRecord]()
 	apiRegistrySourceIDsMu sync.RWMutex
 	apiRegistrySourceIDs   = map[API]string{}
 )
@@ -32,6 +49,13 @@ func RegisterAPIModuleForSource(sourceID string, module APIModule) {
 	registerAPIModule(module.API, &module, nil, normalizeAPIModuleSourceID(sourceID))
 }
 
+// RegisterAPIModuleWithValidationForSource atomically registers a module and its
+// option contract. Legacy registration remains unchanged; no API is enabled by
+// merely constructing validation. In-flight snapshots survive unregistration.
+func RegisterAPIModuleWithValidationForSource(sourceID string, module APIModule, validation APIOptionValidation) {
+	registerAPIRecord(module.API, &module, nil, normalizeAPIModuleSourceID(sourceID), validation, false)
+}
+
 func RegisterLazyAPIModule(api API, factory APIModuleFactory) {
 	registerAPIModule(api, nil, factory, "")
 }
@@ -41,23 +65,26 @@ func RegisterLazyAPIModuleForSource(sourceID string, api API, factory APIModuleF
 }
 
 func registerAPIModule(api API, module *APIModule, factory APIModuleFactory, sourceID string) {
+	registerAPIRecord(api, module, factory, sourceID, APIOptionValidation{}, false)
+}
+
+func registerAPIRecord(api API, module *APIModule, factory APIModuleFactory, sourceID string, validation APIOptionValidation, acceptsAuthoringContext bool) {
 	if api == "" {
 		panic("pigo: api registration requires api name")
 	}
 	if module == nil && factory == nil {
 		panic("pigo: api registration requires module or factory")
 	}
+	var record *apiModuleRecord
 	if module != nil {
-		normalized := normalizeAPIModule(api, *module)
-		module = &normalized
+		record = &apiModuleRecord{module: normalizeAPIModule(api, *module), validation: validation, acceptsAuthoringContext: acceptsAuthoringContext}
 	}
+	var recordFactory func() apiModuleRecord
 	if factory != nil {
-		originalFactory := factory
-		factory = func() APIModule {
-			return normalizeAPIModule(api, originalFactory())
+		recordFactory = func() apiModuleRecord {
+			return apiModuleRecord{module: normalizeAPIModule(api, factory()), validation: validation, acceptsAuthoringContext: acceptsAuthoringContext}
 		}
 	}
-
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			panic(fmt.Sprintf("pigo: api %q already registered", api))
@@ -65,7 +92,7 @@ func registerAPIModule(api API, module *APIModule, factory APIModuleFactory, sou
 	}()
 	apiRegistrySourceIDsMu.Lock()
 	defer apiRegistrySourceIDsMu.Unlock()
-	apiRegistry.Register(api, module, factory)
+	apiRegistry.Register(api, record, recordFactory)
 	apiRegistrySourceIDs[api] = sourceID
 }
 
@@ -108,6 +135,13 @@ func GetAPIModule(api API) *APIModule {
 }
 
 func resolveAPIModule(api API) *APIModule {
+	record := resolveAPIRecord(api)
+	if record == nil {
+		return nil
+	}
+	return &record.module
+}
+func resolveAPIRecord(api API) *apiModuleRecord {
 	return apiRegistry.Resolve(api)
 }
 

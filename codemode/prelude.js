@@ -48,8 +48,15 @@
         if (typeof k !== 'string') throw failure('unsupported_json', 'Symbol keys are not supported');
         const d = descriptor(v, k);
         if (!d || !d.enumerable) continue;
-        if (!('value' in d)) throw failure('unsupported_json', 'JSON accessors are not supported');
-        define(out, k, {value:visit(d.value,depth+1), enumerable:true, configurable:true, writable:true});
+        // JSON.stringify drops named array properties. Reject them rather than
+        // silently changing tool arguments, stored values or output.
+        if (array) {
+          const index = +k;
+          if (!isInteger(index) || index < 0 || index >= 4294967295 || string(index) !== k)
+            throw failure('unsupported_json', 'Named array properties are not supported');
+        }
+        if (!descriptor(d, 'value')) throw failure('unsupported_json', 'JSON accessors are not supported');
+        define(out, k, {__proto__:null, value:visit(d.value,depth+1), enumerable:true, configurable:true, writable:true});
       }
       if (array && out.length !== v.length) throw failure('unsupported_json', 'Sparse arrays are not supported');
       for (let i=0;array && i<v.length;i++) if (!descriptor(out,string(i))) throw failure('unsupported_json', 'Sparse arrays are not supported');

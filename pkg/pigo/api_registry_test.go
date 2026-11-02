@@ -5,7 +5,7 @@ import "testing"
 func isolateAPIRegistry(t *testing.T) {
 	t.Helper()
 
-	previousRegistry := cloneAPIRegistryEntries(apiRegistry.snapshot(cloneAPIModulePointer))
+	previousRegistry := cloneAPIRegistryEntries(apiRegistry.snapshot(cloneAPIRecordPointer))
 	previousSourceIDs := cloneAPIRegistrySourceIDs()
 	previousHook := cloneAPIResolveHook()
 	apiRegistry.restore(cloneAPIRegistryEntries(previousRegistry))
@@ -19,8 +19,8 @@ func isolateAPIRegistry(t *testing.T) {
 	})
 }
 
-func cloneAPIRegistryEntries(entries map[API]*registryEntry[APIModule]) map[API]*registryEntry[APIModule] {
-	cloned := make(map[API]*registryEntry[APIModule], len(entries))
+func cloneAPIRegistryEntries(entries map[API]*registryEntry[apiModuleRecord]) map[API]*registryEntry[apiModuleRecord] {
+	cloned := make(map[API]*registryEntry[apiModuleRecord], len(entries))
 	for api, entry := range entries {
 		if entry == nil {
 			cloned[api] = nil
@@ -28,19 +28,19 @@ func cloneAPIRegistryEntries(entries map[API]*registryEntry[APIModule]) map[API]
 		}
 		entryCopy := *entry
 		if entry.value != nil {
-			entryCopy.value = cloneAPIModulePointer(entry.value)
+			entryCopy.value = cloneAPIRecordPointer(entry.value)
 		}
 		cloned[api] = &entryCopy
 	}
 	return cloned
 }
 
-func cloneAPIModulePointer(module *APIModule) *APIModule {
+func cloneAPIRecordPointer(module *apiModuleRecord) *apiModuleRecord {
 	if module == nil {
 		return nil
 	}
 	cloned := *module
-	cloned.Capabilities = cloneModelCapabilities(module.Capabilities)
+	cloned.module.Capabilities = cloneModelCapabilities(module.module.Capabilities)
 	return &cloned
 }
 
