@@ -86,3 +86,10 @@ configuration fetch and immutable scoped Models/Select observations. External Go
 and race tests cover callback failures, detached concurrent access and unchanged
 registration. This does not register models, prove entitlement or connect model
 selection to runtime routing; real service validation remains outstanding.
+
+## Subsequent IDC-only refresh request construction
+
+[Offline IDC refresh request](kiro-offline-idc-refresh-request.md) assembles an
+explicit JSON request to the fixed regional AWS OIDC host. It contains secrets
+and must not be logged or redirected. No sender, real refresh, client registration,
+credential discovery/source mutation or persistent access is implemented.

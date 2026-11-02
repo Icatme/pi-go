@@ -2464,3 +2464,24 @@
   go test -race ./... passed (pigo30.407s, others passed/cached); go vet ./...,
   gofmt and diff check passed. Parent independent static review found no definite
   blocker; no independent execution by reviewer. No real service or CI dispatch.
+
+## 2026-11-02 — IDC-only offline refresh request (draft)
+
+- Baseline community oauth.ts dd93f2e442–467 plus official AWS CreateToken docs
+  read on 2026-11-02. Independently implemented standard-partition regional OIDC
+  JSON POST with explicit clientId/clientSecret/refreshToken/refresh_token grant.
+- Required explicit UA, context and encoded-byte budget; no arbitrary endpoint,
+  China/GovCloud/isolated suffix guessing, default client, executor, credential
+  source, token import, refresh execution or persistence. Region syntax does not
+  prove endpoint availability/account authorization. This is an internal helper.
+- Input options JSON/fmt hide secrets; fixed errors; request body intentionally
+  contains secrets and must not be logged/persisted/redirected. GetBody absent
+  removes only convenience replay, not a transport-enforced retry guarantee.
+- Three original tests cover exact fields/URL/headers, escaping and exact byte
+  budget, secret-free diagnostics, invalid inputs/partitions and cancellation.
+- Official cloud Go1.26.2, cached dependencies/live flags off: focused IDC race x3
+  passed1.032s; full repository race passed(pigo31.276s, other packages passed/
+  cached); vet/gofmt/diff passed. Independent parent static review found no definite
+  blocker, not independently run. No CI/master merge/deploy/live service calls.
+- Follow-up: request and prior response parser remain disconnected; any sender,
+  source mutation, client registration or actual login requires separate review.
