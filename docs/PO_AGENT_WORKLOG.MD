@@ -2485,3 +2485,24 @@
   blocker, not independently run. No CI/master merge/deploy/live service calls.
 - Follow-up: request and prior response parser remain disconnected; any sender,
   source mutation, client registration or actual login requires separate review.
+
+## 2026-11-02 — Injected IDC attempt, fake-only (draft)
+
+- Stacked on #120. Joins strict request and response components with exactly one
+  explicitly injected executor call; no default client, redirect/retry, login,
+  client registration, source mutation, credential persistence or live call.
+- Validates scope-region and policy before executor; reuses existing bounded JSON
+  transport reader for status/MIME/encoding/length/EOF/Close. Clock/parser run only
+  after successful Close; all failures return zero secret result and fixed error.
+- Four original test functions cover input snapshot mutation, exact request,
+  close-gated rotation/expiry, blocked Close withholding result, response+error,
+  302/401/header/length/budget/read/close/cancel/JSON/missing-rotation/clock failures
+  and preflight preventing executor. Rejected response bodies are not read.
+- Sources retained: official AWS CreateToken and community dd93f2e. Required IDC
+  rotation remains a documented conservative difference from optional official
+  refreshToken. Callback behavior is trusted, cooperative; plaintext memory is
+  not zeroized and bodies must never be logged/redirected. No account proof.
+- Actual official cloud Go1.26.2/cached deps/live disabled: final focused race x3
+  passed1.035s; full repository race passed(pigo30.669s, others passed/cached);
+  vet/gofmt/diff passed. Parent independent static review found no definite
+  blocker, not independently executed. No CI/master merge/deployment.

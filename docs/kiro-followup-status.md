@@ -93,3 +93,11 @@ selection to runtime routing; real service validation remains outstanding.
 explicit JSON request to the fixed regional AWS OIDC host. It contains secrets
 and must not be logged or redirected. No sender, real refresh, client registration,
 credential discovery/source mutation or persistent access is implemented.
+
+## Subsequent fake-only IDC attempt
+
+[Injected IDC attempt](kiro-injected-idc-refresh-attempt.md) connects explicitly
+supplied request inputs and a one-shot fake-testable executor to bounded HTTP/
+Close checks and strict refresh parsing. It returns an in-memory result only;
+credential installation, login and persistence remain absent. Requiring rotation
+is a conservative subset and may reject otherwise valid real responses.
