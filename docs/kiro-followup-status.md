@@ -116,3 +116,12 @@ source update, credential storage, login or persistent access is added.
 fixed expiry-anchor defect: transfer/Close latency no longer extends the local
 refresh deadline. Clock now runs before dispatch and after successful Close;
 post-dispatch invalid/expired observations remain an unknown rotation outcome.
+
+
+## Explicit successful-omission retention
+
+[IDC retention policy](kiro-idc-refresh-retention.md) adds opt-in handling for a
+fully validated response with absent refreshToken, without changing strict entry
+or config layout. Null/empty/duplicate/failed/unknown outcomes remain rejected;
+retention provenance is explicit. Caller owns credential-generation serialization,
+and no source store or persistence is introduced.

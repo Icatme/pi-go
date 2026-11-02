@@ -26,6 +26,10 @@ func (kiroIDCRefreshAttemptOptions) GoString() string { return "[kiro IDC refres
 // credential discovery/source mutation, persistence, login or retry is added.
 // A successful result contains secrets and asserted scope, not verified identity.
 func runKiroInjectedIDCRefreshAttempt(ctx context.Context, options kiroIDCRefreshAttemptOptions, roundTrip func(*http.Request) (*http.Response, error)) (kiroRefreshResult, error) {
+	return runKiroInjectedIDCRefreshAttemptWithPolicy(ctx, options, roundTrip, false)
+}
+
+func runKiroInjectedIDCRefreshAttemptWithPolicy(ctx context.Context, options kiroIDCRefreshAttemptOptions, roundTrip func(*http.Request) (*http.Response, error), retainMissingIDC bool) (kiroRefreshResult, error) {
 	zero := kiroRefreshResult{}
 	if roundTrip == nil || options.Clock == nil || options.Scope.Region != options.Request.Region || !kiroCatalogLabel(options.Scope.ProfileARN, 2048) || options.MaxResponseBytes < 2 || options.MaxResponseBytes > 1<<20 || options.MaxLifetime < time.Second || options.MaxLifetime > 30*24*time.Hour || options.MaxLifetime%time.Second != 0 || options.RefreshSkew < 0 || options.RefreshSkew > options.MaxLifetime {
 		return zero, errKiroIDCRefreshAttempt
@@ -52,7 +56,7 @@ func runKiroInjectedIDCRefreshAttempt(ctx context.Context, options kiroIDCRefres
 	if err != nil || ctx.Err() != nil || stamp.IsZero() || stamp.Year() < 1 || stamp.Year() > 9998 || stamp.Before(started) {
 		return zero, errKiroIDCRefreshAttempt
 	}
-	result, err := parseKiroOfflineRefreshResponse(payload, options.Scope, kiroRefreshIDC, options.Request.RefreshToken, started, options.MaxLifetime, options.RefreshSkew, options.MaxResponseBytes)
+	result, err := parseKiroOfflineRefreshResponseWithIDCPolicy(payload, options.Scope, kiroRefreshIDC, options.Request.RefreshToken, started, options.MaxLifetime, options.RefreshSkew, options.MaxResponseBytes, retainMissingIDC)
 	if err != nil || ctx.Err() != nil || !result.ExpiresAt.After(stamp) {
 		return zero, errKiroIDCRefreshAttempt
 	}

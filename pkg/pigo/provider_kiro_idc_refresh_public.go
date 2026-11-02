@@ -56,15 +56,51 @@ func (r KiroIDCRefreshResult) RefreshAfter() time.Time          { return r.resul
 // subset: an otherwise valid response omitting refreshToken is rejected. Scope
 // and clock are caller assertions. Real service compatibility is not guaranteed.
 func RefreshKiroIDC(ctx context.Context, config KiroIDCRefreshConfig) (*KiroIDCRefreshResult, error) {
+	return refreshKiroIDCWithPolicy(ctx, config, false)
+}
+
+func refreshKiroIDCWithPolicy(ctx context.Context, config KiroIDCRefreshConfig, retainMissingIDC bool) (*KiroIDCRefreshResult, error) {
 	options := kiroIDCRefreshAttemptOptions{Request: kiroIDCRefreshRequestOptions{Region: config.Scope.Region, UserAgent: config.UserAgent, ClientID: config.ClientID, ClientSecret: config.ClientSecret, RefreshToken: config.RefreshToken, MaxBytes: config.MaxRequestBytes}, Scope: config.Scope, MaxResponseBytes: config.MaxResponseBytes, MaxLifetime: config.MaxLifetime, RefreshSkew: config.RefreshSkew, Clock: config.Clock}
 	invoked := false
 	var executor func(*http.Request) (*http.Response, error)
 	if config.RoundTrip != nil {
 		executor = func(r *http.Request) (*http.Response, error) { invoked = true; return config.RoundTrip(r) }
 	}
-	result, err := runKiroInjectedIDCRefreshAttempt(ctx, options, executor)
+	result, err := runKiroInjectedIDCRefreshAttemptWithPolicy(ctx, options, executor, retainMissingIDC)
 	if err != nil {
 		return nil, &KiroIDCRefreshError{executorInvoked: invoked}
 	}
 	return &KiroIDCRefreshResult{result: result}, nil
+}
+
+// RetainedRefreshToken reports successful omission-policy retention, not proof
+// the old token remains valid. An explicit returned token, even identical, is false.
+func (r KiroIDCRefreshResult) RetainedRefreshToken() bool { return r.result.retained }
+
+// KiroIDCRefreshOption is a controlled policy, not an arbitrary callback. Its
+// zero value is invalid. Existing config layout and strict entry are unchanged.
+type KiroIDCRefreshOption struct{ retainMissing bool }
+
+// WithKiroIDCRetainMissingRefreshToken permits retaining only the exact request
+// token when a fully validated successful response OMITS refreshToken. It never
+// handles null/empty values, failures or unknown rotation outcomes as retention.
+func WithKiroIDCRetainMissingRefreshToken() KiroIDCRefreshOption {
+	return KiroIDCRefreshOption{retainMissing: true}
+}
+
+// RefreshKiroIDCWithOptions leaves no-option behavior strict. At most one valid
+// option is accepted before any clock/executor callback. Caller must serialize
+// refreshes per credential generation; there is no source lock/store or retry.
+func RefreshKiroIDCWithOptions(ctx context.Context, config KiroIDCRefreshConfig, options ...KiroIDCRefreshOption) (*KiroIDCRefreshResult, error) {
+	if len(options) > 1 {
+		return nil, &KiroIDCRefreshError{}
+	}
+	retain := false
+	if len(options) == 1 {
+		if !options[0].retainMissing {
+			return nil, &KiroIDCRefreshError{}
+		}
+		retain = true
+	}
+	return refreshKiroIDCWithPolicy(ctx, config, retain)
 }

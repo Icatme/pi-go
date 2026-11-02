@@ -27,6 +27,7 @@ type kiroRefreshResult struct {
 	Family       kiroRefreshFamily
 	ExpiresAt    time.Time
 	RefreshAfter time.Time
+	retained     bool
 }
 
 func (kiroRefreshResult) String() string   { return "[kiro refresh result]" }
@@ -38,7 +39,14 @@ func (kiroRefreshResult) GoString() string { return "[kiro refresh result]" }
 // lifetime is guessed. maxLifetime is caller policy (whole seconds, <=30 days),
 // not an assertion about service expiry; refreshSkew cannot extend ExpiresAt.
 func parseKiroOfflineRefreshResponse(payload []byte, scope kiroCredentialScope, family kiroRefreshFamily, previousRefresh string, now time.Time, maxLifetime, refreshSkew time.Duration, maxBytes int) (kiroRefreshResult, error) {
+	return parseKiroOfflineRefreshResponseWithIDCPolicy(payload, scope, family, previousRefresh, now, maxLifetime, refreshSkew, maxBytes, false)
+}
+
+func parseKiroOfflineRefreshResponseWithIDCPolicy(payload []byte, scope kiroCredentialScope, family kiroRefreshFamily, previousRefresh string, now time.Time, maxLifetime, refreshSkew time.Duration, maxBytes int, retainMissingIDC bool) (kiroRefreshResult, error) {
 	zero := kiroRefreshResult{}
+	if retainMissingIDC && family != kiroRefreshIDC {
+		return zero, errKiroRefreshResponse
+	}
 	if maxBytes < 1 || maxBytes > 1<<20 || now.IsZero() || now.Year() < 1 || now.Year() > 9998 || maxLifetime < time.Second || maxLifetime > 30*24*time.Hour || maxLifetime%time.Second != 0 || refreshSkew < 0 || refreshSkew > maxLifetime || len(scope.Region) > 63 || !kiroRuntimeRegionShape.MatchString(scope.Region) || !kiroCatalogLabel(scope.ProfileARN, 2048) || !kiroCatalogLabel(previousRefresh, 16384) {
 		return zero, errKiroRefreshResponse
 	}
@@ -75,14 +83,17 @@ func parseKiroOfflineRefreshResponse(payload []byte, scope kiroCredentialScope, 
 		}
 	}
 	refresh := previousRefresh
+	retained := false
 	if raw, ok := fields[refreshField]; ok {
 		var rotated string
 		if json.Unmarshal(raw, &rotated) != nil || !kiroCatalogLabel(rotated, 16384) {
 			return zero, errKiroRefreshResponse
 		}
 		refresh = rotated
-	} else if family == kiroRefreshIDC {
+	} else if family == kiroRefreshIDC && !retainMissingIDC {
 		return zero, errKiroRefreshResponse
+	} else {
+		retained = true
 	}
 	if raw, ok := fields["profileArn"]; ok {
 		var profile string
@@ -109,5 +120,5 @@ func parseKiroOfflineRefreshResponse(payload []byte, scope kiroCredentialScope, 
 	if refreshAfter.Before(now) {
 		refreshAfter = now.UTC()
 	}
-	return kiroRefreshResult{Credential: kiroScopedCredential{Scope: scope, Kind: kind, Token: access}, RefreshToken: refresh, Family: family, ExpiresAt: expiresAt, RefreshAfter: refreshAfter}, nil
+	return kiroRefreshResult{Credential: kiroScopedCredential{Scope: scope, Kind: kind, Token: access}, RefreshToken: refresh, Family: family, ExpiresAt: expiresAt, RefreshAfter: refreshAfter, retained: retained}, nil
 }

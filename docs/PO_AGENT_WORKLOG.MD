@@ -2549,3 +2549,26 @@
   race x3 passed1.055s; full repository race passed(pigo30.711s, others passed/
   cached); vet/gofmt/diff passed. Independent child confirmed defect and static
   correction review, no separate test run. No CI/master merge/deploy/live calls.
+
+## 2026-11-02 — Explicit successful IDC omission retention (draft)
+
+- Sources: official AWS CreateToken optional refreshToken and RFC6749§6 optional
+  replacement. Added separate RefreshKiroIDCWithOptions and controlled
+  WithKiroIDCRetainMissingRefreshToken; zero/duplicate option rejects before any
+  callback. Strict old entry and no-option behavior/config layout remain unchanged.
+- Only fully validated successful responses with genuinely absent refreshToken
+  retain the exact request-token snapshot. Explicit null/empty/duplicate/invalid
+  or transport/Close/clock/expiry failures still zero-return. Explicit returned
+  token wins even if identical; RetainedRefreshToken reports provenance only.
+- No source manager/lock/cache/storage/login. Caller must serialize same-generation
+  refresh across processes and fence late results against the actual generation;
+  a failed/unknown attempt never proves old-token validity or retry safety.
+- Three original external test functions compare strict/no-option/opt-in field
+  cases and late failures, no-callback invalid options, and16 independent fake
+  tokens concurrently with no global state. This is not same-token concurrency
+  safety. Independent child static review found no blocker; existing docs updated
+  to distinguish default strict path from new explicit retention option.
+- Actual official cloud Go1.26.2/cached dependencies/live off: focused response/
+  attempt/public/retention race x3 passed1.064s; full repository race passed
+  (pigo30.456s, others passed/cached); vet/gofmt/diff passed. Reviewer did not
+  independently execute. No real account/service/CI/master merge/deployment.

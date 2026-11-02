@@ -28,7 +28,7 @@ or dump the request/body, response payload or returned secret fields. Input/resu
 fmt redaction is not memory zeroization; plaintext strings/buffers remain in
 memory until reclaimed, and an explicit consumer can read them.
 
-The strict IDC parser requires an explicit nonempty rotated refreshToken. AWS's
+The default strict IDC parser requires an explicit nonempty rotated refreshToken. AWS's
 CreateToken response describes that field as optional, so this conservative subset
 may reject a valid real response. The attempt does not infer retention, extend
 expiry or retry on that rejection. Unknown response fields likewise fail closed.
@@ -62,3 +62,8 @@ checks finish. RefreshAfter may already be in the past, meaning refresh is due;
 it must not move the expiry forward. This relies on a trustworthy, consistent
 caller time source; it does not repair fabricated or discontinuous clock data.
 Source: [RFC 6749 section 5.1](https://www.rfc-editor.org/rfc/rfc6749#section-5.1).
+
+
+The later [explicit omission policy](kiro-idc-refresh-retention.md) adds a separate
+controlled path for successful missing-token responses. Default attempt behavior
+remains strict, and no transport/Close/time/parse failure can become retention.

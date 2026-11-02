@@ -52,7 +52,7 @@ explicit authority; this API's presence is not service-use authorization.
 
 Scope is caller-asserted and not account ownership proof. This is IDC standard-
 partition only; no desktop/external-IDP flow or region fallback is introduced.
-The existing strict parser requires nonempty returned rotation even though the
+The default strict entry requires nonempty returned rotation even though the
 AWS field is optional. Omitting it fails with ExecutorInvoked=true, not an automatic
 retention/retry. Unknown response fields also fail. Real service compatibility is
 not verified. See [injected attempt](kiro-injected-idc-refresh-attempt.md) and
@@ -67,3 +67,9 @@ executor is invoked; consuming the body is not proof of a real service send.
 The callback-bearing config itself is not JSON-serializable; serialization fails
 rather than producing a credential configuration file. The typed public error
 also serializes to `{}`; use its method, not JSON persistence, for outcome checks.
+
+
+For successful responses that genuinely omit rotation, a separate explicit
+[retention option](kiro-idc-refresh-retention.md) is now available through
+RefreshKiroIDCWithOptions. The original entry/no-options remain strict. This never
+rescues failed or indeterminate attempts and does not manage concurrent sources.
