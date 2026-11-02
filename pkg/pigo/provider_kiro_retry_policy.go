@@ -5,16 +5,16 @@ package pigo
 type kiroFailureClass string
 
 const (
-	kiroFailureUnknown kiroFailureClass = "unknown"
-	kiroFailureCancelled kiroFailureClass = "cancelled"
-	kiroFailureProtocol kiroFailureClass = "protocol"
-	kiroFailureTransport kiroFailureClass = "transport"
-	kiroFailureAuth kiroFailureClass = "auth"
-	kiroFailureQuota kiroFailureClass = "quota"
-	kiroFailureInputSize kiroFailureClass = "input_size"
-	kiroFailureValidation kiroFailureClass = "validation"
-	kiroFailureCapacity kiroFailureClass = "capacity"
-	kiroFailureThrottle kiroFailureClass = "throttle"
+	kiroFailureUnknown     kiroFailureClass = "unknown"
+	kiroFailureCancelled   kiroFailureClass = "cancelled"
+	kiroFailureProtocol    kiroFailureClass = "protocol"
+	kiroFailureTransport   kiroFailureClass = "transport"
+	kiroFailureAuth        kiroFailureClass = "auth"
+	kiroFailureQuota       kiroFailureClass = "quota"
+	kiroFailureInputSize   kiroFailureClass = "input_size"
+	kiroFailureValidation  kiroFailureClass = "validation"
+	kiroFailureCapacity    kiroFailureClass = "capacity"
+	kiroFailureThrottle    kiroFailureClass = "throttle"
 	kiroFailureUnavailable kiroFailureClass = "unavailable"
 )
 
@@ -32,24 +32,24 @@ const (
 // bounded parser, never arbitrary message substrings. They are not retained in
 // the decision. NotSent requires transport proof: a timeout is not that proof.
 type kiroFailureEvidence struct {
-	Status int
-	Reason string
-	Exception string
-	Cancelled bool
-	ProtocolFailed bool
+	Status          int
+	Reason          string
+	Exception       string
+	Cancelled       bool
+	ProtocolFailed  bool
 	TransportFailed bool
-	Dispatch kiroDispatchEvidence
-	OutputObserved bool
-	ToolExecuted bool
+	Dispatch        kiroDispatchEvidence
+	OutputObserved  bool
+	ToolExecuted    bool
 }
 
 type kiroRetryPolicy struct {
-	AllowUnsentRetry bool
+	AllowUnsentRetry  bool
 	RemainingAttempts int
 }
 
 type kiroFailureDecision struct {
-	Class kiroFailureClass
+	Class       kiroFailureClass
 	RetryUnsent bool
 }
 
