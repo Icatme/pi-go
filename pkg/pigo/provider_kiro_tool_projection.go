@@ -90,7 +90,13 @@ func projectKiroToolConversation(ctx Context, modelID string, schemas map[string
 	var specs []kiroToolWireSpec
 	for _, tool := range ctx.Tools {
 		raw, found := schemas[tool.Name]
-		if !found || tool.OutputSchema != nil || tool.ConstrainedSampling != nil || !consume(tool.Name) || !consume(tool.Description) || !consumeRaw(raw) {
+		// The agent adapter places a nil map in this any field for no schema.
+		// Accept that exact absence form, not an empty or nonempty schema.
+		hasOutputSchema := tool.OutputSchema != nil
+		if schema, ok := tool.OutputSchema.(map[string]any); ok && schema == nil {
+			hasOutputSchema = false
+		}
+		if !found || hasOutputSchema || tool.ConstrainedSampling != nil || !consume(tool.Name) || !consume(tool.Description) || !consumeRaw(raw) {
 			return bad, errKiroToolProjection
 		}
 		if _, err := decodeKiroJSONObject(raw, maxBytes); err != nil {
