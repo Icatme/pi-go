@@ -55,7 +55,7 @@ func parseKiroRetryAfter(values []string, now time.Time, maxDelay time.Duration)
 	}
 	target, err := time.Parse(layout, value)
 	// Roundtrip also rejects a mismatched weekday and noncanonical variants.
-	if err != nil || target.UTC().Format(layout) != value {
+	if err != nil || target.Year() < 1900 || target.UTC().Format(layout) != value {
 		return zero, errKiroRetryAfter
 	}
 	if !target.After(now) {

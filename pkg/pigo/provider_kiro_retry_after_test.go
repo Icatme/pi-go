@@ -39,6 +39,8 @@ func TestKiroRetryAfterRejectsAmbiguousOrOverBudgetHints(t *testing.T) {
 		{"18446744073709551616"}, {"9223372036854775807"},
 		{"61"}, {"Mon, 02 Nov 2026 00:01:01 GMT"},
 		{"Tue, 02 Nov 2026 00:00:01 GMT"},
+		{"Mon, 01 Jan 0001 00:00:00 GMT"},
+		{"Sat, 31 Dec 2016 23:59:60 GMT"},
 		{"Mon, 02 Nov 2026 00:00:01 UTC"},
 		{"Monday, 02-Nov-26 00:00:01 GMT"},
 		{"Mon Nov  2 00:00:01 2026"},

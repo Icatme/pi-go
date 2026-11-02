@@ -15,7 +15,8 @@ also checks retry-after-ms and x-ratelimit-reset-after, accepts wider JavaScript
 numeric/date syntax, rounds milliseconds and caps scheduled waits. We do not
 port these broader behaviors. This independent implementation only accepts the
 standard field with integer seconds or canonical IMF-fixdate. Obsolete HTTP
-date forms are explicitly unsupported despite broader RFC recipient guidance;
+date forms and leap seconds are explicitly unsupported despite broader RFC recipient guidance;
+accepted dates must be Go-representable and year 1900 or later;
 this is a strict offline subset, NOT a fully RFC-compatible HTTP client.
 
 Supply ALL raw values for this field. More than one value fails even if identical;
