@@ -19,15 +19,8 @@ func projectKiroCompletedText(response kiroOfflineResponse, model Model, timesta
 	if maxTextBytes < 1 || maxTextBytes > 1<<20 || len(response.Parts) == 0 || len(response.Parts) > 4096 {
 		return zero, errKiroTextMessage
 	}
-	for _, field := range []struct {
-		value string
-		max   int
-	}{
-		{string(model.API), 128}, {string(model.Provider), 128}, {model.ID, 256},
-	} {
-		if field.value == "" || len(field.value) > field.max || !utf8.ValidString(field.value) || strings.TrimSpace(field.value) != field.value || strings.IndexFunc(field.value, unicode.IsControl) >= 0 {
-			return zero, errKiroTextMessage
-		}
+	if !kiroTextModelIdentityValid(model) {
+		return zero, errKiroTextMessage
 	}
 	if !((response.StopReason == StopReasonStop && response.Usage.StopReason == "END_TURN") || (response.StopReason == StopReasonLength && response.Usage.StopReason == "MAX_TOKENS")) {
 		return zero, errKiroTextMessage
@@ -76,4 +69,18 @@ func projectKiroCompletedText(response kiroOfflineResponse, model Model, timesta
 	// Cost remains unknown (zero-valued), never calculated from guessed model
 	// rates, context percentages or credits. Zero does not mean free service.
 	return message, nil
+}
+
+func kiroTextModelIdentityValid(model Model) bool {
+	for _, field := range []struct {
+		value string
+		max   int
+	}{
+		{string(model.API), 128}, {string(model.Provider), 128}, {model.ID, 256},
+	} {
+		if field.value == "" || len(field.value) > field.max || !utf8.ValidString(field.value) || strings.TrimSpace(field.value) != field.value || strings.IndexFunc(field.value, unicode.IsControl) >= 0 {
+			return false
+		}
+	}
+	return true
 }
