@@ -272,3 +272,18 @@ func TestKiroRegisteredAgentContextMetadataPersistsButNeverReplays(t *testing.T)
 	}
 	check(next, 2)
 }
+
+func TestKiroRegisteredAgentOptInAutoHTTP(t *testing.T) {
+	source := fmt.Sprintf("public-auto-optin-%d", kiroAgentFixtureSequence.Add(1))
+	calls := 0
+	provider, cleanup, err := pigo.RegisterKiroAutoAgentFixtureForTest(source, "local-test-tenant", func(context.Context, []byte) (string, error) { calls++; return "context-text", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	definition := agent.AgentDefinition{DefaultModel: agent.ModelRef{Provider: string(provider), Model: "fixture-model"}}
+	snapshot, err := agent.NewEngine().Run(context.Background(), definition, &agent.AgentSnapshot{SessionID: "local-session"}, []agent.Message{agent.NewUserTextMessage("hello")}, nil)
+	if err != nil || snapshot.Error != "" || calls != 1 {
+		t.Fatal("explicit Auto HTTP route", err, calls)
+	}
+}

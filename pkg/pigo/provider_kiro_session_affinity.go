@@ -33,7 +33,7 @@ func RegisterKiroSessionBufferedModule(sourceID string, config KiroBufferedConfi
 		return errKiroRegistration
 	}
 	affinity.Key = append([]byte(nil), affinity.Key...)
-	return registerKiroBufferedModule(sourceID, config, &affinity)
+	return registerKiroBufferedModule(sourceID, config, &affinity, false)
 }
 func kiroSessionIDValid(value string) bool {
 	return value != "" && len(value) <= 256 && utf8.ValidString(value) && strings.TrimSpace(value) == value && strings.IndexFunc(value, unicode.IsControl) < 0

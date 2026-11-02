@@ -55,10 +55,10 @@ var errKiroRegistration = errors.New("kiro: invalid explicit buffered configurat
 // return buffered lifecycle events only after complete response validation; this
 // is NOT realtime streaming. This API does not establish service-use permission.
 func RegisterKiroBufferedModule(sourceID string, config KiroBufferedConfig) error {
-	return registerKiroBufferedModule(sourceID, config, nil)
+	return registerKiroBufferedModule(sourceID, config, nil, false)
 }
 
-func registerKiroBufferedModule(sourceID string, config KiroBufferedConfig, affinity *KiroSessionAffinity) error {
+func registerKiroBufferedModule(sourceID string, config KiroBufferedConfig, affinity *KiroSessionAffinity, autoHTTP bool) error {
 	if strings.TrimSpace(sourceID) == "" || config.RequestIDs == nil || config.Credentials == nil || config.RoundTrip == nil || len(config.Schemas) > 128 || !kiroTextModelIdentityValid(Model{API: config.API, Provider: config.Provider, ID: "config-check"}) {
 		return errKiroRegistration
 	}
@@ -121,22 +121,31 @@ func registerKiroBufferedModule(sourceID string, config KiroBufferedConfig, affi
 			return run(model, conversation, options.RequestContext, options.SessionID)
 		},
 	}
-	validation := APIOptionValidation{ValidateOptions: validateKiroHostOptions, ValidateSimpleOptions: validateKiroHostSimpleOptions}
-	if affinity != nil {
-		validation.ValidateOptions = func(model Model, options ProviderStreamOptions) error {
-			if !kiroSessionIDValid(options.SessionID) {
-				return errKiroHostOptions
+	validation := APIOptionValidation{
+		ValidateOptions: func(model Model, options ProviderStreamOptions) error {
+			if affinity != nil {
+				if !kiroSessionIDValid(options.SessionID) {
+					return errKiroHostOptions
+				}
+				options.SessionID = ""
 			}
-			options.SessionID = ""
+			if autoHTTP && options.Transport == TransportAuto {
+				options.Transport = TransportSSE
+			}
 			return validateKiroHostOptions(model, options)
-		}
-		validation.ValidateSimpleOptions = func(model Model, options SimpleStreamOptions) error {
-			if !kiroSessionIDValid(options.SessionID) {
-				return errKiroHostOptions
+		},
+		ValidateSimpleOptions: func(model Model, options SimpleStreamOptions) error {
+			if affinity != nil {
+				if !kiroSessionIDValid(options.SessionID) {
+					return errKiroHostOptions
+				}
+				options.SessionID = ""
 			}
-			options.SessionID = ""
+			if autoHTTP && options.Transport == TransportAuto {
+				options.Transport = TransportSSE
+			}
 			return validateKiroHostSimpleOptions(model, options)
-		}
+		},
 	}
 	RegisterAPIModuleWithValidationForSource(sourceID, module, validation)
 	return nil

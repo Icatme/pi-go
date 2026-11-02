@@ -81,3 +81,9 @@ Not claimed: official private endpoint support, real account/model availability,
 login/refresh, persistent raw replay, realtime text/tool parity, automatic catalog
 installation, or deployment. An explicit adapter exists; production service
 interoperability still needs separately authorized verification.
+
+## Later opt-in Auto selector
+
+The original entry remains strict. `kiro-explicit-auto-http.md` documents a
+separate controlled-options entry that explicitly chooses the injected HTTP path
+for Auto, without WebSocket attempts/retries or changes to this config layout.

@@ -13,6 +13,15 @@ import (
 // RegisterKiroSessionAgentFixtureForTest uses the production public registration
 // and option hooks; only wire/executor/catalog fixtures are test-only.
 func RegisterKiroSessionAgentFixtureForTest(source, tenant string, exchange func(context.Context, []byte) (string, error)) (Provider, func(), error) {
+	return registerKiroConfiguredAgentFixture(source, tenant, exchange, false)
+}
+
+// RegisterKiroAutoAgentFixtureForTest explicitly enables the production Auto→HTTP option.
+func RegisterKiroAutoAgentFixtureForTest(source, tenant string, exchange func(context.Context, []byte) (string, error)) (Provider, func(), error) {
+	return registerKiroConfiguredAgentFixture(source, tenant, exchange, true)
+}
+
+func registerKiroConfiguredAgentFixture(source, tenant string, exchange func(context.Context, []byte) (string, error), autoHTTP bool) (Provider, func(), error) {
 	provider := Provider("registered-agent-" + source)
 	api := API("registered-agent-" + source)
 	model := Model{ID: "fixture-model", Provider: provider, API: api, Name: "Local registered fixture"}
@@ -51,7 +60,14 @@ func RegisterKiroSessionAgentFixtureForTest(source, tenant string, exchange func
 			return kiroAttemptResponse(io.NopCloser(bytes.NewReader(wire))), nil
 		},
 	}
-	if err := RegisterKiroSessionBufferedModule(source, config, KiroSessionAffinity{Tenant: tenant, Key: bytes.Repeat([]byte("K"), 32)}); err != nil {
+	affinity := KiroSessionAffinity{Tenant: tenant, Key: bytes.Repeat([]byte("K"), 32)}
+	var err error
+	if autoHTTP {
+		err = RegisterKiroBufferedModuleWithOptions(source, config, WithKiroAutoHTTP(), WithKiroSessionAffinity(affinity))
+	} else {
+		err = RegisterKiroSessionBufferedModule(source, config, affinity)
+	}
+	if err != nil {
 		return "", nil, err
 	}
 	RegisterProviderModule(ProviderModule{Provider: provider, Models: map[string]Model{model.ID: model}, ModelCapabilities: ModelCapabilities{CustomTools: CapabilitySupported}})
