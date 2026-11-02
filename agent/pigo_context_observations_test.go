@@ -119,3 +119,25 @@ func TestPigoContextObservationsBoundedRecords(t *testing.T) {
 		t.Fatal("oversize retained")
 	}
 }
+
+func TestPigoContextObservationsRequireSuccessfulTerminalEvent(t *testing.T) {
+	message := contextObservationFixture()
+	// A partial snapshot or error payload can retain the provider's stop
+	// reason. Only the event kind establishes a successful completion.
+	for _, event := range []pigo.AssistantMessageEvent{
+		{Type: pigo.AssistantMessageEventTextDelta, Partial: message},
+		{Type: pigo.AssistantMessageEventError, Error: message},
+	} {
+		converted := convertPigoAssistantEvent(event)
+		if converted.Message.Metadata != nil || converted.Message.Parts[0].Text != "answer" {
+			t.Fatalf("%s exposed observations or lost content", event.Type)
+		}
+	}
+	if convertPigoAssistantEvent(pigo.AssistantMessageEvent{Type: pigo.AssistantMessageEventDone, Message: message}).Message.Metadata == nil {
+		t.Fatal("successful completion lost context observations")
+	}
+	message.ErrorMessage = "adapter failed"
+	if convertPigoAssistantMessage(message).Metadata != nil {
+		t.Fatal("failed terminal result exposed context observations")
+	}
+}

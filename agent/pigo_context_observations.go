@@ -11,7 +11,7 @@ import (
 // metadata. Unknown diagnostics, error/stack/raw payloads and custom values never
 // cross. These are caller/provider observations, not verified billing or authority.
 func pigoContextObservationMetadata(message pigo.AssistantMessage) map[string]any {
-	if message.StopReason != pigo.StopReasonStop && message.StopReason != pigo.StopReasonLength && message.StopReason != pigo.StopReasonToolUse {
+	if message.ErrorMessage != "" || (message.StopReason != pigo.StopReasonStop && message.StopReason != pigo.StopReasonLength && message.StopReason != pigo.StopReasonToolUse) {
 		return nil
 	}
 	const maxRecords = 4097 // collector retained-part ceiling plus one metadata snapshot

@@ -1,10 +1,11 @@
 # Candidate run-owned evidence scope (not implemented)
 
-This design investigates the ToolCall source-layout blocker recorded in
-[the frozen #128 audit](kiro-stack-audit-128.md). No production behavior changes.
-The external fixture `agent/testdata/compat_toolcall/toolcall_test.go` intentionally
-fails to compile on the current Kiro tree and compiles on the pinned master.
-It is an explicit acceptance probe, not a passing test hidden behind a skip:
+This historical proposal investigated the ToolCall source-layout blocker in
+[the frozen #128 audit](kiro-stack-audit-128.md). The shipped design restores
+the seven-field layout and uses caller-authored tool history across runs.
+The [migration guide](kiro-agent-authored-compatibility.md) covers JSON and
+source compatibility. The external positional-literal probe failed on #128
+and passes on the integrated implementation.
 
 ```
 go test -mod=readonly ./agent/testdata/compat_toolcall/toolcall_test.go
@@ -84,6 +85,3 @@ errors, fmt, JSON, callback payloads or diagnostics.
 7. Existing non-Kiro providers and no-scope conversions retain prior ordinary
    argument behavior; no exported API layout, serialization or default network
    behavior changes beyond the explicitly accepted Kiro capability restriction.
-
-Until that behavioral narrowing is accepted and these tests pass, the compatibility
-blocker remains. This document is not permission to silently reduce session replay.

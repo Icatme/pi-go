@@ -87,6 +87,3 @@ Fake integration tests cover buffered/incremental, full/simple host APIs, strict
 rejection, explicit object authoring, edits, UseNumber restoration, rounded-value
 rejection, conflicting raw, cancelled requests and callback counts. Wire assertions
 parse the input's JSON number, rather than merely searching body text.
-
-This request integration still does not remove the private Agent bridge: the
-external ToolCall layout blocker remains until the separate Agent migration lands.

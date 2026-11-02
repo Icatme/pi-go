@@ -343,9 +343,9 @@ func convertPigoAssistantEvent(event pigo.AssistantMessageEvent) AssistantEvent 
 	case pigo.AssistantMessageEventDone:
 		converted.Message = convertPigoAssistantMessage(event.Message)
 	case pigo.AssistantMessageEventError:
-		converted.Message = convertPigoAssistantMessage(event.Error)
+		converted.Message = convertPigoAssistantSnapshot(event.Error)
 	default:
-		converted.Message = convertPigoAssistantMessage(event.Partial)
+		converted.Message = convertPigoAssistantSnapshot(event.Partial)
 	}
 
 	if event.ToolCall.Name != "" || event.ToolCall.ID != "" {
@@ -357,6 +357,12 @@ func convertPigoAssistantEvent(event pigo.AssistantMessageEvent) AssistantEvent 
 }
 
 func convertPigoAssistantMessage(message pigo.AssistantMessage) Message {
+	converted := convertPigoAssistantSnapshot(message)
+	converted.Metadata = pigoContextObservationMetadata(message)
+	return converted
+}
+
+func convertPigoAssistantSnapshot(message pigo.AssistantMessage) Message {
 	parts := make([]Part, 0, len(message.Content))
 	toolCalls := make([]ToolCall, 0, len(message.Content))
 	for _, block := range message.Content {
@@ -391,7 +397,6 @@ func convertPigoAssistantMessage(message pigo.AssistantMessage) Message {
 		ThinkingLevel: ThinkingLevel(message.ThinkingLevel),
 		StopReason:    fromPigoStopReason(message.StopReason),
 		ErrorMessage:  message.ErrorMessage,
-		Metadata:      pigoContextObservationMetadata(message),
 	}
 }
 

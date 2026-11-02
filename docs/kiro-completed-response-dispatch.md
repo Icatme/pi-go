@@ -22,21 +22,10 @@ MAX_TOKENS with/without declarations; explicit/unsolicited tools; staged tools
 followed by truncation/filtering/conflicting stop; and old tool-only compatibility.
 No live service, credentials or actual tool execution occurs.
 
-## Agent integration gate found by inspection
+## Agent history
 
-Current agent/pigo_stream_model.go is not yet an evidence-preserving Kiro bridge:
-- convertPigoToolCall marshals call.Arguments, not original RawArguments;
-- convertAssistantMessageToPigo does not populate pigo.ToolCall.RawArguments.
-
-Therefore the package-level exact history roundtrip must NOT be advertised as a
-working agent multi-turn replay. Existing agent cancellation/schema/permission
-checks do not fix this evidence loss. Re-serializing a parsed map as purported
-original wire evidence would be incorrect.
-
-A separate change needs an explicit raw-provider-evidence channel, clear handling
-of original versus edited arguments, detached ownership and persistence rules.
-Generic agent Arguments is currently also canonical execution data, so repurposing
-it silently would blur these identities. Before any provider registration, test
-provider → agent → history with large numeric literals, edits, permission rejection,
-cancellation, persistence/restore and missing evidence. No broad agent/provider
-semantics are changed in this PR.
+The Agent retains the current tool argument object across turns and session
+restore. Multi-turn Agent use requires explicit registration for caller-authored
+history. Direct pigo callers can select strict original-wire replay when they
+retain the provider's raw arguments. The [migration guide](kiro-agent-authored-compatibility.md)
+lists both registration entry points and the persistence guarantees.

@@ -54,8 +54,8 @@ unknown-provider/no-diagnostic behavior, final-only handling, input/clone owners
 A registered Agent integration test receives an actual synthetic contextUsageEvent,
 saves/restores its snapshot JSON, continues a text-only session, verifies both
 completed observations survive, and verifies neither next request contains those
-metadata fields. Test fixture changes are `_test.go` only. This does not restore
-missing raw tool evidence: persisted tool-history replay remains unsupported.
+metadata fields. Agent tool-call replay after session restore uses
+[caller-authored history](kiro-agent-authored-compatibility.md).
 
 No real account/service/credentials, automatic transport/network, CI, merge,
 deployment or permission relaxation is exercised. Derived IDs and private endpoint
