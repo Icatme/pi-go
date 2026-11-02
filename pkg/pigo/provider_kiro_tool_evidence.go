@@ -43,6 +43,19 @@ func kiroToolEvidenceValueEqual(raw, parsed any, depth int, left *int) bool {
 		other, ok := parsed.(string)
 		return ok && value == other
 	case []any:
+		// Ordinary Go schemas use []string for required/enum. Compare directly,
+		// without reflection, serializers or rebuilding original raw evidence.
+		if strings, ok := parsed.([]string); ok {
+			if strings == nil || len(value) != len(strings) {
+				return false
+			}
+			for i := range value {
+				if !kiroToolEvidenceValueEqual(value[i], strings[i], depth+1, left) {
+					return false
+				}
+			}
+			return true
+		}
 		other, ok := parsed.([]any)
 		if !ok || other == nil || len(value) != len(other) {
 			return false
