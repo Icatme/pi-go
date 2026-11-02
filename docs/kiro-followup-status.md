@@ -78,3 +78,11 @@ updates a registry, and does not add upstream's profile probes or region fallbac
 [Injected catalog attempt](kiro-injected-catalog-attempt.md) now connects an explicit
 fake-testable executor to bounded JSON/status/Close checks and a scoped observation.
 No default client, automatic fetch/cache or provider/model registration is added.
+
+## Subsequent explicit public catalog API
+
+[Public catalog observations](kiro-public-catalog-observation.md) expose a required-
+configuration fetch and immutable scoped Models/Select observations. External Go
+and race tests cover callback failures, detached concurrent access and unchanged
+registration. This does not register models, prove entitlement or connect model
+selection to runtime routing; real service validation remains outstanding.

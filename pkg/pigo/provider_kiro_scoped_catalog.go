@@ -52,7 +52,7 @@ func newKiroScopedModelCatalog(payload []byte, scope kiroCredentialScope, observ
 // Observation time is caller asserted, not authenticated management provenance.
 func (c *kiroScopedModelCatalog) selectModel(scope kiroCredentialScope, kind kiroCatalogIDKind, id string, now time.Time, maxAge time.Duration) (kiroCatalogEntry, error) {
 	zero := kiroCatalogEntry{}
-	if c == nil || scope != c.scope || now.IsZero() || now.Before(c.observedAt) || maxAge <= 0 || maxAge > 30*24*time.Hour || now.Sub(c.observedAt) >= maxAge || !kiroCatalogLabel(id, 256) {
+	if !c.freshFor(scope, now, maxAge) || !kiroCatalogLabel(id, 256) {
 		return zero, errKiroScopedCatalog
 	}
 	var index int
@@ -68,7 +68,14 @@ func (c *kiroScopedModelCatalog) selectModel(scope kiroCredentialScope, kind kir
 	if !ok {
 		return zero, errKiroScopedCatalog
 	}
-	entry := c.models[index]
+	return cloneKiroCatalogEntry(c.models[index]), nil
+}
+
+func (c *kiroScopedModelCatalog) freshFor(scope kiroCredentialScope, now time.Time, maxAge time.Duration) bool {
+	return c != nil && scope == c.scope && !now.IsZero() && !now.Before(c.observedAt) && maxAge > 0 && maxAge <= 30*24*time.Hour && now.Sub(c.observedAt) < maxAge
+}
+
+func cloneKiroCatalogEntry(entry kiroCatalogEntry) kiroCatalogEntry {
 	if entry.MaxInputTokens != nil {
 		value := *entry.MaxInputTokens
 		entry.MaxInputTokens = &value
@@ -79,5 +86,5 @@ func (c *kiroScopedModelCatalog) selectModel(scope kiroCredentialScope, kind kir
 	}
 	entry.RequestFieldsSchema = append(json.RawMessage(nil), entry.RequestFieldsSchema...)
 	entry.Metadata = append(json.RawMessage(nil), entry.Metadata...)
-	return entry, nil
+	return entry
 }

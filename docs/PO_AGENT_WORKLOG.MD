@@ -2425,3 +2425,25 @@
   Parent review was static, not a second execution. All I/O is injected fake.
 - Scope/timestamp are assertions and executor must cooperate with cancellation;
   no real service/account/billing validation, CI, merge or deployment.
+
+## 2026-11-02 — Explicit public catalog observations (draft, stacked on #117)
+
+- Baseline: pi-provider-kiro v0.12.3 dd93f2e; independently authored public-facing
+  cases extend management/models scenario coverage, without copying upstream code.
+- Added explicit FetchKiroModelCatalog config with required injected scope/auth/
+  executor/clock/limits; opaque immutable catalog and observation values; Models
+  and explicit alias/service Select require exact scope and freshness. Detached
+  raw getters preserve metadata/numeric evidence, absent limits stay absent.
+- Shared prior scoped guard/clone semantics; no automatic registration/cache/
+  login/refresh/default model/network. Scope/time are caller assertions, not
+  entitlement. Runtime service-ID routing and real service acceptance remain open.
+- Three external-package Go tests cover no registration, callback lifecycle and
+  redaction, Close-before-clock, nil/zero values, deep-copy/concurrent getters,
+  scope/age rejection, exact large integers, missing limits and opaque formatting.
+- Actual validation: official Go 1.26.2 cloud, cached dependencies, live flags off;
+  final focused public/scoped race x3 passed (1.047s); final full repository
+  go test -race ./... passed (pigo 31.687s; other packages passed/cached);
+  go vet ./..., gofmt and git diff --check passed. Parent independent static
+  review found no definite blocker; it did not independently execute tests.
+- No CI dispatch, real account/network/tool execution, master merge or deployment.
+  See kiro-public-catalog-observation.md for public API ownership/trust boundaries.
