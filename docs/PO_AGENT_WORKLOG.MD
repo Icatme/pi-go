@@ -2506,3 +2506,24 @@
   passed1.035s; full repository race passed(pigo30.669s, others passed/cached);
   vet/gofmt/diff passed. Parent independent static review found no definite
   blocker, not independently executed. No CI/master merge/deployment.
+
+## 2026-11-02 — Explicit caller-owned public IDC refresh (draft)
+
+- Stacked on #121. Public RefreshKiroIDC requires explicit scope/client inputs,
+  request/response budgets, lifetime/skew, clock and executor. Opaque result getters
+  return copied in-memory credentials/rotation/expiry only. No defaults, source
+  updates, persistence, login, registration, retries or live service calls.
+- Public typed error exposes ExecutorInvoked only: false means this helper did
+  not invoke it; true means server-side rotation outcome may be unknown even if
+  no/partial/all body was read or response/Close/parse/clock failed. Not a sent flag
+  or retry-safe classification. No raw error retained, no old-token validity claim.
+- Three original external-package tests cover success/getters/ownership, opaque
+  fmt/JSON (callback config deliberately not JSON-serializable), errors.As/nil/zero values,
+  preflight no dispatch, and each indeterminate rotation stage with single call.
+- Final official cloud Go1.26.2/cached dependencies/live flags off: focused public
+  IDC race x3 passed1.038s; final full repository race passed(pigo31.042s, others
+  passed/cached); vet/gofmt/diff passed. Independent parent static review found
+  no definite blocker; it did not independently run tests. No CI/master/deploy.
+- Required response rotation remains a conservative IDC subset. Executor must
+  not redirect/retry/log and must honor cancellation; plaintext is not zeroized.
+  Real endpoint/account/client compatibility remains unverified.

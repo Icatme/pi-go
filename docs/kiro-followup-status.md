@@ -101,3 +101,11 @@ supplied request inputs and a one-shot fake-testable executor to bounded HTTP/
 Close checks and strict refresh parsing. It returns an in-memory result only;
 credential installation, login and persistence remain absent. Requiring rotation
 is a conservative subset and may reject otherwise valid real responses.
+
+## Subsequent explicit public IDC refresh API
+
+[Caller-owned IDC refresh](kiro-public-idc-refresh.md) exposes explicit injected
+refresh with opaque in-memory results and a typed ExecutorInvoked failure marker.
+Once control reaches the executor, a failure may hide server-side token rotation;
+it does not prove safe retry or continued validity of the old token. No automatic
+source update, credential storage, login or persistent access is added.
