@@ -925,7 +925,7 @@ eventLoop:
 		if event.Type == AssistantEventStart {
 			if !started {
 				started = true
-				emitEvent(emit, AgentEvent{Type: EventMessageStart, Message: &partial})
+				emitEvent(emit, AgentEvent{Type: EventMessageStart, ModelResponse: true, Message: &partial})
 			}
 			continue
 		}
@@ -940,17 +940,18 @@ eventLoop:
 		}
 		if !started {
 			started = true
-			emitEvent(emit, AgentEvent{Type: EventMessageStart, Message: &partial})
+			emitEvent(emit, AgentEvent{Type: EventMessageStart, ModelResponse: true, Message: &partial})
 		}
 		emitEvent(emit, AgentEvent{
-			Type:         EventMessageUpdate,
-			Message:      &partial,
-			Delta:        event.Delta,
-			UpdateType:   event.Type,
-			ContentIndex: event.ContentIndex,
-			Reason:       event.Reason,
-			ToolCall:     cloneToolCallPtr(event.ToolCall),
-			Err:          event.Err,
+			Type:          EventMessageUpdate,
+			ModelResponse: true,
+			Message:       &partial,
+			Delta:         event.Delta,
+			UpdateType:    event.Type,
+			ContentIndex:  event.ContentIndex,
+			Reason:        event.Reason,
+			ToolCall:      cloneToolCallPtr(event.ToolCall),
+			Err:           event.Err,
 		})
 	}
 
@@ -1003,9 +1004,9 @@ eventLoop:
 	snapshot.Messages = append(snapshot.Messages, finalMessage)
 
 	if !started {
-		emitEvent(emit, AgentEvent{Type: EventMessageStart, Message: &finalMessage})
+		emitEvent(emit, AgentEvent{Type: EventMessageStart, ModelResponse: true, Message: &finalMessage})
 	}
-	emitEvent(emit, AgentEvent{Type: EventMessageEnd, Message: &finalMessage, Err: terminalErr})
+	emitEvent(emit, AgentEvent{Type: EventMessageEnd, ModelResponse: true, Message: &finalMessage, Err: terminalErr})
 	return finalMessage, tools, nil
 }
 
