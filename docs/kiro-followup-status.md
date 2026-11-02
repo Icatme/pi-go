@@ -133,3 +133,11 @@ pinned community-observed desktop shape with explicit UA/scope/token/limits. No
 sender, real desktop credentials, CLI import or official-public-API guarantee is
 introduced. Later response integration must preserve scope and unknown-outcome
 boundaries rather than silently adopting the desktop profile returned by a service.
+
+## Desktop injected attempt
+
+[Desktop attempt](kiro-injected-desktop-refresh.md) now joins the request and strict
+response components with one explicit executor and conservative expiry. Returned
+profile must match; all dispatch-after failures remain unknown rotation outcomes
+with no credential result. This is fake-tested internal wiring, not automatic
+login, a source manager or real endpoint validation.

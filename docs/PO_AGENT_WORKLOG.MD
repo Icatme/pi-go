@@ -2589,3 +2589,23 @@
   race x3 passed1.036s; repository race passed(pigo30.714s, others passed/cached);
   vet/gofmt/diff passed. Independent child static review no blocker, no independent
   execution. No CI/master merge/deploy. Desktop attempt remains next separate step.
+
+## 2026-11-02 — Single injected desktop refresh attempt (draft)
+
+- Stacked on #125; exact pinned desktop family, no official API guarantee.
+  Connects explicit request to shared bounded JSON/HTTP reader and existing desktop
+  parser; no new network client, login, token discovery/source update/persistence.
+- Preflight/start-clock before executor; one explicit invocation; successful Close
+  before end-clock/parser. Anchors expiry to start, rejects rollback/exact-expiry.
+  Bool means executor invoked, not sent/receipt/retry safety. Every returned failure
+  after invocation is true+zero result, including profile mismatch/Close/time.
+- Returned profile must match asserted scope; absence is not account proof.
+  Rotation absence retains exact prior token under existing desktop semantics;
+  null/empty reject and explicit rotation wins. No same-generation source locking.
+- Three original table-driven tests cover exact body/snapshot/scope/rotation/
+  Close-delay expiry, profile mismatch/null, token null/empty, transport/redirect/
+  headers/length/budget/Close/cancel/clock/expiry failures and preflight no invocation.
+- Official cloud Go1.26.2, cached deps/live off: focused desktop attempt race x3
+  passed1.039s; full repo race passed(pigo30.585s, others passed/cached); vet/gofmt/
+  diff passed. Independent child static review no blocker, not independent run.
+  No real credential/service/desktop/CI/master merge/deploy operation occurred.
