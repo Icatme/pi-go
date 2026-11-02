@@ -66,3 +66,9 @@ and race runs; automatic login/refresh remains unsupported.
 observations to explicit scope/time and requires alias/service-ID namespace plus
 freshness policy. It does not fetch a catalog, select a default model, assert
 account access or connect service-ID routing to the registered provider yet.
+
+## Subsequent management request assembly
+
+[Offline catalog request](kiro-offline-catalog-request.md) constructs a scoped
+ListAvailableModels GET with explicit auth/client inputs. It never sends HTTP or
+updates a registry, and does not add upstream's profile probes or region fallback.

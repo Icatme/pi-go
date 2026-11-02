@@ -33,13 +33,8 @@ func kiroLowerHex(value string) bool {
 // Authentication headers are deliberately absent. The request-attempt marker
 // mirrors the community wire format, not an implemented retry policy.
 func buildKiroOfflineClientHeaders(userAgent, invocationID string) (map[string]string, error) {
-	if len(userAgent) == 0 || len(userAgent) > 512 || strings.TrimSpace(userAgent) != userAgent {
+	if !kiroExplicitUserAgentValid(userAgent) {
 		return nil, errKiroClientHeaders
-	}
-	for _, c := range userAgent {
-		if c < 0x20 || c > 0x7e {
-			return nil, errKiroClientHeaders
-		}
 	}
 	if len(invocationID) != 36 {
 		return nil, errKiroClientHeaders
@@ -63,4 +58,16 @@ func buildKiroOfflineClientHeaders(userAgent, invocationID string) (map[string]s
 		"x-amz-user-agent":            userAgent,
 		"user-agent":                  userAgent,
 	}, nil
+}
+
+func kiroExplicitUserAgentValid(userAgent string) bool {
+	if len(userAgent) == 0 || len(userAgent) > 512 || strings.TrimSpace(userAgent) != userAgent {
+		return false
+	}
+	for _, c := range userAgent {
+		if c < 0x20 || c > 0x7e {
+			return false
+		}
+	}
+	return true
 }

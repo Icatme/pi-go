@@ -2394,3 +2394,18 @@
   original tests cover scope/freshness boundaries, explicit namespace ambiguity,
   nil limits, 16 concurrent mutable return copies and invalid observations.
   Parent review was static only. No live credentials/service/CI or deployment.
+
+## 2026-11-02 — Offline scoped management request assembly
+
+- Compared dd93f2e management.ts requestManagement/ListAvailableModels wire shape.
+  Added a construct-only GET for explicit region/profile/origin/UA, safe query
+  escaping and one explicit scoped credential callback. No default network,
+  profile/region discovery, token inference, retries or registry changes.
+- Existing User-Agent validation is extracted unchanged for both request paths.
+  Management requests intentionally omit POST target/content and runtime headers.
+  Returned headers/URL remain sensitive and must not be logged or redirected.
+- Go1.26.2 cached dependencies/live flags disabled: focused catalog/client-header
+  race x3 passed1.041s; full repository race passed (pigo31.546s), vet/gofmt/diff
+  checks passed. Three original tests exercise all auth families, malformed
+  inputs, scope/cancellation/error and callback option-mutation isolation.
+  Parent review was static only. No real credential/service/CI/merge/deployment.
