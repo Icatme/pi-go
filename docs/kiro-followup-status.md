@@ -125,3 +125,11 @@ fully validated response with absent refreshToken, without changing strict entry
 or config layout. Null/empty/duplicate/failed/unknown outcomes remain rejected;
 retention provenance is explicit. Caller owns credential-generation serialization,
 and no source store or persistence is introduced.
+
+## Desktop refresh request subset
+
+[Offline desktop request](kiro-offline-desktop-refresh-request.md) constructs the
+pinned community-observed desktop shape with explicit UA/scope/token/limits. No
+sender, real desktop credentials, CLI import or official-public-API guarantee is
+introduced. Later response integration must preserve scope and unknown-outcome
+boundaries rather than silently adopting the desktop profile returned by a service.

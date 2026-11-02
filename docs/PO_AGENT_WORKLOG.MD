@@ -2572,3 +2572,20 @@
   attempt/public/retention race x3 passed1.064s; full repository race passed
   (pigo30.456s, others passed/cached); vet/gofmt/diff passed. Reviewer did not
   independently execute. No real account/service/CI/master merge/deployment.
+
+## 2026-11-02 — Offline desktop refresh request subset (draft)
+
+- Pinned community oauth.ts dd93f2e endpoint constant/desktop branch supplies
+  POST prod.<region>.auth.desktop.kiro.dev/refreshToken with JSON refreshToken.
+  This is not official public API guarantee or proof of service-use permission.
+- Independently implemented internal constructor, bounded safe hostname shape,
+  asserted profile scope, explicit UA/token/context/escaped-byte budget. No default
+  desktop impersonation, arbitrary URL, IDC secrets, bearer header, executor,
+  discovery/login/CLI/desktop launch, persistence or real service request.
+- Three original tests cover exact URL/method/headers/one body field, escaped byte
+  budget, redaction, invalid inputs, cancellation and value snapshot ownership.
+  Secret body must not be logged/redirected; GetBody=nil not transport enforcement.
+- Actual official cloud Go1.26.2, cached deps/live off: focused desktop request
+  race x3 passed1.036s; repository race passed(pigo30.714s, others passed/cached);
+  vet/gofmt/diff passed. Independent child static review no blocker, no independent
+  execution. No CI/master merge/deploy. Desktop attempt remains next separate step.
