@@ -7,7 +7,7 @@ provider registration, request DTOs or tool execution. No live calls are made.
 
 ## Result and completion contract
 
-- Buffer ordered text/reasoning/completed-tool parts, bounded by explicit limits.
+- Buffer ordered text/reasoning/completed-tool/context-observation parts, bounded by explicit limits.
   Text and signature fields in the same reasoning event are both retained, as
   opaque fragments, without claiming signature validation or replay support.
 - No callback or partial output exists. Any CRC/protocol/schema/usage/transport
@@ -30,9 +30,10 @@ provider registration, request DTOs or tool execution. No live calls are made.
 ## Strict subset and compatibility gaps
 
 Accepted event names are assistantResponseEvent (string content),
-reasoningContentEvent (string text/signature), toolUseEvent and metadataEvent.
+reasoningContentEvent (string text/signature), toolUseEvent, metadataEvent and
+contextUsageEvent (one strictly validated contextUsagePercentage field).
 Known exceptions terminate with a safe allowlisted name, never the body.
-Citation, contextUsageEvent, metering, redacted reasoning and all other events
+Citation, metering, redacted reasoning and all other events
 are currently rejected rather than silently discarded. Extra content fields and
 text/reasoning interleaved inside an open tool are also unsupported. Ordinary
 events still require application/json content type under #51's explicit subset.
@@ -117,3 +118,32 @@ every split point, one-byte reads, all truncated prefixes and a low-bit flip at 
 terminal-state expectations (one old stop reason is lowercase). Python stdlib
 revalidation of all lengths, both CRCs, headers and payloads passed on
 2026-11-01; the new Go test itself has not been compiled or run.
+
+## Standalone context pressure observations (#61 integration extension)
+
+Pinned upstream [event-parser.ts L244-L253](https://github.com/mikeyobrien/pi-provider-kiro/blob/dd93f2e884b60cecd85c7fb4a818fb6d64ba3dba/src/event-parser.ts#L244-L253)
+and its event-parser tests distinguish contextUsageEvent.contextUsagePercentage
+from meteringEvent credits and from metadata token counts. This offline extension
+accepts only the single percentage field: strict nonnegative decimal 0..100,
+no exponent notation, string/null/boolean, duplicate keys or unknown fields.
+It reuses the existing exact lexical range check before float conversion.
+
+Each accepted event adds an ordered context_usage part with a non-nil percentage
+pointer (including zero). Repeated or changing samples remain separate observations;
+there is no summation, token estimate, credit/cost calculation or latest-wins rewrite
+of metadata. The metadata collector's own context percentage remains independently
+reported evidence; no equality across observations and final metadata is implied.
+Returned percentages are float64 telemetry, not exact decimal accounting amounts.
+
+Events may appear during an open tool without flushing it. They cannot close tools
+or establish completion. All existing event/payload/frame bounds apply, and after
+stopReason only metadataEvent is still allowed: even a valid contextUsageEvent then
+rejects the whole buffered response. MAX_TOKENS still discards tools. All parts are
+inert; consumers must explicitly handle the added kind rather than infer tool or
+assistant text from it. No provider response adapter is introduced.
+
+Five new Go regression functions cover ordered/zero/repeated samples, separation
+from metadata/token usage, malformed/ambiguous payloads, no-stop/late/refusal gates,
+MAX_TOKENS tool suppression, open-tool assembly and resource budgets. Go compile,
+gofmt and tests remain unrun. This branch is based on #61 and does not modify the
+separate request-envelope or user-text-block extensions.
