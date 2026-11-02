@@ -51,3 +51,11 @@ denied two-turn tool results, ToolCallEnd-triggered cancellation with zero execu
 and truncated/Close-failed responses with no tool authorization. This is still
 unmerged development code and synthetic verification, not real service validation.
 See the worklog for this increment's actual final test results.
+
+## Subsequent offline refresh-response contract
+
+[Offline refresh response](kiro-offline-refresh-response.md) adds strict supplied-
+JSON semantics for explicit IDC/desktop/external-IDP families, scope, expiry and
+refresh-token rotation. It does not discover credentials, send a refresh request,
+install a credential source or persist access. The worklog records its actual Go
+and race runs; automatic login/refresh remains unsupported.

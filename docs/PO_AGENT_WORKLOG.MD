@@ -2362,3 +2362,20 @@
   real credentials, service calls, CI dispatch or automatic login/model setup.
   Preview text cannot be revoked; a tool lifecycle event is never authorization
   without complete successful result and current schema/permission/context checks.
+
+## 2026-11-02 — Offline refresh response semantics
+
+- Compared pinned pi-provider-kiro dd93f2e src/oauth.ts and test/oauth.test.ts.
+  Independently implemented supplied-response parsing for IDC, desktop and
+  external-IDP families, keeping exact scope and actual expiry separate from
+  refresh-after. Unknown/new fields and missing expiry deliberately reject.
+- No credentials discovered, sources replaced, endpoints called, timers started,
+  persistent access created, CLI/IDE data read/written or real refresh performed.
+  Only omitted desktop/IdP refresh fields retain caller's old token; null/empty
+  reject. IDC needs rotation evidence. Secrets are excluded from JSON/fmt output.
+- Official Go1.26.2 offline/cache-only: focused refresh race x3 passed1.052s;
+  full repository race passed (pigo30.731s), go vet/gofmt/diff checks passed.
+  Parent review was static, not independently executed. Synthetic tests cover
+  expiry bounds/overflow, scope/family conflict, unknown fields and redaction.
+- Still a draft-only internal parser, not automatic OAuth/login or proof of
+  endpoint/account/billing compatibility. No CI or real service calls.
