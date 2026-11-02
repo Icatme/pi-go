@@ -508,6 +508,15 @@ func (a *Agent) replaceRunSnapshotLocked(snapshot AgentSnapshot) {
 }
 
 func (a *Agent) finishRun(snapshot *AgentSnapshot, idle chan struct{}) {
+	// Release this invocation's context before publishing idle. Cancel outside
+	// the agent lock: a parent's AfterFunc stop hook can call back into the agent.
+	a.mu.RLock()
+	cancel := a.cancel
+	a.mu.RUnlock()
+	if cancel != nil {
+		cancel()
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
