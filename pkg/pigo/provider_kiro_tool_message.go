@@ -21,12 +21,9 @@ func projectKiroCompletedTools(response kiroOfflineResponse, model Model, timest
 	if !kiroTextModelIdentityValid(model) || maxBytes < 2 || maxBytes > 1<<20 || maxTools < 1 || maxTools > 128 || len(allowedNames) < 1 || len(allowedNames) > 128 || len(response.Parts) < 1 || len(response.Parts) > 4096 || response.StopReason != StopReasonToolUse || response.Usage.StopReason != "TOOL_USE" {
 		return zero, errKiroToolMessage
 	}
-	allowed := make(map[string]bool, len(allowedNames))
-	for _, name := range allowedNames {
-		if name == "" || len(name) > 256 || !utf8.ValidString(name) || strings.TrimSpace(name) != name || strings.IndexFunc(name, unicode.IsControl) >= 0 || allowed[name] {
-			return zero, errKiroToolMessage
-		}
-		allowed[name] = true
+	allowed := kiroAllowedToolNames(allowedNames)
+	if allowed == nil {
+		return zero, errKiroToolMessage
 	}
 	message := AssistantMessage{API: model.API, Provider: model.Provider, Model: model.ID, Timestamp: timestamp, StopReason: StopReasonToolUse}
 	if !applyKiroCompletedUsage(&message, response.Usage) {
@@ -76,4 +73,19 @@ func projectKiroCompletedTools(response kiroOfflineResponse, model Model, timest
 		return zero, errKiroToolMessage
 	}
 	return message, nil
+}
+
+// kiroAllowedToolNames snapshots the explicit request allowlist before transport.
+func kiroAllowedToolNames(names []string) map[string]bool {
+	if len(names) < 1 || len(names) > 128 {
+		return nil
+	}
+	allowed := make(map[string]bool, len(names))
+	for _, name := range names {
+		if name == "" || len(name) > 256 || !utf8.ValidString(name) || strings.TrimSpace(name) != name || strings.IndexFunc(name, unicode.IsControl) >= 0 || allowed[name] {
+			return nil
+		}
+		allowed[name] = true
+	}
+	return allowed
 }
