@@ -233,6 +233,7 @@ func convertAssistantMessageToPigo(message Message) pigo.Message {
 			Name:             call.Name,
 			Namespace:        call.Namespace,
 			Arguments:        toolCallArgumentsMap(call),
+			RawArguments:     replayProviderRawArguments(call),
 			ThoughtSignature: call.ThoughtSignature,
 		})
 	}
@@ -393,7 +394,7 @@ func convertPigoAssistantMessage(message pigo.AssistantMessage) Message {
 }
 
 func convertPigoToolCall(call pigo.ToolCall) ToolCall {
-	return ToolCall{
+	converted := ToolCall{
 		ID:               call.ID,
 		OriginalID:       call.ID,
 		Name:             call.Name,
@@ -402,6 +403,9 @@ func convertPigoToolCall(call pigo.ToolCall) ToolCall {
 		ParsedArgs:       cloneStringAnyMap(call.Arguments),
 		ThoughtSignature: call.ThoughtSignature,
 	}
+
+	converted.providerEvidence = captureProviderRawArguments(call.RawArguments, converted)
+	return converted
 }
 
 func providerToolCallID(call ToolCall) string {

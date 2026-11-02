@@ -181,6 +181,9 @@ type Part struct {
 
 // ToolCall is an assistant-emitted tool invocation request.
 type ToolCall struct {
+	// Immutable in-memory provider evidence; deliberately absent from JSON.
+	// Not execution data, an approval token, or persisted replay support.
+	providerEvidence *toolProviderEvidence
 	ID               string          `json:"id"`
 	OriginalID       string          `json:"original_id,omitempty"`
 	Name             string          `json:"name"`

@@ -1514,6 +1514,7 @@ func cloneToolCall(call ToolCall) ToolCall {
 		arguments = append(arguments, call.Arguments...)
 	}
 	return ToolCall{
+		providerEvidence: call.providerEvidence,
 		ID:               call.ID,
 		OriginalID:       call.OriginalID,
 		Name:             call.Name,
