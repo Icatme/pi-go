@@ -79,6 +79,13 @@ func validKiroRequestInputs(id kiroRequestIdentity, limits kiroRequestLimits) bo
 // System instructions are rejected, never silently lowered. Existing strict
 // projection restrictions (including persisted raw tool history) still apply.
 func encodeKiroOfflineRequest(ctx Context, schemas map[string]json.RawMessage, id kiroRequestIdentity, limits kiroRequestLimits) ([]byte, error) {
+	return encodeKiroOfflineRequestWithPolicy(ctx, schemas, id, limits, kiroToolHistoryOriginal)
+}
+
+func encodeKiroOfflineRequestWithPolicy(ctx Context, schemas map[string]json.RawMessage, id kiroRequestIdentity, limits kiroRequestLimits, policy kiroToolHistoryPolicy) ([]byte, error) {
+	if policy != kiroToolHistoryOriginal && policy != kiroToolHistoryAuthored {
+		return nil, errKiroRequestEnvelope
+	}
 	if !validKiroRequestInputs(id, limits) || ctx.SystemPrompt != "" {
 		return nil, errKiroRequestEnvelope
 	}
@@ -112,7 +119,7 @@ func encodeKiroOfflineRequest(ctx Context, schemas map[string]json.RawMessage, i
 		if len(ctx.Tools) > limits.Tools {
 			return nil, errKiroRequestEnvelope
 		}
-		projection, err := projectKiroToolConversation(ctx, id.ModelID, schemas, limits.Messages, limits.Tools, limits.PayloadBytes)
+		projection, err := projectKiroToolConversationWithPolicy(ctx, id.ModelID, schemas, limits.Messages, limits.Tools, limits.PayloadBytes, policy)
 		if err != nil {
 			return nil, errKiroRequestEnvelope
 		}

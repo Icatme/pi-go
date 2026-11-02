@@ -3,6 +3,7 @@ package pigo
 const (
 	kiroBufferedOptionAutoHTTP uint8 = iota + 1
 	kiroBufferedOptionAffinity
+	kiroBufferedOptionAuthoredHistory
 )
 
 // KiroBufferedOption is a controlled opt-in, not an arbitrary callback. Its zero
@@ -22,6 +23,14 @@ func WithKiroAutoHTTP() KiroBufferedOption {
 	return KiroBufferedOption{kind: kiroBufferedOptionAutoHTTP}
 }
 
+// WithKiroCallerAuthoredToolHistory explicitly sends current argument objects
+// as authored history, including precise restored values. It does not claim
+// original provider wire provenance or populate RawArguments. Conflicting
+// supplied raw evidence still rejects. Tool permission checks remain separate.
+func WithKiroCallerAuthoredToolHistory() KiroBufferedOption {
+	return KiroBufferedOption{kind: kiroBufferedOptionAuthoredHistory}
+}
+
 // WithKiroSessionAffinity snapshots caller-owned key material at option creation.
 // Registration validates and copies it again. No key generation or persistence.
 func WithKiroSessionAffinity(affinity KiroSessionAffinity) KiroBufferedOption {
@@ -37,11 +46,12 @@ func WithKiroSessionAffinity(affinity KiroSessionAffinity) KiroBufferedOption {
 // accepted; zero/duplicate options reject before registration/callbacks.
 // With no options this has the same strict behavior as RegisterKiroBufferedModule.
 func RegisterKiroBufferedModuleWithOptions(sourceID string, config KiroBufferedConfig, options ...KiroBufferedOption) error {
-	if len(options) > 2 {
+	if len(options) > 3 {
 		return errKiroRegistration
 	}
 	var affinity *KiroSessionAffinity
 	autoHTTP := false
+	history := kiroToolHistoryOriginal
 	for _, option := range options {
 		switch option.kind {
 		case kiroBufferedOptionAutoHTTP:
@@ -49,6 +59,11 @@ func RegisterKiroBufferedModuleWithOptions(sourceID string, config KiroBufferedC
 				return errKiroRegistration
 			}
 			autoHTTP = true
+		case kiroBufferedOptionAuthoredHistory:
+			if history != kiroToolHistoryOriginal || option.affinity != nil {
+				return errKiroRegistration
+			}
+			history = kiroToolHistoryAuthored
 		case kiroBufferedOptionAffinity:
 			if affinity != nil || option.affinity == nil || !kiroSessionIDValid(option.affinity.Tenant) || len(option.affinity.Key) < 32 || len(option.affinity.Key) > 64 {
 				return errKiroRegistration
@@ -60,5 +75,5 @@ func RegisterKiroBufferedModuleWithOptions(sourceID string, config KiroBufferedC
 			return errKiroRegistration
 		}
 	}
-	return registerKiroBufferedModule(sourceID, config, affinity, autoHTTP)
+	return registerKiroExplicitModuleWithHistory(sourceID, config, affinity, autoHTTP, kiroDeliveryBuffered, history)
 }

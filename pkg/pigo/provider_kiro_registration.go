@@ -71,6 +71,13 @@ func registerKiroBufferedModule(sourceID string, config KiroBufferedConfig, affi
 }
 
 func registerKiroExplicitModule(sourceID string, config KiroBufferedConfig, affinity *KiroSessionAffinity, autoHTTP bool, delivery kiroDeliveryMode) error {
+	return registerKiroExplicitModuleWithHistory(sourceID, config, affinity, autoHTTP, delivery, kiroToolHistoryOriginal)
+}
+
+func registerKiroExplicitModuleWithHistory(sourceID string, config KiroBufferedConfig, affinity *KiroSessionAffinity, autoHTTP bool, delivery kiroDeliveryMode, history kiroToolHistoryPolicy) error {
+	if history != kiroToolHistoryOriginal && history != kiroToolHistoryAuthored {
+		return errKiroRegistration
+	}
 	if delivery > kiroDeliveryIncremental || strings.TrimSpace(sourceID) == "" || config.RequestIDs == nil || config.Credentials == nil || config.RoundTrip == nil || len(config.Schemas) > 128 || !kiroTextModelIdentityValid(Model{API: config.API, Provider: config.Provider, ID: "config-check"}) {
 		return errKiroRegistration
 	}
@@ -128,6 +135,7 @@ func registerKiroExplicitModule(sourceID string, config KiroBufferedConfig, affi
 			return fail()
 		}
 		attempt := kiroBufferedAttemptConfig(config, model, ids)
+		attempt.Request.ToolHistoryPolicy = history
 		var stream *AssistantMessageEventStream
 		if delivery == kiroDeliveryLiveText {
 			live := kiroInjectedTextStreamConfig{Request: attempt.Request, Response: attempt.Response, Model: model, Timestamp: attempt.Timestamp, MaxTextBytes: attempt.MaxBytes, MaxEventBytes: attempt.MaxEventBytes}

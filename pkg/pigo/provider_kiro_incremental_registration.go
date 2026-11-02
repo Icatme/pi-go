@@ -22,6 +22,18 @@ var errKiroIncrementalRegistration = errors.New("kiro: invalid explicit incremen
 // executor and body operations must cooperate with context. Previews cannot be
 // recalled after a late failure. sourceID owns UnregisterAPIModules cleanup.
 func RegisterKiroIncrementalModule(sourceID string, config KiroIncrementalConfig, options KiroIncrementalOptions) error {
+	return registerKiroIncrementalModuleWithHistory(sourceID, config, options, kiroToolHistoryOriginal)
+}
+
+// RegisterKiroIncrementalModuleWithAuthoredToolHistory is an explicit alternative
+// that re-encodes current argument objects as authored history, not original wire.
+// It adds no persistence, tool execution authority, network default or retry.
+// All other incremental delivery/permission/late-error boundaries are unchanged.
+func RegisterKiroIncrementalModuleWithAuthoredToolHistory(sourceID string, config KiroIncrementalConfig, options KiroIncrementalOptions) error {
+	return registerKiroIncrementalModuleWithHistory(sourceID, config, options, kiroToolHistoryAuthored)
+}
+
+func registerKiroIncrementalModuleWithHistory(sourceID string, config KiroIncrementalConfig, options KiroIncrementalOptions, history kiroToolHistoryPolicy) error {
 	var affinity *KiroSessionAffinity
 	if options.SessionAffinity != nil {
 		input := options.SessionAffinity
@@ -32,7 +44,7 @@ func RegisterKiroIncrementalModule(sourceID string, config KiroIncrementalConfig
 		copied.Key = append([]byte(nil), input.Key...)
 		affinity = &copied
 	}
-	if err := registerKiroExplicitModule(sourceID, KiroBufferedConfig(config), affinity, options.AutoHTTP, kiroDeliveryIncremental); err != nil {
+	if err := registerKiroExplicitModuleWithHistory(sourceID, KiroBufferedConfig(config), affinity, options.AutoHTTP, kiroDeliveryIncremental, history); err != nil {
 		return errKiroIncrementalRegistration
 	}
 	return nil

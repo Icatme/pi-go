@@ -14,6 +14,7 @@ var errKiroHTTPRequest = errors.New("kiro: invalid offline HTTP request")
 var kiroRuntimeRegionShape = regexp.MustCompile(`^[a-z]{2}(?:-[a-z]+)+-[0-9]+$`)
 
 type kiroHTTPRequestOptions struct {
+	ToolHistoryPolicy kiroToolHistoryPolicy
 	// Default rejects system instructions; lowering requires explicit opt-in.
 	SystemPromptPolicy kiroSystemPromptPolicy
 	Region             string
@@ -39,7 +40,7 @@ func newKiroOfflineHTTPRequest(ctx context.Context, conversation Context, schema
 	if err != nil {
 		return nil, errKiroHTTPRequest
 	}
-	body, err := encodeKiroOfflineRequest(prepared, schemas, options.Identity, options.Limits)
+	body, err := encodeKiroOfflineRequestWithPolicy(prepared, schemas, options.Identity, options.Limits, options.ToolHistoryPolicy)
 	if err != nil {
 		return nil, errKiroHTTPRequest
 	}

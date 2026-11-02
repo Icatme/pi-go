@@ -5,10 +5,10 @@ parses a caller-supplied string) and places that object into `toolUses[].input`:
 [transform.ts lines 280–284](https://github.com/mikeyobrien/pi-provider-kiro/blob/dd93f2e884b60cecd85c7fb4a818fb6d64ba3dba/src/transform.ts#L280-L284).
 It does not require the private Agent evidence field introduced in our draft #94.
 
-This change adds a separate **internal, explicit authored policy** to the inert
-Kiro conversation projector. It does not enable that policy in HTTP requests or
-public registration yet, change public struct layouts, or remove the current
-Agent bridge. The ToolCall compatibility blocker is therefore **not fixed yet**.
+The separate **explicit authored policy** projects current values into inert
+Kiro request data. Controlled registration opt-ins are described below; existing
+entry points remain strict. This does not change public struct layouts or remove
+the current Agent bridge. The ToolCall compatibility blocker is **not fixed yet**.
 
 ## Two distinct contracts
 
@@ -65,3 +65,32 @@ private ToolCall field and rerun the external seven-field compile probe plus all
 legacy/non-Kiro tests. Do not remove the bridge first or claim this isolated
 projector proves a complete Agent integration. No default network, credentials,
 persistence expansion, service calls or upstream service guarantee is introduced.
+
+## Explicit request/registration integration
+
+The next slice threads the policy through the private request constructor and
+public opt-in entry points, without adding fields to public configuration types:
+
+- Buffered: `RegisterKiroBufferedModuleWithOptions(...,
+  WithKiroCallerAuthoredToolHistory())`.
+- Incremental text/completed tools:
+  `RegisterKiroIncrementalModuleWithAuthoredToolHistory(...)`.
+
+Existing registrations remain strict, including the existing incremental entry.
+The new buffered option composes with explicit Auto HTTP and session affinity;
+duplicates and invalid options reject. Live-text-only registration is unchanged.
+No global policy, automatic fallback or argument persistence is introduced.
+
+Request serialization and history validation still occur before credential lookup
+or the injected executor. Authored/history errors and cancellation reach neither.
+Tool schemas, chronological groups, allowlists, final-state checks and actual Agent
+execution permissions are unchanged. Current caller history is input data, not
+proof the model originally emitted it or that a tool should execute.
+
+Fake integration tests cover buffered/incremental, full/simple host APIs, strict
+rejection, explicit object authoring, edits, UseNumber restoration, rounded-value
+rejection, conflicting raw, cancelled requests and callback counts. Wire assertions
+parse the input's JSON number, rather than merely searching body text.
+
+This request integration still does not remove the private Agent bridge: the
+external ToolCall layout blocker remains until the separate Agent migration lands.
