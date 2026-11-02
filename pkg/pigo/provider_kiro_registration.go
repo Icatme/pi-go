@@ -59,6 +59,10 @@ func RegisterKiroBufferedModule(sourceID string, config KiroBufferedConfig) erro
 }
 
 func registerKiroBufferedModule(sourceID string, config KiroBufferedConfig, affinity *KiroSessionAffinity, autoHTTP bool) error {
+	return registerKiroExplicitModule(sourceID, config, affinity, autoHTTP, false)
+}
+
+func registerKiroExplicitModule(sourceID string, config KiroBufferedConfig, affinity *KiroSessionAffinity, autoHTTP, liveText bool) error {
 	if strings.TrimSpace(sourceID) == "" || config.RequestIDs == nil || config.Credentials == nil || config.RoundTrip == nil || len(config.Schemas) > 128 || !kiroTextModelIdentityValid(Model{API: config.API, Provider: config.Provider, ID: "config-check"}) {
 		return errKiroRegistration
 	}
@@ -84,9 +88,15 @@ func registerKiroBufferedModule(sourceID string, config KiroBufferedConfig, affi
 	request.Body.Close()
 	run := func(model Model, conversation Context, ctx context.Context, sessionID string) *AssistantMessageEventStream {
 		fail := func() *AssistantMessageEventStream {
+			if liveText {
+				return streamAPIUnavailable(model, "kiro: live text request rejected")
+			}
 			return streamAPIUnavailable(model, "kiro: buffered request rejected")
 		}
 		if ctx == nil || ctx.Err() != nil || model.API != config.API || model.Provider != config.Provider || !kiroTextModelIdentityValid(model) || model.BaseURL != "" || model.Compat != nil || len(model.Headers) != 0 || !reflect.ValueOf(model.SamplingParams).IsZero() || !reflect.ValueOf(model.SamplingParamsByThinkingLevel).IsZero() || !reflect.ValueOf(model.ThinkingLevelMap).IsZero() {
+			return fail()
+		}
+		if liveText && len(conversation.Tools) != 0 {
 			return fail()
 		}
 		ids, err := config.RequestIDs(ctx)
@@ -107,7 +117,13 @@ func registerKiroBufferedModule(sourceID string, config KiroBufferedConfig, affi
 			return fail()
 		}
 		attempt := kiroBufferedAttemptConfig(config, model, ids)
-		stream, err := runKiroScopedCompletedStream(ctx, prepared, schemas, attempt, config.Credentials, config.RoundTrip)
+		var stream *AssistantMessageEventStream
+		if liveText {
+			live := kiroInjectedTextStreamConfig{Request: attempt.Request, Response: attempt.Response, Model: model, Timestamp: attempt.Timestamp, MaxTextBytes: attempt.MaxBytes, MaxEventBytes: attempt.MaxEventBytes}
+			stream, err = startKiroScopedTextStream(ctx, prepared, live, config.Credentials, config.RoundTrip)
+		} else {
+			stream, err = runKiroScopedCompletedStream(ctx, prepared, schemas, attempt, config.Credentials, config.RoundTrip)
+		}
 		if err != nil {
 			return fail()
 		}
@@ -120,6 +136,9 @@ func registerKiroBufferedModule(sourceID string, config KiroBufferedConfig, affi
 		StreamSimple: func(model Model, conversation Context, options SimpleStreamOptions) *AssistantMessageEventStream {
 			return run(model, conversation, options.RequestContext, options.SessionID)
 		},
+	}
+	if liveText {
+		module.Capabilities.CustomTools = CapabilityUnsupported
 	}
 	validation := APIOptionValidation{
 		ValidateOptions: func(model Model, options ProviderStreamOptions) error {
