@@ -55,6 +55,10 @@ var errKiroRegistration = errors.New("kiro: invalid explicit buffered configurat
 // return buffered lifecycle events only after complete response validation; this
 // is NOT realtime streaming. This API does not establish service-use permission.
 func RegisterKiroBufferedModule(sourceID string, config KiroBufferedConfig) error {
+	return registerKiroBufferedModule(sourceID, config, nil)
+}
+
+func registerKiroBufferedModule(sourceID string, config KiroBufferedConfig, affinity *KiroSessionAffinity) error {
 	if strings.TrimSpace(sourceID) == "" || config.RequestIDs == nil || config.Credentials == nil || config.RoundTrip == nil || len(config.Schemas) > 128 || !kiroTextModelIdentityValid(Model{API: config.API, Provider: config.Provider, ID: "config-check"}) {
 		return errKiroRegistration
 	}
@@ -78,7 +82,7 @@ func RegisterKiroBufferedModule(sourceID string, config KiroBufferedConfig) erro
 		return errKiroRegistration
 	}
 	request.Body.Close()
-	run := func(model Model, conversation Context, ctx context.Context) *AssistantMessageEventStream {
+	run := func(model Model, conversation Context, ctx context.Context, sessionID string) *AssistantMessageEventStream {
 		fail := func() *AssistantMessageEventStream {
 			return streamAPIUnavailable(model, "kiro: buffered request rejected")
 		}
@@ -88,6 +92,13 @@ func RegisterKiroBufferedModule(sourceID string, config KiroBufferedConfig) erro
 		ids, err := config.RequestIDs(ctx)
 		if err != nil || ctx.Err() != nil {
 			return fail()
+		}
+		if affinity != nil {
+			conversationID, valid := kiroSessionConversationID(config, *affinity, sessionID)
+			if !valid || (ids.ConversationID != "" && ids.ConversationID != conversationID) {
+				return fail()
+			}
+			ids.ConversationID = conversationID
 		}
 		// Identity callback runs before input preparation; credentials run only after
 		// subsequent validation+serialization. Caller input stays read-only throughout.
@@ -104,13 +115,30 @@ func RegisterKiroBufferedModule(sourceID string, config KiroBufferedConfig) erro
 	}
 	module := APIModule{API: config.API, Capabilities: ModelCapabilities{CustomTools: CapabilitySupported},
 		Stream: func(model Model, conversation Context, options ProviderStreamOptions) *AssistantMessageEventStream {
-			return run(model, conversation, options.RequestContext)
+			return run(model, conversation, options.RequestContext, options.SessionID)
 		},
 		StreamSimple: func(model Model, conversation Context, options SimpleStreamOptions) *AssistantMessageEventStream {
-			return run(model, conversation, options.RequestContext)
+			return run(model, conversation, options.RequestContext, options.SessionID)
 		},
 	}
-	RegisterAPIModuleWithValidationForSource(sourceID, module, APIOptionValidation{ValidateOptions: validateKiroHostOptions, ValidateSimpleOptions: validateKiroHostSimpleOptions})
+	validation := APIOptionValidation{ValidateOptions: validateKiroHostOptions, ValidateSimpleOptions: validateKiroHostSimpleOptions}
+	if affinity != nil {
+		validation.ValidateOptions = func(model Model, options ProviderStreamOptions) error {
+			if !kiroSessionIDValid(options.SessionID) {
+				return errKiroHostOptions
+			}
+			options.SessionID = ""
+			return validateKiroHostOptions(model, options)
+		}
+		validation.ValidateSimpleOptions = func(model Model, options SimpleStreamOptions) error {
+			if !kiroSessionIDValid(options.SessionID) {
+				return errKiroHostOptions
+			}
+			options.SessionID = ""
+			return validateKiroHostSimpleOptions(model, options)
+		}
+	}
+	RegisterAPIModuleWithValidationForSource(sourceID, module, validation)
 	return nil
 }
 
