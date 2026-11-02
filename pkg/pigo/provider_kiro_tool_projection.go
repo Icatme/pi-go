@@ -9,6 +9,13 @@ import (
 
 var errKiroToolProjection = errors.New("kiro: unsupported tool conversation projection")
 
+type kiroToolHistoryPolicy uint8
+
+const (
+	kiroToolHistoryOriginal kiroToolHistoryPolicy = iota
+	kiroToolHistoryAuthored
+)
+
 type kiroToolWireCall struct {
 	Name  string          `json:"name"`
 	ID    string          `json:"toolUseId"`
@@ -60,6 +67,15 @@ type kiroToolProjection struct {
 // bounded dual-evidence equality rather than silently overriding edits or
 // precision loss. Original raw JSON is replayed and copied.
 func projectKiroToolConversation(ctx Context, modelID string, schemas map[string]json.RawMessage, maxMessages, maxCalls, maxBytes int) (kiroToolProjection, error) {
+	return projectKiroToolConversationWithPolicy(ctx, modelID, schemas, maxMessages, maxCalls, maxBytes, kiroToolHistoryOriginal)
+}
+
+// Authored mode accepts current caller values as history, not provider provenance.
+// The original entry point remains strict; no transport/registration opts in yet.
+func projectKiroToolConversationWithPolicy(ctx Context, modelID string, schemas map[string]json.RawMessage, maxMessages, maxCalls, maxBytes int, policy kiroToolHistoryPolicy) (kiroToolProjection, error) {
+	if policy != kiroToolHistoryOriginal && policy != kiroToolHistoryAuthored {
+		return kiroToolProjection{}, errKiroToolProjection
+	}
 	bad := kiroToolProjection{}
 	if ctx.SystemPrompt != "" || modelID == "" || len(modelID) > 256 || !utf8.ValidString(modelID) || maxBytes < 2 || len(ctx.Messages) == 0 || len(ctx.Tools) == 0 || len(schemas) != len(ctx.Tools) {
 		return bad, errKiroToolProjection
@@ -166,13 +182,27 @@ func projectKiroToolConversation(ctx Context, modelID string, schemas map[string
 					}
 					text.WriteString(b.Text)
 				case ToolCall:
-					if b.RawArguments == "" || !consume(b.ID) || !consume(b.Name) || !consume(b.RawArguments) {
+					var input json.RawMessage
+					if policy == kiroToolHistoryOriginal {
+						if b.RawArguments == "" || !kiroToolArgumentEvidenceMatches(b.RawArguments, b.Arguments, maxBytes) {
+							return bad, errKiroToolProjection
+						}
+						input = json.RawMessage(b.RawArguments)
+					} else {
+						// Never silently override conflicting supplied evidence.
+						if b.RawArguments != "" && !kiroToolArgumentEvidenceMatches(b.RawArguments, b.Arguments, maxBytes) {
+							return bad, errKiroToolProjection
+						}
+						var err error
+						input, err = encodeKiroAuthoredToolArguments(b.Arguments, maxBytes)
+						if err != nil {
+							return bad, errKiroToolProjection
+						}
+					}
+					if !consume(b.ID) || !consume(b.Name) || !consumeRaw(input) {
 						return bad, errKiroToolProjection
 					}
-					if !kiroToolArgumentEvidenceMatches(b.RawArguments, b.Arguments, maxBytes) {
-						return bad, errKiroToolProjection
-					}
-					assistant.Calls = append(assistant.Calls, kiroToolWireCall{Name: b.Name, ID: b.ID, Input: json.RawMessage(b.RawArguments)})
+					assistant.Calls = append(assistant.Calls, kiroToolWireCall{Name: b.Name, ID: b.ID, Input: append(json.RawMessage(nil), input...)})
 				default:
 					return bad, errKiroToolProjection
 				}
