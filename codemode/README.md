@@ -94,7 +94,10 @@ Opaque objects/allocations owned by a Go tool remain the tool's responsibility.
 
 Nonfinite numbers, BigInt, unsafe integers (outside +/-9007199254740991),
 JSON precision loss, unsupported object/accessor values and cycles are
-rejected. Invalid UTF-8 and unpaired UTF-16 surrogate escapes are rejected in
+rejected. Enumerable named array properties (including noncanonical indices like
+`01`) are rejected before serialization instead of being silently discarded.
+Dense arrays remain supported; non-enumerable named properties retain ordinary JSON
+omission behavior. Invalid UTF-8 and unpaired UTF-16 surrogate escapes are rejected in
 JSON string values and keys before decoding; valid surrogate pairs and U+FFFD
 remain supported. `ValidateJSON` exposes this boundary before parsing into
 JavaScript; `*JSONError` supplies `unsafe_number` or `invalid_unicode` codes.
@@ -127,3 +130,41 @@ arbitrary Go goroutines.
 
 The artifact, exact source/ABI digest, MIT notices, maintenance/platform checks
 and stack rationale are in [internal/assets/SOURCE.md](internal/assets/SOURCE.md).
+
+
+### Offline serialization regression checks
+
+The auxiliary command `node --test codemode/prelude_array_test.cjs` loads the
+actual prelude with Node's VM and a fake host. It checks named-array-property
+rejection, descriptor own-value validation, mutation resistance and unchanged
+dense arrays. It does not execute tools or validate the embedded QuickJS/WASM
+runtime. The corresponding Go integration tests are in
+`prelude_array_test.go`; run `go test ./codemode` with the supported Go toolchain
+before considering the fix integrated.
+
+The same suite can also run inside the **already-vendored QuickJS WASM reactor**
+using Node's built-in WebAssembly API (no package/runtime installation):
+
+```powershell
+$env:QUICKJS_ASSET = "./codemode/internal/assets/quickjs.wasm"
+node --test codemode/prelude_array_test.cjs
+Remove-Item Env:QUICKJS_ASSET
+```
+
+The test adapter requires the pinned asset SHA-256 from
+`internal/assets/SOURCE.md`, initializes a fresh reactor per case, uses a
+64 MiB QuickJS heap/512 KiB stack and an interrupt deadline, and rejects
+external host-call/module imports. This Node adapter does not impose the Go/wazero
+2048-page linear-memory ceiling; the 64 MiB setting limits QuickJS-accounted
+heap, not all WebAssembly memory. Run only these fixed trusted fixtures.
+Clock/random imports are deterministic test
+stubs, not production entropy. The fake tool host exists only in the guest test
+program. The adapter restores the intentionally modified Array.prototype.toJSON
+before serializing its own test transcript; it is not a reusable hostile-guest
+bridge or isolation harness.
+
+Both Node VM and pinned QuickJS modes passed 30/30 cases on 2026-11-01; the
+original prelude failed 10 of the same 30 cases in both engines. This verifies
+these JS semantics in the pinned reactor, **not** Go compilation, wazero host
+integration, real tool authorization, concurrency, cancellation races or full
+sandbox isolation. Those still require the Go suite.

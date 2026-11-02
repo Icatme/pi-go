@@ -362,6 +362,11 @@ type AgentState struct {
 
 // AgentEvent is emitted to subscribers for lifecycle, message, and tool updates.
 type AgentEvent struct {
+	// ModelResponse marks message lifecycle events emitted by model generation.
+	// Input, steering, follow-up, system, tool and synthesized runtime-error
+	// messages leave it false. It is set by the engine, never message metadata;
+	// it is descriptive runtime origin, not an authorization or trust credential.
+	ModelResponse      bool               `json:"model_response,omitempty"`
 	Type               EventType          `json:"type"`
 	Timestamp          time.Time          `json:"timestamp"`
 	RunID              string             `json:"run_id,omitempty"`
