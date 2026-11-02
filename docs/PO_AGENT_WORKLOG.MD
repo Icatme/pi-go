@@ -2379,3 +2379,18 @@
   expiry bounds/overflow, scope/family conflict, unknown fields and redaction.
 - Still a draft-only internal parser, not automatic OAuth/login or proof of
   endpoint/account/billing compatibility. No CI or real service calls.
+
+## 2026-11-02 — Scoped offline catalog selection
+
+- Kept pinned management/models baseline dd93f2e. Bound parsed catalog evidence
+  to caller-asserted profile/region and observation time; selection requires
+  explicit current time/maxAge and alias versus exact-service-ID namespace.
+- No fetch/cache/default model/registry/entitlement claim. A concrete alias can
+  equal another record's service ID despite unique aliases, so lookup never
+  guesses namespace. Returned limits/schema/metadata are detached; no properties
+  or prices inferred from missing fields. Catalog JSON/fmt hides private state.
+- Official Go1.26.2 offline/cache-only: final focused race x3 passed1.080s;
+  full-repository race passed (pigo30.947s), vet/gofmt/diff checks passed. Four
+  original tests cover scope/freshness boundaries, explicit namespace ambiguity,
+  nil limits, 16 concurrent mutable return copies and invalid observations.
+  Parent review was static only. No live credentials/service/CI or deployment.

@@ -59,3 +59,10 @@ JSON semantics for explicit IDC/desktop/external-IDP families, scope, expiry and
 refresh-token rotation. It does not discover credentials, send a refresh request,
 install a credential source or persist access. The worklog records its actual Go
 and race runs; automatic login/refresh remains unsupported.
+
+## Subsequent scoped catalog selection
+
+[Scoped catalog selection](kiro-scoped-catalog-selection.md) now binds offline
+observations to explicit scope/time and requires alias/service-ID namespace plus
+freshness policy. It does not fetch a catalog, select a default model, assert
+account access or connect service-ID routing to the registered provider yet.
