@@ -10,6 +10,7 @@ import (
 
 var errKiroOfflineResponse = errors.New("kiro: unsupported or incomplete offline response")
 var errKiroOfflineCancelled = errors.New("kiro: offline response cancelled")
+var errKiroTextObserver = errors.New("kiro: text observer failed")
 
 type kiroOfflineException struct{ Name string }
 
@@ -48,6 +49,16 @@ type kiroOfflineResponse struct {
 // Cancellation is checked around each underlying read; interrupting a blocked Read requires
 // the caller to cancel/close its reader. Inputs must not mutate concurrently.
 func collectKiroOfflineResponse(ctx context.Context, reader io.Reader, limits kiroOfflineLimits) (kiroOfflineResponse, error) {
+	return collectKiroResponseWithTextObserver(ctx, reader, limits, nil)
+}
+
+// collectKiroResponseWithTextObserver synchronously observes each validated text
+// frame before reading the next frame. Observed text is provisional and cannot
+// be retracted on a later failure; the final result still returns zero on error.
+// No tools, reasoning, signatures, metadata or terminal success are sent to the
+// observer. A trusted observer must honor cancellation and must not block forever;
+// the collector cannot preempt it. Nil observer preserves fully buffered behavior.
+func collectKiroResponseWithTextObserver(ctx context.Context, reader io.Reader, limits kiroOfflineLimits, onText func(string) error) (kiroOfflineResponse, error) {
 	zero := kiroOfflineResponse{}
 	if ctx == nil || reader == nil || limits.TotalPayloadBytes < 2 || limits.TextBytes < 1 || limits.Events < 1 || limits.Tools < 1 || limits.ArgumentBytes < 2 {
 		return zero, errKiroOfflineResponse
@@ -168,6 +179,18 @@ func collectKiroOfflineResponse(ctx context.Context, reader io.Reader, limits ki
 				}
 			}
 			parts = append(parts, part)
+			if part.Kind == "text" && onText != nil {
+				if ctx.Err() != nil {
+					return zero, errKiroOfflineCancelled
+				}
+				observerErr := onText(part.Text)
+				if ctx.Err() != nil {
+					return zero, errKiroOfflineCancelled
+				}
+				if observerErr != nil {
+					return zero, errKiroTextObserver
+				}
+			}
 		default:
 			// Citation/metering/redacted/unknown extensions require
 			// their own validated schemas. Do not silently drop them here.
