@@ -2409,3 +2409,19 @@
   checks passed. Three original tests exercise all auth families, malformed
   inputs, scope/cancellation/error and callback option-mutation isolation.
   Parent review was static only. No real credential/service/CI/merge/deployment.
+
+## 2026-11-02 — Injected catalog response pipeline
+
+- Joined explicit scoped management request to one injected executor and bounded
+  JSON response handling, then Close-validated explicit clock and scoped catalog.
+  No default network, profile probes, retry/cache/automatic model registration.
+- HTTP200/MIME/UTF8/encoding/length guards, maxBytes+1 EOF probe, sticky reader
+  errors and no-progress limit apply. Response+transport error still closes body;
+  Close failure/cancellation discard catalog. No raw errors or tokens logged.
+- Go1.26.2 offline/cache-only: final focused race x3 passed1.042s; final full
+  repository race passed (pigo31.108s), vet/gofmt/diff checks passed. Four original
+  tests cover blocked Close ordering, status/header/length/read failures, exact
+  budget, final bytes+error/wrappedEOF, nil response/body and clock rejection.
+  Parent review was static, not a second execution. All I/O is injected fake.
+- Scope/timestamp are assertions and executor must cooperate with cancellation;
+  no real service/account/billing validation, CI, merge or deployment.

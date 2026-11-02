@@ -72,3 +72,9 @@ account access or connect service-ID routing to the registered provider yet.
 [Offline catalog request](kiro-offline-catalog-request.md) constructs a scoped
 ListAvailableModels GET with explicit auth/client inputs. It never sends HTTP or
 updates a registry, and does not add upstream's profile probes or region fallback.
+
+## Subsequent injected management response pipeline
+
+[Injected catalog attempt](kiro-injected-catalog-attempt.md) now connects an explicit
+fake-testable executor to bounded JSON/status/Close checks and a scoped observation.
+No default client, automatic fetch/cache or provider/model registration is added.
