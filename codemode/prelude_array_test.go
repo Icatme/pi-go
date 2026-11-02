@@ -52,3 +52,16 @@ func TestInheritedDescriptorValueCannotDisguiseAccessor(t *testing.T) {
 		}
 	}
 }
+
+func TestJSONCopyIgnoresInheritedDescriptorAccessors(t *testing.T) {
+	s := sandboxForTest(t, DefaultConfig())
+	for _, key := range []string{"get", "set"} {
+		code := `let hits=0;Object.defineProperty(Object.prototype,"` + key + `",{configurable:true,get(){hits++}});
+			try{text({a:[1]})}finally{delete Object.prototype.` + key + `}
+			if(hits)throw Error("inherited descriptor getter executed")`
+		result, err := s.Run(t.Context(), code, RunOptions{})
+		if err != nil || textOutput(result) != `{"a":[1]}` {
+			t.Fatalf("inherited %s interfered with JSON copy: %+v %v", key, result, err)
+		}
+	}
+}

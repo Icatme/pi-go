@@ -56,7 +56,7 @@
             throw failure('unsupported_json', 'Named array properties are not supported');
         }
         if (!descriptor(d, 'value')) throw failure('unsupported_json', 'JSON accessors are not supported');
-        define(out, k, {value:visit(d.value,depth+1), enumerable:true, configurable:true, writable:true});
+        define(out, k, {__proto__:null, value:visit(d.value,depth+1), enumerable:true, configurable:true, writable:true});
       }
       if (array && out.length !== v.length) throw failure('unsupported_json', 'Sparse arrays are not supported');
       for (let i=0;array && i<v.length;i++) if (!descriptor(out,string(i))) throw failure('unsupported_json', 'Sparse arrays are not supported');
@@ -186,4 +186,3 @@
     }
   });
 })
-
