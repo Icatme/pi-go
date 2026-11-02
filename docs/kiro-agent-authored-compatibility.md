@@ -29,6 +29,30 @@ layout is unchanged. No MarshalJSON method is added, preserving outbound JSON
 behavior for external structs anonymously embedding ToolCall. The preexisting
 UnmarshalJSON method and its embedding behavior are unchanged.
 
+The tag change is **not** complete source or serialization compatibility: Go
+includes tags in struct type identity, so direct assignment to an anonymous
+struct repeating the old `parsed_args,omitempty` field no longer compiles.
+Use the exported `ToolCall` type, copy fields explicitly, or use an explicit
+conversion where Go permits it (struct conversions ignore tags). Reflection
+consumers and byte-for-byte JSON fixtures must also account for the changed tag
+and empty-object output. Third-party JSON encoders must be checked separately
+for `omitzero` support; the tested persistence path uses `encoding/json`.
+
+Old snapshots that already omitted an empty `ParsedArgs` object cannot reveal
+whether it was absent or an intentional empty edit. Do not bulk-rewrite absent
+values to `{}`: that would suppress legitimate `Arguments` fallback. Reconstruct
+such edits only from caller-owned authoritative data, not inferred provider
+provenance.
+
+For existing buffered Agent registration, replace the strict registration with
+`RegisterKiroBufferedModuleWithOptions(source, config,
+WithKiroCallerAuthoredToolHistory())`, retaining any explicit session-affinity or
+AutoHTTP options already in use. For incremental Agent registration, replace
+`RegisterKiroIncrementalModule` with
+`RegisterKiroIncrementalModuleWithAuthoredToolHistory` using the same config and
+options. Do not migrate direct `pigo` callers that intentionally require original
+wire evidence. Neither option starts networking during registration.
+
 Exact json.Number/int values survive current-object projection and JSON restore.
 Unsafe large float integers reject rather than guessing their original value.
 Edits are caller-authored and are not certified as provider output. Discarded raw
