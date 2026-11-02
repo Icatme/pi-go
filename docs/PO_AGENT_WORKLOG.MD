@@ -2344,3 +2344,21 @@
   and fake tests do not prove service authorization, account/model availability,
   actual billing or complete upstream compatibility. See status document for
   exact tests, source links and remaining public mixed-Agent integration.
+
+## 2026-11-02 — Explicit incremental text/tools registration
+
+- Upstream baseline remains pi-provider-kiro dd93f2e / package0.12.3 (main checked
+  at 05:09 UTC; no new main delta). Added a distinct public incremental config,
+  options and API registration; existing buffered/live-text modes retain behavior.
+- Uses live provisional text plus completed-only tool lifecycle. Actual no-tools
+  and tool-enabled fake Agent tests now cover Auto/session opt-in, permission deny,
+  cancellation upon ToolCallEnd, truncation/late Close, exact9007199254740993 raw
+  argument replay and execution. All tools/services in tests are local fakes.
+- Official Go1.26.2, cached deps, live flags disabled: focused registration/Agent
+  race repeated three times passed1.172s; final code full-repository race passed
+  (pigo30.590s), go vet, gofmt and diff checks passed. Parent review was independent
+  static inspection, not a second execution. See incremental registration doc.
+- This remains a draft development branch, not master/release/deployment. No
+  real credentials, service calls, CI dispatch or automatic login/model setup.
+  Preview text cannot be revoked; a tool lifecycle event is never authorization
+  without complete successful result and current schema/permission/context checks.

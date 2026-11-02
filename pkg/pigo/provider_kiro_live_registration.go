@@ -54,7 +54,7 @@ func RegisterKiroLiveTextModuleWithOptions(sourceID string, config KiroLiveTextC
 		affinity = &copy
 	}
 	shared := KiroBufferedConfig{API: config.API, Provider: config.Provider, Region: config.Region, ProfileARN: config.ProfileARN, Origin: config.Origin, UserAgent: config.UserAgent, SystemPromptPolicy: config.SystemPromptPolicy, RequestIDs: config.RequestIDs, Credentials: config.Credentials, RoundTrip: config.RoundTrip}
-	if err := registerKiroExplicitModule(sourceID, shared, affinity, options.AutoHTTP, true); err != nil {
+	if err := registerKiroExplicitModule(sourceID, shared, affinity, options.AutoHTTP, kiroDeliveryLiveText); err != nil {
 		return errKiroLiveRegistration
 	}
 	return nil

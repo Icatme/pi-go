@@ -46,6 +46,14 @@ type KiroBufferedConfig struct {
 	RoundTrip                             func(*http.Request) (*http.Response, error)
 }
 
+type kiroDeliveryMode uint8
+
+const (
+	kiroDeliveryBuffered kiroDeliveryMode = iota
+	kiroDeliveryLiveText
+	kiroDeliveryIncremental
+)
+
 var errKiroRegistration = errors.New("kiro: invalid explicit buffered configuration")
 
 // RegisterKiroBufferedModule explicitly registers only an API module, not a model
@@ -59,11 +67,11 @@ func RegisterKiroBufferedModule(sourceID string, config KiroBufferedConfig) erro
 }
 
 func registerKiroBufferedModule(sourceID string, config KiroBufferedConfig, affinity *KiroSessionAffinity, autoHTTP bool) error {
-	return registerKiroExplicitModule(sourceID, config, affinity, autoHTTP, false)
+	return registerKiroExplicitModule(sourceID, config, affinity, autoHTTP, kiroDeliveryBuffered)
 }
 
-func registerKiroExplicitModule(sourceID string, config KiroBufferedConfig, affinity *KiroSessionAffinity, autoHTTP, liveText bool) error {
-	if strings.TrimSpace(sourceID) == "" || config.RequestIDs == nil || config.Credentials == nil || config.RoundTrip == nil || len(config.Schemas) > 128 || !kiroTextModelIdentityValid(Model{API: config.API, Provider: config.Provider, ID: "config-check"}) {
+func registerKiroExplicitModule(sourceID string, config KiroBufferedConfig, affinity *KiroSessionAffinity, autoHTTP bool, delivery kiroDeliveryMode) error {
+	if delivery > kiroDeliveryIncremental || strings.TrimSpace(sourceID) == "" || config.RequestIDs == nil || config.Credentials == nil || config.RoundTrip == nil || len(config.Schemas) > 128 || !kiroTextModelIdentityValid(Model{API: config.API, Provider: config.Provider, ID: "config-check"}) {
 		return errKiroRegistration
 	}
 	catalog := make(map[string]json.RawMessage, len(config.Schemas))
@@ -88,15 +96,18 @@ func registerKiroExplicitModule(sourceID string, config KiroBufferedConfig, affi
 	request.Body.Close()
 	run := func(model Model, conversation Context, ctx context.Context, sessionID string) *AssistantMessageEventStream {
 		fail := func() *AssistantMessageEventStream {
-			if liveText {
+			if delivery == kiroDeliveryLiveText {
 				return streamAPIUnavailable(model, "kiro: live text request rejected")
+			}
+			if delivery == kiroDeliveryIncremental {
+				return streamAPIUnavailable(model, "kiro: incremental request rejected")
 			}
 			return streamAPIUnavailable(model, "kiro: buffered request rejected")
 		}
 		if ctx == nil || ctx.Err() != nil || model.API != config.API || model.Provider != config.Provider || !kiroTextModelIdentityValid(model) || model.BaseURL != "" || model.Compat != nil || len(model.Headers) != 0 || !reflect.ValueOf(model.SamplingParams).IsZero() || !reflect.ValueOf(model.SamplingParamsByThinkingLevel).IsZero() || !reflect.ValueOf(model.ThinkingLevelMap).IsZero() {
 			return fail()
 		}
-		if liveText && len(conversation.Tools) != 0 {
+		if delivery == kiroDeliveryLiveText && len(conversation.Tools) != 0 {
 			return fail()
 		}
 		ids, err := config.RequestIDs(ctx)
@@ -118,9 +129,11 @@ func registerKiroExplicitModule(sourceID string, config KiroBufferedConfig, affi
 		}
 		attempt := kiroBufferedAttemptConfig(config, model, ids)
 		var stream *AssistantMessageEventStream
-		if liveText {
+		if delivery == kiroDeliveryLiveText {
 			live := kiroInjectedTextStreamConfig{Request: attempt.Request, Response: attempt.Response, Model: model, Timestamp: attempt.Timestamp, MaxTextBytes: attempt.MaxBytes, MaxEventBytes: attempt.MaxEventBytes}
 			stream, err = startKiroScopedTextStream(ctx, prepared, live, config.Credentials, config.RoundTrip)
+		} else if delivery == kiroDeliveryIncremental {
+			stream, err = startKiroScopedMixedStream(ctx, prepared, schemas, attempt, config.Credentials, config.RoundTrip)
 		} else {
 			stream, err = runKiroScopedCompletedStream(ctx, prepared, schemas, attempt, config.Credentials, config.RoundTrip)
 		}
@@ -137,7 +150,7 @@ func registerKiroExplicitModule(sourceID string, config KiroBufferedConfig, affi
 			return run(model, conversation, options.RequestContext, options.SessionID)
 		},
 	}
-	if liveText {
+	if delivery == kiroDeliveryLiveText {
 		module.Capabilities.CustomTools = CapabilityUnsupported
 	}
 	validation := APIOptionValidation{
