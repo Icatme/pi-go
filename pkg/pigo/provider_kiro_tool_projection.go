@@ -97,8 +97,19 @@ func projectKiroToolConversation(ctx Context, modelID string, schemas map[string
 		}
 		switch m := message.(type) {
 		case UserMessage:
-			text, ok := m.Content.(string)
-			if !ok || strings.TrimSpace(text) == "" || !consume(text) { return bad, errKiroToolProjection }
+			var text string
+			switch content := m.Content.(type) {
+			case string:
+				text = content
+				if !consume(text) { return bad, errKiroToolProjection }
+			case []ContentBlock:
+				var valid bool
+				text, valid = kiroProjectionText(content, consume, &blocksLeft)
+				if !valid { return bad, errKiroToolProjection }
+			default:
+				return bad, errKiroToolProjection
+			}
+			if strings.TrimSpace(text) == "" { return bad, errKiroToolProjection }
 			entries = append(entries, kiroToolWireEntry{User: &kiroToolWireUser{Content: text, ModelID: modelID}})
 		case AssistantMessage:
 			if m.ErrorMessage != "" || (m.StopReason != StopReasonStop && m.StopReason != StopReasonToolUse) || len(m.Content) > blocksLeft { return bad, errKiroToolProjection }

@@ -1,7 +1,8 @@
 # Strict tool conversation DTO projection
 
-This draft depends on #55 (and transitively #52/#51), not #53. It builds
-community-shaped conversation DTOs only: history, current user, tools and tool
+The original tool projection depends on #55 (and transitively #52/#51).
+This text-block extension is based on #61, which also includes #53's shared
+text extraction helper. It builds community-shaped conversation DTOs only: history, current user, tools and tool
 results. **It is not a sendable full request.** Origin/profile/conversation ID,
 endpoint, credentials and transport are absent; no provider calls it.
 
@@ -13,7 +14,7 @@ No source implementation was copied, and this is not an official API guarantee.
 ## What is now projected
 
 - Actual pi-go Context types, after #55's no-repair call/result identity check.
-- Text user strings; assistant text and structured tool calls; text-only tool
+- Text user strings or text-only ContentBlock slices; assistant text and structured tool calls; text-only tool
   results. Results remain success/error with original IDs, in original order.
 - Adjacent result groups become one user carrier with `content:""` and
   `userInputMessageContext.toolResults`. No Continue/Please-proceed text is added.
@@ -72,7 +73,7 @@ isolation does not make concurrent mutation of the inputs safe.
 
 - Any SystemPrompt (including implicit lowering); dynamic system/catalog state.
   #53's separate text-only opt-in policy is not silently imported here.
-- Images, reasoning/signatures, user content blocks, output schemas, constrained
+- Images, reasoning/signatures, output schemas, constrained
   sampling, hosted tools/executions and namespace/provider ID repair.
 - Missing raw argument evidence, nonnil parsed argument maps, unknown/duplicate
   schemas, interrupted tool groups or non-alternating projected turns.
@@ -101,3 +102,17 @@ go test ./pkg/pigo -run TestKiroToolProjection -count=1
 go test -race ./pkg/pigo
 go test ./...
 ```
+
+## Text-block user inputs (integration branch)
+
+On the #61 joined branch, user ContentBlock slices share the text-only projector's
+strict extraction helper. Value/pointer TextContent concatenates in original order
+without invented separators. Nil pointers, signed text, images, thinking and other
+block types reject the entire projection. Empty/whitespace-only turns still reject.
+User blocks now consume the same 4096 aggregate block budget as assistant and
+result blocks; byte limits are unchanged. Input is not mutated. This capability
+needs #53's helper present through #61, not #56 alone.
+
+Additional regression sources cover string/block equivalence, pointer/value users,
+current and historical turns, invalid blocks, exact shared block boundary and UTF-8/
+byte limits. Go tests and gofmt remain unrun; this is not live provider integration.

@@ -24,13 +24,15 @@ type kiroOfflineLimits struct {
 	ArgumentBytes int
 }
 
-// Parts retain text/reasoning/tool ordering. Reasoning fields remain opaque
+// Parts retain text/reasoning/tool/context-observation ordering. Reasoning fields remain opaque
 // event fragments; no signature validation or replay compatibility is implied.
 type kiroOfflinePart struct {
 	Kind string
 	Text string
 	Signature string
 	Tool *kiroAssembledTool
+	// A point-in-stream percentage, never token usage, cost or completion evidence.
+	ContextUsagePercentage *float64
 }
 type kiroOfflineResponse struct {
 	Parts []kiroOfflinePart
@@ -92,6 +94,12 @@ func collectKiroOfflineResponse(ctx context.Context, reader io.Reader, limits ki
 		case "metadataEvent":
 			if metadata.accept(envelope.Payload) != nil { return zero, errKiroOfflineResponse }
 			terminalMetadataSeen = metadata.snapshot.StopReason != ""
+		case "contextUsageEvent":
+			percentage, err := kiroOfflineContextUsage(envelope.Payload, limits.MessageBytes)
+			if err != nil { return zero, errKiroOfflineResponse }
+			// Preserve repeated observations in stream order. They are not
+			// accumulated or reconciled with final metadata/token accounting.
+			parts = append(parts, kiroOfflinePart{Kind: "context_usage", ContextUsagePercentage: &percentage})
 		case "toolUseEvent":
 			tool, err := assembler.accept(envelope.Payload)
 			if err != nil { return zero, errKiroOfflineResponse }
@@ -123,7 +131,7 @@ func collectKiroOfflineResponse(ctx context.Context, reader io.Reader, limits ki
 			}
 			parts = append(parts, part)
 		default:
-			// Citation/context/metering/redacted/unknown extensions require
+			// Citation/metering/redacted/unknown extensions require
 			// their own validated schemas. Do not silently drop them here.
 			return zero, errKiroOfflineResponse
 		}
