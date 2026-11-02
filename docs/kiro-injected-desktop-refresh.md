@@ -42,4 +42,5 @@ Original synthetic tests cover exact request/snapshot, omission/rotation/matchin
 profile, Close delay without expiry extension, profile mismatch/null, token null/
 empty, transport/redirect/header/length/budget/Close/cancel/time failures and no-call
 preflight. No actual desktop account, real credential or service was used. This
-internal attempt is not yet a public automatic authentication integration.
+internal attempt is exposed only by the later explicit caller-owned wrapper,
+not an automatic authentication integration.

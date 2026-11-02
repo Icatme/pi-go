@@ -31,5 +31,5 @@ calls require explicit authorization. Strings/buffers are not securely zeroized.
 
 Three original tests cover exact synthetic URL/method/headers/single JSON field,
 escaping and byte limits, diagnostic redaction, invalid region/profile/token/UA,
-context cancellation and value-snapshot ownership. This request is not yet wired
-to a desktop executor or exposed as an automatic credential source.
+context cancellation and value-snapshot ownership. The later injected attempt and explicit public wrapper wire this request only to
+a caller-supplied executor, never an automatic credential source.

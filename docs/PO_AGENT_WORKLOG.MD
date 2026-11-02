@@ -2609,3 +2609,23 @@
   passed1.039s; full repo race passed(pigo30.585s, others passed/cached); vet/gofmt/
   diff passed. Independent child static review no blocker, not independent run.
   No real credential/service/desktop/CI/master merge/deploy operation occurred.
+
+## 2026-11-02 — Explicit caller-owned public desktop refresh (draft)
+
+- Stacked on #126; public RefreshKiroDesktop config supplies all scope/token/UA/
+  budget/time/executor inputs. Opaque result and typed ExecutorInvoked error carry
+  no implicit source/cache/login/store. Scope/retention are not identity/validity
+  guarantees. The community endpoint is not an official third-party API promise.
+- Three original external tests cover actual wrapper fake wire, omission/rotation/
+  explicitly returned same token provenance, profile/expiry, secret getters/copies,
+  fmt/JSON/zero/errors.As, no-dispatch and post-dispatch unknown failures and Close.
+- The added same-token test initially had an incorrect expected NEW value and
+  failed; corrected only that test expectation. Production parser correctly
+  returned the explicitly supplied old value with retained=false throughout.
+- Final official cloud Go1.26.2/cached dependencies/live off: focused public
+  desktop race x3 passed1.041s; full repository race passed(pigo30.858s, others
+  passed/cached); vet/gofmt/diff passed. Independent child static review found no
+  blocker, not independently executed. Prior pre-final runs are not final passes.
+- No real service/account/desktop/credentials, CI dispatch, master merge or deploy.
+  Caller controls generation serialization and must prohibit retries/redirects/
+  secret logging; arbitrary callback behavior remains trusted/cooperative.

@@ -141,3 +141,10 @@ response components with one explicit executor and conservative expiry. Returned
 profile must match; all dispatch-after failures remain unknown rotation outcomes
 with no credential result. This is fake-tested internal wiring, not automatic
 login, a source manager or real endpoint validation.
+
+## Explicit public desktop refresh
+
+[Caller-owned desktop API](kiro-public-desktop-refresh.md) exposes the fake-tested
+single attempt with explicit config, opaque result and typed invocation marker.
+It does not launch a desktop/login flow, find tokens, cache access or update a
+source. A matching profile or retained token is still not account/validity proof.
