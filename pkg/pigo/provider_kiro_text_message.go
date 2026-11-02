@@ -25,34 +25,9 @@ func projectKiroCompletedText(response kiroOfflineResponse, model Model, timesta
 	if !((response.StopReason == StopReasonStop && response.Usage.StopReason == "END_TURN") || (response.StopReason == StopReasonLength && response.Usage.StopReason == "MAX_TOKENS")) {
 		return zero, errKiroTextMessage
 	}
-	// Host Usage has no per-field presence. Accept absent counts or complete
-	// reported counts only; missing fields must not become known zeroes.
-	if response.Usage.ContextUsagePercentage != nil || response.Usage.NormalizedTokenUsage != nil {
-		return zero, errKiroTextMessage
-	}
 	message := AssistantMessage{API: model.API, Provider: model.Provider, Model: model.ID, Timestamp: timestamp, StopReason: response.StopReason}
-	counts := response.Usage.TokenCounts
-	if len(counts) != 0 {
-		if len(counts) != 5 {
-			return zero, errKiroTextMessage
-		}
-		for _, field := range []struct {
-			name   string
-			target *int
-		}{
-			{"uncachedInputTokens", &message.Usage.Input},
-			{"outputTokens", &message.Usage.Output},
-			{"cacheReadInputTokens", &message.Usage.CacheRead},
-			{"cacheWriteInputTokens", &message.Usage.CacheWrite},
-			{"totalTokens", &message.Usage.TotalTokens},
-		} {
-			value, exists := counts[field.name]
-			if !exists || value < 0 || int64(int(value)) != value {
-				return zero, errKiroTextMessage
-			}
-			*field.target = int(value)
-		}
-		message.UsageReported = true
+	if !applyKiroCompletedUsage(&message, response.Usage) {
+		return zero, errKiroTextMessage
 	}
 	remaining, used := maxTextBytes, 0
 	for _, part := range response.Parts {
@@ -81,6 +56,38 @@ func kiroTextModelIdentityValid(model Model) bool {
 		if field.value == "" || len(field.value) > field.max || !utf8.ValidString(field.value) || strings.TrimSpace(field.value) != field.value || strings.IndexFunc(field.value, unicode.IsControl) >= 0 {
 			return false
 		}
+	}
+	return true
+}
+
+func applyKiroCompletedUsage(message *AssistantMessage, usage kiroMetadataSnapshot) bool {
+	// Host Usage has no per-field presence. Accept absent counts or complete
+	// reported counts only; missing fields must not become known zeroes.
+	if usage.ContextUsagePercentage != nil || usage.NormalizedTokenUsage != nil {
+		return false
+	}
+	counts := usage.TokenCounts
+	if len(counts) != 0 {
+		if len(counts) != 5 {
+			return false
+		}
+		for _, field := range []struct {
+			name   string
+			target *int
+		}{
+			{"uncachedInputTokens", &message.Usage.Input},
+			{"outputTokens", &message.Usage.Output},
+			{"cacheReadInputTokens", &message.Usage.CacheRead},
+			{"cacheWriteInputTokens", &message.Usage.CacheWrite},
+			{"totalTokens", &message.Usage.TotalTokens},
+		} {
+			value, exists := counts[field.name]
+			if !exists || value < 0 || int64(int(value)) != value {
+				return false
+			}
+			*field.target = int(value)
+		}
+		message.UsageReported = true
 	}
 	return true
 }
