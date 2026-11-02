@@ -2650,3 +2650,18 @@
 - Added convergence review: connected APIs/test limits, live/identity/executor/
   raw-persisted-history/IdP/extension gaps, and integrated review before further
   features. No real service/account, source store, CI/master merge/deploy.
+
+## 2026-11-02 — v0.18.0 integration and release validation
+
+- Integrated the original heads of 91 open PRs from the Kiro and runtime stacks.
+  Reconciled the Kiro retry formatting branches and the earlier adapter design.
+- Review reproduced three defects. Kiro now checks the original conversation
+  before a generic clone can lose content, Agent records context usage only
+  on successful completion, and Codemode copies JSON without invoking an
+  inherited descriptor getter. Added regressions through the public entry points.
+- Windows amd64, Go 1.26.4, live flags off. Root and examples passed uncached
+  race tests, vet and module verification. The external ToolCall compatibility
+  probe passed. The Codemode prelude suite passed all 30 cases in both Node VM
+  and the pinned QuickJS WASM runtime.
+- Updated package and examples versions and documented the AgentEvent and
+  ToolCall migration points. Kiro endpoint and account behavior remain unverified.
