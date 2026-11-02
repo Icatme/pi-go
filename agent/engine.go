@@ -1508,19 +1508,26 @@ func cloneToolCalls(calls []ToolCall) []ToolCall {
 	return cloned
 }
 
+// Tool arguments distinguish an absent object from an explicitly empty edit.
+func cloneToolArgumentMap(arguments map[string]any) map[string]any {
+	if arguments != nil && len(arguments) == 0 {
+		return map[string]any{}
+	}
+	return cloneStringAnyMap(arguments)
+}
+
 func cloneToolCall(call ToolCall) ToolCall {
 	var arguments []byte
 	if len(call.Arguments) > 0 {
 		arguments = append(arguments, call.Arguments...)
 	}
 	return ToolCall{
-		providerEvidence: call.providerEvidence,
 		ID:               call.ID,
 		OriginalID:       call.OriginalID,
 		Name:             call.Name,
 		Namespace:        call.Namespace,
 		Arguments:        arguments,
-		ParsedArgs:       cloneStringAnyMap(call.ParsedArgs),
+		ParsedArgs:       cloneToolArgumentMap(call.ParsedArgs),
 		ThoughtSignature: call.ThoughtSignature,
 	}
 }
@@ -1852,7 +1859,7 @@ func parseToolArguments(tool ToolDefinition, call ToolCall) (any, error) {
 		if err := checkArgumentStrings(call.ParsedArgs); err != nil {
 			return nil, err
 		}
-		return cloneStringAnyMap(call.ParsedArgs), nil
+		return cloneToolArgumentMap(call.ParsedArgs), nil
 	}
 	if len(call.Arguments) == 0 {
 		return map[string]any{}, nil

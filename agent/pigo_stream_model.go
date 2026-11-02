@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -233,7 +235,6 @@ func convertAssistantMessageToPigo(message Message) pigo.Message {
 			Name:             call.Name,
 			Namespace:        call.Namespace,
 			Arguments:        toolCallArgumentsMap(call),
-			RawArguments:     replayProviderRawArguments(call),
 			ThoughtSignature: call.ThoughtSignature,
 		})
 	}
@@ -401,11 +402,10 @@ func convertPigoToolCall(call pigo.ToolCall) ToolCall {
 		Name:             call.Name,
 		Namespace:        call.Namespace,
 		Arguments:        marshalRawJSON(call.Arguments),
-		ParsedArgs:       cloneStringAnyMap(call.Arguments),
+		ParsedArgs:       cloneToolArgumentMap(call.Arguments),
 		ThoughtSignature: call.ThoughtSignature,
 	}
 
-	converted.providerEvidence = captureProviderRawArguments(call.RawArguments, converted)
 	return converted
 }
 
@@ -417,15 +417,24 @@ func providerToolCallID(call ToolCall) string {
 }
 
 func toolCallArgumentsMap(call ToolCall) map[string]any {
-	if len(call.ParsedArgs) > 0 {
-		return cloneStringAnyMap(call.ParsedArgs)
+	// Match execution precedence, including an explicitly empty parsed object.
+	if call.ParsedArgs != nil {
+		return cloneToolArgumentMap(call.ParsedArgs)
 	}
 	if len(call.Arguments) == 0 {
 		return nil
 	}
 
+	if checkRawArgumentUnicode(call.Arguments) != nil {
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(call.Arguments))
+	decoder.UseNumber()
 	var parsed map[string]any
-	if err := json.Unmarshal(call.Arguments, &parsed); err != nil {
+	if err := decoder.Decode(&parsed); err != nil {
+		return nil
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
 		return nil
 	}
 	return parsed

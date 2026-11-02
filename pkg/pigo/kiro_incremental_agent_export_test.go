@@ -56,7 +56,7 @@ func RegisterKiroIncrementalAgentFixtureForTest(source string, observe func([]by
 			return kiroAttemptResponse(body), nil
 		}}
 	affinity := KiroSessionAffinity{Tenant: "local-tenant", Key: bytes.Repeat([]byte("K"), 32)}
-	if err := RegisterKiroIncrementalModule(source, config, KiroIncrementalOptions{AutoHTTP: true, SessionAffinity: &affinity}); err != nil {
+	if err := RegisterKiroIncrementalModuleWithAuthoredToolHistory(source, config, KiroIncrementalOptions{AutoHTTP: true, SessionAffinity: &affinity}); err != nil {
 		return "", nil, err
 	}
 	RegisterProviderModule(ProviderModule{Provider: provider, Models: map[string]Model{model.ID: model}, ModelCapabilities: ModelCapabilities{CustomTools: CapabilitySupported}})

@@ -452,6 +452,9 @@ func cloneReflectionMessage(message core.Message) core.Message {
 				cloned.ToolCalls[i].Arguments = append([]byte(nil), call.Arguments...)
 			}
 			cloned.ToolCalls[i].ParsedArgs = cloneStringAnyMap(call.ParsedArgs)
+			if call.ParsedArgs != nil && len(call.ParsedArgs) == 0 {
+				cloned.ToolCalls[i].ParsedArgs = map[string]any{}
+			}
 		}
 	}
 	if message.ToolResult != nil {

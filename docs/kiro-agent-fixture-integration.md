@@ -1,3 +1,9 @@
+# Historical fixture design (superseded argument contract)
+
+The raw-evidence/restore-rejection descriptions below record the original draft.
+Current tests use explicit authored history, never invent raw, and support precise
+JSON restoration. See [current migration](kiro-agent-authored-compatibility.md).
+
 # Agent / fixture-provider / Kiro protocol integration
 
 This draft uses **test-build-only** fixture registration. The entry point lives

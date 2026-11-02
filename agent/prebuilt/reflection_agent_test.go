@@ -433,3 +433,15 @@ func assertRequestPrefix(t *testing.T, got, want []core.Message) {
 		}
 	}
 }
+
+func TestReflectionClonePreservesEmptyArgumentEdit(t *testing.T) {
+	message := core.Message{ToolCalls: []core.ToolCall{{Name: "lookup", Arguments: []byte(`{"stale":true}`), ParsedArgs: map[string]any{}}}}
+	cloned := cloneReflectionMessage(message)
+	if cloned.ToolCalls[0].ParsedArgs == nil || len(cloned.ToolCalls[0].ParsedArgs) != 0 {
+		t.Fatal("empty edit lost")
+	}
+	cloned.ToolCalls[0].ParsedArgs["new"] = true
+	if len(message.ToolCalls[0].ParsedArgs) != 0 {
+		t.Fatal("clone aliases input")
+	}
+}

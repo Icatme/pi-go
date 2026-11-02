@@ -7,8 +7,8 @@ It does not require the private Agent evidence field introduced in our draft #94
 
 The separate **explicit authored policy** projects current values into inert
 Kiro request data. Controlled registration opt-ins are described below; existing
-entry points remain strict. This does not change public struct layouts or remove
-the current Agent bridge. The ToolCall compatibility blocker is **not fixed yet**.
+entry points remain strict. The Agent integration now removes the private draft bridge and restores its
+original seven-field ToolCall layout; see [compatibility migration](kiro-agent-authored-compatibility.md).
 
 ## Two distinct contracts
 
@@ -58,13 +58,9 @@ custom-method nonexecution, escaped-byte boundaries, node/depth boundaries,
 shared acyclic trees, cycles, detached output and concurrent read-only use.
 The scenarios are independently authored, not copied upstream test code.
 
-Before calling the public compatibility issue resolved: thread an explicit
-controlled option through request/registration, exercise actual fake Agent
-multiple prompts and restores with precise argument conversion, then remove the
-private ToolCall field and rerun the external seven-field compile probe plus all
-legacy/non-Kiro tests. Do not remove the bridge first or claim this isolated
-projector proves a complete Agent integration. No default network, credentials,
-persistence expansion, service calls or upstream service guarantee is introduced.
+The completed Agent integration and explicit external compile probe are documented
+in [the compatibility migration](kiro-agent-authored-compatibility.md). This does
+not introduce default network access or claim actual Kiro service compatibility.
 
 ## Explicit request/registration integration
 

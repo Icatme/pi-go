@@ -42,19 +42,9 @@ func RegisterKiroAgentFixtureForTest(source string, exchange func(context.Contex
 		if len(schemas) == 0 {
 			schemas = nil
 		}
-		// Verify the actual agent bridge and host transcript preserved original
-		// raw evidence before request serialization is allowed to compact JSON.
-		for _, message := range resolved.Messages {
-			if assistant, ok := message.(AssistantMessage); ok {
-				for _, block := range assistant.Content {
-					if call, ok := block.(ToolCall); ok && call.RawArguments != "" && call.RawArguments != kiroAgentFixtureRaw {
-						return streamAPIUnavailable(m, "fixture original evidence missing")
-					}
-				}
-			}
-		}
 		_, _, config := kiroInjectedToolFixture()
 		config.Model = m
+		config.Request.ToolHistoryPolicy = kiroToolHistoryAuthored
 		stream, err := runKiroInjectedCompletedStream(options.RequestContext, resolved, schemas, config, kiroCredentialBearer, "LOCAL_ONLY_AGENT_FIXTURE", func(request *http.Request) (*http.Response, error) {
 			body, err := io.ReadAll(request.Body)
 			if err != nil {

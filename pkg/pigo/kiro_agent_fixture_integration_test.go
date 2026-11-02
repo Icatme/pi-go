@@ -26,7 +26,7 @@ func TestKiroAgentFixtureMultiTurnAndPermission(t *testing.T) {
 				if calls == 1 {
 					return "tool", nil
 				}
-				if calls != 2 {
+				if calls != 2 && calls != 3 {
 					return "", errors.New("unexpected fixture attempt")
 				}
 				text := string(request)
@@ -81,8 +81,8 @@ func TestKiroAgentFixtureMultiTurnAndPermission(t *testing.T) {
 			if mode != "allow" {
 				want = 0
 			}
-			if len(observedRaw) != 1 || observedRaw[0] != " { \"id\" : 9007199254740993 } " {
-				t.Fatal("successful second turn did not contain exact original raw")
+			if len(observedRaw) != 1 || observedRaw[0] != "" {
+				t.Fatal("authored second turn invented original raw")
 			}
 			if dispatches != 2 || calls != 2 || bodies != want || (mode != "allow" && hooks != 1) {
 				t.Fatalf("calls=%d bodies=%d hooks=%d", calls, bodies, hooks)
@@ -101,10 +101,10 @@ func TestKiroAgentFixtureMultiTurnAndPermission(t *testing.T) {
 			}
 			afterRestore, err := agent.NewEngine().Run(context.Background(), definition, &restored, []agent.Message{agent.NewUserTextMessage("next")}, nil)
 			if len(observedRaw) != 2 || observedRaw[1] != "" {
-				t.Fatal("restore did not present missing original evidence to production projector")
+				t.Fatal("restore invented original evidence")
 			}
-			if dispatches != 3 || calls != 2 || bodies != want || (err == nil && afterRestore.Error == "") {
-				t.Fatal("restored history did not reach and fail strict provider projection")
+			if dispatches != 3 || calls != 3 || bodies != want || err != nil || afterRestore.Error != "" {
+				t.Fatal("restored authored history did not continue without reexecuting tools")
 			}
 		})
 	}

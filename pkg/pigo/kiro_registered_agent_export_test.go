@@ -63,9 +63,9 @@ func registerKiroConfiguredAgentFixture(source, tenant string, exchange func(con
 	affinity := KiroSessionAffinity{Tenant: tenant, Key: bytes.Repeat([]byte("K"), 32)}
 	var err error
 	if autoHTTP {
-		err = RegisterKiroBufferedModuleWithOptions(source, config, WithKiroAutoHTTP(), WithKiroSessionAffinity(affinity))
+		err = RegisterKiroBufferedModuleWithOptions(source, config, WithKiroAutoHTTP(), WithKiroSessionAffinity(affinity), WithKiroCallerAuthoredToolHistory())
 	} else {
-		err = RegisterKiroSessionBufferedModule(source, config, affinity)
+		err = RegisterKiroBufferedModuleWithOptions(source, config, WithKiroSessionAffinity(affinity), WithKiroCallerAuthoredToolHistory())
 	}
 	if err != nil {
 		return "", nil, err
