@@ -43,3 +43,21 @@ must visibly retain its provisional status until completion. This API is not yet
 an out-of-the-box Agent registration: the Agent normally supplies SessionID and
 Auto, both rejected here. The existing buffered session/Auto registration remains
 the tested Agent route; adding equivalent explicit live options is separate work.
+
+## Explicit session/Auto options (subsequent increment)
+
+`RegisterKiroLiveTextModuleWithOptions` accepts `KiroLiveTextOptions` with separate
+`AutoHTTP` and optional `SessionAffinity` fields. The original registration still
+uses zero options and keeps its strict behavior above. AutoHTTP selects only the
+injected HTTP executor; explicit WebSocket still rejects and nothing retries.
+Affinity validates/copies tenant/key at registration and derives the same scoped
+HMAC conversation IDs as the buffered module. The caller owns key entropy and
+stable scope labels; IDs and service acceptance remain unverified remotely.
+
+A new fake integration uses this explicit option route with the actual no-tools
+Agent's default Auto and nonempty SessionID. The first terminal is withheld until
+an Agent text-delta update, then a second text turn confirms stable conversation
+identity. A truncated response after a preview fails without retries or tools.
+This closes the previously documented default-Agent configuration gap only when
+callers choose these options; it does not add tool-enabled live streaming. Unit
+regressions cover caller key mutation, invalid affinity and WebSocket rejection.

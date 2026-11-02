@@ -29,8 +29,32 @@ var errKiroLiveRegistration = errors.New("kiro: invalid explicit live text confi
 // Use Stream/StreamSimple, not raw GetAPIModule callbacks, to retain host guards.
 // sourceID owns UnregisterAPIModules cleanup; duplicate API registration panics.
 func RegisterKiroLiveTextModule(sourceID string, config KiroLiveTextConfig) error {
+	return RegisterKiroLiveTextModuleWithOptions(sourceID, config, KiroLiveTextOptions{})
+}
+
+// KiroLiveTextOptions explicitly selects HTTP for Auto and/or session affinity.
+// Nil affinity keeps SessionID rejected. No fallback, retry or default client.
+// Affinity key material is validated and copied during registration.
+type KiroLiveTextOptions struct {
+	AutoHTTP        bool
+	SessionAffinity *KiroSessionAffinity
+}
+
+// RegisterKiroLiveTextModuleWithOptions preserves the strict original entry point.
+// Options select behavior before any request; they never retry a partial stream.
+func RegisterKiroLiveTextModuleWithOptions(sourceID string, config KiroLiveTextConfig, options KiroLiveTextOptions) error {
+	var affinity *KiroSessionAffinity
+	if options.SessionAffinity != nil {
+		input := options.SessionAffinity
+		if !kiroSessionIDValid(input.Tenant) || len(input.Key) < 32 || len(input.Key) > 64 {
+			return errKiroLiveRegistration
+		}
+		copy := *input
+		copy.Key = append([]byte(nil), input.Key...)
+		affinity = &copy
+	}
 	shared := KiroBufferedConfig{API: config.API, Provider: config.Provider, Region: config.Region, ProfileARN: config.ProfileARN, Origin: config.Origin, UserAgent: config.UserAgent, SystemPromptPolicy: config.SystemPromptPolicy, RequestIDs: config.RequestIDs, Credentials: config.Credentials, RoundTrip: config.RoundTrip}
-	if err := registerKiroExplicitModule(sourceID, shared, nil, false, true); err != nil {
+	if err := registerKiroExplicitModule(sourceID, shared, affinity, options.AutoHTTP, true); err != nil {
 		return errKiroLiveRegistration
 	}
 	return nil
