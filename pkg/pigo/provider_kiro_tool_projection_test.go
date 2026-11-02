@@ -46,7 +46,7 @@ func TestKiroToolProjectionRejectsUnsupportedInputs(t *testing.T) {
 		func(c *Context, s map[string]json.RawMessage) { c.SystemPrompt = "system" },
 		func(c *Context, s map[string]json.RawMessage) { delete(s, "lookup") },
 		func(c *Context, s map[string]json.RawMessage) { s["lookup"] = json.RawMessage(`{"type":"object","type":"array"}`) },
-		func(c *Context, s map[string]json.RawMessage) { c.Messages[0] = UserMessage{Content: []ContentBlock{TextContent{Text: "blocks unsupported"}}} },
+		func(c *Context, s map[string]json.RawMessage) { c.Messages[0] = UserMessage{Content: []ContentBlock{ImageContent{Data: "unsupported image", MIMEType: "image/png"}}} },
 		func(c *Context, s map[string]json.RawMessage) { a := c.Messages[1].(AssistantMessage); call := a.Content[1].(ToolCall); call.Arguments = map[string]any{"id":1}; a.Content[1] = call; c.Messages[1] = a },
 		func(c *Context, s map[string]json.RawMessage) { a := c.Messages[1].(AssistantMessage); call := a.Content[1].(ToolCall); call.RawArguments = `{"x":1,"x":2}`; a.Content[1] = call; c.Messages[1] = a },
 		func(c *Context, s map[string]json.RawMessage) { a := c.Messages[1].(AssistantMessage); a.Content[0] = ThinkingContent{Thinking:"fixture"}; c.Messages[1] = a },
