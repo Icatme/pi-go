@@ -86,7 +86,15 @@ func TestKiroPublicIDCRefreshUnknownRotationAfterExecutor(t *testing.T) {
 				body.Reader = strings.NewReader(`{"accessToken":"PRIVATE_ACCESS","expiresIn":3600}`)
 			}
 			if mode == "clock" {
-				config.Clock = func(context.Context) (time.Time, error) { return time.Time{}, errors.New("PRIVATE_CLOCK") }
+				clockCalls := 0
+				originalClock := config.Clock
+				config.Clock = func(ctx context.Context) (time.Time, error) {
+					clockCalls++
+					if clockCalls == 2 {
+						return time.Time{}, errors.New("PRIVATE_CLOCK")
+					}
+					return originalClock(ctx)
+				}
 			}
 			config.RoundTrip = func(r *http.Request) (*http.Response, error) {
 				calls++
@@ -160,5 +168,77 @@ func TestKiroPublicIDCRefreshNotDispatchedAndZeroConfig(t *testing.T) {
 	var failure *pigo.KiroIDCRefreshError
 	if failure.ExecutorInvoked() {
 		t.Fatal("nil error")
+	}
+}
+
+type kiroPublicRefreshCloseClockBody struct {
+	io.Reader
+	closed *bool
+}
+
+func (b *kiroPublicRefreshCloseClockBody) Close() error { *b.closed = true; return nil }
+
+func TestKiroPublicIDCRefreshClockBoundaryAndUnknownExpiry(t *testing.T) {
+	for _, mode := range []string{"pre-zero", "pre-error", "pre-year", "pre-cancel", "backwards", "exact-expired", "beyond-expired", "within-lifetime"} {
+		t.Run(mode, func(t *testing.T) {
+			config := kiroPublicIDCConfig()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			start, _ := config.Clock(context.Background())
+			calls, clocks := 0, 0
+			closed := false
+			config.Clock = func(context.Context) (time.Time, error) {
+				clocks++
+				if clocks == 1 {
+					if calls != 0 || closed {
+						t.Error("start clock after dispatch")
+					}
+					switch mode {
+					case "pre-zero":
+						return time.Time{}, nil
+					case "pre-error":
+						return time.Time{}, errors.New("PRIVATE_CLOCK")
+					case "pre-cancel":
+						cancel()
+						return start, nil
+					case "pre-year":
+						return time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC), nil
+					}
+					return start, nil
+				}
+				if !closed || calls != 1 {
+					t.Error("end clock before Close")
+				}
+				switch mode {
+				case "backwards":
+					return start.Add(-time.Second), nil
+				case "exact-expired":
+					return start.Add(time.Hour), nil
+				case "beyond-expired":
+					return start.Add(2 * time.Hour), nil
+				default:
+					return start.Add(59 * time.Minute), nil
+				}
+			}
+			config.RoundTrip = func(*http.Request) (*http.Response, error) {
+				calls++
+				return kiroPublicIDCResponse(&kiroPublicRefreshCloseClockBody{Reader: strings.NewReader(kiroPublicIDCResponseJSON), closed: &closed}), nil
+			}
+			result, err := pigo.RefreshKiroIDC(ctx, config)
+			if mode == "within-lifetime" {
+				if err != nil || result == nil || !result.ExpiresAt().Equal(start.Add(time.Hour)) || !result.RefreshAfter().Equal(start.Add(55*time.Minute)) || clocks != 2 || calls != 1 || !closed {
+					t.Fatal("deadline extended by delay", err)
+				}
+				return
+			}
+			var failure *pigo.KiroIDCRefreshError
+			if result != nil || !errors.As(err, &failure) {
+				t.Fatal("invalid clock released credentials")
+			}
+			pre := strings.HasPrefix(mode, "pre-")
+			if failure.ExecutorInvoked() == pre || (pre && (calls != 0 || clocks != 1 || closed)) || (!pre && (calls != 1 || clocks != 2 || !closed)) {
+				t.Fatal("wrong rotation outcome", calls, clocks, closed)
+			}
+		})
 	}
 }

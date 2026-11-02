@@ -29,8 +29,8 @@ func TestKiroInjectedIDCRefreshAttemptScopeRotationAndClose(t *testing.T) {
 	_, now := kiroRefreshFixture()
 	options.Clock = func(context.Context) (time.Time, error) {
 		clocks++
-		if body.closes != 1 {
-			t.Error("clock before Close")
+		if clocks == 2 && body.closes != 1 {
+			t.Error("end clock before Close")
 		}
 		return now, nil
 	}
@@ -50,7 +50,7 @@ func TestKiroInjectedIDCRefreshAttemptScopeRotationAndClose(t *testing.T) {
 		return kiroCatalogHTTPFixture(body), nil
 	})
 	expectedScope, _ := kiroRefreshFixture()
-	if err != nil || calls != 1 || clocks != 1 || body.closes != 1 || result.Credential.Scope != expectedScope || result.Credential.Token != "NEW_ACCESS" || result.RefreshToken != "NEW_REFRESH" || !result.ExpiresAt.Equal(now.Add(time.Hour)) || !result.RefreshAfter.Equal(now.Add(55*time.Minute)) {
+	if err != nil || calls != 1 || clocks != 2 || body.closes != 1 || result.Credential.Scope != expectedScope || result.Credential.Token != "NEW_ACCESS" || result.RefreshToken != "NEW_REFRESH" || !result.ExpiresAt.Equal(now.Add(time.Hour)) || !result.RefreshAfter.Equal(now.Add(55*time.Minute)) {
 		t.Fatal("result/lifecycle", err)
 	}
 	for _, value := range []any{result, kiroIDCRefreshAttemptFixture()} {
@@ -90,10 +90,10 @@ func TestKiroInjectedIDCRefreshAttemptFailuresAreZeroAndSingle(t *testing.T) {
 			oldClock := options.Clock
 			options.Clock = func(ctx context.Context) (time.Time, error) {
 				clocks++
-				if mode == "clock" {
+				if mode == "clock" && clocks == 2 {
 					return time.Time{}, errors.New("PRIVATE_CLOCK")
 				}
-				if mode == "zero-clock" {
+				if mode == "zero-clock" && clocks == 2 {
 					return time.Time{}, nil
 				}
 				return oldClock(ctx)
@@ -128,7 +128,7 @@ func TestKiroInjectedIDCRefreshAttemptFailuresAreZeroAndSingle(t *testing.T) {
 				t.Fatal("rejected response body read")
 			}
 			parseFailure := mode == "missing-rotation" || mode == "malformed" || mode == "clock" || mode == "zero-clock"
-			if (parseFailure && clocks != 1) || (!parseFailure && clocks != 0) {
+			if (parseFailure && clocks != 2) || (!parseFailure && clocks != 1) {
 				t.Fatal("clock ordering", clocks)
 			}
 		})
@@ -192,5 +192,17 @@ func TestKiroInjectedIDCRefreshAttemptWaitsForClose(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Close did not release")
+	}
+}
+
+func TestKiroIDCRefreshExpiryCannotExtendDuringClose(t *testing.T) {
+	options := kiroIDCRefreshAttemptFixture()
+	_, start := kiroRefreshFixture()
+	observed := start
+	options.Clock = func(context.Context) (time.Time, error) { return observed, nil }
+	body := &kiroAttemptBody{reader: strings.NewReader(kiroIDCFakeResponse), onClose: func() { observed = start.Add(10 * time.Minute) }}
+	result, err := runKiroInjectedIDCRefreshAttempt(context.Background(), options, func(*http.Request) (*http.Response, error) { return kiroCatalogHTTPFixture(body), nil })
+	if err != nil || !result.ExpiresAt.Equal(start.Add(time.Hour)) {
+		t.Fatal("Close latency extended expiry", err, result.ExpiresAt)
 	}
 }

@@ -9,6 +9,8 @@ import (
 // KiroIDCRefreshConfig is explicitly caller-owned; use keyed literals. No zero-
 // value client, scope, clock, credential, budget, retry or persistence exists.
 // The executor MUST NOT retry, redirect or log secrets and must honor context.
+// Clock is called before dispatch and after successful Close (up to twice);
+// expiry is anchored conservatively before dispatch, never extended by Close.
 // Client credentials must already be authorized; this does not register/login.
 type KiroIDCRefreshConfig struct {
 	Scope                             KiroCredentialScope

@@ -109,3 +109,10 @@ refresh with opaque in-memory results and a typed ExecutorInvoked failure marker
 Once control reaches the executor, a failure may hide server-side token rotation;
 it does not prove safe retry or continued validity of the old token. No automatic
 source update, credential storage, login or persistent access is added.
+
+## Refresh audit correction
+
+[Refresh/public-boundary audit](kiro-refresh-audit.md) records one reproduced and
+fixed expiry-anchor defect: transfer/Close latency no longer extends the local
+refresh deadline. Clock now runs before dispatch and after successful Close;
+post-dispatch invalid/expired observations remain an unknown rotation outcome.

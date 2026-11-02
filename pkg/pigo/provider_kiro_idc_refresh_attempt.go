@@ -35,6 +35,12 @@ func runKiroInjectedIDCRefreshAttempt(ctx context.Context, options kiroIDCRefres
 		return zero, errKiroIDCRefreshAttempt
 	}
 	defer request.Body.Close()
+	// Anchor the local expiry conservatively before handing control to transport.
+	// Response transfer/Close latency must never extend token validity.
+	started, err := options.Clock(ctx)
+	if err != nil || ctx.Err() != nil || started.IsZero() || started.Year() < 1 || started.Year() > 9998 {
+		return zero, errKiroIDCRefreshAttempt
+	}
 	response, transportErr := roundTrip(request)
 	// This reader is JSON-transport-only despite its original catalog name. It
 	// closes response+error bodies and validates MIME, length, budget, EOF and Close.
@@ -43,11 +49,11 @@ func runKiroInjectedIDCRefreshAttempt(ctx context.Context, options kiroIDCRefres
 		return zero, errKiroIDCRefreshAttempt
 	}
 	stamp, err := options.Clock(ctx)
-	if err != nil || ctx.Err() != nil {
+	if err != nil || ctx.Err() != nil || stamp.IsZero() || stamp.Year() < 1 || stamp.Year() > 9998 || stamp.Before(started) {
 		return zero, errKiroIDCRefreshAttempt
 	}
-	result, err := parseKiroOfflineRefreshResponse(payload, options.Scope, kiroRefreshIDC, options.Request.RefreshToken, stamp, options.MaxLifetime, options.RefreshSkew, options.MaxResponseBytes)
-	if err != nil || ctx.Err() != nil {
+	result, err := parseKiroOfflineRefreshResponse(payload, options.Scope, kiroRefreshIDC, options.Request.RefreshToken, started, options.MaxLifetime, options.RefreshSkew, options.MaxResponseBytes)
+	if err != nil || ctx.Err() != nil || !result.ExpiresAt.After(stamp) {
 		return zero, errKiroIDCRefreshAttempt
 	}
 	return result, nil

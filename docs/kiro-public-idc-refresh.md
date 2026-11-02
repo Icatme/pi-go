@@ -11,6 +11,12 @@ registration is performed. Tests use synthetic credentials and fake executors.
 Success returns an opaque `KiroIDCRefreshResult` only after HTTP/body/Close/clock/
 strict-parser validation. `Credential()` and `RefreshToken()` are explicit secret
 getters; `ExpiresAt()` and `RefreshAfter()` retain separate expiry semantics.
+The same Clock is called before dispatch and after successful Close (up to twice).
+Expiry uses the pre-dispatch timestamp as a conservative local deadline, not the
+post-Close time; backward/expired ending observations fail. A starting-clock error
+leaves ExecutorInvoked=false; an ending-clock/expiry error leaves it true.
+RefreshAfter may already be due at completion. The clock must be trustworthy and
+consistent; this policy is not proof of the exact server expiration time.
 Values are copied and no mutable token store is shared. Result JSON is `{}` and
 fmt is redacted: this is deliberately not a persistence/restore format. Do not
 log explicit secret getters. The config's three credential fields are excluded

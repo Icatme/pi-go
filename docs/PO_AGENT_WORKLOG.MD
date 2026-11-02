@@ -2527,3 +2527,25 @@
 - Required response rotation remains a conservative IDC subset. Executor must
   not redirect/retry/log and must honor cancellation; plaintext is not zeroized.
   Real endpoint/account/client compatibility remains unverified.
+
+## 2026-11-02 — Confirmed refresh expiry-anchor correction / #122 audit
+
+- A new reproducer FAILED against the prior implementation: fake Close advanced
+  clock by ten minutes and ExpiresAt became06:10 instead of conservative06:00.
+  RFC6749§5.1 lifetime is from response generation, not client Close completion.
+- Fixed only IDC attempt timing: validated clock before executor, second clock
+  after successful Close, reject backward/invalid/end>=expiry; parse anchored to
+  start. The pure parser and exported struct layout remain unchanged. Clock's
+  success-path invocation count changes1→2 and is explicitly documented.
+- Post-dispatch expiry/time failures retain ExecutorInvoked=true (rotation may
+  already have happened); pre-clock invalid/error/cancel are false with0 executor.
+  RefreshAfter may already be due, never extends expiry. Trusted same-clock
+  semantics are required; this is conservative, not actual server timestamp proof.
+- Added Close-delay reproducer and external boundary matrix for prezero/error/
+  year/cancel, ending backward/exact-expired/beyond/within; updated existing
+  callback-count tests. Fixed stale 'no public API' docs and recorded a scoped
+  audit of rotation omission, extension fields, secrets and real-service gaps.
+- Final official cloud Go1.26.2, cached dependencies/live disabled: focused IDC
+  race x3 passed1.055s; full repository race passed(pigo30.711s, others passed/
+  cached); vet/gofmt/diff passed. Independent child confirmed defect and static
+  correction review, no separate test run. No CI/master merge/deploy/live calls.

@@ -3,7 +3,8 @@
 This internal draft constructs a request only. It has no executor, login, client
 registration, credential discovery, CLI/IDE import, timer, persistence, retry,
 redirect, source update or service call. Tests use only visibly synthetic secrets.
-No public refresh API is added yet.
+This constructor is internal; the later explicit public refresh API is documented
+in [caller-owned IDC refresh](kiro-public-idc-refresh.md).
 
 Evidence checked on 2026-11-02:
 - [AWS IAM Identity Center CreateToken](https://docs.aws.amazon.com/singlesignon/latest/OIDCAPIReference/API_CreateToken.html)
