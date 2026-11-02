@@ -2447,3 +2447,20 @@
   review found no definite blocker; it did not independently execute tests.
 - No CI dispatch, real account/network/tool execution, master merge or deployment.
   See kiro-public-catalog-observation.md for public API ownership/trust boundaries.
+
+## 2026-11-02 — Explicit catalog service-ID to runtime regression (draft)
+
+- Stacked on #118; no production implementation change. Independently authored
+  scenario from the upstream dd93f2e distinction between host alias and kiroModelId.
+- Synthetic catalog intentionally has overlapping alias/service namespaces.
+  Public Select(ServiceID) feeds caller-owned Model.ID; public registration and
+  StreamSimple preserve exact ID in current/history wire paths and final result.
+  Catalog/runtime are each invoked once; registration invokes neither callback.
+- Documentation now explains manual ServiceID mapping and explicitly excludes
+  automatic alias resolution, per-dispatch catalog freshness, capability defaults,
+  entitlement, model registration and real endpoint compatibility guarantees.
+- Actual official cloud Go 1.26.2/cached dependencies/live flags disabled:
+  final catalog-runtime/public focused race x3 passed 1.042s; full repository
+  go test -race ./... passed (pigo30.407s, others passed/cached); go vet ./...,
+  gofmt and diff check passed. Parent independent static review found no definite
+  blocker; no independent execution by reviewer. No real service or CI dispatch.

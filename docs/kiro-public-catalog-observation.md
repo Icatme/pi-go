@@ -46,3 +46,21 @@ scope/freshness rejection, nil/zero catalogs, zero config and late Close failure
 These extend the upstream v0.12.3 `dd93f2e` management/models scenario mapping;
 no upstream implementation or fixture was copied. Real endpoint acceptance,
 real account authorization and runtime model-ID routing remain unverified.
+
+## Explicit caller mapping into a registered runtime
+
+The registered Kiro module sends `Model.ID` as the exact service `modelId` for both
+current and historical user messages. It does not resolve catalog aliases. A
+caller may explicitly select an observation with an asserted matching scope and
+freshness policy, then put `observation.ServiceID()` into its own `Model.ID` while
+supplying its own API/provider identity and other host model policy. This neither
+registers a catalog model automatically nor fills missing capability/price fields.
+The returned host message then uses this same exact service ID, not an alias.
+Do not copy `Alias()` into `Model.ID` expecting automatic translation.
+
+A synthetic public-path integration test covers two entries whose alias/service
+namespaces overlap (`sample-1.2.3` and `sample-1-2.3`). It checks explicit selection,
+exact JSON paths in current/history requests, final result identity and one
+catalog/one runtime attempt with no fetch on registration. This is manual caller
+wiring, not a dynamic resolver, implicit freshness recheck at every dispatch,
+automatic account policy, real endpoint acceptance or generic model factory.
