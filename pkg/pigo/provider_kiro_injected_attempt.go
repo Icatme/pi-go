@@ -24,6 +24,15 @@ type kiroHTTPResponseLimits struct {
 // Read or Close without its cooperation; no background goroutines are spawned.
 // Inputs and executor must not be mutated concurrently. No request is logged.
 func runKiroInjectedAttempt(ctx context.Context, conversation Context, schemas map[string]json.RawMessage, options kiroHTTPRequestOptions, kind kiroCredentialKind, token string, roundTrip func(*http.Request) (*http.Response, error), limits kiroHTTPResponseLimits) (result kiroOfflineResponse, resultErr error) {
+	return runKiroInjectedAttemptWithTextObserver(ctx, conversation, schemas, options, kind, token, roundTrip, limits, nil)
+}
+
+// runKiroInjectedAttemptWithTextObserver retains the same explicit single-attempt
+// transport/ownership limits while observing validated text before HTTP completion.
+// Text is provisional: later read, framing, Content-Length, Close or cancellation
+// failures still return zero final evidence. The trusted callback sees text only;
+// it must return promptly, honor cancellation and never treat previews as success.
+func runKiroInjectedAttemptWithTextObserver(ctx context.Context, conversation Context, schemas map[string]json.RawMessage, options kiroHTTPRequestOptions, kind kiroCredentialKind, token string, roundTrip func(*http.Request) (*http.Response, error), limits kiroHTTPResponseLimits, onText func(string) error) (result kiroOfflineResponse, resultErr error) {
 	zero := kiroOfflineResponse{}
 	s := limits.Stream
 	// Fixed ceilings bound admitted work, not process heap or wall-clock time.
@@ -77,7 +86,19 @@ func runKiroInjectedAttempt(ctx context.Context, conversation Context, schemas m
 	// One extra byte distinguishes true EOF at the exact budget from a limit-
 	// generated EOF. An exhausted allowance must NEVER certify completion.
 	reader := &io.LimitedReader{R: response.Body, N: limits.WireBytes + 1}
-	result, resultErr = collectKiroOfflineResponse(ctx, reader, limits.Stream)
+	var guardedText func(string) error
+	if onText != nil {
+		guardedText = func(text string) error {
+			// The extra wire byte is only an EOF probe, never preview data.
+			// Likewise do not expose a frame already beyond a declared length.
+			consumed := limits.WireBytes + 1 - reader.N
+			if reader.N == 0 || (response.ContentLength >= 0 && consumed > response.ContentLength) {
+				return errKiroInjectedAttempt
+			}
+			return onText(text)
+		}
+	}
+	result, resultErr = collectKiroResponseWithTextObserver(ctx, reader, limits.Stream, guardedText)
 	if resultErr != nil || reader.N == 0 || (response.ContentLength >= 0 && response.ContentLength != limits.WireBytes+1-reader.N) || ctx.Err() != nil {
 		return zero, errKiroInjectedAttempt
 	}
