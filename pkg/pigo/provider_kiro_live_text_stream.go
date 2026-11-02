@@ -26,6 +26,37 @@ type kiroInjectedTextStreamConfig struct {
 // Executor/body/Close must cooperate with context; blocked trusted code cannot
 // be preempted. Consume Events or Close, and read Result once.
 func startKiroInjectedTextStream(ctx context.Context, conversation Context, config kiroInjectedTextStreamConfig, kind kiroCredentialKind, token string, roundTrip func(*http.Request) (*http.Response, error)) (*AssistantMessageEventStream, error) {
+	mapper, err := prepareKiroTextAttempt(ctx, conversation, config, roundTrip)
+	if err != nil {
+		return nil, err
+	}
+	request, err := newKiroOfflineRequestWithToken(ctx, conversation, nil, config.Request, kind, token)
+	if err != nil {
+		return nil, errKiroLiveTextStream
+	}
+	return startKiroPreparedTextStream(ctx, request, mapper, config, roundTrip), nil
+}
+
+// startKiroScopedTextStream obtains one explicit scoped credential after request
+// serialization, then starts the existing text-only incremental worker. No tools,
+// retries, credential cache/refresh or transport selection are added. A returned
+// stream may expose provisional text; only final validated evidence is completion.
+func startKiroScopedTextStream(ctx context.Context, conversation Context, config kiroInjectedTextStreamConfig, source kiroCredentialSource, roundTrip func(*http.Request) (*http.Response, error)) (*AssistantMessageEventStream, error) {
+	if source == nil {
+		return nil, errKiroLiveTextStream
+	}
+	mapper, err := prepareKiroTextAttempt(ctx, conversation, config, roundTrip)
+	if err != nil {
+		return nil, err
+	}
+	request, err := newKiroOfflineRequestWithCredentialSource(ctx, conversation, nil, config.Request, source)
+	if err != nil {
+		return nil, errKiroLiveTextStream
+	}
+	return startKiroPreparedTextStream(ctx, request, mapper, config, roundTrip), nil
+}
+
+func prepareKiroTextAttempt(ctx context.Context, conversation Context, config kiroInjectedTextStreamConfig, roundTrip func(*http.Request) (*http.Response, error)) (*kiroIncrementalTextMapper, error) {
 	if ctx == nil || ctx.Err() != nil || roundTrip == nil || !kiroHTTPResponseLimitsValid(config.Response) || len(conversation.Tools) != 0 || config.Model.ID != config.Request.Identity.ModelID {
 		return nil, errKiroLiveTextStream
 	}
@@ -33,10 +64,12 @@ func startKiroInjectedTextStream(ctx context.Context, conversation Context, conf
 	if err != nil {
 		return nil, errKiroLiveTextStream
 	}
-	request, err := newKiroOfflineRequestWithToken(ctx, conversation, nil, config.Request, kind, token)
-	if err != nil {
-		return nil, errKiroLiveTextStream
-	}
+	return mapper, nil
+}
+
+// The builder has validated and snapshotted this owned request before any worker
+// starts. executeKiroPreparedAttempt owns body Close; source never receives it.
+func startKiroPreparedTextStream(ctx context.Context, request *http.Request, mapper *kiroIncrementalTextMapper, config kiroInjectedTextStreamConfig, roundTrip func(*http.Request) (*http.Response, error)) *AssistantMessageEventStream {
 	return managedAssistantStream(ctx, func(requestCtx context.Context) *AssistantMessageEventStream {
 		stream := newAssistantMessageEventStream()
 		ownedRequest := request.WithContext(requestCtx)
@@ -77,5 +110,5 @@ func startKiroInjectedTextStream(ctx context.Context, conversation Context, conf
 			stream.finish(final)
 		}()
 		return stream
-	}), nil
+	})
 }
