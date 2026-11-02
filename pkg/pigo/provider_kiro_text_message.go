@@ -16,6 +16,10 @@ var errKiroTextMessage = errors.New("kiro: unsupported completed text projection
 // Unknown/partial evidence is rejected, never silently lost or recomputed.
 func projectKiroCompletedText(response kiroOfflineResponse, model Model, timestamp time.Time, maxTextBytes int) (AssistantMessage, error) {
 	zero := AssistantMessage{}
+	response, diagnostics, maxTextBytes, observationErr := splitKiroContextObservations(response, timestamp, maxTextBytes)
+	if observationErr != nil {
+		return zero, errKiroTextMessage
+	}
 	if maxTextBytes < 1 || maxTextBytes > 1<<20 || len(response.Parts) == 0 || len(response.Parts) > 4096 {
 		return zero, errKiroTextMessage
 	}
@@ -25,7 +29,7 @@ func projectKiroCompletedText(response kiroOfflineResponse, model Model, timesta
 	if !((response.StopReason == StopReasonStop && response.Usage.StopReason == "END_TURN") || (response.StopReason == StopReasonLength && response.Usage.StopReason == "MAX_TOKENS")) {
 		return zero, errKiroTextMessage
 	}
-	message := AssistantMessage{API: model.API, Provider: model.Provider, Model: model.ID, Timestamp: timestamp, StopReason: response.StopReason}
+	message := AssistantMessage{API: model.API, Provider: model.Provider, Model: model.ID, Timestamp: timestamp, StopReason: response.StopReason, Diagnostics: diagnostics}
 	if !applyKiroCompletedUsage(&message, response.Usage) {
 		return zero, errKiroTextMessage
 	}

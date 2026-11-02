@@ -51,8 +51,9 @@ This module is named **buffered** deliberately: no provisional text or executabl
 tool events are published before the entire HTTP response, EOF/length/Close,
 terminal metadata and final projection pass. Successful complete lifecycle events
 are then delivered to the normal host queue. It does not connect the separately
-implemented realtime text-only observer. Partial usage, context percentage,
-reasoning/signature replay and unsupported event shapes still fail closed.
+implemented realtime text-only observer. Partial token usage, reasoning/signature replay and unsupported event shapes still
+fail closed. Valid context percentages are retained only as final Diagnostics,
+never token/cost usage; see kiro-completed-context-diagnostics.md.
 
 The public registry still exposes GetAPIModule for historical compatibility.
 Calling a module's raw callbacks directly bypasses host option hooks. That is not

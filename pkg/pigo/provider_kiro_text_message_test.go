@@ -59,7 +59,7 @@ func TestKiroCompletedTextRejectsUnsupportedEvidence(t *testing.T) {
 		func(r *kiroOfflineResponse) { r.StopReason = StopReasonToolUse },
 		func(r *kiroOfflineResponse) { r.Usage.StopReason = "" },
 		func(r *kiroOfflineResponse) { r.Usage.StopReason = "MAX_TOKENS" },
-		func(r *kiroOfflineResponse) { v := 50.0; r.Usage.ContextUsagePercentage = &v },
+		func(r *kiroOfflineResponse) { v := 101.0; r.Usage.ContextUsagePercentage = &v },
 		func(r *kiroOfflineResponse) { v := 1.0; r.Usage.NormalizedTokenUsage = &v },
 		func(r *kiroOfflineResponse) { r.Usage.TokenCounts = map[string]int64{"outputTokens": 1} },
 		func(r *kiroOfflineResponse) {

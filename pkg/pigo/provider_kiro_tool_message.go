@@ -18,6 +18,10 @@ var errKiroToolMessage = errors.New("kiro: unsupported completed tool projection
 // agent execution approval. Inputs must not mutate concurrently.
 func projectKiroCompletedTools(response kiroOfflineResponse, model Model, timestamp time.Time, allowedNames []string, maxBytes, maxTools int) (AssistantMessage, error) {
 	zero := AssistantMessage{}
+	response, diagnostics, maxBytes, observationErr := splitKiroContextObservations(response, timestamp, maxBytes)
+	if observationErr != nil {
+		return zero, errKiroToolMessage
+	}
 	if !kiroTextModelIdentityValid(model) || maxBytes < 2 || maxBytes > 1<<20 || maxTools < 1 || maxTools > 128 || len(allowedNames) < 1 || len(allowedNames) > 128 || len(response.Parts) < 1 || len(response.Parts) > 4096 || response.StopReason != StopReasonToolUse || response.Usage.StopReason != "TOOL_USE" {
 		return zero, errKiroToolMessage
 	}
@@ -25,7 +29,7 @@ func projectKiroCompletedTools(response kiroOfflineResponse, model Model, timest
 	if allowed == nil {
 		return zero, errKiroToolMessage
 	}
-	message := AssistantMessage{API: model.API, Provider: model.Provider, Model: model.ID, Timestamp: timestamp, StopReason: StopReasonToolUse}
+	message := AssistantMessage{API: model.API, Provider: model.Provider, Model: model.ID, Timestamp: timestamp, StopReason: StopReasonToolUse, Diagnostics: diagnostics}
 	if !applyKiroCompletedUsage(&message, response.Usage) {
 		return zero, errKiroToolMessage
 	}

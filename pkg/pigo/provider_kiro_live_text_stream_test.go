@@ -121,7 +121,7 @@ delivered:
 }
 
 func TestKiroLiveHostLateFailureNeverSendsDoneOrTools(t *testing.T) {
-	for _, mode := range []string{"close", "tool", "reasoning", "context_usage"} {
+	for _, mode := range []string{"close", "tool", "reasoning", "invalid_context_usage"} {
 		frames := [][]byte{kiroOfflineEvent("assistantResponseEvent", `{"content":"preview"}`)}
 		stop := "END_TURN"
 		switch mode {
@@ -130,8 +130,8 @@ func TestKiroLiveHostLateFailureNeverSendsDoneOrTools(t *testing.T) {
 			stop = "TOOL_USE"
 		case "reasoning":
 			frames = append(frames, kiroOfflineEvent("reasoningContentEvent", `{"text":"opaque thought"}`))
-		case "context_usage":
-			frames = append(frames, kiroOfflineEvent("contextUsageEvent", `{"contextUsagePercentage":1}`))
+		case "invalid_context_usage":
+			frames = append(frames, kiroOfflineEvent("contextUsageEvent", `{"contextUsagePercentage":101}`))
 		}
 		frames = append(frames, kiroOfflineEvent("metadataEvent", `{"stopReason":"`+stop+`"}`))
 		body := &kiroAttemptBody{reader: bytes.NewReader(kiroOfflineJoin(frames...))}

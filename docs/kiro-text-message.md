@@ -58,3 +58,9 @@ checks before adding a buffered event adapter. Event terminal/Result/Close,
 observer safety, explicit executor provenance, tool raw-history and reasoning
 replay remain the independent gates described in docs/kiro-host-adapter-plan.md
 (on documentation PR #73, not inherited here). This is not usable live Kiro.
+
+## Later context-observation extension
+
+The original context-percentage rejection is superseded by
+`kiro-completed-context-diagnostics.md`: valid completed observations are retained
+as bounded final Diagnostics, without token/cost inference or relaxed termination.

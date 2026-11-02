@@ -50,3 +50,9 @@ Community source pinned at
 
 This change has no host tool_start/delta/end delivery yet. That lifecycle and
 the agent's schema/permission/execution boundary require a separate small change.
+
+## Later context-observation extension
+
+The original context-percentage rejection is superseded by
+`kiro-completed-context-diagnostics.md`: valid completed observations are retained
+as bounded final Diagnostics, without token/cost inference or relaxed termination.
