@@ -3,9 +3,11 @@
 This development integration includes the plugin watchlist from draft [#50](https://github.com/Icatme/pi-go/pull/50),
 plus its updated implementation status. It does not merge or deploy master.
 
+Latest consolidated scope and remaining gaps: [convergence review](kiro-convergence-review.md).
+
 ## Upstream check
 
-Read-only GitHub check at 05:09 UTC: upstream `main` is still
+Read-only GitHub check at 06:43 UTC: upstream `main` is still
 [dd93f2e884b60cecd85c7fb4a818fb6d64ba3dba](https://github.com/mikeyobrien/pi-provider-kiro/commit/dd93f2e884b60cecd85c7fb4a818fb6d64ba3dba),
 commit dated 2026-10-29 22:21:36 UTC, message `chore(release): v0.12.3`.
 The pinned [package.json](https://github.com/mikeyobrien/pi-provider-kiro/blob/dd93f2e884b60cecd85c7fb4a818fb6d64ba3dba/package.json)
@@ -148,3 +150,13 @@ login, a source manager or real endpoint validation.
 single attempt with explicit config, opaque result and typed invocation marker.
 It does not launch a desktop/login flow, find tokens, cache access or update a
 source. A matching profile or retained token is still not account/validity proof.
+
+
+## Caller-owned refresh/runtime handoff and convergence
+
+[Handoff regression](kiro-refresh-runtime-handoff.md) connects both public refresh
+families to an explicitly supplied expiry-check source and public provider runtime.
+It verifies exact access-token headers, secret exclusion, scope/expiry rejection
+and no hidden refresh. This test-only closure does not implement a token manager.
+The [convergence review](kiro-convergence-review.md) records remaining gaps and
+prioritizes integrated review over more unconnected interfaces.

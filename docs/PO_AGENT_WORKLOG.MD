@@ -2629,3 +2629,24 @@
 - No real service/account/desktop/credentials, CI dispatch, master merge or deploy.
   Caller controls generation serialization and must prohibit retries/redirects/
   secret logging; arbitrary callback behavior remains trusted/cooperative.
+
+## 2026-11-02 — Caller-owned refresh/runtime handoff and convergence (test-only)
+
+- Stacked on #127; no production change. Both public IDC/desktop refresh APIs feed
+  a caller-authored expiry-check Credentials callback into public registration/
+  StreamSimple. Synthetic frames/fixture helpers only support data construction.
+- Six scenarios assert access only in Authorization, no access in JSON or other
+  headers/URL, no refresh/client secrets in runtime URL/body/headers; wrong scope
+  and exact expiry suppress runtime. Valid-then-expired second request does not
+  renew implicitly. One refresh only; registration invokes no source or executor.
+- Independent child review found a coverage wording gap, not a production leak:
+  added explicit non-Authorization access-header/URL assertions and corrected the
+  helper description before final tests. No concurrency blocker found.
+- Final official cloud Go1.26.2/cached deps/live off: focused handoff race x3
+  passed1.041s; final repository race passed(pigo30.588s, others passed/cached);
+  vet/gofmt/diff passed. Independent review was static, not separately run.
+- Read-only upstream main rechecked06:43UTC: stilldd93f2e/v0.12.3 committed
+  2026-10-29T22:21:36Z. No new main delta. Existing tag-list gap is not hidden.
+- Added convergence review: connected APIs/test limits, live/identity/executor/
+  raw-persisted-history/IdP/extension gaps, and integrated review before further
+  features. No real service/account, source store, CI/master merge/deploy.
