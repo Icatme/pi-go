@@ -33,12 +33,33 @@ func TestKiroHistoryGroupsRejectWithoutRepair(t *testing.T) {
 		func(c *Context) { c.Tools = append(c.Tools, Tool{Name: "lookup"}) },
 		func(c *Context) { c.Messages[2] = ToolResultMessage{ToolCallID: "fixture-1", ToolName: "other"} },
 		func(c *Context) { a := c.Messages[1].(AssistantMessage); a.StopReason = ""; c.Messages[1] = a },
-		func(c *Context) { a := c.Messages[1].(AssistantMessage); a.Content[1] = ToolCall{ID: "fixture-1", Name: "lookup"}; c.Messages[1] = a },
-		func(c *Context) { a := c.Messages[1].(AssistantMessage); a.Content[0] = ToolCall{ID: "provider|foreign", Name: "lookup"}; c.Messages[1] = a },
+		func(c *Context) {
+			a := c.Messages[1].(AssistantMessage)
+			a.Content[1] = ToolCall{ID: "fixture-1", Name: "lookup"}
+			c.Messages[1] = a
+		},
+		func(c *Context) {
+			a := c.Messages[1].(AssistantMessage)
+			a.Content[0] = ToolCall{ID: "provider|foreign", Name: "lookup"}
+			c.Messages[1] = a
+		},
 		func(c *Context) { c.Messages[0] = SystemMessage{Content: "dynamic"} },
-		func(c *Context) { a := c.Messages[1].(AssistantMessage); a.Content[0] = ToolCall{ID: "fixture-1", Name: "lookup", Namespace: "foreign"}; c.Messages[1] = a },
-		func(c *Context) { a := c.Messages[1].(AssistantMessage); a.Content[0] = ToolCall{ID: "fixture-1", Name: "lookup", ThoughtSignature: "fixture"}; c.Messages[1] = a },
-		func(c *Context) { var call *ToolCall; a := c.Messages[1].(AssistantMessage); a.Content[0] = call; c.Messages[1] = a },
+		func(c *Context) {
+			a := c.Messages[1].(AssistantMessage)
+			a.Content[0] = ToolCall{ID: "fixture-1", Name: "lookup", Namespace: "foreign"}
+			c.Messages[1] = a
+		},
+		func(c *Context) {
+			a := c.Messages[1].(AssistantMessage)
+			a.Content[0] = ToolCall{ID: "fixture-1", Name: "lookup", ThoughtSignature: "fixture"}
+			c.Messages[1] = a
+		},
+		func(c *Context) {
+			var call *ToolCall
+			a := c.Messages[1].(AssistantMessage)
+			a.Content[0] = call
+			c.Messages[1] = a
+		},
 		func(c *Context) { var result *ToolResultMessage; c.Messages[2] = result },
 		func(c *Context) { c.Messages = append(c.Messages, c.Messages[1:]...) },
 	} {

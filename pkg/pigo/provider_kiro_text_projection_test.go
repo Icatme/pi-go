@@ -2,7 +2,7 @@ package pigo
 
 import (
 	"reflect"
- "strings"
+	"strings"
 	"testing"
 )
 
@@ -123,10 +123,12 @@ func TestKiroTextProjectionBoundsEmptyBlocks(t *testing.T) {
 // Timing is intentionally not asserted. The benchmark measures the budget-first
 // guard only after a real Go toolchain is available.
 func BenchmarkKiroTextProjectionOversize(b *testing.B) {
- ctx:=Context{Messages:[]Message{UserMessage{Content:strings.Repeat("x",1<<20)}}}
- b.ReportAllocs()
- b.ResetTimer()
- for i:=0;i<b.N;i++ {
-  if _,err:=projectKiroTextConversation(ctx,"fixture-model",false,1,1);err==nil { b.Fatal("over-budget text accepted") }
- }
+	ctx := Context{Messages: []Message{UserMessage{Content: strings.Repeat("x", 1<<20)}}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := projectKiroTextConversation(ctx, "fixture-model", false, 1, 1); err == nil {
+			b.Fatal("over-budget text accepted")
+		}
+	}
 }

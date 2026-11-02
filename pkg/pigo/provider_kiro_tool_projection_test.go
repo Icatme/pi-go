@@ -9,7 +9,10 @@ import (
 )
 
 type kiroProjectionMustNotMarshal struct{}
-func (kiroProjectionMustNotMarshal) MarshalJSON() ([]byte, error) { panic("custom schema marshaler must not run") }
+
+func (kiroProjectionMustNotMarshal) MarshalJSON() ([]byte, error) {
+	panic("custom schema marshaler must not run")
+}
 
 func kiroToolProjectionFixture() (Context, map[string]json.RawMessage) {
 	return Context{Tools: []Tool{{Name: "lookup", Description: "fixture", Parameters: kiroProjectionMustNotMarshal{}}}, Messages: []Message{
@@ -38,23 +41,59 @@ func TestKiroToolProjectionEmptyResultCarrierAndRawPrecision(t *testing.T) {
 	}
 	p.History[1].Assistant.Calls[0].Input[0] = '!'
 	call := ctx.Messages[1].(AssistantMessage).Content[1].(ToolCall)
-	if call.RawArguments[0] != '{' { t.Fatal("arguments alias caller state") }
+	if call.RawArguments[0] != '{' {
+		t.Fatal("arguments alias caller state")
+	}
 }
 
 func TestKiroToolProjectionRejectsUnsupportedInputs(t *testing.T) {
 	for _, mutate := range []func(*Context, map[string]json.RawMessage){
 		func(c *Context, s map[string]json.RawMessage) { c.SystemPrompt = "system" },
 		func(c *Context, s map[string]json.RawMessage) { delete(s, "lookup") },
-		func(c *Context, s map[string]json.RawMessage) { s["lookup"] = json.RawMessage(`{"type":"object","type":"array"}`) },
-		func(c *Context, s map[string]json.RawMessage) { c.Messages[0] = UserMessage{Content: []ContentBlock{ImageContent{Data: "unsupported image", MIMEType: "image/png"}}} },
-		func(c *Context, s map[string]json.RawMessage) { a := c.Messages[1].(AssistantMessage); call := a.Content[1].(ToolCall); call.Arguments = map[string]any{"id":1}; a.Content[1] = call; c.Messages[1] = a },
-		func(c *Context, s map[string]json.RawMessage) { a := c.Messages[1].(AssistantMessage); call := a.Content[1].(ToolCall); call.RawArguments = `{"x":1,"x":2}`; a.Content[1] = call; c.Messages[1] = a },
-		func(c *Context, s map[string]json.RawMessage) { a := c.Messages[1].(AssistantMessage); a.Content[0] = ThinkingContent{Thinking:"fixture"}; c.Messages[1] = a },
-		func(c *Context, s map[string]json.RawMessage) { r := c.Messages[2].(ToolResultMessage); r.Content = []ContentBlock{ImageContent{Data:"fixture"}}; c.Messages[2] = r },
-		func(c *Context, s map[string]json.RawMessage) { c.Messages = append(c.Messages, UserMessage{Content:"interrupted chronology"}) },
+		func(c *Context, s map[string]json.RawMessage) {
+			s["lookup"] = json.RawMessage(`{"type":"object","type":"array"}`)
+		},
+		func(c *Context, s map[string]json.RawMessage) {
+			c.Messages[0] = UserMessage{Content: []ContentBlock{ImageContent{Data: "unsupported image", MIMEType: "image/png"}}}
+		},
+		func(c *Context, s map[string]json.RawMessage) {
+			a := c.Messages[1].(AssistantMessage)
+			call := a.Content[1].(ToolCall)
+			call.Arguments = map[string]any{"id": 1}
+			a.Content[1] = call
+			c.Messages[1] = a
+		},
+		func(c *Context, s map[string]json.RawMessage) {
+			a := c.Messages[1].(AssistantMessage)
+			call := a.Content[1].(ToolCall)
+			call.RawArguments = `{"x":1,"x":2}`
+			a.Content[1] = call
+			c.Messages[1] = a
+		},
+		func(c *Context, s map[string]json.RawMessage) {
+			a := c.Messages[1].(AssistantMessage)
+			a.Content[0] = ThinkingContent{Thinking: "fixture"}
+			c.Messages[1] = a
+		},
+		func(c *Context, s map[string]json.RawMessage) {
+			r := c.Messages[2].(ToolResultMessage)
+			r.Content = []ContentBlock{ImageContent{Data: "fixture"}}
+			c.Messages[2] = r
+		},
+		func(c *Context, s map[string]json.RawMessage) {
+			c.Messages = append(c.Messages, UserMessage{Content: "interrupted chronology"})
+		},
 		func(c *Context, s map[string]json.RawMessage) { c.Tools[0].OutputSchema = map[string]any{} },
-		func(c *Context, s map[string]json.RawMessage) { a := c.Messages[1].(AssistantMessage); a.Content = append(a.Content, TextContent{Text:"after tool"}); c.Messages[1] = a },
-		func(c *Context, s map[string]json.RawMessage) { r := c.Messages[2].(ToolResultMessage); r.Details = map[string]any{"fixture":true}; c.Messages[2] = r },
+		func(c *Context, s map[string]json.RawMessage) {
+			a := c.Messages[1].(AssistantMessage)
+			a.Content = append(a.Content, TextContent{Text: "after tool"})
+			c.Messages[1] = a
+		},
+		func(c *Context, s map[string]json.RawMessage) {
+			r := c.Messages[2].(ToolResultMessage)
+			r.Details = map[string]any{"fixture": true}
+			c.Messages[2] = r
+		},
 	} {
 		ctx, schemas := kiroToolProjectionFixture()
 		mutate(&ctx, schemas)
@@ -147,25 +186,31 @@ func TestKiroToolProjectionMultipleGroupsAndTools(t *testing.T) {
 
 // Synthetic receive -> inert host result -> history, never tool execution.
 func TestKiroReceivedToolIdentityRoundTrip(t *testing.T) {
- for _, id := range []string{"aA0_.:-", strings.Repeat("x", 64)} {
-  a := kiroTestAssembler(t)
-  payload, _ := json.Marshal(map[string]any{"name":"lookup", "toolUseId":id, "input":map[string]any{}, "stop":true})
-  tool, err := a.accept(payload)
-  if err != nil || tool == nil { t.Fatalf("receive: %v", err) }
-  ctx, schemas := kiroToolProjectionFixture()
-  ctx.Messages[1] = AssistantMessage{StopReason:StopReasonToolUse, Content:[]ContentBlock{ToolCall{ID:tool.ID, Name:tool.Name, RawArguments:string(tool.Arguments)}}}
-  ctx.Messages[2] = ToolResultMessage{ToolCallID:tool.ID, ToolName:tool.Name, Content:[]ContentBlock{TextContent{Text:"synthetic result"}}}
-  projected, err := projectKiroToolConversation(ctx, "fixture-model", schemas, 10, 10, 4096)
-  if err != nil || projected.Current.Context == nil || len(projected.Current.Context.Results) != 1 || projected.Current.Context.Results[0].ID != id || projected.History[1].Assistant.Calls[0].ID != id { t.Fatalf("roundtrip identity: %#v, %v", projected, err) }
- }
+	for _, id := range []string{"aA0_.:-", strings.Repeat("x", 64)} {
+		a := kiroTestAssembler(t)
+		payload, _ := json.Marshal(map[string]any{"name": "lookup", "toolUseId": id, "input": map[string]any{}, "stop": true})
+		tool, err := a.accept(payload)
+		if err != nil || tool == nil {
+			t.Fatalf("receive: %v", err)
+		}
+		ctx, schemas := kiroToolProjectionFixture()
+		ctx.Messages[1] = AssistantMessage{StopReason: StopReasonToolUse, Content: []ContentBlock{ToolCall{ID: tool.ID, Name: tool.Name, RawArguments: string(tool.Arguments)}}}
+		ctx.Messages[2] = ToolResultMessage{ToolCallID: tool.ID, ToolName: tool.Name, Content: []ContentBlock{TextContent{Text: "synthetic result"}}}
+		projected, err := projectKiroToolConversation(ctx, "fixture-model", schemas, 10, 10, 4096)
+		if err != nil || projected.Current.Context == nil || len(projected.Current.Context.Results) != 1 || projected.Current.Context.Results[0].ID != id || projected.History[1].Assistant.Calls[0].ID != id {
+			t.Fatalf("roundtrip identity: %#v, %v", projected, err)
+		}
+	}
 }
 
 func BenchmarkKiroToolProjectionOversizeDescription(b *testing.B) {
- ctx,schemas:=kiroToolProjectionFixture()
- ctx.Tools[0].Description=strings.Repeat("x",1<<20)
- b.ReportAllocs()
- b.ResetTimer()
- for i:=0;i<b.N;i++ {
-  if _,err:=projectKiroToolConversation(ctx,"fixture-model",schemas,10,10,64);err==nil { b.Fatal("over-budget description accepted") }
- }
+	ctx, schemas := kiroToolProjectionFixture()
+	ctx.Tools[0].Description = strings.Repeat("x", 1<<20)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := projectKiroToolConversation(ctx, "fixture-model", schemas, 10, 10, 64); err == nil {
+			b.Fatal("over-budget description accepted")
+		}
+	}
 }

@@ -8,9 +8,10 @@ import (
 var errKiroExplicitAuth = errors.New("kiro: invalid explicit authentication input")
 
 type kiroCredentialKind string
+
 const (
-	kiroCredentialBearer kiroCredentialKind = "bearer"
-	kiroCredentialAPIKey kiroCredentialKind = "api_key"
+	kiroCredentialBearer      kiroCredentialKind = "bearer"
+	kiroCredentialAPIKey      kiroCredentialKind = "api_key"
 	kiroCredentialExternalIDP kiroCredentialKind = "external_idp"
 )
 
@@ -23,13 +24,17 @@ func buildKiroExplicitAuthHeaders(kind kiroCredentialKind, token string) (map[st
 	if kind != kiroCredentialBearer && kind != kiroCredentialAPIKey && kind != kiroCredentialExternalIDP {
 		return nil, errKiroExplicitAuth
 	}
-	if len(token) == 0 || len(token) > 16384 { return nil, errKiroExplicitAuth }
+	if len(token) == 0 || len(token) > 16384 {
+		return nil, errKiroExplicitAuth
+	}
 	// Conservative RFC 6750 b64token character subset, with '=' only as
 	// trailing padding. This is not signature/claims/expiration validation.
 	padding := false
 	for i, c := range token {
 		if c == '=' {
-			if i == 0 { return nil, errKiroExplicitAuth }
+			if i == 0 {
+				return nil, errKiroExplicitAuth
+			}
 			padding = true
 			continue
 		}

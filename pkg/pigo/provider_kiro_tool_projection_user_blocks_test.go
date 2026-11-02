@@ -48,17 +48,17 @@ func TestKiroToolProjectionCurrentUserTextBlocks(t *testing.T) {
 
 func TestKiroToolProjectionRejectsUnsafeUserBlocks(t *testing.T) {
 	for name, blocks := range map[string][]ContentBlock{
-		"nil slice": nil,
-		"empty slice": {},
-		"whitespace": {TextContent{Text: " \t"}, &TextContent{Text: "\n"}},
-		"nil block": {nil},
+		"nil slice":        nil,
+		"empty slice":      {},
+		"whitespace":       {TextContent{Text: " \t"}, &TextContent{Text: "\n"}},
+		"nil block":        {nil},
 		"nil text pointer": {(*TextContent)(nil)},
-		"signed text": {TextContent{Text: "text", TextSignature: "signature"}},
-		"image": {TextContent{Text: "prefix"}, ImageContent{Data: "fixture", MIMEType: "image/png"}},
-		"thinking": {ThinkingContent{Thinking: "private reasoning"}},
-		"tool": {ToolCall{ID: "unexpected", Name: "lookup", RawArguments: "{}"}},
-		"invalid utf8": {TextContent{Text: string([]byte{0xff})}},
-		"byte limit": {TextContent{Text: strings.Repeat("x", 4097)}},
+		"signed text":      {TextContent{Text: "text", TextSignature: "signature"}},
+		"image":            {TextContent{Text: "prefix"}, ImageContent{Data: "fixture", MIMEType: "image/png"}},
+		"thinking":         {ThinkingContent{Thinking: "private reasoning"}},
+		"tool":             {ToolCall{ID: "unexpected", Name: "lookup", RawArguments: "{}"}},
+		"invalid utf8":     {TextContent{Text: string([]byte{0xff})}},
+		"byte limit":       {TextContent{Text: strings.Repeat("x", 4097)}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, schemas := kiroToolProjectionFixture()

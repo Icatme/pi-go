@@ -79,10 +79,18 @@ func TestKiroEnvelopeRejectsMalformed(t *testing.T) {
 	for _, mutate := range []func(*kiroEventStreamMessage){
 		func(m *kiroEventStreamMessage) { delete(m.Headers, ":message-type") },
 		func(m *kiroEventStreamMessage) { delete(m.Headers, ":content-type") },
-		func(m *kiroEventStreamMessage) { m.Headers[":message-type"] = kiroEventStreamHeader{Type: 0, Value: true} },
-		func(m *kiroEventStreamMessage) { m.Headers[":content-type"] = kiroEventStreamHeader{Type: 7, Value: "text/plain"} },
-		func(m *kiroEventStreamMessage) { m.Headers[":exception-type"] = kiroEventStreamHeader{Type: 7, Value: "error"} },
-		func(m *kiroEventStreamMessage) { m.Headers[":event-type"] = kiroEventStreamHeader{Type: 7, Value: "futureEvent"} },
+		func(m *kiroEventStreamMessage) {
+			m.Headers[":message-type"] = kiroEventStreamHeader{Type: 0, Value: true}
+		},
+		func(m *kiroEventStreamMessage) {
+			m.Headers[":content-type"] = kiroEventStreamHeader{Type: 7, Value: "text/plain"}
+		},
+		func(m *kiroEventStreamMessage) {
+			m.Headers[":exception-type"] = kiroEventStreamHeader{Type: 7, Value: "error"}
+		},
+		func(m *kiroEventStreamMessage) {
+			m.Headers[":event-type"] = kiroEventStreamHeader{Type: 7, Value: "futureEvent"}
+		},
 	} {
 		m := kiroTestEnvelopeMessage("event", "assistantResponseEvent", []byte("{}"))
 		mutate(&m)

@@ -14,10 +14,10 @@ var errKiroHTTPRequest = errors.New("kiro: invalid offline HTTP request")
 var kiroRuntimeRegionShape = regexp.MustCompile(`^[a-z]{2}(?:-[a-z]+)+-[0-9]+$`)
 
 type kiroHTTPRequestOptions struct {
-	Region string
-	Identity kiroRequestIdentity
-	Limits kiroRequestLimits
-	UserAgent string
+	Region       string
+	Identity     kiroRequestIdentity
+	Limits       kiroRequestLimits
+	UserAgent    string
 	InvocationID string
 }
 
@@ -30,12 +30,20 @@ func newKiroOfflineHTTPRequest(ctx context.Context, conversation Context, schema
 		return nil, errKiroHTTPRequest
 	}
 	headers, err := buildKiroOfflineClientHeaders(options.UserAgent, options.InvocationID)
-	if err != nil { return nil, errKiroHTTPRequest }
+	if err != nil {
+		return nil, errKiroHTTPRequest
+	}
 	body, err := encodeKiroOfflineRequest(conversation, schemas, options.Identity, options.Limits)
-	if err != nil { return nil, errKiroHTTPRequest }
-	endpoint := url.URL{Scheme:"https", Host:"runtime."+options.Region+".kiro.dev", Path:"/generateAssistantResponse"}
+	if err != nil {
+		return nil, errKiroHTTPRequest
+	}
+	endpoint := url.URL{Scheme: "https", Host: "runtime." + options.Region + ".kiro.dev", Path: "/generateAssistantResponse"}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
-	if err != nil || ctx.Err() != nil { return nil, errKiroHTTPRequest }
-	for key, value := range headers { request.Header.Set(key, value) }
+	if err != nil || ctx.Err() != nil {
+		return nil, errKiroHTTPRequest
+	}
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
 	return request, nil
 }

@@ -106,10 +106,10 @@ func (a *kiroToolAssembler) accept(payload []byte) (*kiroAssembledTool, error) {
 			if len(object) != 0 {
 				fragment = trimmed
 			} else if len(a.active.Arguments) != 0 {
-                // Only a leading empty placeholder is in our supported subset.
-                // Do not guess whether a later object replaces prior arguments.
-                return nil, a.fail()
-            }
+				// Only a leading empty placeholder is in our supported subset.
+				// Do not guess whether a later object replaces prior arguments.
+				return nil, a.fail()
+			}
 		}
 		if len(fragment) > a.maxArguments-len(a.active.Arguments) {
 			return nil, a.fail()

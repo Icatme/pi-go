@@ -2,8 +2,8 @@ package pigo
 
 import (
 	"errors"
-	"time"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -19,10 +19,15 @@ func projectKiroCompletedText(response kiroOfflineResponse, model Model, timesta
 	if maxTextBytes < 1 || maxTextBytes > 1<<20 || len(response.Parts) == 0 || len(response.Parts) > 4096 {
 		return zero, errKiroTextMessage
 	}
-	for _, field := range []struct{ value string; max int }{
-		{string(model.API),128}, {string(model.Provider),128}, {model.ID,256},
+	for _, field := range []struct {
+		value string
+		max   int
+	}{
+		{string(model.API), 128}, {string(model.Provider), 128}, {model.ID, 256},
 	} {
-		if field.value == "" || len(field.value) > field.max || !utf8.ValidString(field.value) || strings.TrimSpace(field.value) != field.value || strings.IndexFunc(field.value, unicode.IsControl) >= 0 { return zero, errKiroTextMessage }
+		if field.value == "" || len(field.value) > field.max || !utf8.ValidString(field.value) || strings.TrimSpace(field.value) != field.value || strings.IndexFunc(field.value, unicode.IsControl) >= 0 {
+			return zero, errKiroTextMessage
+		}
 	}
 	if !((response.StopReason == StopReasonStop && response.Usage.StopReason == "END_TURN") || (response.StopReason == StopReasonLength && response.Usage.StopReason == "MAX_TOKENS")) {
 		return zero, errKiroTextMessage
@@ -32,19 +37,26 @@ func projectKiroCompletedText(response kiroOfflineResponse, model Model, timesta
 	if response.Usage.ContextUsagePercentage != nil || response.Usage.NormalizedTokenUsage != nil {
 		return zero, errKiroTextMessage
 	}
-	message := AssistantMessage{API:model.API, Provider:model.Provider, Model:model.ID, Timestamp:timestamp, StopReason:response.StopReason}
+	message := AssistantMessage{API: model.API, Provider: model.Provider, Model: model.ID, Timestamp: timestamp, StopReason: response.StopReason}
 	counts := response.Usage.TokenCounts
 	if len(counts) != 0 {
-		if len(counts) != 5 { return zero, errKiroTextMessage }
-		for _, field := range []struct {name string; target *int}{
-			{"uncachedInputTokens",&message.Usage.Input},
-			{"outputTokens",&message.Usage.Output},
-			{"cacheReadInputTokens",&message.Usage.CacheRead},
-			{"cacheWriteInputTokens",&message.Usage.CacheWrite},
-			{"totalTokens",&message.Usage.TotalTokens},
+		if len(counts) != 5 {
+			return zero, errKiroTextMessage
+		}
+		for _, field := range []struct {
+			name   string
+			target *int
+		}{
+			{"uncachedInputTokens", &message.Usage.Input},
+			{"outputTokens", &message.Usage.Output},
+			{"cacheReadInputTokens", &message.Usage.CacheRead},
+			{"cacheWriteInputTokens", &message.Usage.CacheWrite},
+			{"totalTokens", &message.Usage.TotalTokens},
 		} {
 			value, exists := counts[field.name]
-			if !exists || value < 0 || int64(int(value)) != value { return zero, errKiroTextMessage }
+			if !exists || value < 0 || int64(int(value)) != value {
+				return zero, errKiroTextMessage
+			}
 			*field.target = int(value)
 		}
 		message.UsageReported = true
@@ -56,9 +68,11 @@ func projectKiroCompletedText(response kiroOfflineResponse, model Model, timesta
 		}
 		remaining -= len(part.Text)
 		used += len(part.Text)
-		message.Content = append(message.Content, TextContent{Text:part.Text})
+		message.Content = append(message.Content, TextContent{Text: part.Text})
 	}
-	if used == 0 { return zero, errKiroTextMessage }
+	if used == 0 {
+		return zero, errKiroTextMessage
+	}
 	// Cost remains unknown (zero-valued), never calculated from guessed model
 	// rates, context percentages or credits. Zero does not mean free service.
 	return message, nil

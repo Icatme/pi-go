@@ -13,10 +13,18 @@ import (
 // strings may still remain in memory. No discovery, persistence or send occurs.
 func newKiroOfflineRequestWithToken(ctx context.Context, conversation Context, schemas map[string]json.RawMessage, options kiroHTTPRequestOptions, kind kiroCredentialKind, token string) (*http.Request, error) {
 	auth, err := buildKiroExplicitAuthHeaders(kind, token)
-	if err != nil { return nil, errKiroExplicitAuth }
+	if err != nil {
+		return nil, errKiroExplicitAuth
+	}
 	request, err := newKiroOfflineHTTPRequest(ctx, conversation, schemas, options)
-	if err != nil { return nil, errKiroHTTPRequest }
-	for key, value := range auth { request.Header.Set(key, value) }
-	if ctx.Err() != nil { return nil, errKiroHTTPRequest }
+	if err != nil {
+		return nil, errKiroHTTPRequest
+	}
+	for key, value := range auth {
+		request.Header.Set(key, value)
+	}
+	if ctx.Err() != nil {
+		return nil, errKiroHTTPRequest
+	}
 	return request, nil
 }

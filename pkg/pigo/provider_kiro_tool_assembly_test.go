@@ -1,8 +1,8 @@
 package pigo
 
 import (
-	"errors"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -157,27 +157,37 @@ func FuzzKiroToolAssembly(f *testing.F) {
 }
 
 func TestKiroToolAssemblyNativeIDBoundary(t *testing.T) {
- for _, id := range []string{"", "中", "a/b", strings.Repeat("x", 65)} {
-  a := kiroTestAssembler(t)
-  payload, _ := json.Marshal(map[string]any{"name":"lookup", "toolUseId":id, "input":map[string]any{}, "stop":true})
-  if tool, err := a.accept(payload); err == nil || tool != nil { t.Fatalf("accepted unsupported ID %q", id) }
- }
- for _, id := range []string{"aA0_.:-", strings.Repeat("x", 64)} {
-  a := kiroTestAssembler(t)
-  payload, _ := json.Marshal(map[string]any{"name":"lookup", "toolUseId":id, "input":map[string]any{}, "stop":true})
-  tool, err := a.accept(payload)
-  if err != nil || tool == nil || tool.ID != id { t.Fatalf("native ID rejected: %q, %v", id, err) }
- }
+	for _, id := range []string{"", "中", "a/b", strings.Repeat("x", 65)} {
+		a := kiroTestAssembler(t)
+		payload, _ := json.Marshal(map[string]any{"name": "lookup", "toolUseId": id, "input": map[string]any{}, "stop": true})
+		if tool, err := a.accept(payload); err == nil || tool != nil {
+			t.Fatalf("accepted unsupported ID %q", id)
+		}
+	}
+	for _, id := range []string{"aA0_.:-", strings.Repeat("x", 64)} {
+		a := kiroTestAssembler(t)
+		payload, _ := json.Marshal(map[string]any{"name": "lookup", "toolUseId": id, "input": map[string]any{}, "stop": true})
+		tool, err := a.accept(payload)
+		if err != nil || tool == nil || tool.ID != id {
+			t.Fatalf("native ID rejected: %q, %v", id, err)
+		}
+	}
 }
 
 func TestKiroToolAssemblyRejectsLateEmptyObjectPlaceholder(t *testing.T) {
- for _,initial:=range []string{
-  `{"name":"lookup","toolUseId":"fixture","input":{"a":1}}`,
-  `{"name":"lookup","toolUseId":"fixture","input":"{\"a\":1}"}`,
- } {
-  a:=kiroTestAssembler(t)
-  if tool,err:=a.accept([]byte(initial));err!=nil || tool!=nil { t.Fatalf("start: %#v, %v",tool,err) }
-  if tool,err:=a.accept([]byte(`{"input":{},"stop":true}`));err==nil || tool!=nil { t.Fatal("late object silently ignored") }
-  if tool,err:=a.accept([]byte(`{"stop":true}`));err==nil || tool!=nil { t.Fatal("failure was not sticky") }
- }
+	for _, initial := range []string{
+		`{"name":"lookup","toolUseId":"fixture","input":{"a":1}}`,
+		`{"name":"lookup","toolUseId":"fixture","input":"{\"a\":1}"}`,
+	} {
+		a := kiroTestAssembler(t)
+		if tool, err := a.accept([]byte(initial)); err != nil || tool != nil {
+			t.Fatalf("start: %#v, %v", tool, err)
+		}
+		if tool, err := a.accept([]byte(`{"input":{},"stop":true}`)); err == nil || tool != nil {
+			t.Fatal("late object silently ignored")
+		}
+		if tool, err := a.accept([]byte(`{"stop":true}`)); err == nil || tool != nil {
+			t.Fatal("failure was not sticky")
+		}
+	}
 }

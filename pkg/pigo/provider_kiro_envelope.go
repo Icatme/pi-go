@@ -16,9 +16,9 @@ var errKiroEnvelopeException = errors.New("kiro event stream: service exception"
 // and lifecycle must be checked by a future event consumer before any output.
 // This type has no conversion to pi-go output or executable tool calls.
 type kiroEnvelope struct {
-	Kind    string
-	Name    string
-	Payload json.RawMessage
+	Kind         string
+	Name         string
+	Payload      json.RawMessage
 	PayloadValid bool // UTF-8 JSON object syntax only; never field-schema validity.
 }
 

@@ -11,7 +11,7 @@ var errKiroRetryAfter = errors.New("kiro: unsupported or over-budget retry-after
 
 type kiroRetryAfterHint struct {
 	Present bool
-	Delay time.Duration
+	Delay   time.Duration
 }
 
 // parseKiroRetryAfter is a pure parser, never retry permission. Supply all raw

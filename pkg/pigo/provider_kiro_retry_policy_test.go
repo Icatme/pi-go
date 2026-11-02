@@ -4,7 +4,7 @@ import "testing"
 
 func TestKiroFailureExactClassification(t *testing.T) {
 	for _, tc := range []struct {
-		e kiroFailureEvidence
+		e    kiroFailureEvidence
 		want kiroFailureClass
 	}{
 		{kiroFailureEvidence{Reason: "MONTHLY_REQUEST_COUNT"}, kiroFailureQuota},
@@ -66,6 +66,8 @@ func TestKiroFailureUnsentRetryRequiresEveryGuard(t *testing.T) {
 		}
 	}
 	for _, p := range []kiroRetryPolicy{{}, {AllowUnsentRetry: true}, {AllowUnsentRetry: true, RemainingAttempts: -1}, {RemainingAttempts: 1}} {
-		if got := classifyKiroFailure(good, p); got.RetryUnsent { t.Fatalf("policy bypass: %+v", got) }
+		if got := classifyKiroFailure(good, p); got.RetryUnsent {
+			t.Fatalf("policy bypass: %+v", got)
+		}
 	}
 }

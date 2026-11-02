@@ -19,15 +19,21 @@ func TestKiroJoinedHTTPRequestBlocksAndContextUsage(t *testing.T) {
 		TextContent{Text: "find"}, &TextContent{Text: " fixture"},
 	}}
 	request, err := newKiroOfflineHTTPRequest(context.Background(), conversation, schemas, kiroHTTPRequestFixture())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer request.Body.Close()
 	calls := 0
 	transport := kiroFixtureRoundTripper(func(r *http.Request) (*http.Response, error) {
 		calls++
 		body, err := io.ReadAll(r.Body)
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		var envelope kiroRequestEnvelope
-		if err := json.Unmarshal(body, &envelope); err != nil { t.Fatal(err) }
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			t.Fatal(err)
+		}
 		state := envelope.ConversationState
 		if len(state.History) != 2 || state.History[0].User == nil ||
 			state.History[0].User.Content != "find fixture" ||
@@ -52,7 +58,9 @@ func TestKiroJoinedHTTPRequestBlocksAndContextUsage(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(wire)), Request: r}, nil
 	})
 	response, err := transport.RoundTrip(request)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer response.Body.Close()
 	got, err := collectKiroOfflineResponse(request.Context(), response.Body, kiroOfflineTestLimits())
 	if err != nil || calls != 1 || got.StopReason != StopReasonStop || len(got.Parts) != 3 {
@@ -73,28 +81,38 @@ func TestKiroJoinedHTTPRequestRejectsSignedBlocksAndWireOverflow(t *testing.T) {
 	conversation.Messages[0] = UserMessage{Content: []ContentBlock{TextContent{Text: "find fixture", TextSignature: "unsupported"}}}
 	options := kiroHTTPRequestFixture()
 	if request, err := newKiroOfflineHTTPRequest(context.Background(), conversation, schemas, options); err == nil || request != nil {
-		if request != nil { request.Body.Close() }
+		if request != nil {
+			request.Body.Close()
+		}
 		t.Fatal("HTTP composition bypassed signed-block rejection")
 	}
 	conversation.Messages[0] = UserMessage{Content: []ContentBlock{TextContent{Text: "find fixture"}}}
 	request, err := newKiroOfflineHTTPRequest(context.Background(), conversation, schemas, options)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	size := request.ContentLength
 	request.Body.Close()
 	options.Limits.WireBytes = int(size)
 	request, err = newKiroOfflineHTTPRequest(context.Background(), conversation, schemas, options)
-	if err != nil { t.Fatal("exact serialized block budget rejected", err) }
+	if err != nil {
+		t.Fatal("exact serialized block budget rejected", err)
+	}
 	request.Body.Close()
 	options.Limits.WireBytes--
 	if request, err := newKiroOfflineHTTPRequest(context.Background(), conversation, schemas, options); err == nil || request != nil {
-		if request != nil { request.Body.Close() }
+		if request != nil {
+			request.Body.Close()
+		}
 		t.Fatal("HTTP composition bypassed final serialized budget")
 	}
 }
 
 func TestKiroJoinedRetryHintNeverAuthorizesDispatchedReplay(t *testing.T) {
 	hint, err := parseKiroRetryAfter([]string{"2"}, time.Unix(0, 0), 10*time.Second)
-	if err != nil || !hint.Present || hint.Delay != 2*time.Second { t.Fatal("fixture hint rejected", err) }
+	if err != nil || !hint.Present || hint.Delay != 2*time.Second {
+		t.Fatal("fixture hint rejected", err)
+	}
 	for _, dispatch := range []kiroDispatchEvidence{kiroDispatchUnknown, kiroDispatchSent} {
 		decision := classifyKiroFailure(kiroFailureEvidence{
 			Status: 429, Dispatch: dispatch,
