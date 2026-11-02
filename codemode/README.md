@@ -96,7 +96,7 @@ Nonfinite numbers, BigInt, unsafe integers (outside +/-9007199254740991),
 JSON precision loss, unsupported object/accessor values and cycles are
 rejected. Enumerable named array properties (including noncanonical indices like
 `01`) are rejected before serialization instead of being silently discarded.
-Dense arrays remain supported; non-enumerable properties retain ordinary JSON
+Dense arrays remain supported; non-enumerable named properties retain ordinary JSON
 omission behavior. Invalid UTF-8 and unpaired UTF-16 surrogate escapes are rejected in
 JSON string values and keys before decoding; valid surrogate pairs and U+FFFD
 remain supported. `ValidateJSON` exposes this boundary before parsing into
