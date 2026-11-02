@@ -1,9 +1,9 @@
 # Kiro plugin follow-up status — 2026-11-02 UTC
 
-This development integration includes the plugin watchlist from draft [#50](https://github.com/Icatme/pi-go/pull/50),
-plus its updated implementation status. It does not merge or deploy master.
-
-Latest consolidated scope and remaining gaps: [convergence review](kiro-convergence-review.md).
+For the v0.18.0 registration and history contracts, see the [provider
+guide](providers.md#kiro-for-go-applications) and [Agent history
+migration](kiro-agent-authored-compatibility.md). The entries below record the
+state of individual development branches at the time of each review.
 
 ## Upstream check
 
