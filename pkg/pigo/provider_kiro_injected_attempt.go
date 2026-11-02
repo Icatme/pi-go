@@ -34,16 +34,30 @@ func runKiroInjectedAttempt(ctx context.Context, conversation Context, schemas m
 // it must return promptly, honor cancellation and never treat previews as success.
 func runKiroInjectedAttemptWithTextObserver(ctx context.Context, conversation Context, schemas map[string]json.RawMessage, options kiroHTTPRequestOptions, kind kiroCredentialKind, token string, roundTrip func(*http.Request) (*http.Response, error), limits kiroHTTPResponseLimits, onText func(string) error) (result kiroOfflineResponse, resultErr error) {
 	zero := kiroOfflineResponse{}
-	s := limits.Stream
-	// Fixed ceilings bound admitted work, not process heap or wall-clock time.
-	if roundTrip == nil || limits.WireBytes < 16 || limits.WireBytes > 16<<20 || s.MessageBytes < 16 || s.MessageBytes > 1<<20 || s.TotalPayloadBytes < 2 || s.TotalPayloadBytes > 16<<20 || s.TextBytes < 1 || s.TextBytes > 4<<20 || s.Events < 1 || s.Events > 65536 || s.Tools < 1 || s.Tools > 1024 || s.ArgumentBytes < 2 || s.ArgumentBytes > 1<<20 {
+	if roundTrip == nil || !kiroHTTPResponseLimitsValid(limits) {
 		return zero, errKiroInjectedAttempt
 	}
 	request, err := newKiroOfflineRequestWithToken(ctx, conversation, schemas, options, kind, token)
 	if err != nil {
 		return zero, errKiroInjectedAttempt
 	}
+	return executeKiroPreparedAttempt(request, roundTrip, limits, onText)
+}
+
+// executeKiroPreparedAttempt is internal to validated request builders. It owns
+// and closes their prepared body, so async callers need not retain mutable Context.
+// This is not an arbitrary-URL transport API; callers must construct the request
+// through newKiroOfflineRequestWithToken and must not mutate it during execution.
+func executeKiroPreparedAttempt(request *http.Request, roundTrip func(*http.Request) (*http.Response, error), limits kiroHTTPResponseLimits, onText func(string) error) (result kiroOfflineResponse, resultErr error) {
+	zero := kiroOfflineResponse{}
+	if request == nil || request.Body == nil {
+		return zero, errKiroInjectedAttempt
+	}
 	defer request.Body.Close()
+	if roundTrip == nil || !kiroHTTPResponseLimitsValid(limits) {
+		return zero, errKiroInjectedAttempt
+	}
+	ctx := request.Context()
 	if ctx.Err() != nil {
 		return zero, errKiroInjectedAttempt
 	}
@@ -103,4 +117,9 @@ func runKiroInjectedAttemptWithTextObserver(ctx context.Context, conversation Co
 		return zero, errKiroInjectedAttempt
 	}
 	return result, nil
+}
+
+func kiroHTTPResponseLimitsValid(limits kiroHTTPResponseLimits) bool {
+	s := limits.Stream
+	return limits.WireBytes >= 16 && limits.WireBytes <= 16<<20 && s.MessageBytes >= 16 && s.MessageBytes <= 1<<20 && s.TotalPayloadBytes >= 2 && s.TotalPayloadBytes <= 16<<20 && s.TextBytes >= 1 && s.TextBytes <= 4<<20 && s.Events >= 1 && s.Events <= 65536 && s.Tools >= 1 && s.Tools <= 1024 && s.ArgumentBytes >= 2 && s.ArgumentBytes <= 1<<20
 }
