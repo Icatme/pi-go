@@ -187,7 +187,10 @@ func registerKiroExplicitModuleWithHistory(sourceID string, config KiroBufferedC
 			return validateKiroHostSimpleOptions(model, options)
 		},
 	}
-	RegisterAPIModuleWithValidationForSource(sourceID, module, validation)
+	// Kiro validates both authoring and initial-system forms itself, including
+	// tool declarations, before requesting credentials. Generic normalization
+	// recursively clones unvalidated arguments and can drop pointer blocks.
+	registerAPIRecord(module.API, &module, nil, normalizeAPIModuleSourceID(sourceID), validation, true)
 	return nil
 }
 

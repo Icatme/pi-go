@@ -28,6 +28,9 @@ type APIOptionValidation struct {
 type apiModuleRecord struct {
 	module     APIModule
 	validation APIOptionValidation
+	// The adapter bounds and serializes the original context before handing it
+	// to a transport. Generic transcript cloning would discard wire evidence.
+	acceptsAuthoringContext bool
 }
 
 type APIModuleFactory func() APIModule
@@ -50,7 +53,7 @@ func RegisterAPIModuleForSource(sourceID string, module APIModule) {
 // option contract. Legacy registration remains unchanged; no API is enabled by
 // merely constructing validation. In-flight snapshots survive unregistration.
 func RegisterAPIModuleWithValidationForSource(sourceID string, module APIModule, validation APIOptionValidation) {
-	registerAPIRecord(module.API, &module, nil, normalizeAPIModuleSourceID(sourceID), validation)
+	registerAPIRecord(module.API, &module, nil, normalizeAPIModuleSourceID(sourceID), validation, false)
 }
 
 func RegisterLazyAPIModule(api API, factory APIModuleFactory) {
@@ -62,10 +65,10 @@ func RegisterLazyAPIModuleForSource(sourceID string, api API, factory APIModuleF
 }
 
 func registerAPIModule(api API, module *APIModule, factory APIModuleFactory, sourceID string) {
-	registerAPIRecord(api, module, factory, sourceID, APIOptionValidation{})
+	registerAPIRecord(api, module, factory, sourceID, APIOptionValidation{}, false)
 }
 
-func registerAPIRecord(api API, module *APIModule, factory APIModuleFactory, sourceID string, validation APIOptionValidation) {
+func registerAPIRecord(api API, module *APIModule, factory APIModuleFactory, sourceID string, validation APIOptionValidation, acceptsAuthoringContext bool) {
 	if api == "" {
 		panic("pigo: api registration requires api name")
 	}
@@ -74,12 +77,12 @@ func registerAPIRecord(api API, module *APIModule, factory APIModuleFactory, sou
 	}
 	var record *apiModuleRecord
 	if module != nil {
-		record = &apiModuleRecord{module: normalizeAPIModule(api, *module), validation: validation}
+		record = &apiModuleRecord{module: normalizeAPIModule(api, *module), validation: validation, acceptsAuthoringContext: acceptsAuthoringContext}
 	}
 	var recordFactory func() apiModuleRecord
 	if factory != nil {
 		recordFactory = func() apiModuleRecord {
-			return apiModuleRecord{module: normalizeAPIModule(api, factory()), validation: validation}
+			return apiModuleRecord{module: normalizeAPIModule(api, factory()), validation: validation, acceptsAuthoringContext: acceptsAuthoringContext}
 		}
 	}
 	defer func() {

@@ -250,3 +250,77 @@ func TestKiroExplicitRegistrationNoToolEventsOnIncompleteResponse(t *testing.T) 
 		})
 	}
 }
+
+func TestKiroPublicEntryValidatesOriginalHistory(t *testing.T) {
+	for _, simple := range []bool{false, true} {
+		t.Run(map[bool]string{false: "Stream", true: "StreamSimple"}[simple], func(t *testing.T) {
+			config, model := kiroRegistrationFixture(t)
+			config.SystemPromptPolicy = "prepend_first_user"
+			config.Schemas = map[string]json.RawMessage{"lookup": json.RawMessage(`{"type":"object"}`)}
+			var wire []byte
+			var creds int
+			source, transport := config.Credentials, config.RoundTrip
+			config.Credentials = func(ctx context.Context, scope KiroCredentialScope) (KiroScopedCredential, error) {
+				creds++
+				return source(ctx, scope)
+			}
+			config.RoundTrip = func(req *http.Request) (*http.Response, error) {
+				body, err := io.ReadAll(req.Body)
+				if err != nil {
+					return nil, err
+				}
+				wire = body
+				return transport(req)
+			}
+			if err := RegisterKiroBufferedModuleWithOptions(t.Name(), config, WithKiroCallerAuthoredToolHistory()); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { UnregisterAPIModules(t.Name()) })
+			run := func(input Context) AssistantMessage {
+				if simple {
+					return CompleteSimple(model, input, SimpleStreamOptions{RequestContext: t.Context()})
+				}
+				return Complete(model, input, ProviderStreamOptions{RequestContext: t.Context()})
+			}
+			cycle := map[string]any{}
+			cycle["self"] = cycle
+			call := ToolCall{ID: "one", Name: "lookup", Arguments: cycle}
+			tools := []Tool{{Name: "lookup", Parameters: map[string]any{"type": "object"}}}
+			history := func(block ContentBlock) Context {
+				return Context{Messages: []Message{
+					&SystemMessage{Content: "policy"},
+					&UserMessage{Content: "question"},
+					&AssistantMessage{StopReason: StopReasonStop, Content: []ContentBlock{TextContent{Text: "left"}, block}},
+					UserMessage{Content: "continue"},
+				}}
+			}
+			t.Run("pointer text and initial policy", func(t *testing.T) {
+				if got := run(history(&TextContent{Text: "right"})); got.StopReason != StopReasonStop || !bytes.Contains(wire, []byte(`"content":"leftright"`)) || !bytes.Contains(wire, []byte(`"content":"policy\n\nquestion"`)) {
+					t.Fatalf("pointer history was lost in transit: %q, %s", got.StopReason, wire)
+				}
+			})
+			for _, tt := range []struct {
+				name  string
+				input Context
+			}{
+				{"signed pointer history", history(&TextContent{Text: "right", TextSignature: "opaque"})},
+				{"nil pointer history", history((*TextContent)(nil))},
+				{"nil message", Context{Messages: []Message{UserMessage{Content: "q"}, (*AssistantMessage)(nil), UserMessage{Content: "q"}}}},
+				{"constrained sampling", Context{Tools: []Tool{{Name: "lookup", Parameters: map[string]any{"type": "object"}, ConstrainedSampling: &ToolConstrainedSampling{Type: "text"}}}, Messages: []Message{UserMessage{Content: "q"}}}},
+				{"cyclic arguments", Context{Tools: tools, Messages: []Message{
+					UserMessage{Content: "q"},
+					AssistantMessage{StopReason: StopReasonToolUse, Content: []ContentBlock{call}},
+					ToolResultMessage{ToolCallID: "one", ToolName: "lookup", Content: []ContentBlock{TextContent{Text: "ok"}}},
+				}}},
+			} {
+				t.Run(tt.name, func(t *testing.T) {
+					before := creds
+					wire = nil
+					if got := run(tt.input); got.StopReason != StopReasonError || creds != before || wire != nil {
+						t.Fatalf("invalid input reached credentials or transport: %s", got.StopReason)
+					}
+				})
+			}
+		})
+	}
+}

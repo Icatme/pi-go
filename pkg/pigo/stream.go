@@ -76,16 +76,25 @@ func newAssistantMessageEventStream() *AssistantMessageEventStream {
 	return stream
 }
 
-func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+func prepareStreamContext(record *apiModuleRecord, model Model, ctx Context) (Context, error) {
+	if record != nil && record.acceptsAuthoringContext {
+		return ctx, nil
+	}
 	ctx = contextFromTranscript(NormalizeContext(ctx))
-	if _, err := resolveContextToolSampling(model, ctx); err != nil {
+	_, err := resolveContextToolSampling(model, ctx)
+	return ctx, err
+}
+
+func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantMessageEventStream {
+	record := resolveAPIRecord(model.API)
+	ctx, err := prepareStreamContext(record, model, ctx)
+	if err != nil {
 		return streamAPIUnavailable(model, err.Error())
 	}
 	options.Headers = mergeRequestHeaders(model.Headers, options.Headers)
 	if err := ValidateResponseFormat(model, options.ResponseFormat); err != nil {
 		return streamAPIUnavailable(model, err.Error())
 	}
-	record := resolveAPIRecord(model.API)
 	var apiModule *APIModule
 	if record != nil {
 		apiModule = &record.module
@@ -109,15 +118,15 @@ func Stream(model Model, ctx Context, options ProviderStreamOptions) *AssistantM
 }
 
 func StreamSimple(model Model, ctx Context, options SimpleStreamOptions) *AssistantMessageEventStream {
-	ctx = contextFromTranscript(NormalizeContext(ctx))
-	if _, err := resolveContextToolSampling(model, ctx); err != nil {
+	record := resolveAPIRecord(model.API)
+	ctx, err := prepareStreamContext(record, model, ctx)
+	if err != nil {
 		return streamAPIUnavailable(model, err.Error())
 	}
 	options.Headers = mergeRequestHeaders(model.Headers, options.Headers)
 	if err := ValidateResponseFormat(model, options.ResponseFormat); err != nil {
 		return streamAPIUnavailable(model, err.Error())
 	}
-	record := resolveAPIRecord(model.API)
 	var apiModule *APIModule
 	if record != nil {
 		apiModule = &record.module
