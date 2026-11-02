@@ -2326,3 +2326,21 @@
   and serialized conversation formats keep their existing representation.
 - Added local transport regressions for large integers and duplicate keys in
   terminal arguments, including a Responses call with no argument delta.
+
+## 2026-11-02 — Kiro watchlist and tested development integration
+
+- Carry #50's explicit upstream/plugin watchlist into the Kiro development stack,
+  preserving its source commit as an additional remote merge parent. Existing
+  instructions and other plugin baselines are unchanged; Kiro implementation
+  wording now points to docs/kiro-followup-status.md instead of saying absent.
+- Read-only upstream main remains dd93f2e (package version 0.12.3), dated
+  2026-10-29 22:21:36 UTC. No new main delta observed; tag-list API unavailable.
+- Latest code at #111 includes independent synthetic Go/race tests of scoped
+  credentials, explicit buffered/live-text registration and internal mixed
+  text/tool worker. Final code full-repository race and vet passed with Go1.26.2;
+  this documentation integration leaves code blobs unchanged.
+- Draft branches only: no master merge, release/deployment, automatic login,
+  real credential/service/tool calls or CI dispatch. Community protocol evidence
+  and fake tests do not prove service authorization, account/model availability,
+  actual billing or complete upstream compatibility. See status document for
+  exact tests, source links and remaining public mixed-Agent integration.
