@@ -252,13 +252,13 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 			tools := append([]codemode.Tool(nil), templates...)
 			for i := range tools {
 				projection := projections[tools[i].Name]
-				tools[i].Invoke = func(callCtx context.Context, call codemode.HostCall) (json.RawMessage, error) {
+				tools[i].InvokeWithExecution = func(callCtx context.Context, call codemode.HostCall) (json.RawMessage, codemode.Execution, error) {
 					if err := codemode.ValidateJSON(call.Arguments); err != nil {
-						return nil, &codemode.CallError{Code: string(agent.ToolFailureArgumentInvalid), ReasonCode: boundaryReason(err), Message: "arguments rejected at JavaScript boundary", Err: err,
+						return nil, codemode.Execution{}, &codemode.CallError{Code: string(agent.ToolFailureArgumentInvalid), ReasonCode: boundaryReason(err), Message: "arguments rejected at JavaScript boundary", Err: err,
 							Execution: codemode.Execution{Local: string(agent.ToolLocalNotStarted), Remote: string(agent.ToolRemoteNotDispatched)}}
 					}
 					outcome := execution.ChildCaller.Call(callCtx, agent.ToolCall{Name: call.Name, Arguments: call.Arguments})
-					facts := codemode.Execution{Local: string(outcome.Execution.Local), Remote: string(outcome.Execution.Remote)}
+					facts := codemode.Execution{Local: string(outcome.Execution.Local), Remote: string(outcome.Execution.Remote), LocalEffect: string(outcome.Execution.LocalEffect)}
 					if outcome.Err != nil {
 						code := string(agent.ToolFailureProtocol)
 						reason := ""
@@ -266,16 +266,16 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 							code = string(outcome.Failure.Code)
 							reason = outcome.Failure.Reason
 						}
-						return nil, &codemode.CallError{Code: code, ReasonCode: reason, Message: effectiveError(outcome.Result, code), CallID: outcome.ToolCall.ID, Execution: facts, Err: outcome.Err}
+						return nil, facts, &codemode.CallError{Code: code, ReasonCode: reason, Message: effectiveError(outcome.Result, code), CallID: outcome.ToolCall.ID, Execution: facts, Err: outcome.Err}
 					}
 					if projection == NativeValue && outcome.IsError {
-						return nil, &codemode.CallError{Code: string(agent.ToolFailureToolReportedError), Message: effectiveError(outcome.Result, "tool reported an error"), CallID: outcome.ToolCall.ID, Execution: facts}
+						return nil, facts, &codemode.CallError{Code: string(agent.ToolFailureToolReportedError), Message: effectiveError(outcome.Result, "tool reported an error"), CallID: outcome.ToolCall.ID, Execution: facts}
 					}
 					value, err := projectResult(outcome.Result, projection, len(tools[i].OutputSchema) > 0)
 					if err != nil {
-						return nil, &codemode.CallError{Code: string(agent.ToolFailureResultRejected), ReasonCode: boundaryReason(err), Message: "tool result rejected at JavaScript boundary", CallID: outcome.ToolCall.ID, Execution: facts, Err: err}
+						return nil, facts, &codemode.CallError{Code: string(agent.ToolFailureResultRejected), ReasonCode: boundaryReason(err), Message: "tool result rejected at JavaScript boundary", CallID: outcome.ToolCall.ID, Execution: facts, Err: err}
 					}
-					return value, nil
+					return value, facts, nil
 				}
 			}
 			result, err := sandbox.Run(ctx, code, codemode.RunOptions{Tools: tools, Namespaces: metadata, Timeout: options.Timeout, MaxOutputTokens: options.MaxOutputTokens, OutputReserveBytes: 1024, Sequential: sequential || execution.ChildSequential, Store: store})

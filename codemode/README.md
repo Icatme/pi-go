@@ -27,6 +27,24 @@ The caller owns tools, authorization, schemas, sessions, side effects and I/O
 cancellation. It must check authorization immediately before dispatch. Tool
 sets and visible schemas are copied per script. `Invoke` receives a
 host-assigned ID; returned bytes transfer ownership. No automatic retry occurs.
+For hosts that can report execution facts on successful calls, set
+`Tool.InvokeWithExecution(ctx, call) (raw, execution, err)` instead of `Invoke`.
+Exactly one entry point must be set; the original `Invoke` signature is
+unchanged. The returned sidecar is independent of the JSON payload, so facts
+survive later JSON/result/completion-budget rejection. `Execution.LocalEffect`
+uses `none_reported`, `committed_reported`, or `unknown`; an omitted field is
+unspecified, never evidence of no effect. A reported commit wins over conflicting
+error metadata. The basic call ledger and catchable error's `execution` retain
+these bounded facts even if result text is withheld. Existing `CallError` hosts
+can also report the optional field on failures.
+
+These are trusted host reports, not durable receipts. A panic before returning
+facts and calls still running when a script exits remain uncertain. Inspect
+outstanding calls and host state before any retry/rollback. Neither this API nor
+an ordinary returned error guarantees an operation did not happen. No automatic
+retry is added; scripts/hosts can still explicitly issue new calls and must use
+appropriate idempotency/reconciliation policies.
+
 `RunOptions.Sequential` makes all leaf invocations start in admission order,
 including `Promise.all`, and waits for actual host exit before starting the
 next. Generic successful host results have remote `not_applicable`; integrations

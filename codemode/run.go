@@ -11,9 +11,10 @@ import (
 )
 
 type invocation struct {
-	call   HostCall
-	jsID   int
-	invoke func(context.Context, HostCall) (json.RawMessage, error)
+	call                HostCall
+	jsID                int
+	invoke              func(context.Context, HostCall) (json.RawMessage, error)
+	invokeWithExecution func(context.Context, HostCall) (json.RawMessage, Execution, error)
 }
 type completion struct {
 	id      int
@@ -338,7 +339,7 @@ func (r *runState) admit(jsID int, name, payload string) string {
 	r.s.notifyLocked()
 	r.s.mu.Unlock()
 	// Budget and queue slots are reserved before copying arguments.
-	call := invocation{call: HostCall{ID: id, Name: name, Arguments: json.RawMessage(payload)}, jsID: jsID, invoke: t.Invoke}
+	call := invocation{call: HostCall{ID: id, Name: name, Arguments: json.RawMessage(payload)}, jsID: jsID, invoke: t.Invoke, invokeWithExecution: t.InvokeWithExecution}
 	r.queue <- call
 	r.mu.Unlock()
 	return success(nil)
@@ -350,7 +351,7 @@ func (r *runState) dispatch() {
 		case call := <-r.queue:
 			<-r.queueSlots
 			if r.ctx.Err() != nil {
-				r.finish(call, nil, r.ctx.Err(), false)
+				r.finish(call, nil, Execution{}, r.ctx.Err(), false)
 				r.retire(call)
 				continue
 			}
@@ -381,7 +382,7 @@ func (r *runState) drainQueue() {
 		select {
 		case c := <-r.queue:
 			<-r.queueSlots
-			r.finish(c, nil, r.ctx.Err(), false)
+			r.finish(c, nil, Execution{}, r.ctx.Err(), false)
 			r.retire(c)
 		default:
 			return
@@ -393,18 +394,19 @@ func (r *runState) execute(call invocation) {
 	select {
 	case r.s.callSlots <- struct{}{}:
 	case <-r.ctx.Done():
-		r.finish(call, nil, r.ctx.Err(), false)
+		r.finish(call, nil, Execution{}, r.ctx.Err(), false)
 		r.retire(call)
 		return
 	}
 	// This permit belongs to the real host invocation until Invoke returns.
 	defer func() { <-r.s.callSlots; r.retire(call) }()
 	if r.ctx.Err() != nil {
-		r.finish(call, nil, r.ctx.Err(), false)
+		r.finish(call, nil, Execution{}, r.ctx.Err(), false)
 		return
 	}
 	r.recordExecution(call.call.ID, Execution{Local: "entered", Remote: "unknown"}, "")
 	var raw json.RawMessage
+	var reported Execution
 	var err error
 	func() {
 		defer func() {
@@ -416,9 +418,13 @@ func (r *runState) execute(call invocation) {
 				err = &CallError{Code: "host_panic", Message: "host invocation panicked; inspect the host report", Execution: Execution{Local: "returned", Remote: "unknown"}, Err: cause}
 			}
 		}()
-		raw, err = call.invoke(r.ctx, call.call)
+		if call.invokeWithExecution != nil {
+			raw, reported, err = call.invokeWithExecution(r.ctx, call.call)
+		} else {
+			raw, err = call.invoke(r.ctx, call.call)
+		}
 	}()
-	r.finish(call, raw, err, true)
+	r.finish(call, raw, reported, err, true)
 }
 
 func (r *runState) recordExecution(id int, facts Execution, code string) {
@@ -435,10 +441,21 @@ func (r *runState) recordExecution(id int, facts Execution, code string) {
 	r.s.mu.Unlock()
 }
 
-func (r *runState) finish(call invocation, raw json.RawMessage, invokeErr error, entered bool) {
+func (r *runState) finish(call invocation, raw json.RawMessage, reported Execution, invokeErr error, entered bool) {
 	facts := Execution{Local: "not_started", Remote: "not_dispatched"}
 	if entered {
-		facts = Execution{Local: "returned", Remote: "not_applicable"}
+		facts = Execution{Local: "returned", Remote: "not_applicable", LocalEffect: normalizeLocalEffect(reported.LocalEffect)}
+		switch reported.Local {
+		case "not_started", "entered", "returned":
+			facts.Local = reported.Local
+		}
+		switch reported.Remote {
+		case "not_dispatched", "complete_reported", "input_required", "unknown", "not_applicable":
+			facts.Remote = reported.Remote
+		case "":
+		default:
+			facts.Remote = "unknown"
+		}
 	}
 	var failure *CallError
 	if invokeErr != nil {
@@ -453,6 +470,9 @@ func (r *runState) finish(call invocation, raw json.RawMessage, invokeErr error,
 			remote := "not_dispatched"
 			if entered {
 				remote = "unknown"
+				if reported.Remote != "" {
+					remote = facts.Remote
+				}
 			}
 			failure = &CallError{Code: code, Message: "host tool failed (" + code + "); inspect the host report", Execution: Execution{Local: facts.Local, Remote: remote}, Err: invokeErr}
 		}
@@ -467,7 +487,11 @@ func (r *runState) finish(call invocation, raw json.RawMessage, invokeErr error,
 		}
 		if failure.Execution.Remote == "" {
 			failure.Execution.Remote = "unknown"
+			if reported.Remote != "" {
+				failure.Execution.Remote = facts.Remote
+			}
 		}
+		failure.Execution.LocalEffect = mergeLocalEffect(facts.LocalEffect, failure.Execution.LocalEffect)
 		facts = failure.Execution
 	}
 	if failure == nil {
@@ -519,7 +543,8 @@ func (r *runState) finish(call invocation, raw json.RawMessage, invokeErr error,
 			failure.CallID = strconv.Itoa(call.jsID)
 		}
 		if len(failure.Execution.Local) > 32 || len(failure.Execution.Remote) > 32 {
-			failure.Execution = Execution{Local: facts.Local, Remote: "unknown"}
+			failure.Execution = Execution{Local: "returned", Remote: "unknown", LocalEffect: facts.LocalEffect}
+			facts = failure.Execution
 		}
 		code = failure.Code
 		if len(failure.ReasonCode) > 128 {

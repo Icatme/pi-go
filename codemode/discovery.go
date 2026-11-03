@@ -28,7 +28,7 @@ func copyTools(tools []Tool, maxBytes int) ([]Tool, []toolDescription, error) {
 	names := map[string]bool{}
 	bytes := 0
 	for i, t := range tools {
-		if t.Name == "" || len(t.Name) > 128 || len(t.Namespace) > 128 || len(t.Description) > 32<<10 || len(t.ResultDescription) > 4096 || t.Invoke == nil || names[t.Name] || !utf8.ValidString(t.Name+t.Namespace+t.Description+t.ResultDescription) {
+		if t.Name == "" || len(t.Name) > 128 || len(t.Namespace) > 128 || len(t.Description) > 32<<10 || len(t.ResultDescription) > 4096 || (t.Invoke == nil) == (t.InvokeWithExecution == nil) || names[t.Name] || !utf8.ValidString(t.Name+t.Namespace+t.Description+t.ResultDescription) {
 			return nil, nil, fmt.Errorf("invalid or duplicate tool %q", t.Name)
 		}
 		names[t.Name] = true

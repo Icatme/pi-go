@@ -328,6 +328,32 @@ An after-hook panic becomes `hook` with reason `after_hook_panic`, discards
 unprocessed output and preserves already reported execution facts. Error-valued
 panics retain their original Go causes for trusted callers.
 
+`ToolExecutionInfo.LocalEffect` optionally records executor-reported **local**
+side effects, separately from remote dispatch/completion and output acceptance:
+
+- `none_reported`: the executor explicitly reports no local effect.
+- `committed_reported`: at least one local effect committed. This does not prove
+  complete success, disk durability or the ability to roll back.
+- `unknown`, or an omitted field: local effects are not established. Ordinary
+  success, cancellation, an exception or a panic does not establish no effect.
+
+Return this fact in `ToolResult.Execution` or `ToolExecutionError.Execution`.
+An effect-only typed error is supported. A reported commit survives an empty or
+conflicting error report, after-hook redaction/failure, result rejection and
+canceled state finalization. Invalid effect strings become `unknown`. Hooks
+cannot change these execution facts by replacing result metadata. Business JSON
+such as `{published:true}` alone is insufficient: output may be withheld.
+
+This is an additive optional field; existing executor signatures and zero-value
+JSON encoding remain unchanged. Facts are trusted reports from application
+executors, not verification by the Agent and not a durable commit journal. A
+panic before returning a report remains unknown. A lost process/response may
+still require reconciliation against the host's durable state. Do not blindly
+retry or roll back a call that entered execution based on a failed or canceled
+result. The runtime does not automatically replay it; a new caller/model request
+is a new call, not an idempotency guarantee. `none_reported` also says nothing
+about remote side effects or whether another invocation is authorized.
+
 Set `ToolDefinition.MaxArgumentBytes` to give individual tools different JSON
 argument limits. The bound applies before parsing and after parsing, schema
 coercion and before hooks, including hooks that block or fail. Oversized calls
