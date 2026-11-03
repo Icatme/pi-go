@@ -1,11 +1,14 @@
 # In-process execution receipts (opt-in)
 
-This is the first, deliberately limited compatibility step toward preserving
+This is a deliberately limited compatibility mechanism for preserving
 local effect facts. It does **not** replace the full runtime/persistence work in
 #144 or make the stacked filesystem write tools ready to merge.
 
 Use `agent.RunToolCallWithReceipts` for a direct call, or
-`(*codemode.Sandbox).RunWithReceipts` for standalone Codemode. Both take an
+`(*codemode.Sandbox).RunWithReceipts` for standalone Codemode. For an explicit
+non-persistent model run, use `(*agent.Runner).RunWithReceipts` with snapshot,
+prompts, invocation hooks and a limit. Its hooks must have a nil Journal.
+These entries take an
 explicit maximum number of captured entries (1–4096) and return the ordinary
 result plus a separate `*executionreceipt.Handle`. Retain that handle, including
 when execution fails or is canceled. An invalid limit or unsupported context is
@@ -28,7 +31,9 @@ and names are limited to 4096 UTF-8 bytes each. A false committed flag means
 **unknown**, never “no effect”, even for an ordinary successful return. A true
 flag means at least one local commit was reported, not complete success,
 durability, remote completion, safe retry or a rollback guarantee. There is no
-automatic retry here. A process crash between commit and report remains unknown.
+retry barrier or deduplication. A model or JavaScript can call a tool again after
+failure, including after a commit; receipts do not make writes automatically
+safe or idempotent. A process crash between commit and report remains unknown.
 No file contents, arguments, result payloads or raw errors are retained.
 
 Bodies seal their own slot when they actually exit, before after-hooks and result
@@ -67,10 +72,20 @@ receive them automatically; a receipt-aware host must not discard the handle
 and treat an ordinary result/error as proof of no side effects. Nested receipt
 wrappers are rejected; children use the existing explicit invocation scope.
 
-This phase supports **direct calls and standalone Codemode only**. It has no
-model-runner, session, journal, checkpoint, restart or durable receipt support.
-Core model-runner contexts (including session/checkpoint execution) reject these
-wrappers, and cannot reuse an enclosing capture capability. Starting a fresh
+This package supports direct calls, standalone Codemode and the **explicit
+non-persistent Runner entry point**. The latter returns the existing RunStream
+and a separate handle: drain stream.Events before stream.Wait, then reconcile
+any outstanding bodies through the handle. The normal model error flow is
+unchanged; neither a model nor a script is prevented from issuing further calls.
+The host must supply its own write/retry policy and cannot assume that event
+observation or ordinary permission callbacks are an automatic race-free barrier.
+
+No receipt-aware Continue/resume or model-runner journal is provided. Old
+Runner/Engine entries, session model runs and checkpoint execution reject
+capture and cannot borrow an enclosing invocation's capability. This entry
+point does not integrate persistence or restore old execution receipts.
+[Session-backed direct calls](../agent/session/RECEIPTS.md) have their own limited
+storage protocol; they are not persistent model runs. Starting a fresh
 background context deliberately discards that boundary and is outside the
 contract; trusted host code must not detach a persistent operation to bypass it.
 This blocks the receipt-required tool's business side effects, not all earlier

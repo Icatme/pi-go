@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Icatme/pi-go/internal/receiptcapture"
 )
 
 const runnerEventBufferSize = 32
@@ -41,7 +43,7 @@ func (r *Runner) Run(ctx context.Context, snapshot AgentSnapshot, prompts []Mess
 
 // RunWithHooks starts a new run with invocation-local runtime hooks.
 func (r *Runner) RunWithHooks(ctx context.Context, snapshot AgentSnapshot, prompts []Message, hooks LoopHooks) *RunStream {
-	return r.start(ctx, snapshot, prompts, runnerStartRun, hooks)
+	return r.start(ctx, snapshot, prompts, runnerStartRun, hooks, nil)
 }
 
 // Query starts a new run from an empty snapshot with one user-text prompt.
@@ -51,13 +53,13 @@ func (r *Runner) Query(ctx context.Context, query string) *RunStream {
 
 // Continue resumes a run from snapshot without appending prompt messages.
 func (r *Runner) Continue(ctx context.Context, snapshot AgentSnapshot) *RunStream {
-	return r.start(ctx, snapshot, nil, runnerStartContinue, LoopHooks{})
+	return r.start(ctx, snapshot, nil, runnerStartContinue, LoopHooks{}, nil)
 }
 
 // ResumePendingToolCallsWithHooks resumes the exact pending tool-call batch in
 // snapshot with invocation-local runtime hooks.
 func (r *Runner) ResumePendingToolCallsWithHooks(ctx context.Context, snapshot AgentSnapshot, hooks LoopHooks) *RunStream {
-	return r.start(ctx, snapshot, nil, runnerStartPendingTools, hooks)
+	return r.start(ctx, snapshot, nil, runnerStartPendingTools, hooks, nil)
 }
 
 // RunStream exposes one asynchronous runner invocation.
@@ -106,7 +108,10 @@ const (
 	runnerStartPendingTools
 )
 
-func (r *Runner) start(ctx context.Context, snapshot AgentSnapshot, prompts []Message, mode runnerStartMode, hooks LoopHooks) *RunStream {
+func (r *Runner) start(ctx context.Context, snapshot AgentSnapshot, prompts []Message, mode runnerStartMode, hooks LoopHooks, capture *receiptcapture.Handle) *RunStream {
+	if capture == nil {
+		ctx = receiptcapture.Block(ctx)
+	}
 	parentRunID := runnerRunIDFromContext(ctx)
 	runID := newRunnerRunID()
 	runCtx, cancel := context.WithCancel(ctx)
@@ -128,6 +133,9 @@ func (r *Runner) start(ctx context.Context, snapshot AgentSnapshot, prompts []Me
 
 	go func() {
 		defer cancel()
+		if capture != nil {
+			defer receiptcapture.CloseRegistration(capture)
+		}
 
 		var (
 			next *AgentSnapshot
@@ -139,7 +147,7 @@ func (r *Runner) start(ctx context.Context, snapshot AgentSnapshot, prompts []Me
 		case runnerStartPendingTools:
 			next, err = NewEngine().ResumePendingToolCallsWithHooks(runCtx, definition, &initial, publisher.emit, hooks)
 		default:
-			next, err = NewEngine().RunWithHooks(runCtx, definition, &initial, normalizedPrompts, publisher.emit, hooks)
+			next, err = NewEngine().runWithHooks(runCtx, definition, &initial, normalizedPrompts, publisher.emit, hooks, capture != nil)
 		}
 
 		finalSnapshot := initial
@@ -152,6 +160,9 @@ func (r *Runner) start(ctx context.Context, snapshot AgentSnapshot, prompts []Me
 		stream.snapshot = finalSnapshot
 		stream.err = err
 		stream.resultMu.Unlock()
+		if capture != nil {
+			receiptcapture.CloseRegistration(capture)
+		}
 		close(stream.events)
 		close(stream.done)
 	}()

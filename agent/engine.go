@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Icatme/pi-go/internal/receiptcapture"
 )
 
 // LoopHooks customize runtime behavior between turns.
@@ -32,6 +34,7 @@ type loopRuntimeState struct {
 }
 
 type loopExecutionState struct {
+	receipts        bool
 	firstTurn       bool
 	turn            int
 	completedTurn   *PrepareNextTurnContext
@@ -83,6 +86,10 @@ func (e *Engine) Run(ctx context.Context, definition AgentDefinition, snapshot *
 
 // RunWithHooks appends prompts and executes turns with runtime hooks.
 func (e *Engine) RunWithHooks(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, prompts []Message, emit EventSink, hooks LoopHooks) (out *AgentSnapshot, err error) {
+	return e.runWithHooks(receiptcapture.Block(ctx), definition, snapshot, prompts, emit, hooks, false)
+}
+
+func (e *Engine) runWithHooks(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, prompts []Message, emit EventSink, hooks LoopHooks, receipts bool) (out *AgentSnapshot, err error) {
 	ctx = newToolInvocationContext(ctx)
 	if hasPendingToolState(snapshot) {
 		return nil, ErrPendingToolCallsRequireResume
@@ -131,7 +138,7 @@ func (e *Engine) RunWithHooks(ctx context.Context, definition AgentDefinition, s
 		err = wrapEngineRunError(err, newMessages, false)
 		return next, err
 	}
-	next, newMessages, err = e.runLoop(ctx, definition, next, emit, hooks, initialPending, normalized, runtimeState, loopExecutionState{firstTurn: true, turn: 1})
+	next, newMessages, err = e.runLoop(ctx, definition, next, emit, hooks, initialPending, normalized, runtimeState, loopExecutionState{firstTurn: true, turn: 1, receipts: receipts})
 	if err != nil {
 		err = wrapEngineRunError(err, newMessages, runtimeState.turnEnded)
 		return next, err
@@ -147,6 +154,7 @@ func (e *Engine) Continue(ctx context.Context, definition AgentDefinition, snaps
 
 // ContinueWithHooks executes turns from the existing snapshot with runtime hooks.
 func (e *Engine) ContinueWithHooks(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink, hooks LoopHooks) (out *AgentSnapshot, err error) {
+	ctx = receiptcapture.Block(ctx)
 	ctx = newToolInvocationContext(ctx)
 	definition, err = definition.Validate()
 	if err != nil {
@@ -204,6 +212,7 @@ func (e *Engine) ContinueWithHooks(ctx context.Context, definition AgentDefiniti
 // snapshot without appending a duplicate assistant message. The batch is
 // resolved and preflighted again against the current definition and hooks.
 func (e *Engine) ResumePendingToolCallsWithHooks(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink, hooks LoopHooks) (out *AgentSnapshot, err error) {
+	ctx = receiptcapture.Block(ctx)
 	if hooks.Journal != nil {
 		return snapshot, errors.New("run journal: pending calls require host reconciliation; automatic resume is unsupported")
 	}
@@ -561,7 +570,7 @@ func isToolCallsSuspended(err error) bool {
 }
 
 func (e *Engine) runLoop(ctx context.Context, definition AgentDefinition, snapshot *AgentSnapshot, emit EventSink, hooks LoopHooks, pendingMessages []Message, initialNewMessages []Message, runtimeState *loopRuntimeState, executionState loopExecutionState) (next *AgentSnapshot, newMessages []Message, err error) {
-	ctx = withJournal(ctx, hooks.Journal)
+	ctx = withReceiptJournal(ctx, hooks.Journal, executionState.receipts)
 	firstTurn := executionState.firstTurn
 	turn := executionState.turn
 	if turn <= 0 {
