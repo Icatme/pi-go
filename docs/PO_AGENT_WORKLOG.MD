@@ -2740,3 +2740,26 @@
 - Model session/checkpoint persistence and write-stack replay remain separate;
   no large recovery framework, defaults, dependencies, CI, user-local computer,
   live model, merge or deployment was introduced.
+
+## Compatible filesystem integration (2026-11-03)
+
+- Reintroduced the complete #149 filesystem package on #152 without #144's
+  incompatible public fields. Production migration changes only the three write
+  entry guards and shared post-publication receipt reporting. Core defaults,
+  dependency manifests and CI workflows remain unchanged.
+- Preserved all original 80 tests and two examples; migrated commit assertions
+  to actual immutable host receipts. Added five model/Codemode/direct-session/
+  legacy-entry integration tests and documented the superseded PR topology.
+- Offline Go1.26.2 full root tests and full root race passed, as did vet,
+  examples tests, module verification and Windows/Darwin test compilation
+  (compilation is not runtime/platform support). Independent fstools race passed.
+- Historical unkeyed public struct literals compile. A real create_file call
+  persisted via the direct session binding was reopened by the old baseline:
+  it browsed both raw receipt payloads and refused continuation with ErrInterrupted.
+- Review caught a potentially vacuous legacy edit guard fixture; it now uses a
+  valid existing source, while replace uses different existing content. Both
+  assert refusal and unchanged bytes. Permission/socket fixtures may skip under
+  restricted OS privileges; no privilege bypass or external service was used.
+- Nonpersistent model operation and repeated-call risks remain explicit. No
+  model journal/checkpoint recovery, automatic retry safety, merge, CI,
+  deployment, user-local execution or Eino dependency was introduced.
