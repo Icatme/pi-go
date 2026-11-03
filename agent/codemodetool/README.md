@@ -18,6 +18,14 @@ regex grammar on an explicitly supported model. Both `New` and `NewDynamic`
 still execute the same `{"code": source}` argument object. Nil preserves ordinary
 function tools. See [native input configuration, fallback and limits](../../docs/native-tools.md).
 
+The binding forwards the leaf's optional `Execution.LocalEffect` through a
+separate execution sidecar, including successful results later rejected by
+Codemode budgets. After-hook/output failures cannot erase reported local commits.
+Inspect each child call's immutable ledger; the parent script does not infer
+that the whole batch had no effects from one successful or side-effect-free
+child. An omitted/unknown fact is not permission to retry. This does not make
+host filesystem writes transactional or supply a crash-durable receipt.
+
 Ordinary short MCP names map to `mcp__server__tool`. Namespace names longer than
 24 bytes, requiring sanitization, or containing the `__` separator use a capped
 readable namespace plus a 12-hex identity hash. Tool names exceeding the remaining

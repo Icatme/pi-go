@@ -29,6 +29,19 @@ const (
 type ToolLocalState string
 type ToolRemoteState string
 
+// ToolLocalEffect describes executor-reported local side effects, independently
+// of output acceptance and remote transport facts. Empty means unspecified, not
+// no effect. These facts are not a durable receipt or permission to retry.
+type ToolLocalEffect string
+
+const (
+	ToolLocalEffectNoneReported ToolLocalEffect = "none_reported"
+	// CommittedReported means at least one local effect was committed, not that
+	// the whole operation succeeded, is durable, or can be rolled back.
+	ToolLocalEffectCommittedReported ToolLocalEffect = "committed_reported"
+	ToolLocalEffectUnknown           ToolLocalEffect = "unknown"
+)
+
 const (
 	ToolLocalNotStarted        ToolLocalState  = "not_started"
 	ToolLocalEntered           ToolLocalState  = "entered"
@@ -48,9 +61,10 @@ type ToolSendAttempt struct {
 }
 
 type ToolExecutionInfo struct {
-	Local    ToolLocalState    `json:"local"`
-	Remote   ToolRemoteState   `json:"remote"`
-	Attempts []ToolSendAttempt `json:"attempts,omitempty"`
+	LocalEffect ToolLocalEffect   `json:"local_effect,omitempty"`
+	Local       ToolLocalState    `json:"local"`
+	Remote      ToolRemoteState   `json:"remote"`
+	Attempts    []ToolSendAttempt `json:"attempts,omitempty"`
 }
 
 type ToolFailure struct {
@@ -157,4 +171,28 @@ func publicToolOutcome(outcome toolOutcome) ToolCallOutcome {
 	return ToolCallOutcome{ToolCall: cloneToolCall(outcome.call), Result: cloneToolResult(outcome.result),
 		IsError: outcome.isError, Err: outcome.err, Execution: *cloneToolExecutionInfo(&outcome.execution),
 		Failure: cloneToolFailure(outcome.failure)}
+}
+
+func normalizeLocalEffect(effect ToolLocalEffect) ToolLocalEffect {
+	switch effect {
+	case "", ToolLocalEffectNoneReported, ToolLocalEffectCommittedReported, ToolLocalEffectUnknown:
+		return effect
+	default:
+		return ToolLocalEffectUnknown
+	}
+}
+
+// A reported commit cannot be erased by a later empty/conflicting report.
+func mergeLocalEffect(a, b ToolLocalEffect) ToolLocalEffect {
+	a, b = normalizeLocalEffect(a), normalizeLocalEffect(b)
+	if a == ToolLocalEffectCommittedReported || b == ToolLocalEffectCommittedReported {
+		return ToolLocalEffectCommittedReported
+	}
+	if a == ToolLocalEffectUnknown || b == ToolLocalEffectUnknown {
+		return ToolLocalEffectUnknown
+	}
+	if b != "" {
+		return b
+	}
+	return a
 }

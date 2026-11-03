@@ -358,14 +358,19 @@ func toolOutcomeFromExecution(prepared preparedToolCall, result ToolResult, exec
 		outcome.execution = *cloneToolExecutionInfo(result.Execution)
 		outcome.execution.Local = ToolLocalReturned
 	}
+	outcome.execution.LocalEffect = normalizeLocalEffect(outcome.execution.LocalEffect)
 	if execErr != nil {
 		if result.Execution == nil || result.Execution.Remote == "" {
 			outcome.execution.Remote = ToolRemoteUnknown
 		}
 		var typed *ToolExecutionError
-		if errors.As(execErr, &typed) && typed.Execution.Remote != "" {
-			outcome.execution = *cloneToolExecutionInfo(&typed.Execution)
-			outcome.execution.Local = ToolLocalReturned
+		if errors.As(execErr, &typed) {
+			effect := mergeLocalEffect(outcome.execution.LocalEffect, typed.Execution.LocalEffect)
+			if typed.Execution.Remote != "" {
+				outcome.execution = *cloneToolExecutionInfo(&typed.Execution)
+				outcome.execution.Local = ToolLocalReturned
+			}
+			outcome.execution.LocalEffect = effect
 		}
 		outcome.err = newToolFailure(execErr, ToolFailureProtocol, outcome.execution)
 		var failure *ToolExecutionError

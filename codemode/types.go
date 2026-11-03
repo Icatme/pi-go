@@ -81,6 +81,10 @@ type Tool struct {
 	// Invoke receives a host-generated admission ID. It must respect context.
 	// Returned bytes transfer ownership to the sandbox. No automatic retry occurs.
 	Invoke func(context.Context, HostCall) (json.RawMessage, error)
+	// InvokeWithExecution additionally returns trusted facts independently of the
+	// JSON result. Set exactly one invocation function. Facts survive rejection
+	// of successful output; a panic before returning leaves effects unspecified.
+	InvokeWithExecution func(context.Context, HostCall) (json.RawMessage, Execution, error)
 }
 
 // Namespace supplies on-demand documentation for a visible tool namespace.
@@ -122,9 +126,18 @@ type Output struct {
 	Data     string `json:"data,omitempty"`
 }
 
+// Local effect values are host reports, not receipts or retry authorization.
+// Empty/unknown must never be interpreted as proving that nothing happened.
+const (
+	LocalEffectNoneReported      = "none_reported"
+	LocalEffectCommittedReported = "committed_reported"
+	LocalEffectUnknown           = "unknown"
+)
+
 type Execution struct {
-	Local  string `json:"local"`
-	Remote string `json:"remote"`
+	LocalEffect string `json:"local_effect,omitempty"`
+	Local       string `json:"local"`
+	Remote      string `json:"remote"`
 }
 
 // CallError is a machine-readable host failure. A tool-declared business
@@ -191,3 +204,25 @@ func (e *CloseError) Error() string {
 	return fmt.Sprintf("codemode: close incomplete: %d outstanding calls: %v", len(e.Outstanding), e.Err)
 }
 func (e *CloseError) Unwrap() error { return e.Err }
+
+func normalizeLocalEffect(effect string) string {
+	switch effect {
+	case "", LocalEffectNoneReported, LocalEffectCommittedReported, LocalEffectUnknown:
+		return effect
+	default:
+		return LocalEffectUnknown
+	}
+}
+func mergeLocalEffect(a, b string) string {
+	a, b = normalizeLocalEffect(a), normalizeLocalEffect(b)
+	if a == LocalEffectCommittedReported || b == LocalEffectCommittedReported {
+		return LocalEffectCommittedReported
+	}
+	if a == LocalEffectUnknown || b == LocalEffectUnknown {
+		return LocalEffectUnknown
+	}
+	if b != "" {
+		return b
+	}
+	return a
+}
