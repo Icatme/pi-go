@@ -59,6 +59,74 @@ transport or cookie jar must respect context cancellation and the host's account
 and network isolation policy; the library cannot turn an arbitrary RoundTripper
 into a different authenticated account.
 
+## Reuse filesystem tools without implementing another tool suite
+
+An existing filesystem MCP server can supply tools to the same Agent loop.
+For example, the upstream
+[`@modelcontextprotocol/server-filesystem`](https://github.com/modelcontextprotocol/servers/tree/194cc86e3ae6400958555bd4116849d822d69263/src/filesystem)
+provides `read_text_file`, `list_directory` and filename-glob `search_files`.
+`search_files` is not content grep. The inspected package is version 2.1.0 and
+requires Node >=24; this is a source reference, not a live compatibility test or
+an instruction to install the latest release automatically.
+
+After the host has separately reviewed and provisioned a pinned server and its
+Node runtime, use this configuration fragment (import `time` and this package
+as `mcp`). All four variables are trusted application configuration: absolute
+paths to Node, the installed server's JS entrypoint, the allowed directory, and
+the application's authenticated identity. They must not come from model input.
+
+```go
+manager, err := mcp.New(mcp.Config{
+    Scope: mcp.Scope{Identity: hostIdentity, AuthEpoch: 1},
+    Servers: []mcp.ServerConfig{{
+        Name: "files",
+        Command: nodeExecutable,
+        Args: []string{filesystemServerEntrypoint, allowedDirectory},
+        Trusted: true,
+        Timeout: 10 * time.Second,
+        Exposure: mcp.Hidden,
+        ToolRules: []mcp.ToolRule{
+            {Pattern: "read_text_file", Exposure: mcp.Codemode},
+            {Pattern: "list_directory", Exposure: mcp.Codemode},
+            {Pattern: "search_files", Exposure: mcp.Codemode},
+        },
+    }},
+    Limits: mcp.Limits{MaxResponseBytes: 1 << 20},
+})
+// Handle err. New is inert; a later connection starts the trusted process.
+```
+
+Keep the existing [`agent/toolset`](../agent/toolset/README.md) integration:
+construct the toolset over this manager and a caller-owned Codemode sandbox,
+then assign `set.Resolve` to `AgentDefinition.ToolResolver`. The
+[`managed example`](../examples/mcp-managed/README.md) already demonstrates
+that lifecycle, permission callbacks and cleanup using offline fixtures; do
+not run a second Agent loop or copy its fixture-specific permission names.
+Authorize the selected `mcp__files__*` leaves individually in the host permission
+callback, together with whichever orchestration tools the application permits.
+The MCP adapter rechecks permission at dispatch, including Codemode calls.
+Close both manager and sandbox with bounded cleanup contexts.
+
+The hidden default denies unlisted tools, including server tools added later;
+do not replace it with an unrestricted `*` rule or trust read-only annotations
+as authorization. This policy restricts calls through this manager, not the
+server process's OS privileges. The host owns the server's allowed-directory
+policy, filesystem permissions, isolation, executable provenance and updates.
+`Trusted: true` authorizes process startup; it does not certify the server.
+The process inherits the host environment; `Env` adds or overrides variables,
+not an environment allowlist. Account for inherited secrets before launching.
+Codemode's VM isolation does not sandbox the MCP server. Read-only access can
+still disclose secrets in files or filenames; use the smallest approved
+workspace and treat returned content as untrusted data.
+
+Client response limits and deadlines do not impose a server-side scanning or
+memory budget, guarantee cancellation of filesystem calls, or turn path checks
+into protection against arbitrary filesystem/mount races. Verify the selected
+server's behavior and deployment platforms separately. This option adds no Go
+module dependency but requires the separately deployed Node/server process,
+so it is not a single-Go-binary filesystem implementation. This documentation
+does not install, launch or validate that external server.
+
 ## Raw JSON and cache ownership
 
 Each connection has a fresh Observer. Its SDK middleware marks a logical request
