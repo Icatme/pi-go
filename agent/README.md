@@ -427,9 +427,11 @@ never overwriting an existing name; it requires Linux O_TMPFILE and trusted
 procfs. Committed/uncertain outcomes retain local-effect facts on failure.
 `fstools.PreviewEditDefinition` computes a read-only unique-replacement candidate
 with byte fingerprints, without writing or promising compare-and-swap.
+`fstools.AtomicReplaceDefinition` separately opts into ordinary atomic
+create-or-replace publication: last writer wins, no CAS; new inode metadata is not
+preserved, and the host must protect the workspace against malicious writers.
 These tools use the ordinary Codemode/permission lifecycle. Nothing is enabled
-by default; overwriting writes, edits and command execution remain separate
-future capabilities.
+by default; actual edit application and command execution remain future capabilities.
 
 ## Agents As Task Tools
 

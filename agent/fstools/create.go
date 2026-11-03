@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -86,7 +85,7 @@ type createArguments struct {
 func parseCreate(raw []byte, maxBytes, maxArgs int) (createArguments, error) {
 	var args createArguments
 	bad := func(err error) (createArguments, error) {
-		return args, failure(agent.ToolFailureArgumentInvalid, "fstools: expected a new relative file path and bounded UTF-8 content without NUL", err)
+		return args, failure(agent.ToolFailureArgumentInvalid, "fstools: expected a relative file path and bounded UTF-8 content without NUL", err)
 	}
 	if len(raw) > maxArgs {
 		return bad(errors.New("argument limit"))
@@ -131,122 +130,8 @@ type pendingCreation interface {
 }
 
 func createFailure(committed, attempted bool, message string, cause error) error {
-	effect := agent.ToolLocalEffectUnknown
-	reason := "create_not_published"
-	if attempted {
-		reason = "create_publication_unknown"
-	}
-	if committed {
-		effect = agent.ToolLocalEffectCommittedReported
-		reason = "create_published"
-	}
-	code := agent.ToolFailureResource
-	if errors.Is(cause, context.Canceled) {
-		code = agent.ToolFailureCanceled
-	} else if errors.Is(cause, context.DeadlineExceeded) {
-		code = agent.ToolFailureDeadline
-	} else {
-		var typed *agent.ToolExecutionError
-		if errors.As(cause, &typed) && typed.Code == agent.ToolFailurePolicyDenied {
-			code = agent.ToolFailurePolicyDenied
-		}
-	}
-	return &agent.ToolExecutionError{Code: code, Reason: reason, Message: message, Err: cause, Execution: agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotApplicable, LocalEffect: effect}}
+	return publicationFailure("create", committed, attempted, message, cause)
 }
-func createResult(synced bool) agent.ToolResult {
-	durability := "unknown"
-	if synced {
-		durability = "synced"
-	}
-	raw, _ := json.Marshal(struct {
-		Created    bool   `json:"created"`
-		Durability string `json:"durability"`
-	}{true, durability})
-	return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: string(raw)}}, StructuredContent: raw, Execution: &agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotApplicable, LocalEffect: agent.ToolLocalEffectCommittedReported}}
-}
-func publishCreate(ctx context.Context, in agent.ToolExecutionContext, pending pendingCreation, data []byte) (result agent.ToolResult, err error) {
-	committed, attempted, synced := false, false, false
-	defer func() {
-		if p := recover(); p != nil {
-			cause, ok := p.(error)
-			if !ok {
-				cause = fmt.Errorf("create panic: %v", p)
-			}
-			message := "fstools: create failed unexpectedly; inspect destination before retrying"
-			if committed {
-				message = "fstools: file was published before an unexpected failure; do not blindly retry or roll back"
-			}
-			err = createFailure(committed, attempted, message, cause)
-		}
-		closeErr := pending.Close()
-		if closeErr != nil {
-			if err == nil {
-				message := "fstools: create cleanup failed; inspect destination before retrying"
-				if committed {
-					message = "fstools: file was published but cleanup failed; do not blindly retry or roll back"
-				}
-				err = createFailure(committed, attempted, message, closeErr)
-			} else {
-				err = errors.Join(err, createFailure(committed, attempted, "fstools: create cleanup failed", closeErr))
-			}
-		}
-		if committed {
-			result = createResult(synced)
-		}
-	}()
-	// No named staging file exists. Pre-publication failures close the anonymous
-	// inode; after Publish is attempted, never remove a destination by pathname.
-	for len(data) > 0 {
-		if err = permission(ctx, in); err != nil {
-			return
-		}
-		end := min(len(data), 8192)
-		var n int
-		n, err = pending.Write(data[:end])
-		if err != nil {
-			err = createFailure(false, false, "fstools: cannot stage file content; destination was not published", err)
-			return
-		}
-		if n < 1 || n > end {
-			err = createFailure(false, false, "fstools: file staging made invalid progress; destination was not published", io.ErrShortWrite)
-			return
-		}
-		data = data[n:]
-	}
-	if err = permission(ctx, in); err != nil {
-		return
-	}
-	if err = pending.Sync(); err != nil {
-		err = createFailure(false, false, "fstools: cannot sync staged file; destination was not published", err)
-		return
-	}
-	if err = permission(ctx, in); err != nil {
-		return
-	}
-	attempted = true
-	if err = pending.Publish(); err != nil {
-		if errors.Is(err, os.ErrExist) {
-			err = createFailure(false, false, "fstools: destination already exists; no overwrite performed", err)
-			return
-		}
-		err = createFailure(false, true, "fstools: file publication was not confirmed; inspect destination before retrying", err)
-		return
-	}
-	committed = true
-	// Publication is irreversible here. Revocation/cancellation changes reporting,
-	// not the committed fact, and cannot authorize unlinking a replaced pathname.
-	if err = permission(ctx, in); err != nil {
-		err = createFailure(true, true, "fstools: file was published before cancellation or revocation; durability unknown", err)
-		return
-	}
-	if err = pending.SyncDirectory(); err != nil {
-		err = createFailure(true, true, "fstools: file was published but directory sync failed; durability unknown", err)
-		return
-	}
-	synced = true
-	if err = permission(ctx, in); err != nil {
-		err = createFailure(true, true, "fstools: file was published and synced before cancellation or revocation", err)
-		return
-	}
-	return
+func publishCreate(ctx context.Context, in agent.ToolExecutionContext, pending pendingCreation, data []byte) (agent.ToolResult, error) {
+	return publishFile(ctx, in, pending, data, "create")
 }

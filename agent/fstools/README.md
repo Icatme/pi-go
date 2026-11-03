@@ -6,11 +6,12 @@
 `fstools.GrepDefinition(root, grepOptions)` opts into single-file content search.
 `fstools.CreateFileDefinition(root, createOptions)` explicitly opts into new-file
 creation only. `fstools.PreviewEditDefinition(root, previewOptions)` opts into
-read-only replacement previews. Existing `Definitions` callers never gain these
+read-only replacement previews. `fstools.AtomicReplaceDefinition(root, replaceOptions)`
+explicitly opts into ordinary create-or-replace workspace writes. Existing `Definitions` callers never gain these
 capabilities by upgrading.
 Nothing is installed or enabled in the core Agent, CLI, managed MCP configuration,
 or a downstream application. This is not a complete filesystem suite:
-overwriting `write`, `edit`, shell and Python are not supplied.
+automatic `edit` application, shell and Python are not supplied.
 
 ```go
 // trustedWorkspace comes from application configuration, never model input.
@@ -356,7 +357,8 @@ It reads one bounded file and computes a candidate in memory; it never modifies
 the original, creates another file, or automatically invokes `create_file`.
 The complete candidate can be reviewed by a person or separately passed to an
 explicitly authorized create-only operation under a **new** destination name.
-There is still no overwriting/apply-edit tool.
+There is no automatic apply-edit tool. Separately authorized `atomic_replace`
+is last-writer-wins publication, not a guarded application of a preview.
 
 ```go
 previewTool, err := fstools.PreviewEditDefinition(root, fstools.PreviewEditOptions{
@@ -412,7 +414,7 @@ Pass the **same** definitions through the existing native adapter:
 
 ```go
 binding := codemodetool.Native(tools[0], "workspace")
-// Or explicitly bind readTool/findTool/grepTool/createTool/previewTool using the same adapter.
+// Or explicitly bind readTool/findTool/grepTool/createTool/previewTool/replaceTool using the same adapter.
 codeTool, err := codemodetool.New(sandbox,
     []codemodetool.Binding{binding}, codemodetool.Options{})
 ```
@@ -423,6 +425,59 @@ filesystem bridge in the JavaScript runtime. Only explicitly bound leaves are
 visible. Include `codeTool` in the application definition only if wanted.
 Do not expose an unrestricted shell/Python bridge and describe this root as a
 security boundary for that bridge.
+
+## Explicit ordinary atomic replacement
+
+`AtomicReplaceDefinition(root, ReplaceOptions{MaxBytes: 64 << 10})` exposes
+`atomic_replace({"path":"file.txt","content":"complete new text"})` separately
+from `create_file`. Its default/maximum input limits are 64 KiB/1 MiB, UTF-8
+without NUL, including empty content. Parent directories must exist. Nil permission
+hooks authorize this capability when the host explicitly selects it. The model
+cannot choose permission modes or upgrade `create_file` into overwrite authority.
+
+This is **ordinary workspace overwrite semantics, not CAS**: last writer wins.
+Other tools, editors or processes may change the target between observation and
+publication; their updates can be overwritten. No expected-hash claim, transaction,
+automatic retry, backup or rollback is provided. The tool rejects names observed
+as symlinks, directories or special files, but a later name change may be replaced.
+The final rename replaces a directory entry; it does not follow a final symlink.
+A concurrent target deletion can result in creating the name instead.
+
+On Linux with the already-required trusted procfs and O_TMPFILE filesystem
+support, the tool writes a complete anonymous inode, synchronizes it, links a
+cryptographically random temporary name in the fixed parent directory and renames
+that entry onto the target. The result is `{published:true,durability:"synced"}`
+on normal completion. Rename is the commit point. Directory-sync, cancellation,
+revocation or cleanup failures afterwards preserve `committed_reported`; uncertain
+publication errors retain `unknown`. `synced` means the requested file/directory
+fsync calls succeeded, not a hardware guarantee or a promise that nobody changed
+the destination afterwards. A failure before commit does not intentionally replace
+the old destination. Nothing unlinks the destination as rollback.
+
+The new inode has **at most 0600 permissions**, subject to umask. It does not inherit
+old ownership, ACLs, xattrs, timestamps or executable bits. Other hard links and
+already-open descriptors continue referencing the old inode. This is deliberately
+not equivalent to in-place truncation; applications needing exact metadata
+preservation should not select this increment.
+
+**Additional host requirement:** the destination directory must be controlled
+against malicious same-permission writers. A temporary name exists briefly before
+rename and may remain after process termination or cleanup failure. Random names
+and O_EXCL-style collision handling are not protection against malicious staging
+replacement. Cleanup removes only the temporary name we successfully linked and
+never removes a name consumed by successful rename. The parent is a pinned inode,
+not continuously checked pathname ancestry. Hostile mounts/procfs or moving a
+parent outside its authorized scope remain outside the supported contract.
+
+Permission and context are rechecked immediately before rename, after staging
+publication, as well as throughout bounded writes and after commit. The check and
+syscall are not atomic with external revocation; blocking syscalls are not forcibly
+canceled. Linux-only support remains explicit; other platforms fail closed.
+
+A host wanting fewer lost updates can serialize **all** its workspace mutation
+entries across read/compute/publish using one shared coordinator. This tool adds
+no global locking framework. Other processes, editors and bypassing callers remain
+uncoordinated; ordinary advisory OS locks do not create a universal CAS contract.
 
 ## Small-PR delivery plan
 
@@ -441,10 +496,11 @@ security boundary for that bridge.
    overwriting any name and with commit/unknown facts retained on failure.
 6. **Sixth increment:** read-only exact replacement preview with complete bounded
    candidate text and informational byte fingerprints. No apply/overwrite.
-7. **Later:** explicit workspace overwriting `write`/`edit` capabilities with host approval,
-   atomicity and conflict semantics; read-only/workspace presets made only from
-   implemented definitions.
-8. **Separate optional capability:** command execution/Python with real documented
+7. **Seventh increment:** explicit ordinary `atomic_replace`, no CAS, no implicit
+   activation, and committed/unknown outcome facts.
+8. **Later:** actual `edit` application and optional workspace coordination;
+   read-only/workspace presets made only from implemented definitions.
+9. **Separate optional capability:** command execution/Python with real documented
    OS isolation, resource/lifetime control and host permissions. Never infer this
    authority from a filesystem root or Codemode allowlist.
 
