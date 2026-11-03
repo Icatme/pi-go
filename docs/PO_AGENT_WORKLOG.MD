@@ -2685,3 +2685,31 @@
 - Deliberately not a full #144 repair: no model-loop/session/checkpoint receipt
   persistence, JS receipt projection, restart recovery or write-stack replay.
   #144 and dependent write-tool merge blockers remain pending separate phases.
+
+## 2026-11-03 — session-backed direct receipt calls (phase 2)
+
+- Adds an explicit single-use direct-call binding over #150, not a model-loop
+  journal or checkpoint extension. Old public types, runtime payloads, headers
+  and JSONL batches are unchanged. No write-tool-stack migration or defaults.
+- Atomic intent and final pairs each preserve legacy Pending:true. New reads
+  validate scope/epoch, branch/head, fence/intent IDs, phase and bounded facts.
+  Pending histories refuse execution after restart. Only the original live
+  handle can be finalized; no replay, reset or caller-invented effect receipt.
+- Tests cover real file commit/hook failure, Codemode child effects, lost ACK
+  before/after execution, authorization changes during permission and storage,
+  concurrent binding CAS/Finalize, fork, compaction, bounds and malformed pairs.
+  Existing torn-tail repair can trim a partial final; surviving intent remains
+  fenced. A newline-terminated corrupt batch is rejected instead.
+- Actual current-writer/baseline-5dcf3c4-reader probe passed: old JSONL reader
+  browses both custom receipt payloads, old PrepareRun returns ErrInterrupted.
+  New reader also accepts valid legacy runtime history. This is read
+  compatibility, not permission for unaware old runners to resume new writes.
+- Offline cloud Go1.26.2: full root tests/vet and five relevant race packages
+  passed; independent review and receipt-focused race passed. Actual checkpoint
+  nesting test rejects this mode before business/receipt I/O, while accurately
+  allowing checkpoint's own prior persistence bookkeeping.
+- Limits remain: effects and log append are not one transaction, pending intent
+  lacks live partial facts, durability follows Storage, and crashes may need
+  external investigation. #144/write stack, model-loop receipt persistence and
+  checkpoint recovery remain separate blocked work. No CI/live service, local
+  user computer, extra dependencies, merge or deployment.
