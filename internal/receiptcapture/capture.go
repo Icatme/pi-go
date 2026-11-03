@@ -53,8 +53,14 @@ type slot struct {
 	index int
 }
 
-func Block(ctx context.Context) context.Context { return context.WithValue(ctx, blockedKey{}, true) }
-func blocked(ctx context.Context) bool          { b, _ := ctx.Value(blockedKey{}).(bool); return b }
+func Block(ctx context.Context) context.Context {
+	// Legacy Engine entry points accept nil before invocation normalization.
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, blockedKey{}, true)
+}
+func blocked(ctx context.Context) bool { b, _ := ctx.Value(blockedKey{}).(bool); return b }
 
 func Begin(ctx context.Context, maxCalls int) (context.Context, *Handle, error) {
 	if ctx == nil {
