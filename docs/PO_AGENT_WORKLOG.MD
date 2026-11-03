@@ -2713,3 +2713,30 @@
   external investigation. #144/write stack, model-loop receipt persistence and
   checkpoint recovery remain separate blocked work. No CI/live service, local
   user computer, extra dependencies, merge or deployment.
+
+## 2026-11-03 — opt-in non-persistent model receipt runs (phase 3)
+
+- Adds Runner.RunWithReceipts without changing old public layouts, snapshots,
+  events, Invoke or journal formats. A private mode parameter reaches the loop;
+  no inheritable context grant can turn legacy nested execution into this mode.
+  Legacy Runner/Engine and checkpoint entries block capture; non-nil journals
+  are rejected before a new receipt run starts. No durable model recovery added.
+- Registration closes in the actual runner goroutine before done, while pending
+  host/child bodies retain their original handle until they really exit.
+- Error scheduling is intentionally unchanged. A regression actually appends to
+  a file twice after a committed first-call error: the model can call again and
+  both receipts survive. Capture is not a retry barrier, idempotency policy or
+  automatic write safety. Host policy remains separate, not implicitly granted.
+- Offline cloud Go1.26.2: full root tests/vet, relevant six-package race and
+  independent review/race passed. Tests include real file/hook/panic/cancel,
+  dynamic model turns, cumulative capacity, permissions, Codemode late bodies,
+  nested legacy/checkpoint rejection and concurrent same-Runner handle isolation.
+- Temporary composition with #149 filesystem production code showed a small
+  migration: require capture before create/replace/edit I/O, report immediately
+  after publication and remove #144 LocalEffect fields. Five integration race
+  tests passed through real model/Codemode/session direct paths. This experiment
+  did not port the entire old filesystem test suite or docs, and is not a
+  published filesystem migration or permission to merge that stack.
+- Model session/checkpoint persistence and write-stack replay remain separate;
+  no large recovery framework, defaults, dependencies, CI, user-local computer,
+  live model, merge or deployment was introduced.

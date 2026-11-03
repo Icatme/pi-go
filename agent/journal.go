@@ -44,9 +44,16 @@ type journalScope struct {
 }
 
 func withJournal(ctx context.Context, journal RunJournal) context.Context {
-	// Model loops cannot yet persist/recover receipts, even with a nil journal.
-	// Do not let nested direct wrappers or inherited capture imply otherwise.
-	return context.WithValue(receiptcapture.Block(ctx), journalKey{}, &journalScope{journal: journal, accepted: make(map[stateKey]json.RawMessage)})
+	return withReceiptJournal(ctx, journal, false)
+}
+
+func withReceiptJournal(ctx context.Context, journal RunJournal, receipts bool) context.Context {
+	// Only the explicit, non-persistent model entry point can retain capture.
+	// This never removes a block inherited from a legacy or checkpoint context.
+	if !receipts || journal != nil {
+		ctx = receiptcapture.Block(ctx)
+	}
+	return context.WithValue(ctx, journalKey{}, &journalScope{journal: journal, accepted: make(map[stateKey]json.RawMessage)})
 }
 
 // ToolState is available only to sequential top-level tools in a journaled run.

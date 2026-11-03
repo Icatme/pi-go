@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Icatme/pi-go/agent"
+	"github.com/Icatme/pi-go/internal/receiptcapture"
 )
 
 const (
@@ -91,7 +92,7 @@ func (r *Runner) start(ctx context.Context, operation func(context.Context, chan
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(receiptcapture.Block(ctx))
 	stream := &RunStream{
 		events: make(chan agent.AgentEvent, checkpointEventBufferSize),
 		done:   make(chan struct{}),
