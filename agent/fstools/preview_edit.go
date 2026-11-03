@@ -125,29 +125,12 @@ func previewEdit(ctx context.Context, in agent.ToolExecutionContext, root *os.Ro
 	if err != nil {
 		return agent.ToolResult{}, err
 	}
-	if err := permission(ctx, in); err != nil {
+	candidate, matchLine, err := exactEditCandidate(ctx, in, data, args, options.MaxBytes)
+	if err != nil {
 		return agent.ToolResult{}, err
 	}
-	source := string(data)
-	first := strings.Index(source, args.OldText)
-	if first < 0 {
-		return agent.ToolResult{}, failure(agent.ToolFailureResource, "fstools: old_text was not found", nil)
-	}
-	// Start one byte later, not len(old_text) later: overlapping occurrences also
-	// make a proposed replacement ambiguous. All strings are valid bounded UTF-8.
-	if strings.Index(source[first+1:], args.OldText) >= 0 {
-		return agent.ToolResult{}, failure(agent.ToolFailureResource, "fstools: old_text is not unique", nil)
-	}
-	candidateBytes := len(source) - len(args.OldText) + len(*args.NewText)
-	if candidateBytes > options.MaxBytes {
-		return agent.ToolResult{}, failure(agent.ToolFailureResource, "fstools: preview candidate exceeds byte limit", nil)
-	}
-	if err := permission(ctx, in); err != nil {
-		return agent.ToolResult{}, err
-	}
-	candidate := source[:first] + *args.NewText + source[first+len(args.OldText):]
 	originalHash, candidateHash := sha256.Sum256(data), sha256.Sum256([]byte(candidate))
-	result := previewOutput{PreviewOnly: true, OriginalSHA256: hex.EncodeToString(originalHash[:]), CandidateSHA256: hex.EncodeToString(candidateHash[:]), Content: candidate, MatchLine: strings.Count(source[:first], "\n") + 1}
+	result := previewOutput{PreviewOnly: true, OriginalSHA256: hex.EncodeToString(originalHash[:]), CandidateSHA256: hex.EncodeToString(candidateHash[:]), Content: candidate, MatchLine: matchLine}
 	if err := permission(ctx, in); err != nil {
 		return agent.ToolResult{}, err
 	}
@@ -159,4 +142,31 @@ func previewEdit(ctx context.Context, in agent.ToolExecutionContext, root *os.Ro
 		return agent.ToolResult{}, err
 	}
 	return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: string(encoded)}}, StructuredContent: encoded}, nil
+}
+
+// exactEditCandidate is shared by preview and explicitly enabled edit. It does
+// not write, normalize text, or establish a file-version precondition.
+func exactEditCandidate(ctx context.Context, in agent.ToolExecutionContext, data []byte, args previewArguments, maxBytes int) (string, int, error) {
+	if err := permission(ctx, in); err != nil {
+		return "", 0, err
+	}
+	source := string(data)
+	first := strings.Index(source, args.OldText)
+	if first < 0 {
+		return "", 0, failure(agent.ToolFailureResource, "fstools: old_text was not found", nil)
+	}
+	// Start one byte later, not len(old_text) later: overlapping occurrences also
+	// make a proposed replacement ambiguous. All strings are valid bounded UTF-8.
+	if strings.Index(source[first+1:], args.OldText) >= 0 {
+		return "", 0, failure(agent.ToolFailureResource, "fstools: old_text is not unique", nil)
+	}
+	candidateBytes := len(source) - len(args.OldText) + len(*args.NewText)
+	if candidateBytes > maxBytes {
+		return "", 0, failure(agent.ToolFailureResource, "fstools: edit candidate exceeds byte limit", nil)
+	}
+	if err := permission(ctx, in); err != nil {
+		return "", 0, err
+	}
+	candidate := source[:first] + *args.NewText + source[first+len(args.OldText):]
+	return candidate, strings.Count(source[:first], "\n") + 1, nil
 }

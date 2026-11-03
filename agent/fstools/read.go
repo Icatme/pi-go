@@ -96,8 +96,8 @@ func read(ctx context.Context, execution agent.ToolExecutionContext, root *os.Ro
 	return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: string(encoded)}}, StructuredContent: encoded}, nil
 }
 
-// readTextFile is shared by read and single-file grep. It validates the entire
-// bounded file before either caller publishes any content.
+// readTextFile is shared by read, grep, preview and explicitly selected edit.
+// It validates the entire bounded file before a caller uses its content.
 func readTextFile(ctx context.Context, execution agent.ToolExecutionContext, root *os.Root, filename string, maxBytes int) ([]byte, error) {
 	if err := permission(ctx, execution); err != nil {
 		return nil, err

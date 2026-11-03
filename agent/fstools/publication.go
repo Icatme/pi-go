@@ -40,7 +40,7 @@ func publicationResult(operation string, synced bool) agent.ToolResult {
 		durability = "synced"
 	}
 	key := "created"
-	if operation == "replace" {
+	if operation != "create" {
 		key = "published"
 	}
 	raw, _ := json.Marshal(map[string]any{key: true, "durability": durability})

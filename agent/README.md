@@ -430,8 +430,10 @@ with byte fingerprints, without writing or promising compare-and-swap.
 `fstools.AtomicReplaceDefinition` separately opts into ordinary atomic
 create-or-replace publication: last writer wins, no CAS; new inode metadata is not
 preserved, and the host must protect the workspace against malicious writers.
-These tools use the ordinary Codemode/permission lifecycle. Nothing is enabled
-by default; actual edit application and command execution remain future capabilities.
+`fstools.EditDefinition` separately enables unique exact byte replacement followed
+by that same ordinary publication; it rereads the source and does not apply a
+preview fingerprint as CAS. These tools use the ordinary Codemode/permission
+lifecycle. Nothing is enabled by default; command execution remains separate.
 
 ## Agents As Task Tools
 

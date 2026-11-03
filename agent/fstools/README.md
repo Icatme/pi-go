@@ -7,11 +7,13 @@
 `fstools.CreateFileDefinition(root, createOptions)` explicitly opts into new-file
 creation only. `fstools.PreviewEditDefinition(root, previewOptions)` opts into
 read-only replacement previews. `fstools.AtomicReplaceDefinition(root, replaceOptions)`
-explicitly opts into ordinary create-or-replace workspace writes. Existing `Definitions` callers never gain these
+explicitly opts into ordinary create-or-replace workspace writes.
+`fstools.EditDefinition(root, editOptions)` separately opts into exact replacement
+and actual publication. Existing `Definitions` callers never gain these
 capabilities by upgrading.
 Nothing is installed or enabled in the core Agent, CLI, managed MCP configuration,
 or a downstream application. This is not a complete filesystem suite:
-automatic `edit` application, shell and Python are not supplied.
+shell and Python are not supplied.
 
 ```go
 // trustedWorkspace comes from application configuration, never model input.
@@ -357,8 +359,9 @@ It reads one bounded file and computes a candidate in memory; it never modifies
 the original, creates another file, or automatically invokes `create_file`.
 The complete candidate can be reviewed by a person or separately passed to an
 explicitly authorized create-only operation under a **new** destination name.
-There is no automatic apply-edit tool. Separately authorized `atomic_replace`
-is last-writer-wins publication, not a guarded application of a preview.
+The separately authorized `edit` rereads the source and computes a new candidate;
+it does not apply this preview or its fingerprint. Both `edit` and `atomic_replace`
+use last-writer-wins publication, not guarded preview application.
 
 ```go
 previewTool, err := fstools.PreviewEditDefinition(root, fstools.PreviewEditOptions{
@@ -414,7 +417,7 @@ Pass the **same** definitions through the existing native adapter:
 
 ```go
 binding := codemodetool.Native(tools[0], "workspace")
-// Or explicitly bind readTool/findTool/grepTool/createTool/previewTool/replaceTool using the same adapter.
+// Or explicitly bind readTool/findTool/grepTool/createTool/previewTool/replaceTool/editTool using the same adapter.
 codeTool, err := codemodetool.New(sandbox,
     []codemodetool.Binding{binding}, codemodetool.Options{})
 ```
@@ -479,6 +482,45 @@ entries across read/compute/publish using one shared coordinator. This tool adds
 no global locking framework. Other processes, editors and bypassing callers remain
 uncoordinated; ordinary advisory OS locks do not create a universal CAS contract.
 
+## Explicit exact edit with publication
+
+`EditDefinition(root, EditOptions{MaxBytes: 64 << 10})` exposes
+`edit({"path":"file.txt","old_text":"old","new_text":"new"})`. Selecting it
+is a combined content-read and overwrite capability, even if the host does not
+separately expose `read`, `preview_edit` or `atomic_replace`. It does not enable
+any of those other definitions. Permission checks run under the `edit` invocation
+through the ordinary Agent/Codemode lifecycle; a nil hook grants the selected
+capability within the configured scope.
+
+The source must initially exist and pass the same bounded regular-text read as
+`read`. `old_text` must be nonempty and occur exactly once, including overlapping
+occurrences; `new_text` is required, may be empty, and must differ. Matching is
+exact raw UTF-8 bytes with no fuzzy match or BOM/newline/whitespace normalization.
+Unmatched bytes are retained. Each source, old/new string and full candidate is
+bounded by MaxBytes (default 64 KiB, maximum 1 MiB). Not-found, ambiguous, invalid
+text or oversized candidates fail before preparing a publication. The tool returns
+only `{published:true,durability:"synced"}` on normal success, not the original or
+candidate file content, a diff, or a version/CAS token.
+
+The unique match applies to the **bytes read**, not to the inode or bytes present
+at commit. Read and publication resolve the root-relative path separately. A
+concurrent editor can replace that name or change its parent between these steps;
+the candidate from the earlier file can replace the later file. If the source is
+deleted after reading, publication may recreate it. This is intentional ordinary
+**last-writer-wins**, not protection against lost updates, a transaction, or an
+application of a previous preview. The current implementation adds no per-path
+lock or mutation queue. Host-wide cooperative serialization can be applied as
+described above, but is not isolation from unrelated writers.
+
+All `atomic_replace` metadata, trusted-directory, pinned-parent, platform and
+failure boundaries above apply: a new inode with at most 0600 permissions (no
+old executable bit/ACL/xattr/ownership preservation), other hard links unchanged,
+Linux with supported O_TMPFILE/procfs, no malicious staging-name writers, and no
+rollback of the destination. Edit authorization is revalidated before staging and immediately before rename;
+previous authorization to read alone does not grant this capability. Revocation/cancellation after commit still reports committed facts.
+File/directory fsync successes do not guarantee storage hardware or prevent later
+external updates. In-flight syscalls cannot be forcibly canceled.
+
 ## Small-PR delivery plan
 
 1. **First increment:** optional Linux `ls`, root-relative paths, bounded output,
@@ -498,9 +540,11 @@ uncoordinated; ordinary advisory OS locks do not create a universal CAS contract
    candidate text and informational byte fingerprints. No apply/overwrite.
 7. **Seventh increment:** explicit ordinary `atomic_replace`, no CAS, no implicit
    activation, and committed/unknown outcome facts.
-8. **Later:** actual `edit` application and optional workspace coordination;
-   read-only/workspace presets made only from implemented definitions.
-9. **Separate optional capability:** command execution/Python with real documented
+8. **Eighth increment:** explicit exact `edit` reusing preview matching and ordinary
+   replacement publication, without CAS or implicit write authority.
+9. **Later:** optional workspace coordination and presets made only from implemented
+   definitions.
+10. **Separate optional capability:** command execution/Python with real documented
    OS isolation, resource/lifetime control and host permissions. Never infer this
    authority from a filesystem root or Codemode allowlist.
 
