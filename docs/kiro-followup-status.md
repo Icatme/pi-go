@@ -4,6 +4,11 @@ For the v0.18.0 registration and history contracts, see the [provider
 guide](providers.md#kiro-for-go-applications) and [Agent history
 migration](kiro-agent-authored-compatibility.md). The entries below record the
 state of individual development branches at the time of each review.
+For the verified merged baseline, current remaining gaps and next validation
+steps, use the [post-merge convergence review](kiro-convergence-review.md).
+In particular, the historical "persisted tool-history restore remains
+unsupported" row below predates the explicit authored-history contract; it is
+not the v0.18.0 status.
 
 ## Upstream check
 
