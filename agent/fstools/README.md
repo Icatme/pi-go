@@ -3,9 +3,10 @@
 `fstools.Definitions(root, options)` creates one ordinary Agent definition:
 `ls`. `fstools.ReadDefinition(root, readOptions)` separately opts into `read`;
 `fstools.FindDefinition(root, findOptions)` separately opts into filename search.
-Existing `Definitions` callers never gain either capability just by upgrading.
+`fstools.GrepDefinition(root, grepOptions)` opts into single-file content search.
+Existing `Definitions` callers never gain these capabilities just by upgrading.
 Nothing is installed or enabled in the core Agent, CLI, managed MCP configuration,
-or a downstream application. This is not a complete filesystem suite: `grep`,
+or a downstream application. This is not a complete filesystem suite:
 `write`, `edit`, shell and Python are not supplied.
 
 ```go
@@ -216,13 +217,77 @@ uses the permission hook to revoke in-flight calls; closing the root alone is no
 revocation of already-open directory descriptors. Linux only; no procfs dependency
 is introduced for filename discovery.
 
+## Single-file grep
+
+`GrepDefinition` is a separate, explicit content-read capability. It reuses
+`read`'s pinned-inode opener and bounded whole-file text reader, not a second
+filesystem implementation. The same Linux/procfs, final-symlink, trusted local
+workspace and syscall-cancellation restrictions apply. Other platforms fail
+closed. No shell, ripgrep process, download or new module dependency is involved.
+
+```go
+grepTool, err := fstools.GrepDefinition(root, fstools.GrepOptions{
+    MaxScanBytes: 64 << 10,
+    MaxLineBytes: 16 << 10,
+    MaxScannedLines: 10000,
+    MaxMatches: 100,
+    MaxResultBytes: 64 << 10,
+})
+// Check err, then explicitly add grepTool to the application's allowed tools.
+```
+
+Arguments are `{path, pattern}`. `path` must identify one file under the same
+relative-path policy as `read`; directories and final symlinks are rejected.
+This first increment is not recursive grep, has no glob/gitignore discovery,
+context lines or pagination, and does not promise Pi/Eino API compatibility.
+Use `find` separately for bounded filename discovery; the host must budget any
+multi-file orchestration rather than assuming per-call limits bound a whole run.
+
+Patterns use Go's case-sensitive regexp syntax (inline flags such as `(?i)`
+are allowed), not PCRE/backreferences. A nonempty pattern is limited to 256 UTF-8
+bytes. The implementation validates a conservative instruction-expansion cost
+before simplification, then enforces a 4096-instruction compiled-program limit.
+Valid but expensive patterns can be rejected. These bounds do not promise exact
+allocator-byte limits or immediate cancellation during a regexp operation.
+Matching uses the standard library, not a custom regexp engine.
+
+The complete file must fit `MaxScanBytes` (default 64 KiB, ceiling 1 MiB), be valid
+UTF-8 without NUL, and every line must fit `MaxLineBytes` (default 16 KiB, ceiling
+256 KiB). Violations fail explicitly without partial content, even when an early
+match would already fill the output. LF separates lines and is excluded from
+line text/length; CR is retained, including in CRLF. A terminal LF does not add a
+synthetic extra line. Empty files have zero lines; an LF by itself has one empty
+line. UTF-8 line limits count bytes, not characters.
+
+The result contains `matches: [{line, text}]` with 1-based line numbers and at
+most one entry per matching line, `bytes_read` for the whole validated file,
+`lines_scanned` for lines actually regex-tested, `truncated`, and `limits`.
+Matching stops at `max_scanned_lines` (default 10000, ceiling 100000),
+`max_matches` (default 100, ceiling 4096), or `max_result_bytes` (default 64 KiB,
+range 256 bytes to 1 MiB). Encoded JSON escapes and result metadata count against
+the byte budget. `truncated` conservatively means completeness was not proven;
+an exact match-count boundary may set it even if nothing was omitted. No line
+is silently shortened or skipped. Permissions/cancellation are checked during
+reading, validation, between matching lines and before publishing; revocation
+or cancellation discards all results.
+
+Matching lines can contain credentials or other sensitive text. This is not
+redaction; the host must approve content-read access and handle returned data
+accordingly. Unmatched lines are not returned. The design borrows explicit
+opt-in tools, matching-line/line-number results and visible output-limit semantics
+from [Pi](https://github.com/earendil-works/pi/blob/9c9ce8547e5a88cbe834a53e9a6d83a789d08e47/packages/coding-agent/src/core/tools/grep.ts)
+and [Eino](https://github.com/cloudwego/eino/blob/v0.9.1/adk/middlewares/filesystem/filesystem.go),
+without importing their Agent runtimes or copying their subprocess/backend
+implementations. File opening and permissions remain this package's narrower
+contract; neither upstream's local backend is treated as an OS sandbox.
+
 ## Codemode
 
 Pass the **same** definitions through the existing native adapter:
 
 ```go
 binding := codemodetool.Native(tools[0], "workspace")
-// Or explicitly bind readTool/findTool using the same adapter.
+// Or explicitly bind readTool/findTool/grepTool using the same adapter.
 codeTool, err := codemodetool.New(sandbox,
     []codemodetool.Binding{binding}, codemodetool.Options{})
 ```
@@ -244,13 +309,13 @@ security boundary for that bridge.
    under the trusted workspace/procfs boundary above. Final symlinks remain
    unsupported. No broader read-only preset is introduced yet.
 3. **Third increment:** explicit filename `find`, bounded descriptor-relative
-   traversal and no child-symlink descent. **Next:** `grep`, with additional
-   scanned-byte, per-file/line and content-result limits. No full-tree buffering
-   before truncation.
-4. **Later:** explicit workspace `write`/`edit` capabilities with host approval,
+   traversal and no child-symlink descent.
+4. **Fourth increment:** explicit single-file `grep` sharing bounded text reads,
+   with standard Go regexp, byte/line/match/JSON limits and no external process.
+5. **Later:** explicit workspace `write`/`edit` capabilities with host approval,
    atomicity and conflict semantics; read-only/workspace presets made only from
    implemented definitions.
-5. **Separate optional capability:** command execution/Python with real documented
+6. **Separate optional capability:** command execution/Python with real documented
    OS isolation, resource/lifetime control and host permissions. Never infer this
    authority from a filesystem root or Codemode allowlist.
 

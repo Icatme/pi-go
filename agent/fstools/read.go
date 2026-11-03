@@ -82,40 +82,9 @@ type readOutput struct {
 }
 
 func read(ctx context.Context, execution agent.ToolExecutionContext, root *os.Root, args arguments, options ReadOptions) (agent.ToolResult, error) {
-	if err := permission(ctx, execution); err != nil {
-		return agent.ToolResult{}, err
-	}
-	file, err := openRegular(ctx, execution, root, args.Path)
+	data, err := readTextFile(ctx, execution, root, args.Path, options.MaxBytes)
 	if err != nil {
 		return agent.ToolResult{}, err
-	}
-	defer file.Close()
-	// The extra byte detects growth beyond the cap without trusting Stat.Size.
-	data := make([]byte, options.MaxBytes+1)
-	used := 0
-	for used < len(data) {
-		if err := permission(ctx, execution); err != nil {
-			return agent.ToolResult{}, err
-		}
-		end := min(used+8192, len(data))
-		n, err := file.Read(data[used:end])
-		used += n
-		if used > options.MaxBytes {
-			return agent.ToolResult{}, failure(agent.ToolFailureResource, "fstools: file exceeds read limit", nil)
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return agent.ToolResult{}, failure(agent.ToolFailureResource, "fstools: cannot read file", err)
-		}
-		if n == 0 {
-			return agent.ToolResult{}, failure(agent.ToolFailureResource, "fstools: file read made no progress", io.ErrNoProgress)
-		}
-	}
-	data = data[:used]
-	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
-		return agent.ToolResult{}, failure(agent.ToolFailureResource, "fstools: file is not supported UTF-8 text", nil)
 	}
 	encoded, _ := json.Marshal(readOutput{Text: string(data)})
 	if len(encoded) > options.MaxResultBytes {
@@ -125,4 +94,45 @@ func read(ctx context.Context, execution agent.ToolExecutionContext, root *os.Ro
 		return agent.ToolResult{}, err
 	}
 	return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: string(encoded)}}, StructuredContent: encoded}, nil
+}
+
+// readTextFile is shared by read and single-file grep. It validates the entire
+// bounded file before either caller publishes any content.
+func readTextFile(ctx context.Context, execution agent.ToolExecutionContext, root *os.Root, filename string, maxBytes int) ([]byte, error) {
+	if err := permission(ctx, execution); err != nil {
+		return nil, err
+	}
+	file, err := openRegular(ctx, execution, root, filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	// The extra byte detects growth beyond the cap without trusting Stat.Size.
+	data := make([]byte, maxBytes+1)
+	used := 0
+	for used < len(data) {
+		if err := permission(ctx, execution); err != nil {
+			return nil, err
+		}
+		end := min(used+8192, len(data))
+		n, err := file.Read(data[used:end])
+		used += n
+		if used > maxBytes {
+			return nil, failure(agent.ToolFailureResource, "fstools: file exceeds read limit", nil)
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, failure(agent.ToolFailureResource, "fstools: cannot read file", err)
+		}
+		if n == 0 {
+			return nil, failure(agent.ToolFailureResource, "fstools: file read made no progress", io.ErrNoProgress)
+		}
+	}
+	data = data[:used]
+	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
+		return nil, failure(agent.ToolFailureResource, "fstools: file is not supported UTF-8 text", nil)
+	}
+	return data, nil
 }

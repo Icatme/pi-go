@@ -393,8 +393,11 @@ for a caller-owned `os.Root` on Linux. `fstools.ReadDefinition` separately opts
 into bounded text-file reads from a trusted local workspace; it requires normal
 procfs and does not add read authority to existing `Definitions` callers. Other
 platforms fail closed. `fstools.FindDefinition` separately opts into bounded
-filename discovery without content reads or child-symlink descent. These tools
-use the ordinary Codemode/permission lifecycle. Nothing is enabled by default; writes and command execution remain
+filename discovery without content reads or child-symlink descent.
+`fstools.GrepDefinition` explicitly opts into bounded single-file content search,
+sharing the text-read boundary and using Go regexp without external processes.
+These tools use the ordinary Codemode/permission lifecycle. Nothing is enabled
+by default; writes and command execution remain
 separate future capabilities.
 
 ## Agents As Task Tools
