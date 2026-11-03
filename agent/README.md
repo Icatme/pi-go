@@ -389,10 +389,12 @@ restores an executor from serialized history.
 ## Optional filesystem tools
 
 [`agent/fstools`](fstools/README.md) supplies an opt-in, bounded `ls` definition
-for a caller-owned `os.Root` on Linux. Other platforms fail closed. The same
-definition can be bound through Codemode; permissions remain host-owned. No
-filesystem tools are enabled by default. File reads, writes and command execution
-are separate future increments, not implicit capabilities of this package.
+for a caller-owned `os.Root` on Linux. `fstools.ReadDefinition` separately opts
+into bounded text-file reads from a trusted local workspace; it requires normal
+procfs and does not add read authority to existing `Definitions` callers. Other
+platforms fail closed. Both definitions use the ordinary Codemode/permission
+lifecycle. Nothing is enabled by default; writes and command execution remain
+separate future capabilities.
 
 ## Agents As Task Tools
 

@@ -1,9 +1,11 @@
-# Optional filesystem tools: first increment
+# Optional filesystem tools
 
 `fstools.Definitions(root, options)` creates one ordinary Agent definition:
-`ls`. Nothing is installed or enabled in the core Agent, CLI, managed MCP
-configuration, or a downstream application. This is not a complete filesystem
-suite: `read`, `find`, `grep`, `write`, `edit`, shell and Python are not supplied.
+`ls`. `fstools.ReadDefinition(root, readOptions)` separately opts into `read`;
+existing `Definitions` callers never gain read authority just by upgrading.
+Nothing is installed or enabled in the core Agent, CLI, managed MCP configuration,
+or a downstream application. This is not a complete filesystem suite: `find`,
+`grep`, `write`, `edit`, shell and Python are not supplied.
 
 ```go
 // trustedWorkspace comes from application configuration, never model input.
@@ -24,13 +26,14 @@ Create a separate root and tool set for each trusted tenant/session authorizatio
 scope. A manager's MCP identity changes do not automatically rebind native
 filesystem tools. The host controls scope changes and revocation; it should
 retire old definitions and stop calls before closing their root. A nil permission
-hook means the host permits all directory listings under that root.
+hook means the host permits directory listings under that root and, when
+`ReadDefinition` is explicitly selected, the text reads that tool supports.
 
-## Contract and limits
+## Directory-listing contract and limits
 
 `ls({"path":"."})` lists the root. A path is required, valid Unicode, at most
 4096 UTF-8 bytes, relative and slash-separated. Absolute paths, any `..`
-component, NUL, backslashes and colons fail. Relative symlinks are allowed only
+component, NUL, backslashes and colons fail. For `ls`, relative symlinks are allowed only
 when Go's `os.Root` resolves them within the opened root; escaping and absolute
 symlink targets fail, including absolute targets that happen to point inside.
 The result contains `entries: [{name, type}]` and `truncated: bool`. Types are
@@ -78,12 +81,73 @@ trusted directory path. Applications needing a stronger boundary must provide
 an independently configured OS/container sandbox. No isolation claim is made
 for Windows, macOS, JS/WASM, or any untested filesystem/platform.
 
+## Explicit text-file reads
+
+```go
+readTool, err := fstools.ReadDefinition(root, fstools.ReadOptions{
+    MaxBytes: 64 << 10,
+    MaxResultBytes: 128 << 10,
+})
+if err != nil { return err }
+definition.Tools = append(definition.Tools, readTool)
+```
+
+`read({"path":"notes.txt"})` returns `{text: "..."}` as identical JSON text and
+structured content. It accepts the same relative path syntax as `ls`, but rejects
+**all final symlinks**, even an otherwise safe relative symlink. Intermediate
+symlink directories are resolved by `os.Root` under its normal containment rules.
+There is no offset, paging, model-controlled limit or partial/truncated text.
+
+Only a regular inode can be read. Directories, FIFOs, devices, sockets and final
+symlink inodes fail. NUL bytes and invalid UTF-8 fail without returning content.
+The byte limit defaults to 64 KiB, maximum 1 MiB. Reads request at most the limit
+plus one byte, in chunks of at most 8 KiB, so file growth cannot bypass the cap.
+The encoded JSON limit defaults to 128 KiB, minimum 256 bytes and maximum 8 MiB;
+escaping expansion and the envelope count. Exceeding either limit is an explicit
+error, never a silent truncation. Retaining both result representations consumes
+up to twice the encoded result bound; input buffers and runtime metadata are
+additional. Trusted after hooks remain responsible for their replacement output.
+
+### Read-open security boundary
+
+Linux read first pins the target with `O_PATH` through `os.Root`, checks its inode
+type, then reopens **that descriptor** through a pinned `/proc/self/fd` directory.
+It never reopens the original untrusted pathname. The original descriptor stays
+alive until the new read descriptor is verified to be the same regular inode.
+This avoids a file-to-FIFO/device/symlink replacement between checking and opening.
+OS read permissions still apply when the pinned inode is reopened. The original
+pathname can be removed/replaced without redirecting the read to its replacement.
+The file's contents can still change in place: this is not a snapshot or a lock.
+
+This technique requires a **trusted host mount namespace and a normal procfs**
+mounted at `/proc`; absent/unavailable procfs fails closed. The proc directory's
+filesystem type and reopened inode identity are checked, but these checks do not
+prove that a maliciously rebound proc subtree belongs to the current process.
+A host that can rebind `/proc/self/fd` or manipulate the process's descriptor table
+is outside this threat model. No claim of protection against such a host is made.
+
+The host must select a workspace containing ordinary local data files. Regular
+inode mode does **not** prove ordinary disk-file behavior: virtual filesystems may
+expose regular-looking files with special semantics. Procfs and sysfs file targets
+are rejected as defense in depth; this is not an exhaustive classifier of virtual
+filesystems. Mount crossings, hardlinks, hostile/FUSE/network filesystem behavior
+and arbitrary in-process code are not isolated. Do not expose virtual/hostile
+filesystem roots expecting this tool to make them safe. Stronger requirements
+need an independently configured OS/container boundary, not a broader tool label.
+
+Permission/cancellation is checked before pinning, before accessing procfs,
+immediately before reopening, before every read chunk and before publishing text.
+No syscall is promised to obey a context deadline. Only errors with safe generic
+messages reach the model; original OS causes remain inspectable by trusted Go
+callers. Neither construction nor reading invokes a shell or a subprocess.
+
 ## Codemode
 
 Pass the **same** definitions through the existing native adapter:
 
 ```go
 binding := codemodetool.Native(tools[0], "workspace")
+// Or explicitly bind readTool using the same adapter.
 codeTool, err := codemodetool.New(sandbox,
     []codemodetool.Binding{binding}, codemodetool.Options{})
 ```
@@ -97,12 +161,13 @@ security boundary for that bridge.
 
 ## Small-PR delivery plan
 
-1. **This PR:** optional Linux `ls`, root-relative paths, bounded output,
+1. **First increment:** optional Linux `ls`, root-relative paths, bounded output,
    cancellation/permission checks, direct and Codemode tests. Default core stays
    tool-free.
-2. **Next:** bounded text `read`, after resolving file-type/open races and special
-   file handling per supported OS. Prove regular-file reads, byte/UTF-8 limits,
-   symlink replacement behavior and cancellation limits before adding a preset.
+2. **Second increment:** explicitly selected Linux text `read`, pinned-inode
+   reopening, byte/UTF-8/JSON limits and deterministic replacement-race tests,
+   under the trusted workspace/procfs boundary above. Final symlinks remain
+   unsupported. No broader read-only preset is introduced yet.
 3. **Then:** `find` and `grep`, with independent visited-entry, depth, scanned-byte,
    per-file/line, match and output budgets. No full-tree buffering before truncation.
 4. **Later:** explicit workspace `write`/`edit` capabilities with host approval,
