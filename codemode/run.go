@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"sync"
 	"unicode/utf8"
+
+	"github.com/Icatme/pi-go/internal/receiptcapture"
 )
 
 type invocation struct {
@@ -403,10 +405,17 @@ func (r *runState) execute(call invocation) {
 		r.finish(call, nil, r.ctx.Err(), false)
 		return
 	}
+	invokeCtx, sealReceipt, receiptErr := receiptcapture.Enter(r.ctx, "codemode", strconv.Itoa(call.call.ID), call.call.Name)
+	if receiptErr != nil {
+		r.finish(call, nil, receiptErr, false)
+		return
+	}
+	defer sealReceipt()
 	r.recordExecution(call.call.ID, Execution{Local: "entered", Remote: "unknown"}, "")
 	var raw json.RawMessage
 	var err error
 	func() {
+		defer sealReceipt()
 		defer func() {
 			if p := recover(); p != nil {
 				cause, ok := p.(error)
@@ -416,7 +425,7 @@ func (r *runState) execute(call invocation) {
 				err = &CallError{Code: "host_panic", Message: "host invocation panicked; inspect the host report", Execution: Execution{Local: "returned", Remote: "unknown"}, Err: cause}
 			}
 		}()
-		raw, err = call.invoke(r.ctx, call.call)
+		raw, err = call.invoke(invokeCtx, call.call)
 	}()
 	r.finish(call, raw, err, true)
 }

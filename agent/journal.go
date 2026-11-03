@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync"
 	"unicode/utf8"
+
+	"github.com/Icatme/pi-go/internal/receiptcapture"
 )
 
 // RunJournal is a host-owned commit boundary. Record must atomically persist
@@ -42,7 +44,9 @@ type journalScope struct {
 }
 
 func withJournal(ctx context.Context, journal RunJournal) context.Context {
-	return context.WithValue(ctx, journalKey{}, &journalScope{journal: journal, accepted: make(map[stateKey]json.RawMessage)})
+	// Model loops cannot yet persist/recover receipts, even with a nil journal.
+	// Do not let nested direct wrappers or inherited capture imply otherwise.
+	return context.WithValue(receiptcapture.Block(ctx), journalKey{}, &journalScope{journal: journal, accepted: make(map[stateKey]json.RawMessage)})
 }
 
 // ToolState is available only to sequential top-level tools in a journaled run.
