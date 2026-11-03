@@ -386,6 +386,14 @@ can be assigned to `AgentDefinition.ToolResolver`. Resume rebuilds current
 executors only after the trusted host supplies identity provenance; it never
 restores an executor from serialized history.
 
+## Optional filesystem tools
+
+[`agent/fstools`](fstools/README.md) supplies an opt-in, bounded `ls` definition
+for a caller-owned `os.Root` on Linux. Other platforms fail closed. The same
+definition can be bound through Codemode; permissions remain host-owned. No
+filesystem tools are enabled by default. File reads, writes and command execution
+are separate future increments, not implicit capabilities of this package.
+
 ## Agents As Task Tools
 
 `prebuilt.NewAgentTool` exposes one named definition as a strict
