@@ -392,8 +392,9 @@ restores an executor from serialized history.
 for a caller-owned `os.Root` on Linux. `fstools.ReadDefinition` separately opts
 into bounded text-file reads from a trusted local workspace; it requires normal
 procfs and does not add read authority to existing `Definitions` callers. Other
-platforms fail closed. Both definitions use the ordinary Codemode/permission
-lifecycle. Nothing is enabled by default; writes and command execution remain
+platforms fail closed. `fstools.FindDefinition` separately opts into bounded
+filename discovery without content reads or child-symlink descent. These tools
+use the ordinary Codemode/permission lifecycle. Nothing is enabled by default; writes and command execution remain
 separate future capabilities.
 
 ## Agents As Task Tools

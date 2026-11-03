@@ -164,7 +164,7 @@ func list(ctx context.Context, execution agent.ToolExecutionContext, root *os.Ro
 		if err := permission(ctx, execution); err != nil {
 			return agent.ToolResult{}, err
 		}
-		items, err := directory.ReadDir(1)
+		items, err := readOneEntry(directory)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return agent.ToolResult{}, failure(agent.ToolFailureResource, "fstools: cannot list directory", err)
 		}
@@ -208,4 +208,17 @@ func list(ctx context.Context, execution agent.ToolExecutionContext, root *os.Ro
 	}
 	encoded, _ := json.Marshal(result)
 	return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: string(encoded)}}, StructuredContent: encoded}, nil
+}
+
+// readOneEntry distinguishes true EOF from a disappearing entry. On Go 1.26,
+// ReadDir(1) can return no entries and nil when an entry disappears before its
+// eager stat; treating that as EOF would incorrectly report a complete list.
+func readOneEntry(directory interface {
+	ReadDir(int) ([]os.DirEntry, error)
+}) ([]os.DirEntry, error) {
+	entries, err := directory.ReadDir(1)
+	if len(entries) == 0 && err == nil {
+		return nil, io.ErrNoProgress
+	}
+	return entries, err
 }

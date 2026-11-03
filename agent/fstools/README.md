@@ -2,10 +2,11 @@
 
 `fstools.Definitions(root, options)` creates one ordinary Agent definition:
 `ls`. `fstools.ReadDefinition(root, readOptions)` separately opts into `read`;
-existing `Definitions` callers never gain read authority just by upgrading.
+`fstools.FindDefinition(root, findOptions)` separately opts into filename search.
+Existing `Definitions` callers never gain either capability just by upgrading.
 Nothing is installed or enabled in the core Agent, CLI, managed MCP configuration,
-or a downstream application. This is not a complete filesystem suite: `find`,
-`grep`, `write`, `edit`, shell and Python are not supplied.
+or a downstream application. This is not a complete filesystem suite: `grep`,
+`write`, `edit`, shell and Python are not supplied.
 
 ```go
 // trustedWorkspace comes from application configuration, never model input.
@@ -27,7 +28,8 @@ scope. A manager's MCP identity changes do not automatically rebind native
 filesystem tools. The host controls scope changes and revocation; it should
 retire old definitions and stop calls before closing their root. A nil permission
 hook means the host permits directory listings under that root and, when
-`ReadDefinition` is explicitly selected, the text reads that tool supports.
+`ReadDefinition` is explicitly selected, the text reads that tool supports;
+selecting `FindDefinition` similarly authorizes its bounded filename traversal.
 
 ## Directory-listing contract and limits
 
@@ -141,13 +143,86 @@ No syscall is promised to obey a context deadline. Only errors with safe generic
 messages reach the model; original OS causes remain inspectable by trusted Go
 callers. Neither construction nor reading invokes a shell or a subprocess.
 
+## Explicit filename discovery
+
+```go
+findTool, err := fstools.FindDefinition(root, fstools.FindOptions{
+    MaxVisitedEntries: 10000,
+    MaxDepth: 8,
+    MaxMatches: 256,
+    MaxResultBytes: 64 << 10,
+})
+if err != nil { return err }
+definition.Tools = append(definition.Tools, findTool)
+```
+
+`find({"path":".", "pattern":"*.go"})` searches **basenames**, not file contents.
+The pattern is a case-sensitive Go `path.Match` glob, at most 256 UTF-8 bytes:
+`*`, `?`, character classes and backslash escaping are supported. A slash, NUL,
+empty pattern or malformed glob fails before filesystem I/O. `**` has no special
+recursive meaning; traversal happens independently of the basename match. A
+nonmatching directory is still searched unless a traversal limit prevents it.
+
+Results contain `entries: [{path, type}]`, `visited`, `truncated` and `limits`.
+Types match `ls`. Paths are slash-separated, root-relative logical traversal paths;
+the starting directory itself is not a match candidate. Basenames are preserved
+exactly and JSON-escaped, including newlines, colons and backslashes. A discovered
+path with a colon/backslash is not accepted by this package's stricter path-input
+syntax; finding its name does not expand the read tool's accepted path syntax.
+Non-UTF-8 names fail instead of undergoing lossy replacement.
+
+Traversal is depth-first in filesystem order, not sorted, paged or a snapshot.
+The starting directory is **depth 1**: `MaxDepth: 1` examines its entries but enters
+no child directories. Matching directories at the boundary may be returned,
+with `max_depth` recorded; other entries at the current level are still searched.
+Every examined entry counts against `MaxVisitedEntries`, including nonmatches.
+Entry and match budgets stop the search as soon as exhausted, without an extra
+lookahead read to prove whether more data exists. Therefore `truncated: true`
+means **completeness was not established**, not that omitted matches necessarily
+exist. Reaching the depth bound on an empty child is conservative in the same way.
+
+Defaults/ceilings are: visited entries 10000/100000, depth 8/64, matches 256/4096,
+encoded result bytes 64 KiB/1 MiB (minimum 256). All are host-controlled. `limits`
+contains any reached `max_depth`, `max_visited_entries`, `max_matches`, or
+`max_result_bytes`. Space for the worst-case envelope and reasons is reserved
+before collecting matches; this can stop before fully filling the byte cap.
+Matching paths too large for the budget can produce an empty truncated result.
+Both retained result representations together consume up to twice the JSON cap.
+Trusted after hooks remain responsible for bounding their replacement results.
+No full-directory or full-tree buffering occurs: each directory read requests one
+entry, though Go internally buffers directory bytes/metadata. At most `MaxDepth`
+directory handles are held by the traversal; all are closed on success/error.
+
+The starting path uses `os.Root` containment and may resolve a safe in-root
+symlink, as `ls` does. **Child symlinks are listed but never descended through.**
+Each child open uses one basename relative to the still-open parent descriptor,
+with `O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK`; a directory swapped for a symlink,
+FIFO or nondirectory cannot redirect that descent. File content is never
+opened/read, and symlink target text is never returned. Other special entries
+can be returned by name and type. Permission is checked before the initial open, every bounded directory
+read, every child open and final publication. Cancellation/revocation or an I/O
+error discards accumulated matches rather than returning an apparently complete
+partial search. An empty read without EOF is also an error: a disappearing
+entry must not be mistaken for a complete search. The same guard applies to
+`ls`. Concurrent mutation may therefore cause a safe error.
+
+A directory moved after it was opened remains the object being traversed. Its
+reported logical path may no longer resolve from the root afterward. This is not
+live ancestry enforcement or OS isolation: mount crossings/cycles, hostile
+filesystems and arbitrary in-process code remain outside the security guarantee.
+Depth/entry budgets bound work on successful operations but cannot interrupt a
+blocked filesystem syscall. The host still selects a trusted local workspace and
+uses the permission hook to revoke in-flight calls; closing the root alone is not
+revocation of already-open directory descriptors. Linux only; no procfs dependency
+is introduced for filename discovery.
+
 ## Codemode
 
 Pass the **same** definitions through the existing native adapter:
 
 ```go
 binding := codemodetool.Native(tools[0], "workspace")
-// Or explicitly bind readTool using the same adapter.
+// Or explicitly bind readTool/findTool using the same adapter.
 codeTool, err := codemodetool.New(sandbox,
     []codemodetool.Binding{binding}, codemodetool.Options{})
 ```
@@ -168,8 +243,10 @@ security boundary for that bridge.
    reopening, byte/UTF-8/JSON limits and deterministic replacement-race tests,
    under the trusted workspace/procfs boundary above. Final symlinks remain
    unsupported. No broader read-only preset is introduced yet.
-3. **Then:** `find` and `grep`, with independent visited-entry, depth, scanned-byte,
-   per-file/line, match and output budgets. No full-tree buffering before truncation.
+3. **Third increment:** explicit filename `find`, bounded descriptor-relative
+   traversal and no child-symlink descent. **Next:** `grep`, with additional
+   scanned-byte, per-file/line and content-result limits. No full-tree buffering
+   before truncation.
 4. **Later:** explicit workspace `write`/`edit` capabilities with host approval,
    atomicity and conflict semantics; read-only/workspace presets made only from
    implemented definitions.

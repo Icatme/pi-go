@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -240,6 +241,29 @@ func TestRootRenameAndArgumentRevalidation(t *testing.T) {
 	for _, args := range []any{map[string]any{"path": "../"}, map[string]any{"path": ".", "extra": 1}, nil} {
 		if _, err := tool.Execute(t.Context(), agent.ToolExecutionContext{Args: args}); err == nil {
 			t.Fatalf("direct Execute accepted %#v", args)
+		}
+	}
+}
+
+type emptyDirectoryRead struct {
+	err       error
+	requested int
+}
+
+func (r *emptyDirectoryRead) ReadDir(n int) ([]os.DirEntry, error) {
+	r.requested = n
+	return nil, r.err
+}
+func TestEmptyDirectoryReadIsNotAutomaticallyEOF(t *testing.T) {
+	for _, cause := range []error{nil, io.EOF, os.ErrPermission} {
+		reader := &emptyDirectoryRead{err: cause}
+		entries, err := readOneEntry(reader)
+		want := cause
+		if want == nil {
+			want = io.ErrNoProgress
+		}
+		if len(entries) != 0 || !errors.Is(err, want) || reader.requested != 1 {
+			t.Fatalf("entries=%v error=%v requested=%d", entries, err, reader.requested)
 		}
 	}
 }
