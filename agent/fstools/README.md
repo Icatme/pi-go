@@ -5,7 +5,9 @@
 `fstools.FindDefinition(root, findOptions)` separately opts into filename search.
 `fstools.GrepDefinition(root, grepOptions)` opts into single-file content search.
 `fstools.CreateFileDefinition(root, createOptions)` explicitly opts into new-file
-creation only. Existing `Definitions` callers never gain these capabilities by upgrading.
+creation only. `fstools.PreviewEditDefinition(root, previewOptions)` opts into
+read-only replacement previews. Existing `Definitions` callers never gain these
+capabilities by upgrading.
 Nothing is installed or enabled in the core Agent, CLI, managed MCP configuration,
 or a downstream application. This is not a complete filesystem suite:
 overwriting `write`, `edit`, shell and Python are not supplied.
@@ -347,13 +349,70 @@ attempt, and do not blindly retry or roll back a reported commit. No filesystem
 operation is retried by this tool. The package does not claim a transaction,
 mount isolation or a general OS sandbox.
 
+## Read-only edit previews
+
+`PreviewEditDefinition` exposes `preview_edit({path, old_text, new_text})`.
+It reads one bounded file and computes a candidate in memory; it never modifies
+the original, creates another file, or automatically invokes `create_file`.
+The complete candidate can be reviewed by a person or separately passed to an
+explicitly authorized create-only operation under a **new** destination name.
+There is still no overwriting/apply-edit tool.
+
+```go
+previewTool, err := fstools.PreviewEditDefinition(root, fstools.PreviewEditOptions{
+    MaxBytes: 64 << 10,
+    MaxResultBytes: 128 << 10,
+})
+// Check err and explicitly select/bind this content-reading capability.
+```
+
+The source, old text, new text and candidate each have a host byte limit
+(default 64 KiB, ceiling 1 MiB). `old_text` must be nonempty and occur exactly
+once, **including overlapping occurrences**: searching `aa` in `aaa` is
+ambiguous. No match, multiple matches and identical old/new text are errors.
+An empty `new_text` deletes the selected occurrence. Replacement text is
+inserted once and is not searched/replaced recursively.
+
+Matching is exact on the UTF-8 bytes, not fuzzy, case-insensitive or normalized.
+The tool does not normalize BOMs, whitespace, LF, CRLF, mixed endings or bare CR.
+Bytes outside the selected match stay unchanged. For a cross-line match, include
+its actual newline characters in `old_text`; `a\nb` does not match `a\r\nb`.
+A BOM is preserved unless explicitly included in the replacement's matched span.
+This borrows the targeted, unique-match workflow from
+[Pi](https://github.com/earendil-works/pi/blob/9c9ce8547e5a88cbe834a53e9a6d83a789d08e47/packages/coding-agent/src/core/tools/edit.ts)
+and [Eino](https://github.com/cloudwego/eino-ext/blob/eee37f63ff9548c5eaec48fc157863339f8eda07/adk/backend/local/local.go),
+without importing their runtimes or copying their write/normalization backends.
+
+The result has `preview_only:true`, the complete candidate `content`,
+`original_sha256`, `candidate_sha256` and `match_line`. Hashes cover the exact
+source bytes read and exact returned candidate bytes, including BOM/newlines.
+`match_line` is 1 plus the number of LF bytes before the match's first byte;
+a bare CR does not increment it. Candidate length is checked before allocation,
+then encoded JSON including escapes/hashes is checked against `MaxResultBytes`
+(default 128 KiB, range 512 bytes to 8 MiB). Oversized/nontext/invalid input fails
+without a partial candidate; runtime and child-call budgets also apply.
+
+Fingerprints identify **this call's bytes**, not an atomic filesystem snapshot,
+current on-disk contents, a lock, a durable revision or a CAS token. A concurrent
+writer may change the source during/after reading. Any later apply operation
+needs fresh authorization and a separate sound concurrency policy; a matching
+hash check followed by ordinary rename would not provide that policy.
+
+The preview inherits `read`'s Linux/procfs, regular-file, final-symlink and trusted
+workspace boundaries. It reuses the existing bounded text reader and adds no
+filesystem opener, diff framework, dependency or process. Permissions and
+cancellation are checked between bounded stages and before publication; a denied
+or canceled preview returns no candidate. The result contains **full file
+content**, potentially including secrets: authorize it like `read`, not like a
+metadata-only comparison. It does not redact or make content safe to share.
+
 ## Codemode
 
 Pass the **same** definitions through the existing native adapter:
 
 ```go
 binding := codemodetool.Native(tools[0], "workspace")
-// Or explicitly bind readTool/findTool/grepTool/createTool using the same adapter.
+// Or explicitly bind readTool/findTool/grepTool/createTool/previewTool using the same adapter.
 codeTool, err := codemodetool.New(sandbox,
     []codemodetool.Binding{binding}, codemodetool.Options{})
 ```
@@ -380,10 +439,12 @@ security boundary for that bridge.
    with standard Go regexp, byte/line/match/JSON limits and no external process.
 5. **Fifth increment:** explicit Linux create-only text publication, without
    overwriting any name and with commit/unknown facts retained on failure.
-6. **Later:** explicit workspace overwriting `write`/`edit` capabilities with host approval,
+6. **Sixth increment:** read-only exact replacement preview with complete bounded
+   candidate text and informational byte fingerprints. No apply/overwrite.
+7. **Later:** explicit workspace overwriting `write`/`edit` capabilities with host approval,
    atomicity and conflict semantics; read-only/workspace presets made only from
    implemented definitions.
-7. **Separate optional capability:** command execution/Python with real documented
+8. **Separate optional capability:** command execution/Python with real documented
    OS isolation, resource/lifetime control and host permissions. Never infer this
    authority from a filesystem root or Codemode allowlist.
 

@@ -425,6 +425,8 @@ sharing the text-read boundary and using Go regexp without external processes.
 `fstools.CreateFileDefinition` separately opts into create-only text publication,
 never overwriting an existing name; it requires Linux O_TMPFILE and trusted
 procfs. Committed/uncertain outcomes retain local-effect facts on failure.
+`fstools.PreviewEditDefinition` computes a read-only unique-replacement candidate
+with byte fingerprints, without writing or promising compare-and-swap.
 These tools use the ordinary Codemode/permission lifecycle. Nothing is enabled
 by default; overwriting writes, edits and command execution remain separate
 future capabilities.
