@@ -422,9 +422,12 @@ platforms fail closed. `fstools.FindDefinition` separately opts into bounded
 filename discovery without content reads or child-symlink descent.
 `fstools.GrepDefinition` explicitly opts into bounded single-file content search,
 sharing the text-read boundary and using Go regexp without external processes.
+`fstools.CreateFileDefinition` separately opts into create-only text publication,
+never overwriting an existing name; it requires Linux O_TMPFILE and trusted
+procfs. Committed/uncertain outcomes retain local-effect facts on failure.
 These tools use the ordinary Codemode/permission lifecycle. Nothing is enabled
-by default; writes and command execution remain
-separate future capabilities.
+by default; overwriting writes, edits and command execution remain separate
+future capabilities.
 
 ## Agents As Task Tools
 

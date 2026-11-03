@@ -44,18 +44,12 @@ func openRegular(ctx context.Context, execution agent.ToolExecutionContext, root
 	}
 	// Pin the proc directory too: reopen by decimal fd relative to this handle,
 	// never by traversing the model-supplied pathname a second time.
-	procFD, err := unix.Open("/proc/self/fd", unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	proc, err := openProcDirectory()
 	if err != nil {
 		return fail(err)
 	}
-	proc := os.NewFile(uintptr(procFD), "fstools-proc-fd")
 	defer proc.Close()
-	if err := unix.Fstatfs(procFD, &filesystem); err != nil {
-		return fail(err)
-	}
-	if filesystem.Type != unix.PROC_SUPER_MAGIC {
-		return fail(errors.New("procfs is required"))
-	}
+	procFD := int(proc.Fd())
 	if err := permission(ctx, execution); err != nil {
 		return nil, err
 	}
@@ -72,6 +66,26 @@ func openRegular(ctx context.Context, execution agent.ToolExecutionContext, root
 	if !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
 		file.Close()
 		return fail(errors.New("pinned inode changed"))
+	}
+	return file, nil
+}
+
+// openProcDirectory pins the trusted host's proc fd directory for decimal-fd
+// operations. Procfs type alone does not defend against malicious bind mounts.
+func openProcDirectory() (*os.File, error) {
+	fd, err := unix.Open("/proc/self/fd", unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), "fstools-proc-fd")
+	var fs unix.Statfs_t
+	if err = unix.Fstatfs(fd, &fs); err != nil {
+		file.Close()
+		return nil, err
+	}
+	if fs.Type != unix.PROC_SUPER_MAGIC {
+		file.Close()
+		return nil, errors.New("procfs is required")
 	}
 	return file, nil
 }

@@ -1,0 +1,252 @@
+package fstools
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/Icatme/pi-go/agent"
+	"github.com/Icatme/pi-go/internal/jsontext"
+)
+
+// CreateOptions bounds explicitly selected create-only UTF-8 file writes.
+// The host chooses the root; the model cannot select modes or overwrite policy.
+type CreateOptions struct{ MaxBytes int } // Default 64 KiB; ceiling 1 MiB.
+
+// CreateFileDefinition creates only new files. Existing names are never replaced;
+// parent directories must exist. Linux O_TMPFILE and trusted procfs are required.
+// Nothing is enabled by default. This is not a filesystem transaction or sandbox.
+func CreateFileDefinition(root *os.Root, options CreateOptions) (agent.ToolDefinition, error) {
+	if !supported {
+		return agent.ToolDefinition{}, ErrUnsupportedPlatform
+	}
+	if root == nil {
+		return agent.ToolDefinition{}, errors.New("fstools: root is required")
+	}
+	if options.MaxBytes == 0 {
+		options.MaxBytes = 64 << 10
+	}
+	if options.MaxBytes < 1 || options.MaxBytes > 1<<20 {
+		return agent.ToolDefinition{}, errors.New("fstools: unsupported create limit")
+	}
+	maxArgs := 6*options.MaxBytes + (32 << 10)
+	parseArgs := func(raw []byte) (createArguments, error) { return parseCreate(raw, options.MaxBytes, maxArgs) }
+	return agent.ToolDefinition{Name: "create_file", Description: "Create one new UTF-8 text file under the host-authorized root. Never overwrites any existing name and never creates parent directories. Existing, unsupported or oversized targets fail. After an uncertain or committed failure, inspect host execution facts and destination before retrying; no automatic rollback.",
+		Parameters:       map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "maxLength": 4096}, "content": map[string]any{"type": "string", "maxLength": options.MaxBytes}}, "required": []string{"path", "content"}, "additionalProperties": false},
+		OutputSchema:     map[string]any{"type": "object", "properties": map[string]any{"created": map[string]any{"type": "boolean"}, "durability": map[string]any{"type": "string", "enum": []string{"synced", "unknown"}}}, "required": []string{"created", "durability"}, "additionalProperties": false},
+		MaxArgumentBytes: maxArgs,
+		ParseArguments: func(call agent.ToolCall) (any, error) {
+			raw := call.Arguments
+			if call.ParsedArgs != nil {
+				if err := jsontext.ValidateStrings(call.ParsedArgs); err != nil {
+					return nil, invalid(err)
+				}
+				var err error
+				raw, err = json.Marshal(call.ParsedArgs)
+				if err != nil {
+					return nil, invalid(err)
+				}
+			}
+			return parseArgs(raw)
+		},
+		Execute: func(ctx context.Context, in agent.ToolExecutionContext) (agent.ToolResult, error) {
+			if err := jsontext.ValidateStrings(in.Args); err != nil {
+				return agent.ToolResult{}, invalid(err)
+			}
+			raw, err := json.Marshal(in.Args)
+			if err != nil {
+				return agent.ToolResult{}, invalid(err)
+			}
+			args, err := parseArgs(raw)
+			if err != nil {
+				return agent.ToolResult{}, err
+			}
+			if err := permission(ctx, in); err != nil {
+				return agent.ToolResult{}, err
+			}
+			pending, err := newPendingCreate(root, args.Path)
+			if err != nil {
+				return agent.ToolResult{}, createFailure(false, false, "fstools: cannot prepare new file; destination was not published", err)
+			}
+			return publishCreate(ctx, in, pending, []byte(*args.Content))
+		},
+	}, nil
+}
+
+type createArguments struct {
+	Path    string  `json:"path"`
+	Content *string `json:"content"`
+}
+
+func parseCreate(raw []byte, maxBytes, maxArgs int) (createArguments, error) {
+	var args createArguments
+	bad := func(err error) (createArguments, error) {
+		return args, failure(agent.ToolFailureArgumentInvalid, "fstools: expected a new relative file path and bounded UTF-8 content without NUL", err)
+	}
+	if len(raw) > maxArgs {
+		return bad(errors.New("argument limit"))
+	}
+	if err := jsontext.ValidateUnicode(raw); err != nil {
+		return bad(err)
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&args); err != nil {
+		return bad(err)
+	}
+	if err := d.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return bad(errors.New("expected one object"))
+	}
+	if args.Content == nil || len(*args.Content) > maxBytes || strings.ContainsRune(*args.Content, 0) {
+		return bad(errors.New("invalid content"))
+	}
+	if args.Path == "." || strings.HasSuffix(args.Path, "/") || strings.HasSuffix(args.Path, "/.") {
+		return bad(errors.New("expected file basename"))
+	}
+	encoded, _ := json.Marshal(arguments{Path: args.Path})
+	p, err := parse(encoded)
+	if err != nil {
+		return bad(err)
+	}
+	if p.Path == "." {
+		return bad(errors.New("expected file basename"))
+	}
+	args.Path = p.Path
+	return args, nil
+}
+
+// pendingCreation is a private, per-call staging lifecycle, also used for fault
+// injection. It is not an application backend or a pluggable authority boundary.
+type pendingCreation interface {
+	Write([]byte) (int, error)
+	Sync() error
+	Publish() error
+	SyncDirectory() error
+	Close() error
+}
+
+func createFailure(committed, attempted bool, message string, cause error) error {
+	effect := agent.ToolLocalEffectUnknown
+	reason := "create_not_published"
+	if attempted {
+		reason = "create_publication_unknown"
+	}
+	if committed {
+		effect = agent.ToolLocalEffectCommittedReported
+		reason = "create_published"
+	}
+	code := agent.ToolFailureResource
+	if errors.Is(cause, context.Canceled) {
+		code = agent.ToolFailureCanceled
+	} else if errors.Is(cause, context.DeadlineExceeded) {
+		code = agent.ToolFailureDeadline
+	} else {
+		var typed *agent.ToolExecutionError
+		if errors.As(cause, &typed) && typed.Code == agent.ToolFailurePolicyDenied {
+			code = agent.ToolFailurePolicyDenied
+		}
+	}
+	return &agent.ToolExecutionError{Code: code, Reason: reason, Message: message, Err: cause, Execution: agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotApplicable, LocalEffect: effect}}
+}
+func createResult(synced bool) agent.ToolResult {
+	durability := "unknown"
+	if synced {
+		durability = "synced"
+	}
+	raw, _ := json.Marshal(struct {
+		Created    bool   `json:"created"`
+		Durability string `json:"durability"`
+	}{true, durability})
+	return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: string(raw)}}, StructuredContent: raw, Execution: &agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotApplicable, LocalEffect: agent.ToolLocalEffectCommittedReported}}
+}
+func publishCreate(ctx context.Context, in agent.ToolExecutionContext, pending pendingCreation, data []byte) (result agent.ToolResult, err error) {
+	committed, attempted, synced := false, false, false
+	defer func() {
+		if p := recover(); p != nil {
+			cause, ok := p.(error)
+			if !ok {
+				cause = fmt.Errorf("create panic: %v", p)
+			}
+			message := "fstools: create failed unexpectedly; inspect destination before retrying"
+			if committed {
+				message = "fstools: file was published before an unexpected failure; do not blindly retry or roll back"
+			}
+			err = createFailure(committed, attempted, message, cause)
+		}
+		closeErr := pending.Close()
+		if closeErr != nil {
+			if err == nil {
+				message := "fstools: create cleanup failed; inspect destination before retrying"
+				if committed {
+					message = "fstools: file was published but cleanup failed; do not blindly retry or roll back"
+				}
+				err = createFailure(committed, attempted, message, closeErr)
+			} else {
+				err = errors.Join(err, createFailure(committed, attempted, "fstools: create cleanup failed", closeErr))
+			}
+		}
+		if committed {
+			result = createResult(synced)
+		}
+	}()
+	// No named staging file exists. Pre-publication failures close the anonymous
+	// inode; after Publish is attempted, never remove a destination by pathname.
+	for len(data) > 0 {
+		if err = permission(ctx, in); err != nil {
+			return
+		}
+		end := min(len(data), 8192)
+		var n int
+		n, err = pending.Write(data[:end])
+		if err != nil {
+			err = createFailure(false, false, "fstools: cannot stage file content; destination was not published", err)
+			return
+		}
+		if n < 1 || n > end {
+			err = createFailure(false, false, "fstools: file staging made invalid progress; destination was not published", io.ErrShortWrite)
+			return
+		}
+		data = data[n:]
+	}
+	if err = permission(ctx, in); err != nil {
+		return
+	}
+	if err = pending.Sync(); err != nil {
+		err = createFailure(false, false, "fstools: cannot sync staged file; destination was not published", err)
+		return
+	}
+	if err = permission(ctx, in); err != nil {
+		return
+	}
+	attempted = true
+	if err = pending.Publish(); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			err = createFailure(false, false, "fstools: destination already exists; no overwrite performed", err)
+			return
+		}
+		err = createFailure(false, true, "fstools: file publication was not confirmed; inspect destination before retrying", err)
+		return
+	}
+	committed = true
+	// Publication is irreversible here. Revocation/cancellation changes reporting,
+	// not the committed fact, and cannot authorize unlinking a replaced pathname.
+	if err = permission(ctx, in); err != nil {
+		err = createFailure(true, true, "fstools: file was published before cancellation or revocation; durability unknown", err)
+		return
+	}
+	if err = pending.SyncDirectory(); err != nil {
+		err = createFailure(true, true, "fstools: file was published but directory sync failed; durability unknown", err)
+		return
+	}
+	synced = true
+	if err = permission(ctx, in); err != nil {
+		err = createFailure(true, true, "fstools: file was published and synced before cancellation or revocation", err)
+		return
+	}
+	return
+}

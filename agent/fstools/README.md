@@ -4,10 +4,11 @@
 `ls`. `fstools.ReadDefinition(root, readOptions)` separately opts into `read`;
 `fstools.FindDefinition(root, findOptions)` separately opts into filename search.
 `fstools.GrepDefinition(root, grepOptions)` opts into single-file content search.
-Existing `Definitions` callers never gain these capabilities just by upgrading.
+`fstools.CreateFileDefinition(root, createOptions)` explicitly opts into new-file
+creation only. Existing `Definitions` callers never gain these capabilities by upgrading.
 Nothing is installed or enabled in the core Agent, CLI, managed MCP configuration,
 or a downstream application. This is not a complete filesystem suite:
-`write`, `edit`, shell and Python are not supplied.
+overwriting `write`, `edit`, shell and Python are not supplied.
 
 ```go
 // trustedWorkspace comes from application configuration, never model input.
@@ -281,13 +282,78 @@ without importing their Agent runtimes or copying their subprocess/backend
 implementations. File opening and permissions remain this package's narrower
 contract; neither upstream's local backend is treated as an OS sandbox.
 
+## Create-only text files
+
+`CreateFileDefinition` exposes `create_file({path, content})` only when the host
+explicitly selects it. It is not an overwriting `write`/`edit` tool. Existing
+names of every type (including dangling symlinks, FIFOs, directories and
+hardlinks) are never replaced. Parent directories must already exist; there is
+no automatic mkdir, append, chmod option, or default write preset.
+
+```go
+createTool, err := fstools.CreateFileDefinition(root, fstools.CreateOptions{
+    MaxBytes: 64 << 10,
+})
+// Check err and explicitly authorize/bind this definition when writes are wanted.
+```
+
+Content must be valid UTF-8 without NUL and fit the host byte limit (default
+64 KiB, ceiling 1 MiB). Empty content is supported. The model cannot change
+file permissions or overwrite policy. Paths use the same root-relative policy;
+a trailing slash or `/.` is rejected rather than silently treated as a file.
+New files have permission bits **at most 0600**, further restricted by the host's
+umask. The tool does not change process-wide umask, preserve an existing file's
+metadata or accept model-selected executable permissions.
+
+On Linux with a supporting local filesystem, an existing parent directory is
+opened through `os.Root` and kept fixed by descriptor. An anonymous `O_TMPFILE`
+inode is written completely in bounded chunks and synced, then published using
+`linkat` from a fixed, trusted proc fd directory to one basename under the same
+parent descriptor. There is no named temporary file for another process to
+swap. The kernel's new-link operation refuses existing names, including a name
+created by a concurrent caller. Unsupported `O_TMPFILE`/procfs/platform cases
+fail without fallback to truncation or a named temporary file. Directory sync
+is requested after successful publication. No dependencies or external process
+are added; the proc-directory helper is shared with `read`.
+
+**Authority and concurrency boundary:** the host must choose a trusted local
+workspace/filesystem and mount namespace, as for `read`. Once opened, authority
+is to that fixed parent directory inode, not a continuously rechecked pathname
+ancestry. The host must prevent unauthorized directory moves across roots and
+hostile mount/proc changes. A replaced parent symlink cannot redirect the fixed
+handle, but renaming the directory does not revoke it. Closing `os.Root` does
+not revoke already-open handles; drain outstanding calls when changing scope.
+The final permission/context check is immediately before publication, but the
+check and syscall are not atomic with an external revocation. In-flight writes
+and syncs cannot be guaranteed to stop immediately on cancellation.
+
+Publication success is the commit point. The normal result is
+`{created:true, durability:"synced"}`; `synced` means the requested file/directory
+sync calls returned successfully, not a guarantee of honest hardware, continued
+path identity or protection from another writer after publication. Once linked,
+any later directory-sync/cleanup/cancellation/revocation failure retains
+`Execution.LocalEffect=committed_reported`, returns a safe failure, and may report
+`durability:"unknown"`. An unexpected publication error is conservatively
+`unknown`: it is not proof that no destination was created. A known existing-name
+conflict is reported without opening or overwriting that object.
+
+There is **no pathname unlink rollback** after attempting publication: another
+writer may already have changed that name. Pre-publication failure closes the
+anonymous file without leaving a named staging entry. Host execution facts,
+including Codemode's child ledger, survive output hooks and result rejection;
+ordinary business JSON alone is not a receipt. These are not crash-durable
+receipts or automatic idempotency: reconcile uncertain outcomes before another
+attempt, and do not blindly retry or roll back a reported commit. No filesystem
+operation is retried by this tool. The package does not claim a transaction,
+mount isolation or a general OS sandbox.
+
 ## Codemode
 
 Pass the **same** definitions through the existing native adapter:
 
 ```go
 binding := codemodetool.Native(tools[0], "workspace")
-// Or explicitly bind readTool/findTool/grepTool using the same adapter.
+// Or explicitly bind readTool/findTool/grepTool/createTool using the same adapter.
 codeTool, err := codemodetool.New(sandbox,
     []codemodetool.Binding{binding}, codemodetool.Options{})
 ```
@@ -312,10 +378,12 @@ security boundary for that bridge.
    traversal and no child-symlink descent.
 4. **Fourth increment:** explicit single-file `grep` sharing bounded text reads,
    with standard Go regexp, byte/line/match/JSON limits and no external process.
-5. **Later:** explicit workspace `write`/`edit` capabilities with host approval,
+5. **Fifth increment:** explicit Linux create-only text publication, without
+   overwriting any name and with commit/unknown facts retained on failure.
+6. **Later:** explicit workspace overwriting `write`/`edit` capabilities with host approval,
    atomicity and conflict semantics; read-only/workspace presets made only from
    implemented definitions.
-6. **Separate optional capability:** command execution/Python with real documented
+7. **Separate optional capability:** command execution/Python with real documented
    OS isolation, resource/lifetime control and host permissions. Never infer this
    authority from a filesystem root or Codemode allowlist.
 
