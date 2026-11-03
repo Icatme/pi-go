@@ -2665,3 +2665,23 @@
   and the pinned QuickJS WASM runtime.
 - Updated package and examples versions and documented the AgentEvent and
   ToolCall migration points. Kiro endpoint and account behavior remain unverified.
+
+## 2026-11-03 — opt-in in-process receipt compatibility foundation
+
+- Based on v0.18.0 master, independently of the incompatible #144 struct-field
+  additions. Preserves old public layouts, Invoke, execution JSON and persistent
+  formats; positional literal regressions cover the affected API surfaces.
+- New direct Agent/Codemode wrappers return a bounded, separate host receipt
+  handle. Central per-body reservation/sealing covers static/dynamic children,
+  cancellation, panic and output-hook/projection failure. No report means
+  unknown; pending calls remain observable after a canceled caller returns.
+- Actual temporary-file commit test retains commit through hook failure; missing
+  capture refuses before file I/O. Real Agent and checkpoint runners reject
+  nested capture before receipt-required tool bodies, not before their own
+  model calls or persistence bookkeeping. No automatic retry or write defaults.
+- Offline Go1.26.2: full root tests and vet passed; Agent, Codemode, native adapter
+  and collector race tests passed, including independent review. No CI, live
+  service, local user computer, Eino dependency or deployment was used.
+- Deliberately not a full #144 repair: no model-loop/session/checkpoint receipt
+  persistence, JS receipt projection, restart recovery or write-stack replay.
+  #144 and dependent write-tool merge blockers remain pending separate phases.

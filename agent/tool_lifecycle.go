@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/Icatme/pi-go/internal/receiptcapture"
 )
 
 func preparedFailure(call ToolCall, args any, err error, code ToolFailureCode) preparedToolCall {
@@ -248,6 +250,15 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 			return outcome, nil
 		}
 	}
+	ctx, sealReceipt, receiptErr := receiptcapture.Enter(ctx, "agent", prepared.call.ID, prepared.call.Name)
+	if receiptErr != nil {
+		outcome := rejectedToolOutcome(prepared.call, receiptErr, ToolFailureResource)
+		emitToolOutcome(emit, prepared, outcome)
+		return outcome, nil
+	}
+	// Also seal on an unexpected lifecycle panic. Normal sealing happens as soon
+	// as the actual body exits, before hooks or result projection.
+	defer sealReceipt()
 	if prepared.tool.ChildTools != nil {
 		children = newChildCallScope(ctx, e, definition, assistant, prepared, emit)
 	}
@@ -288,7 +299,10 @@ func (e *Engine) executePreparedTool(ctx context.Context, definition AgentDefini
 	if prepared.onEntered != nil {
 		prepared.onEntered()
 	}
-	result, execErr := executeToolBody(ctx, prepared.tool.Execute, executionContext)
+	result, execErr := func() (ToolResult, error) {
+		defer sealReceipt()
+		return executeToolBody(ctx, prepared.tool.Execute, executionContext)
+	}()
 	// Only the bound scope owns child facts. Executors and hooks cannot supply
 	// or replace this sidecar, including ordinary leaf tools.
 	result.ChildCalls = nil
