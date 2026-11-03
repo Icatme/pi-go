@@ -434,6 +434,9 @@ preserved, and the host must protect the workspace against malicious writers.
 by that same ordinary publication; it rereads the source and does not apply a
 preview fingerprint as CAS. These tools use the ordinary Codemode/permission
 lifecycle. Nothing is enabled by default; command execution remains separate.
+`fstools.ReadOnlyDefinitions` combines exactly ls/read/find/grep/preview_edit;
+`fstools.WorkspaceWriteDefinitions` adds create_file/atomic_replace/edit. Both are
+explicit opt-ins with per-tool options, not default grants or OS isolation.
 
 ## Agents As Task Tools
 

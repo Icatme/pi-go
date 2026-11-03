@@ -38,6 +38,56 @@ hook means the host permits directory listings under that root and, when
 `ReadDefinition` is explicitly selected, the text reads that tool supports;
 selecting `FindDefinition` similarly authorizes its bounded filename traversal.
 
+## Explicit fixed presets
+
+For one-line assembly, use either of these **opt-in** factories:
+
+```go
+readOnly, err := fstools.ReadOnlyDefinitions(root, fstools.ReadOnlyOptions{})
+// Exact order: ls, read, find, grep, preview_edit.
+
+workspace, err := fstools.WorkspaceWriteDefinitions(root, fstools.WorkspaceWriteOptions{})
+// Exact order: the five read tools, create_file, atomic_replace, edit.
+```
+
+The workspace preset is a **read-and-write** capability, including replacement
+of existing files. It is not a create-only preset. `ReadOnlyOptions` has per-tool
+`List`, `Read`, `Find`, `Grep`, `Preview` limits; `WorkspaceWriteOptions` nests those
+under `ReadOnly` and adds `Create`, `Replace`, `Edit` limits. Zero fields retain the
+individual tools' bounded defaults. Limits apply to each tool call, not a shared
+per-tenant or multi-call budget. A host must impose any aggregate budget itself.
+
+Membership is fixed and tested: neither preset silently gains future tools.
+`Definitions` continues returning only `ls`. All factories return fresh definitions
+and schemas, perform no filesystem I/O and leave root ownership with the caller.
+Any invalid member returns `nil, error`, not a partial set. Neither preset enables
+core Agent, CLI, MCP manager or downstream application defaults. Unsupported
+platforms fail closed; the underlying Linux/procfs/O_TMPFILE and trusted-workspace
+requirements still apply when the relevant tools execute.
+
+Read-only does not mean redacted or safe to share: read, grep and preview may
+return sensitive contents. Workspace writes retain last-writer-wins semantics,
+new-inode metadata changes and malicious-directory-writer restrictions documented
+below. No shared mutation queue, CAS, OS sandbox, shell or Python is introduced.
+Use a separate root and preset per authorization scope; managed MCP scopes do not
+rebind native filesystem closures.
+
+The returned slice is ordinary `[]agent.ToolDefinition`. Hosts may explicitly
+filter it or append other separately authorized definitions. For read plus
+create-only access, compose `ReadOnlyDefinitions` and `CreateFileDefinition`; do
+not select the full workspace preset and assume it forbids overwrites. Callers
+must check all constructor errors before installing tools.
+
+[The Go examples](example_test.go) show direct versus Codemode assembly, per-member
+`codemodetool.Native` bindings, verified `ExportedName()` aliases, and the same
+`CheckToolPermission` hook for both the outer code call and actual leaf tool names.
+These examples are compiled but not run automatically: their workspace paths are
+host configuration placeholders. Separate integration tests execute the adapter
+with temporary fixtures, including outer/leaf denial and a read-only set that
+cannot invoke edit. Allowing the outer code tool never implicitly authorizes its
+leaf calls. Do not bypass the lifecycle by directly calling `Execute` for untrusted
+model requests without the host's checks.
+
 ## Directory-listing contract and limits
 
 `ls({"path":"."})` lists the root. A path is required, valid Unicode, at most
@@ -542,9 +592,10 @@ external updates. In-flight syscalls cannot be forcibly canceled.
    activation, and committed/unknown outcome facts.
 8. **Eighth increment:** explicit exact `edit` reusing preview matching and ordinary
    replacement publication, without CAS or implicit write authority.
-9. **Later:** optional workspace coordination and presets made only from implemented
-   definitions.
-10. **Separate optional capability:** command execution/Python with real documented
+9. **Ninth increment:** explicit fixed read-only and read-and-write workspace
+   presets, with ordinary Codemode assembly examples and permission regression tests.
+10. **Later:** optional cooperative workspace coordination, if an application needs it.
+11. **Separate optional capability:** command execution/Python with real documented
    OS isolation, resource/lifetime control and host permissions. Never infer this
    authority from a filesystem root or Codemode allowlist.
 
