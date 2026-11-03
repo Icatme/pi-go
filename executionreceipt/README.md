@@ -1,8 +1,8 @@
 # In-process execution receipts (opt-in)
 
 This is a deliberately limited compatibility mechanism for preserving
-local effect facts. It does **not** replace the full runtime/persistence work in
-#144 or make the stacked filesystem write tools ready to merge.
+local effect facts. It preserves the old public layouts rather than adopting
+the incompatible fields from #144. It is not a general durable recovery protocol.
 
 Use `agent.RunToolCallWithReceipts` for a direct call, or
 `(*codemode.Sandbox).RunWithReceipts` for standalone Codemode. For an explicit
@@ -89,11 +89,12 @@ storage protocol; they are not persistent model runs. Starting a fresh
 background context deliberately discards that boundary and is outside the
 contract; trusted host code must not detach a persistent operation to bypass it.
 This blocks the receipt-required tool's business side effects, not all earlier
-model calls or checkpoint/session bookkeeping I/O. The existing write-tool stack
-has not been replayed onto this API. Its merge
-blockers remain. No default tools, filesystem capabilities, external services,
-Eino dependencies, runtime locks, CAS or OS sandbox are introduced.
+model calls or checkpoint/session bookkeeping I/O. The compatible
+[filesystem tools](../agent/fstools/README.md) require these explicit entry points for writes; their [integration record](../agent/fstools/INTEGRATION.md)
+explains which earlier drafts they replace. Tools are never enabled by this
+package. No external services, Eino dependencies, runtime locks, CAS or OS
+sandbox are introduced.
 
-Future persistence support must independently preserve facts on failure and
-fence unaware readers before any new write tools can rely on it. In-memory
-capture and source compatibility do not prove durable recovery compatibility.
+Future persistent model/checkpoint support must independently preserve facts on
+failure and fence unaware readers before write tools can rely on those paths.
+In-memory capture and source compatibility do not prove durable recovery compatibility.
