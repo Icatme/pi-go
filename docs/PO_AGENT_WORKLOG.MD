@@ -2763,3 +2763,29 @@
 - Nonpersistent model operation and repeated-call risks remain explicit. No
   model journal/checkpoint recovery, automatic retry safety, merge, CI,
   deployment, user-local execution or Eino dependency was introduced.
+
+## Explicit host-executor tool adapters (2026-11-03)
+
+- Added opt-in run_command/run_python factories in agent/exectools. They accept
+  trusted host functions, never discover/start a process or install a runtime.
+  Only bounded args/source are model-controlled; backend, tenant, environment,
+  filesystem/network and actual resource/termination policy remain host-owned.
+- Require capture/current permission before dispatch; recheck before output.
+  Synchronous deadlines request cancellation, not kill/reap guarantees. Shared
+  bounded stdout/stderr writers seal on return/panic, discard excess without
+  accumulating it, and safely encode invalid UTF-8/control bytes with flags.
+  Nonzero exits preserve bounded Agent diagnostics with IsError; Native keeps
+  its existing rejection contract. Backend errors expose only safe messages.
+- No inferred commit on start/success, no retry or sandbox claims. Explicit host
+  reports survive downstream failure. No presets, old structs/Invoke, runtime
+  scheduling, dependency manifests, persistence formats or CI workflows changed.
+- Mock/public API tests cover strict raw and host arguments (including null,
+  case aliases and duplicate keys), budgets, concurrent output/tenant closures,
+  late writes, cancellation/deadline versus noncooperative body exit, explicit
+  commits through error/panic/hook/validation, Native leaf policy and model runs.
+- Offline Go1.26.2 full root tests, relevant six-package race, vet, module verify,
+  historical unkeyed literal compilation, Windows/Darwin test compilation and
+  independent mock race/review passed. Cross-compilation certifies no backend.
+- Corrected receipt documentation's pre-#153 migration-status sentences. No
+  actual shell/Python backend, external service, install, live model, CI,
+  user-local execution, merge or deployment was performed.
