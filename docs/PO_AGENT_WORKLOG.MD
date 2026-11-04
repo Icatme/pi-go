@@ -2789,3 +2789,53 @@
 - Corrected receipt documentation's pre-#153 migration-status sentences. No
   actual shell/Python backend, external service, install, live model, CI,
   user-local execution, merge or deployment was performed.
+
+## 2026-11-03 - User-local PR review and v0.19.0 preparation
+
+- Execution was verified on the user's JACKIE-LAPTOP Windows host. The desktop
+  project inventory identified V:\gitdownload\pi-go as local; that original
+  checkout was clean and remained unchanged. Work used an isolated checkout in
+  the Codex task directory and the host's existing WSL2 distribution.
+- Reviewed #150 -> #151 -> #152 -> #153 -> #154 at their current heads, plus
+  independent docs #138/#142. #153 replaces #139-141, #143 and #145-149;
+  #144 is excluded. Root and agent AGENTS.md were read; no .agents directory
+  exists in this repository.
+- Local codex review found one concrete regression: receiptcapture.Block(nil)
+  panicked before the Engine's existing context normalization. All five public
+  Engine entry cases reproduced it. The fix preserves non-nil contexts and
+  normalizes nil before applying the block. Five regression cases now pass.
+  A focused local codex re-review found no actionable issue; its own test attempt
+  was blocked by its read-only sandbox, so the tests were run separately below.
+- The fix was pushed to #152 as 9906351d580fb2651df50d714bd6fd56f3d5ca84.
+  The local integration carries the identical patch as 0f3bc31.
+- Windows Go1.26.4: uncached full root tests, root vet and module verification,
+  examples tests/vet, explicit compat_toolcall and external historical positional
+  literals passed. After the fix, Agent/collector/checkpoint/Codemode/session
+  tests and target-branch Agent/collector vet passed again.
+- Local WSL Linux Go1.26.2: uncached full root race, full root vet and examples
+  race passed. After the fix, all Agent/Codemode/collector packages passed race
+  again. Locked dependencies came from existing Windows/WSL caches; no module
+  versions were changed for setup. All live-service flags stayed disabled.
+- A real new direct-call API wrote a file and JSONL receipts. The actual v0.18.0
+  baseline then opened the log, browsed both receipt records and returned
+  ErrInterrupted from its old PrepareRun. Old positional literals built with both
+  baseline and current source. PR #142's exact new configuration compiled and
+  constructed inertly without starting an MCP server.
+- v0.19.0 notes, package version and examples pin are prepared. CLI/provider
+  and examples tests passed after the version changes; the Windows CLI built
+  successfully and reported pigo 0.19.0.
+
+## 2026-11-04 - Reviewed stack integration for v0.19.0
+
+- After the user's explicit confirmation, #150, #151, #152, #153 and #154 were
+  merged in that dependency order, followed by independent docs #138 and #142.
+  Stacked PRs were retargeted to master only after their prerequisites merged.
+  Merge commits preserve the original histories, including the #152 fix.
+- Master ee1061b27e230f3a757067b8d8291da868e8e069 has exactly the same file tree
+  as the locally reviewed and tested integration before its version bump.
+  No PR Approval was submitted. #144 and the superseded filesystem PRs were
+  not merged; OCAI was outside this task.
+- The release follows the existing five-platform CLI archive, bundled-license
+  and SHA256SUMS convention. Archive building and final remote verification
+  must use the merged release commit; a locally prepared version is not itself
+  a published release or a downstream dependency upgrade.
