@@ -3035,3 +3035,29 @@
   x20 and separate examples tests/vet passed. Optional full module inventory
   remains blocked by uncached indirect metadata with GOPROXY=off; dependencies
   are unchanged. Final independent rereview found no remaining blocker.
+
+
+## 2026-11-05 - SuperAgent offline evaluation baseline slice
+
+- M9a is stacked on unmerged draft #172's exact tree. Added a deterministic
+  300-delivery/20-request experiment with separate expected routing and observed
+  ledgers, simulated timing/budgets, five repetitions and a checked-in compact
+  baseline covering full-result SHA-256. See [M9a](superagent-m9a.md).
+- Two structural scheduling surrogates are implemented; two single-Pi prompt
+  baselines and the pre-M1 historical baseline explicitly remain missing.
+  Real model calls are zero and tokens are null, not estimated usage.
+- Fixed-service Router load sweep covers 1/5/10/20/40 events per virtual minute,
+  maximum batches 1/8 and five repeats. The synthetic bypass fixture reduces
+  scripted calls but shows no completion latency improvement.
+- Actual runtime tests separately cover 300 valid Submit attempts, input/report/
+  reply identity, failure isolation, worker results, journal reopen deduplication
+  and legacy Open compatibility. These are not wall-time model benchmarks.
+- Independent review identified zero-stop event scheduling and correctness
+  scoring gaps; both have regression coverage. No production runtime or journal
+  format, dependency, provider configuration or default behavior changed.
+- No user computer, live service/model/device, credentials, extra paid execution,
+  manual CI, merge or deployment was used. This is not final M9 acceptance.
+- Linux amd64 Go 1.26.10 readonly full tests/vet/race, focused evaluation race
+  x5, separate examples tests/vet and deterministic CLI baseline checks passed.
+  Final independent review found no remaining blocker. PowerShell was not
+  available on this cloud verification host; no Windows validation is claimed.
