@@ -309,7 +309,7 @@ See [M3b contract and limits](../docs/superagent-m3b.md). Cross-inference spill
 continuation, safe long-context compaction, explicit tool-result publication and
 production-scale history performance are still later M3 work.
 
-## Controlled background tools (M4a)
+## Controlled background tools (M4a–M4b)
 
 `OpenMainBackground` explicitly registers bounded, host-authorized backends.
 `Job.Background` supplies per-Worker launch/query/stop capabilities;
@@ -318,6 +318,12 @@ synchronous tools. Operations persist their original task/delivery/call, grant
 and quota before dispatch, and release capacity only after verified real exit.
 The same task can process new input while an operation runs. Completion arrives
 once as a new task event, preserving native call/result ordering.
+
+For a batch main router, use the existing `OpenMainJournal` with both
+`MainJournalOptions.BatchRouter` (and `BatchOptions`) and `Background`.
+[M4b composition acceptance](../docs/superagent-m4b.md) covers mixed input
+ordering, native Pi completion, authority, stop/unknown and lease takeover.
+The JSONL constructors and their defaults are unchanged.
 
 `agent/background.NewLocal` is an opt-in in-process backend, not a shell,
 sandbox or durable process service. Lost registry state remains unknown and
