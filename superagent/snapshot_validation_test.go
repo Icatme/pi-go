@@ -148,13 +148,13 @@ func BenchmarkSnapshotTransition(b *testing.B) {
 				b.SetBytes(int64(size))
 				b.ResetTimer()
 				for b.Loop() {
-					raw, err := encodeSnapshot(s, id)
+					raw, validated, err := encodeSnapshot(s, id)
 					if err != nil {
 						b.Fatal(err)
 					}
 					if kind == "main" {
 						a, tr := snapshotValidationMain()
-						tr.Main.Snapshot = raw
+						tr.Main.Snapshot, tr.validatedSnapshot = raw, validated
 						for i := 0; i < 3; i++ {
 							if err := a.validateMain(tr); err != nil {
 								b.Fatal(err)
@@ -162,7 +162,7 @@ func BenchmarkSnapshotTransition(b *testing.B) {
 						}
 					} else {
 						a, tr := snapshotValidationWorker()
-						tr.Snapshot = raw
+						tr.Snapshot, tr.validatedSnapshot = raw, validated
 						if err := a.apply(tr, false); err != nil {
 							b.Fatal(err)
 						}
@@ -170,5 +170,197 @@ func BenchmarkSnapshotTransition(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+func TestValidatedSnapshotIsBoundToEncodedBytesAndOwner(t *testing.T) {
+	for _, owner := range []string{"main-test", "task-1"} {
+		t.Run(owner, func(t *testing.T) {
+			source := agent.AgentSnapshot{SessionID: owner, Metadata: map[string]any{"value": "original"}}
+			raw, proof, err := encodeSnapshot(source, owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source.Metadata["value"] = "changed by callback"
+			decoded, err := validateSnapshot(raw, owner, proof)
+			if err != nil || decoded.Metadata["value"] != "original" {
+				t.Fatalf("not detached from input: %+v, %v", decoded, err)
+			}
+			if _, err := validateSnapshot(raw, "different-owner", proof); err == nil {
+				t.Fatal("validation bypassed session ownership")
+			}
+			changed := json.RawMessage(strings.Replace(string(raw), "original", "tampered", 1))
+			if _, err := validateSnapshot(changed, owner, proof); err == nil {
+				t.Fatal("valid but different JSON borrowed a prior validation")
+			}
+			// In-place edits cannot alter the immutable byte binding.
+			copy(raw, changed)
+			if _, err := validateSnapshot(raw, owner, proof); err == nil {
+				t.Fatal("raw byte mutation altered the private validation")
+			}
+		})
+	}
+}
+
+func TestValidatedSnapshotNeverBypassesMainStateChecks(t *testing.T) {
+	a, tr := snapshotValidationMain()
+	raw, proof, err := encodeSnapshot(agent.AgentSnapshot{SessionID: "main-test"}, "main-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.Main.Snapshot, tr.validatedSnapshot = raw, proof
+	if err := a.validateMain(tr); err != nil {
+		t.Fatal(err)
+	}
+	tr.Main.InputID = "another input"
+	if err := a.validateMain(tr); err == nil {
+		t.Fatal("proof bypassed exact inbox identity")
+	}
+	tr.Main.InputID = "input"
+	a.events[0].state = "routing"
+	if err := a.validateMain(tr); err == nil {
+		t.Fatal("proof bypassed current admission state")
+	}
+	a.events[0].state = "received"
+	a.main.inbox[0].input.Kind = "worker_result"
+	tr.Main.Decision = MainDecision{Action: "new"}
+	if err := a.validateMain(tr); err == nil {
+		t.Fatal("proof let a result authorize new work")
+	}
+}
+
+func TestValidatedSnapshotIsProcessLocalAndReplayUsesDiskBytes(t *testing.T) {
+	for _, kind := range []string{"main", "worker"} {
+		t.Run(kind, func(t *testing.T) {
+			var a *SuperAgent
+			var tr transition
+			owner := "main-test"
+			if kind == "main" {
+				a, tr = snapshotValidationMain()
+			} else {
+				a, tr = snapshotValidationWorker()
+				owner = "task-1"
+			}
+			raw, proof, err := encodeSnapshot(agent.AgentSnapshot{SessionID: owner}, owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == "main" {
+				tr.Main.Snapshot = raw
+			} else {
+				tr.Snapshot = raw
+			}
+			without, err := json.Marshal(tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tr.validatedSnapshot = proof
+			with, err := json.Marshal(tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(with) != string(without) {
+				t.Fatal("private validation changed the journal format")
+			}
+			var disk transition
+			if err := json.Unmarshal(with, &disk); err != nil {
+				t.Fatal(err)
+			}
+			if disk.validatedSnapshot != nil {
+				t.Fatal("proof survived serialization")
+			}
+			// Even an in-process replay call with a stale proof must read disk bytes.
+			// A different valid snapshot should replay, but invalid content should not.
+			changed := json.RawMessage(fmt.Sprintf(`{"session_id":%q,"metadata":{"disk":true}}`, owner))
+			if kind == "main" {
+				tr.Main.Snapshot = changed
+			} else {
+				tr.Snapshot = changed
+			}
+			if err := a.apply(tr, true); err != nil {
+				t.Fatalf("replay relied on a live proof instead of valid disk bytes: %v", err)
+			}
+			if kind == "main" {
+				a, tr = snapshotValidationMain()
+				tr.Main.Snapshot = json.RawMessage(`{"session_id":"foreign"}`)
+			} else {
+				a, tr = snapshotValidationWorker()
+				tr.Snapshot = json.RawMessage(`{"session_id":"foreign"}`)
+			}
+			tr.validatedSnapshot = proof
+			if err := a.apply(tr, true); err == nil {
+				t.Fatal("proof bypassed strict disk validation")
+			}
+		})
+	}
+}
+
+// Three main checks still run under the coordinator lock. This benchmark
+// isolates their content-validation cost, not total lock duration or I/O.
+func BenchmarkMainSnapshotChecks(b *testing.B) {
+	for _, size := range []int{64 << 10, 1 << 20, 7 << 20} {
+		for _, mode := range []string{"reparse", "reuse"} {
+			b.Run(fmt.Sprintf("%dKiB/%s", size>>10, mode), func(b *testing.B) {
+				a, tr := snapshotValidationMain()
+				raw, proof, err := encodeSnapshot(agent.AgentSnapshot{SessionID: "main-test", Metadata: map[string]any{"blob": strings.Repeat("x", size)}}, "main-test")
+				if err != nil {
+					b.Fatal(err)
+				}
+				tr.Main.Snapshot = raw
+				if mode == "reuse" {
+					tr.validatedSnapshot = proof
+				}
+				b.ReportAllocs()
+				b.SetBytes(int64(size))
+				b.ResetTimer()
+				for b.Loop() {
+					for i := 0; i < 3; i++ {
+						if err := a.validateMain(tr); err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestInvalidEncodedMainSnapshotCannotPoisonJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "main.jsonl")
+	route := func(_ context.Context, job MainJob) (MainOutcome, error) {
+		s := agent.AgentSnapshot{SessionID: job.SessionID, Metadata: map[string]any{"valid": "retained"}}
+		if job.Input.Trigger.ID == "bad" {
+			s.Messages = []agent.Message{{ToolCalls: []agent.ToolCall{{Arguments: json.RawMessage(`{"value":"\ud800"}`)}}}}
+		} else if job.Input.Trigger.ID == "after" && job.Snapshot.Metadata["valid"] != "retained" {
+			t.Error("invalid result replaced last valid main snapshot")
+		}
+		return MainOutcome{Decision: MainDecision{Action: "ignore"}, Snapshot: s}, nil
+	}
+	a, err := OpenMain(t.Context(), path, 1, route, mainWorker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	for _, id := range []string{"before", "bad", "after"} {
+		submit(t, a, Trigger{ID: id, Source: "im", Thread: "chat", Kind: "request"})
+		waitIdle(t, a)
+	}
+	if failures := a.MainFailures(); len(failures) != 1 || a.MainFailureCause(failures[0].InputID) == nil {
+		t.Fatalf("invalid main encoding not recorded as failure: %+v", failures)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := OpenMain(t.Context(), path, 1, route, mainWorker)
+	if err != nil {
+		t.Fatalf("invalid snapshot poisoned journal: %v", err)
+	}
+	defer b.Close()
+	if len(b.MainFailures()) != 1 {
+		t.Fatal("main failure lost after reopen")
+	}
+	s, ok, err := b.MainSnapshot()
+	if err != nil || !ok || s.Metadata["valid"] != "retained" {
+		t.Fatal("last valid snapshot lost after reopen")
 	}
 }

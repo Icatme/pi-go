@@ -1,7 +1,6 @@
 package superagent
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -24,16 +23,17 @@ const maxSnapshotBytes = 8 << 20
 const maxReportBytes = 64 << 10
 
 type transition struct {
-	Main              *mainTransition `json:"main,omitempty"`
-	State             string          `json:"state"`
-	Index             int             `json:"index"`
-	Trigger           *Trigger        `json:"trigger,omitempty"`
-	Task              string          `json:"task,omitempty"`
-	ProviderSessionID string          `json:"provider_session_id,omitempty"`
-	Text              string          `json:"text,omitempty"`
-	Snapshot          json.RawMessage `json:"snapshot,omitempty"`
-	Receipts          []ToolReceipt   `json:"receipts,omitempty"`
-	NeedsReview       bool            `json:"needs_review,omitempty"`
+	validatedSnapshot *validatedSnapshot // process-local content proof; never serialized
+	Main              *mainTransition    `json:"main,omitempty"`
+	State             string             `json:"state"`
+	Index             int                `json:"index"`
+	Trigger           *Trigger           `json:"trigger,omitempty"`
+	Task              string             `json:"task,omitempty"`
+	ProviderSessionID string             `json:"provider_session_id,omitempty"`
+	Text              string             `json:"text,omitempty"`
+	Snapshot          json.RawMessage    `json:"snapshot,omitempty"`
+	Receipts          []ToolReceipt      `json:"receipts,omitempty"`
+	NeedsReview       bool               `json:"needs_review,omitempty"`
 }
 
 type item struct {
@@ -239,6 +239,10 @@ func (a *SuperAgent) commit(tr transition) error {
 }
 
 func (a *SuperAgent) apply(tr transition, replay bool) error {
+	if replay {
+		// Disk records never inherit a live validation result.
+		tr.validatedSnapshot = nil
+	}
 	if tr.Main != nil || strings.HasPrefix(tr.State, "main_") || strings.HasPrefix(tr.State, "reply_") || strings.HasPrefix(tr.State, "control_") {
 		return a.applyMain(tr, replay)
 	}
@@ -341,8 +345,7 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 			}
 			finished := tr.State == "completed" || tr.State == "truncated" || tr.State == "completed_with_tool_errors"
 			if finished || len(tr.Snapshot) > 0 {
-				var snap agent.AgentSnapshot
-				if len(tr.Snapshot) > maxSnapshotBytes || len(tr.Snapshot) == 0 || tr.Snapshot[0] != '{' || decodeSnapshot(tr.Snapshot, &snap) != nil || !belongsTo(snap, t.id) {
+				if _, err := validateSnapshot(tr.Snapshot, t.id, tr.validatedSnapshot); err != nil {
 					return errors.New("invalid worker snapshot")
 				}
 				t.snapshot = tr.Snapshot
@@ -544,12 +547,12 @@ func (a *SuperAgent) runJob(i int, job Job, active *activeRun) {
 		tr.NeedsReview = true
 	}
 	if err == nil || !reflect.ValueOf(out.Snapshot).IsZero() {
-		snapshot, snapshotErr := encodeSnapshot(out.Snapshot, job.TaskID)
+		snapshot, validated, snapshotErr := encodeSnapshot(out.Snapshot, job.TaskID)
 		if snapshotErr != nil {
 			err = errors.Join(err, snapshotErr)
 			tr.NeedsReview = true
 		} else {
-			tr.Snapshot = snapshot
+			tr.Snapshot, tr.validatedSnapshot = snapshot, validated
 		}
 	}
 	for _, r := range tr.Receipts {
@@ -590,33 +593,6 @@ func callbackPanic(stage string, p any) error {
 
 func belongsTo(s agent.AgentSnapshot, taskID string) bool {
 	return s.SessionID == taskID || (s.SessionID == "" && len(s.Messages) == 0)
-}
-
-func encodeSnapshot(s agent.AgentSnapshot, taskID string) (data json.RawMessage, err error) {
-	defer func() {
-		if p := recover(); p != nil {
-			data = nil
-			err = callbackPanic("worker snapshot serialization", p)
-		}
-	}()
-	if !belongsTo(s, taskID) {
-		return nil, errors.New("worker returned a snapshot with incorrect task identity")
-	}
-	data, err = json.Marshal(s)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > maxSnapshotBytes {
-		return nil, errors.New("worker snapshot exceeds 8 MiB")
-	}
-	var decoded agent.AgentSnapshot
-	return data, decodeSnapshot(data, &decoded)
-}
-
-func decodeSnapshot(data json.RawMessage, dst *agent.AgentSnapshot) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	return dec.Decode(dst)
 }
 
 func (a *SuperAgent) Status() View {
