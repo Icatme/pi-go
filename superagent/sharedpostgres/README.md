@@ -112,6 +112,19 @@ timeout, server-side transaction abort, a deliberately injected lost COMMIT
 receipt and raw migration/rollback. The receipt injection is **not** a real
 TCP partition. Independent pools are **not** independent processes or hosts.
 
+The separately named `TestPostgresCoordinator*` cases use the same two gates
+and fixture, and compose the real `superagent.OpenMainJournal` coordinator with
+scripted Router/Worker callbacks. They exercise JSONL cutover at each admitted
+main-flow boundary, subscribed callback fanout, private snapshots, reports,
+outbox attempts and verified receipts, old-owner Router/Worker cancellation,
+uncertain reply-claim COMMIT, and background review/late-completion conservation.
+They reopen through independent pools and compare durable records as well as
+coordinator state. Background tools and platform receipts are in-memory fixtures;
+no real external action or model is called. Lease expiry pauses only the journal's
+test renewal loop, not a process or host. "Restart" here means closing/reopening
+the coordinator and journal, **not restarting PostgreSQL**. See the exact scope
+and reproduction in [M6c](../../docs/superagent-m6c.md).
+
 Still required before deployment: execute the suite on an authorized disposable
 PG 17/18 service; add independent process kill/pause/takeover, actual TCP loss at
 commit boundaries, database restart, disk durability and two-host fault testing.

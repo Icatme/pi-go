@@ -3252,3 +3252,17 @@
   No historical baseline, real model performance, full M9/release acceptance,
   live services, user computer, additional paid work, CI, merge or deployment.
   See [M9b boundaries and reproduction](superagent-m9b.md).
+
+## 2026-11-05 - M6c PostgreSQL coordinator acceptance preparation
+
+- Added five double-gated `TestPostgresCoordinator*` entries on #185's exact
+  baseline tree. Real OpenMainJournal plus in-process scripted callbacks covers
+  migration boundaries, task/report/snapshot/subscription and outbox conservation,
+  expired-lease takeover, unknown reply-claim COMMIT and background late evidence.
+- Reused the existing disposable-database fixture, bounded operations and random
+  domain cleanup. No runtime, dependency, schema or CI configuration changes.
+- No PostgreSQL service was used: these cases compile and explicitly skip.
+  Offline suite success is not real PostgreSQL coordinator acceptance. Restart
+  means coordinator/journal reopen; ACK loss is injection, not a TCP partition.
+- Full offline verification, independent review and exact-tree publication
+  evidence are recorded in the draft PR. See [M6c](superagent-m6c.md).
