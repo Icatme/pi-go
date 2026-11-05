@@ -122,6 +122,7 @@ type mainTransition struct {
 	ControlIDs        []string             `json:"control_ids,omitempty"`
 	Delivery          *ReplyDelivery       `json:"delivery,omitempty"`
 	DeliveryResult    *ReplyDeliveryResult `json:"delivery_result,omitempty"`
+	Batch             []mainTransition     `json:"batch,omitempty"`
 }
 
 // OpenMain opens the persistent main session for this journal's single host
@@ -130,7 +131,11 @@ type mainTransition struct {
 // stateless API; once a journal is upgraded, it must be reopened with OpenMain.
 // Old completed reports are not replayed as fresh main inputs on upgrade.
 func OpenMain(ctx context.Context, path string, parallel int, route MainRouter, work Worker) (*SuperAgent, error) {
-	if ctx == nil || path == "" || parallel < 1 || parallel > 64 || route == nil || work == nil {
+	return openMain(ctx, path, parallel, route, nil, MainBatchOptions{}, work)
+}
+
+func openMain(ctx context.Context, path string, parallel int, route MainRouter, batch MainBatchRouter, options MainBatchOptions, work Worker) (*SuperAgent, error) {
+	if ctx == nil || path == "" || parallel < 1 || parallel > 64 || (route == nil && batch == nil) || work == nil {
 		return nil, errors.New("superagent: require a context, path, 1–64 workers, main router and worker")
 	}
 	if err := ctx.Err(); err != nil {
@@ -158,6 +163,7 @@ func OpenMain(ctx context.Context, path string, parallel int, route MainRouter, 
 		}
 	}
 	a.parallel, a.mainRoute, a.work = parallel, route, work
+	a.mainBatchRoute, a.mainBatchOptions = batch, options
 	a.wg.Add(1)
 	go a.schedule()
 	return a, nil
@@ -194,6 +200,9 @@ func copyReport(report *Report) *Report {
 }
 
 func (a *SuperAgent) dispatchMain() bool {
+	if a.mainBatchRoute != nil {
+		return a.dispatchMainBatch()
+	}
 	if a.mainRoute == nil || a.main.running || a.main.cursor == len(a.main.inbox) {
 		return false
 	}
@@ -306,6 +315,9 @@ func (a *SuperAgent) runMain(job MainJob) {
 // validateMain is side-effect free and runs before the append as well as on
 // replay. Invalid model output must never be written to a replayable journal.
 func (a *SuperAgent) validateMain(tr transition) error {
+	if tr.State == "main_batch_decided" || tr.State == "main_batch_failed" {
+		return a.validateMainBatch(tr)
+	}
 	m := tr.Main
 	if m == nil {
 		return errors.New("missing main transition")
@@ -365,7 +377,7 @@ func (a *SuperAgent) validateMain(tr transition) error {
 	}
 	switch d.Action {
 	case "new", "attach":
-		if d.Text != "" || m.ReplyID != "" || m.Assignment == nil || m.Assignment.Index != item.event || m.Assignment.State != "queued" || m.Assignment.Main != nil || m.Assignment.Thread != nil {
+		if d.Text != "" || m.ReplyID != "" || m.Assignment == nil || m.Assignment.Index != item.event || m.Assignment.State != "queued" || m.Assignment.Main != nil || m.Assignment.Thread != nil || m.Assignment.Admission != nil {
 			return errors.New("invalid main assignment")
 		}
 		assignment := m.Assignment
@@ -405,7 +417,16 @@ func (a *SuperAgent) applyMain(tr transition, replay bool) error {
 	if err := a.validateMain(tr); err != nil {
 		return err
 	}
+	return a.reduceMain(tr, replay, false)
+}
+
+// reduceMain requires prior validation. A batch defers its one shared snapshot
+// update until every child has been reduced, avoiding a full copy per input.
+func (a *SuperAgent) reduceMain(tr transition, replay, deferSnapshot bool) error {
 	m := tr.Main
+	if tr.State == "main_batch_decided" || tr.State == "main_batch_failed" {
+		return a.reduceMainBatch(tr, replay)
+	}
 	if strings.HasPrefix(tr.State, "reply_") {
 		a.applyReply(tr)
 		return nil
@@ -455,7 +476,9 @@ func (a *SuperAgent) applyMain(tr transition, replay bool) error {
 	if tr.State == "main_failed" {
 		a.main.failures = append(a.main.failures, MainFailure{InputID: m.InputID, Text: tr.Text})
 	} else {
-		a.main.snapshot = slices.Clone(m.Snapshot)
+		if !deferSnapshot {
+			a.main.snapshot = slices.Clone(m.Snapshot)
+		}
 		if m.Decision.Action == "steer" || m.Decision.Action == "cancel" {
 			a.main.controls = append(a.main.controls, MainControl{ID: "control-" + m.InputID, DecisionID: m.DecisionID, InputID: m.InputID, Source: item.input.Trigger.Source, Thread: item.input.Trigger.Thread, EventID: item.input.Trigger.ID, Action: m.Decision.Action, Target: *m.Decision.Target, Text: m.Decision.Text, Status: "pending"})
 			c := &a.main.controls[len(a.main.controls)-1]

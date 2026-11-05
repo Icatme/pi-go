@@ -23,6 +23,7 @@ const maxSnapshotBytes = 8 << 20
 const maxReportBytes = 64 << 10
 
 type transition struct {
+	Admission         *AdmissionRecord   `json:"admission,omitempty"`
 	validatedSnapshot *validatedSnapshot // process-local content proof; never serialized
 	Thread            *threadTransition  `json:"thread,omitempty"`
 	Main              *mainTransition    `json:"main,omitempty"`
@@ -38,19 +39,20 @@ type transition struct {
 }
 
 type item struct {
-	trigger      Trigger
-	state, task  string
-	threadEntry  bool // explicit subscription admission; targets are frozen
-	admission    int  // first delivery index of the external admission
-	handback     *Handback
-	routeActions int
-	entryTask    string   // explicit host association, part of admission identity
-	chatEntry    bool     // admitted after the persistent chat routing boundary
-	controls     []string // durable controls aimed at this exact invocation
-	delegation   string
-	mainInput    bool
-	mainAdmitted bool
-	cause        error // trusted in-process diagnostic; never serialized
+	admissionRecord *AdmissionRecord
+	trigger         Trigger
+	state, task     string
+	threadEntry     bool // explicit subscription admission; targets are frozen
+	admission       int  // first delivery index of the external admission
+	handback        *Handback
+	routeActions    int
+	entryTask       string   // explicit host association, part of admission identity
+	chatEntry       bool     // admitted after the persistent chat routing boundary
+	controls        []string // durable controls aimed at this exact invocation
+	delegation      string
+	mainInput       bool
+	mainAdmitted    bool
+	cause           error // trusted in-process diagnostic; never serialized
 }
 
 type task struct {
@@ -79,6 +81,8 @@ type SuperAgent struct {
 	store             *session.JSONLStorage
 	route             Router
 	mainRoute         MainRouter
+	mainBatchRoute    MainBatchRouter
+	mainBatchOptions  MainBatchOptions
 	main              mainState
 	work              Worker
 	parallel, running int
@@ -246,6 +250,11 @@ func (a *SuperAgent) commit(tr transition) error {
 	if a.fatal != nil {
 		return a.fatal
 	}
+	if tr.Admission != nil || tr.State == "admission_received" {
+		if err := a.validateAdmission(tr); err != nil {
+			return err
+		}
+	}
 	if tr.Thread != nil || strings.HasPrefix(tr.State, "thread_") {
 		if err := a.validateThread(tr); err != nil {
 			return err
@@ -283,6 +292,9 @@ func (a *SuperAgent) commit(tr transition) error {
 }
 
 func (a *SuperAgent) apply(tr transition, replay bool) error {
+	if tr.Admission != nil || tr.State == "admission_received" {
+		return a.applyAdmission(tr, replay)
+	}
 	if replay {
 		// Disk records never inherit a live validation result.
 		tr.validatedSnapshot = nil
@@ -482,7 +494,7 @@ func (a *SuperAgent) dispatch() bool {
 				a.commit(transition{Index: i, State: "ignored", Text: "Noise event ignored."})
 				return true
 			}
-			if a.mainRoute != nil && e.mainInput {
+			if a.hasMainRouter() && e.mainInput {
 				continue
 			}
 			id := e.entryTask
@@ -496,7 +508,7 @@ func (a *SuperAgent) dispatch() bool {
 			if a.routing {
 				continue
 			}
-			if a.mainRoute != nil {
+			if a.hasMainRouter() {
 				continue
 			}
 			if a.commit(transition{Index: i, State: "routing"}) == nil {
