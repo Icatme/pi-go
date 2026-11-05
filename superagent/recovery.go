@@ -79,6 +79,9 @@ func ReconcileFile(path, taskID, source, eventID, note string) error {
 	if err != nil {
 		return err
 	}
+	if err := a.recoverInterrupted(); err != nil {
+		return errors.Join(err, a.Close())
+	}
 	err = a.Reconcile(taskID, source, eventID, note)
 	return errors.Join(err, a.Close())
 }

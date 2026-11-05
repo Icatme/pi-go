@@ -24,6 +24,7 @@ const maxSnapshotBytes = 8 << 20
 const maxReportBytes = 64 << 10
 
 type transition struct {
+	Main              *mainTransition `json:"main,omitempty"`
 	State             string          `json:"state"`
 	Index             int             `json:"index"`
 	Trigger           *Trigger        `json:"trigger,omitempty"`
@@ -36,12 +37,16 @@ type transition struct {
 }
 
 type item struct {
-	trigger     Trigger
-	state, task string
-	cause       error // trusted in-process diagnostic; never serialized
+	trigger      Trigger
+	state, task  string
+	delegation   string
+	mainInput    bool
+	mainAdmitted bool
+	cause        error // trusted in-process diagnostic; never serialized
 }
 
 type task struct {
+	delegation        string
 	active            *activeRun
 	progressSeq       uint64
 	id, summary, last string
@@ -65,6 +70,8 @@ type SuperAgent struct {
 	cancel            context.CancelFunc
 	store             *session.JSONLStorage
 	route             Router
+	mainRoute         MainRouter
+	main              mainState
 	work              Worker
 	parallel, running int
 	routing           bool
@@ -94,6 +101,12 @@ func Open(ctx context.Context, path string, parallel int, route Router, work Wor
 	if err != nil {
 		return nil, err
 	}
+	if a.main.id != "" {
+		return nil, errors.Join(errors.New("superagent: persistent main journal requires OpenMain"), a.Close())
+	}
+	if err := a.recoverInterrupted(); err != nil {
+		return nil, errors.Join(err, a.Close())
+	}
 	a.parallel, a.route, a.work = parallel, route, work
 	a.wg.Add(1)
 	go a.schedule()
@@ -118,6 +131,10 @@ func (a *SuperAgent) restore() error {
 		}
 		a.sequence++
 	}
+	return nil
+}
+
+func (a *SuperAgent) recoverInterrupted() error {
 	for _, i := range slices.Clone(a.pending) {
 		if a.events[i].state == "running" || a.events[i].state == "routing" {
 			if err := a.commit(transition{Index: i, State: "interrupted", NeedsReview: a.events[i].state == "running", Text: "Process stopped before the outcome was recorded. Check effects before continuing."}); err != nil {
@@ -187,6 +204,11 @@ func (a *SuperAgent) commit(tr transition) error {
 	if a.fatal != nil {
 		return a.fatal
 	}
+	if tr.Main != nil {
+		if err := a.validateMain(tr); err != nil {
+			return err
+		}
+	}
 	data, err := json.Marshal(tr)
 	if err == nil {
 		_, err = a.store.AppendEntry(session.MainLane, session.NewEntry{Type: session.EntryTypeCustom, ID: strconv.Itoa(a.sequence + 1), Custom: &session.CustomData{CustomType: journalKind, Payload: data}})
@@ -201,7 +223,7 @@ func (a *SuperAgent) commit(tr transition) error {
 		a.sequence++
 		// Replaying the journal does not emit live progress. Register active
 		// control before publishing the running transition in dispatch.
-		if a.work != nil && tr.State != "running" {
+		if a.work != nil && tr.State != "running" && tr.Main == nil {
 			e := a.events[tr.Index]
 			if e.task != "" {
 				a.publishLocked(RunTarget{TaskID: e.task, Source: e.trigger.Source, EventID: e.trigger.ID}, tr.State)
@@ -214,6 +236,9 @@ func (a *SuperAgent) commit(tr transition) error {
 }
 
 func (a *SuperAgent) apply(tr transition, replay bool) error {
+	if tr.Main != nil || strings.HasPrefix(tr.State, "main_") || strings.HasPrefix(tr.State, "reply_") {
+		return a.applyMain(tr, replay)
+	}
 	if tr.State == "received" {
 		if tr.Index != len(a.events) || tr.Trigger == nil {
 			return errors.New("invalid event admission")
@@ -226,8 +251,11 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 			return errors.New("duplicate event admission")
 		}
 		a.accepted[key] = tr.Index
-		a.events = append(a.events, item{trigger: *tr.Trigger, state: "received"})
+		a.events = append(a.events, item{trigger: *tr.Trigger, state: "received", mainAdmitted: a.main.id != ""})
 		a.pending = append(a.pending, tr.Index)
+		if a.main.id != "" && tr.Trigger.Kind != "noise" && a.subscriptions[[2]string{tr.Trigger.Source, tr.Trigger.Thread}] == "" {
+			a.enqueueMain(tr.Index, nil)
+		}
 		return nil
 	}
 	if tr.Index < 0 || tr.Index >= len(a.events) {
@@ -266,7 +294,7 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 				// Pre-affinity journals used the local task ID on the wire.
 				providerSessionID = tr.Task
 			}
-			t = &task{id: tr.Task, providerSessionID: providerSessionID, summary: brief(e.trigger.Text)}
+			t = &task{id: tr.Task, providerSessionID: providerSessionID, summary: brief(e.trigger.Text), delegation: e.delegation}
 			a.tasks[tr.Task] = t
 			a.taskIDs = append(a.taskIDs, tr.Task)
 		} else if tr.ProviderSessionID != "" {
@@ -277,6 +305,9 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 		}
 		a.subscriptions[thread] = tr.Task
 		e.task = tr.Task
+		if e.delegation == "" {
+			e.delegation = t.delegation
+		}
 		t.pending++
 	case "running":
 		if e.state != "queued" || t == nil || t.running || (t.blocks(tr.Index) && !(replay && t.legacyReview)) {
@@ -328,6 +359,9 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 			return errors.New("unexpected terminal transition")
 		}
 		a.reports = append(a.reports, Report{Source: e.trigger.Source, Thread: e.trigger.Thread, EventID: e.trigger.ID, TaskID: e.task, Status: tr.State, Text: tr.Text, Receipts: tr.Receipts, NeedsReview: tr.NeedsReview})
+		if a.main.id != "" && e.mainAdmitted && (e.state == "running" || (e.state == "queued" && tr.State == "blocked")) {
+			a.enqueueMain(tr.Index, &a.reports[len(a.reports)-1])
+		}
 		a.pending = slices.DeleteFunc(a.pending, func(i int) bool { return i == tr.Index })
 	default:
 		return fmt.Errorf("unknown transition %q", tr.State)
@@ -373,11 +407,17 @@ func (a *SuperAgent) dispatch() bool {
 				a.commit(transition{Index: i, State: "ignored", Text: "Noise event ignored."})
 				return true
 			}
+			if a.mainRoute != nil && e.mainInput {
+				continue
+			}
 			if id := a.subscriptions[[2]string{e.trigger.Source, e.trigger.Thread}]; id != "" {
 				a.commit(transition{Index: i, State: "queued", Task: id})
 				return true
 			}
 			if a.routing {
+				continue
+			}
+			if a.mainRoute != nil {
 				continue
 			}
 			if a.commit(transition{Index: i, State: "routing"}) == nil {
@@ -420,7 +460,7 @@ func (a *SuperAgent) dispatch() bool {
 			return true
 		}
 	}
-	return false
+	return a.dispatchMain()
 }
 
 func (a *SuperAgent) routeEvent(i int, trig Trigger, candidates []TaskInfo) {
@@ -616,10 +656,11 @@ func (a *SuperAgent) WaitIdle(ctx context.Context) error {
 	for {
 		a.mu.Lock()
 		err := a.fatal
-		if err == nil && len(a.pending) > 0 {
+		pending := len(a.pending) > 0 || a.main.cursor < len(a.main.inbox)
+		if err == nil && pending {
 			err = a.ctx.Err()
 		}
-		done := len(a.pending) == 0
+		done := !pending
 		ch := a.changed
 		a.mu.Unlock()
 		if err != nil || done {

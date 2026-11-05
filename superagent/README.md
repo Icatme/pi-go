@@ -1,5 +1,9 @@
 # SuperAgent
 
+For the persistent main-session Go host API, its upgrade boundary and durable
+reply contract, see [M1a](../docs/superagent-m1a.md) and `ExampleOpenMain`.
+The existing `Open` examples below retain the stateless Router contract.
+
 SuperAgent is an opt-in coordinator in the pi-go module. An incoming conversation
 can start a task or join one started elsewhere. Each task has its own Pi agent
 snapshot. A later event from a subscribed thread goes directly to that task.

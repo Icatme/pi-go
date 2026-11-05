@@ -430,6 +430,27 @@ func OfflineModel() agent.StreamModel {
 			}
 			return offlineAnswer(string(data)), nil
 		}
+		if strings.HasSuffix(req.SystemPrompt, mainInstructions) {
+			var input mainModelInput
+			if err := json.Unmarshal([]byte(last), &input); err != nil {
+				return nil, err
+			}
+			decision := MainDecision{Action: "ignore"}
+			if input.Input.Kind == "worker_result" && input.Input.Report != nil {
+				report := input.Input.Report
+				decision = MainDecision{Action: "reply", Text: report.Status + ": " + report.Text}
+				if report.NeedsReview {
+					decision.Text += " Review required; verify effects before continuing."
+				}
+			} else if input.Input.Kind == "user" && input.Input.Trigger.Kind == "request" {
+				decision.Action = "new"
+			}
+			data, err := json.Marshal(decision)
+			if err != nil {
+				return nil, err
+			}
+			return offlineAnswer(string(data)), nil
+		}
 		var event Trigger
 		// Jobs start with an event envelope; native steering delivers ordinary
 		// user text at a runner boundary.
