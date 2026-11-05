@@ -1,6 +1,7 @@
 // Package channel provides host-authenticated ingress and approved-reply
-// delivery boundaries. It contains no network client, credentials, or live
-// service integration. Hosts supply a truthful, authenticated Transport.
+// delivery boundaries, with optional explicit GitHub HTTP adapters. Hosts own
+// credentials, authorization and network policy; the default Adapter starts no
+// listener, poller, scheduler or sender.
 package channel
 
 import (

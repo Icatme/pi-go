@@ -3152,3 +3152,26 @@
   real device, user computer, credentials, live model, Codex/extra paid execution,
   manual CI, merge or deployment. Linux process-crash evidence is not host reboot,
   power-loss, adversarial filesystem or Windows/macOS acceptance.
+
+## 2026-11-05 - SuperAgent GitHub HTTP protocol development slice
+
+- M5b builds on #180 HEAD d4b50e45 / exact tree 3fe26ff3. The isolated remote
+  checkout uses an equivalent-tree commit; publication uses the exact remote
+  parent and compares the final tested tree before branch creation.
+- Optional GitHubWebhook validates bounded raw-body HMAC, unambiguous supported
+  events, exact repo/PR targets and independent host actor/intent authority.
+  GitHub headers are unsigned: the durable event ID is a raw-body digest, and
+  duplicates surface ErrGitHubReplay plus current evidence/original admission.
+  Identical signed bodies cannot prove independent event identity or freshness;
+  host audit and independent verification remain required. No automatic send.
+- Optional GitHubTransport posts only through host client/endpoint/destinations,
+  refuses redirects, validates exact 201 comment receipts, respects the later
+  rate hint and never creates a token, retries POST or scans to prove absence.
+  Unknown outcomes remain fenced across restart; no platform idempotency claim.
+- Test-first missing-API failure, real httptest HTTP regressions and independent
+  read-only review cover forged/raw-byte/header replays, cross-repo isolation,
+  editing actor, grant drift, approved send/echo and lost-ack recovery. Review
+  fixed dual-hint early retry and changed-grant replay receipt contracts.
+- Full offline validation and exact final-tree evidence are in the draft PR.
+  See [M5b](superagent-m5b.md). No real GitHub/GHES, existing credentials, user
+  computer, live model, Codex/extra paid execution, manual CI, merge or deployment.
