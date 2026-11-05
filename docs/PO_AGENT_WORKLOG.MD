@@ -2839,3 +2839,20 @@
   and SHA256SUMS convention. Archive building and final remote verification
   must use the merged release commit; a locally prepared version is not itself
   a published release or a downstream dependency upgrade.
+
+## 2026-11-05 - Open filesystem and receipt PR review
+
+- Reviewed #139–141, #143–149 against the v0.19.0 integration. #153 already
+  contains the nine filesystem proposals. #150–152 provide the receipt API
+  used by the integrated tools. The corrections below apply to that implementation.
+- Reject duplicate and incorrectly cased filesystem argument names before
+  execution. A raw read request could previously select the second of two
+  different paths. A staging-time permission denial now reports that the
+  destination was not published; a failed destination syscall remains uncertain.
+- Bound Codemode local and remote status fields before recording or forwarding
+  them. Agent, Codemode and its native adapter preserve typed-nil tool failures
+  and their receipt facts without dereferencing a missing error payload.
+- Windows Go 1.26.4 passed the offline root module tests and vet. WSL Linux Go
+  1.26.2 passed race tests for agent, fstools, codemodetool, codemode and
+  agent/session, including Linux publication regressions, and vet for the
+  agent and codemode package trees.

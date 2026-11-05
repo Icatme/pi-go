@@ -1,7 +1,6 @@
 package fstools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -115,12 +114,7 @@ func parseFind(raw []byte) (findArguments, error) {
 	if len(raw) > 32<<10 {
 		return bad(errors.New("argument limit"))
 	}
-	if err := jsontext.ValidateUnicode(raw); err != nil {
-		return bad(err)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&args); err != nil {
+	if err := decodeStringArguments(raw, map[string]*string{"path": &args.Path, "pattern": &args.Pattern}); err != nil {
 		return bad(err)
 	}
 	encoded, _ := json.Marshal(arguments{Path: args.Path})

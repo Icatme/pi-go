@@ -104,8 +104,11 @@ func publishFile(ctx context.Context, in agent.ToolExecutionContext, pending pen
 	if err = permission(ctx, in); err != nil {
 		return
 	}
-	attempted = true
-	if err = pending.Publish(); err != nil {
+	if err = pending.Publish(func() { attempted = true }); err != nil {
+		if !attempted {
+			err = publicationFailure(operation, false, false, "fstools: file publication stopped before updating the destination", err)
+			return
+		}
 		if operation == "create" && errors.Is(err, os.ErrExist) {
 			err = publicationFailure(operation, false, false, "fstools: destination already exists; no overwrite performed", err)
 			return

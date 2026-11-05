@@ -1,13 +1,11 @@
 package fstools
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"strings"
 
@@ -98,18 +96,11 @@ func parsePreview(raw []byte, maxBytes, maxArgs int) (previewArguments, error) {
 	if len(raw) > maxArgs {
 		return bad(errors.New("argument limit"))
 	}
-	if err := jsontext.ValidateUnicode(raw); err != nil {
+	args.NewText = new(string)
+	if err := decodeStringArguments(raw, map[string]*string{"path": &args.Path, "old_text": &args.OldText, "new_text": args.NewText}); err != nil {
 		return bad(err)
 	}
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&args); err != nil {
-		return bad(err)
-	}
-	if err := d.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return bad(errors.New("expected one object"))
-	}
-	if args.OldText == "" || args.NewText == nil || args.OldText == *args.NewText || len(args.OldText) > maxBytes || len(*args.NewText) > maxBytes || strings.ContainsRune(args.OldText, 0) || strings.ContainsRune(*args.NewText, 0) {
+	if args.OldText == "" || args.OldText == *args.NewText || len(args.OldText) > maxBytes || len(*args.NewText) > maxBytes || strings.ContainsRune(args.OldText, 0) || strings.ContainsRune(*args.NewText, 0) {
 		return bad(errors.New("invalid replacement"))
 	}
 	pathRaw, _ := json.Marshal(arguments{Path: args.Path})

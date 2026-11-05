@@ -475,8 +475,8 @@ func freezeLeaf(original agent.ToolDefinition, name string, projection Projectio
 		// Raw causes may contain credentials or payloads. Only an explicit safe
 		// ToolExecutionError.Message may become the default lifecycle presentation;
 		// after hooks can still replace it with their own processed public output.
-		var typed *agent.ToolExecutionError
-		if errors.As(err, &typed) && typed.Message != "" {
+		typed, _ := errors.AsType[*agent.ToolExecutionError](err)
+		if typed != nil && typed.Message != "" {
 			return result, err
 		}
 		failure := &agent.ToolExecutionError{Message: "tool call failed; inspect the host report", Err: err}

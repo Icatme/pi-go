@@ -15,6 +15,9 @@ Nothing is installed or enabled in the core Agent, CLI, managed MCP configuratio
 or a downstream application. This is not a complete filesystem suite:
 shell and Python are not supplied.
 
+Use each argument name exactly as spelled in the tool schema and only once per
+JSON object. The tools reject unknown or repeated names before filesystem access.
+
 ```go
 // trustedWorkspace comes from application configuration, never model input.
 root, err := os.OpenRoot(trustedWorkspace)
@@ -547,6 +550,10 @@ publication errors retain `unknown`. `synced` means the requested file/directory
 fsync calls succeeded, not a hardware guarantee or a promise that nobody changed
 the destination afterwards. A failure before commit does not intentionally replace
 the old destination. Nothing unlinks the destination as rollback.
+
+If permission is revoked after linking the staging name but before attempting
+the rename, the tool reports `replace_not_published` (or `edit_not_published`
+for `edit`). A rename error with an uncertain outcome reports `*_publication_unknown`.
 
 The new inode has **at most 0600 permissions**, subject to umask. It does not inherit
 old ownership, ACLs, xattrs, timestamps or executable bits. Other hard links and

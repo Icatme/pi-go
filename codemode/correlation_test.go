@@ -4,8 +4,55 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/Icatme/pi-go/executionreceipt"
 )
+
+func TestTypedNilHostErrorPreservesFailureAndReceipt(t *testing.T) {
+	s := sandboxForTest(t, DefaultConfig())
+	var cause *CallError
+	tool := Tool{Name: "write", Invoke: func(ctx context.Context, _ HostCall) (json.RawMessage, error) {
+		executionreceipt.ReportLocalCommit(ctx)
+		return nil, cause
+	}}
+	r, h, err := s.RunWithReceipts(t.Context(), `await tools.write({})`, RunOptions{Tools: []Tool{tool}}, 1)
+	if !errors.Is(err, cause) || len(r.Calls) != 1 || r.Calls[0].Code != "host" {
+		t.Fatalf("calls=%+v err=%v", r.Calls, err)
+	}
+	if records := h.Snapshot(); len(records) != 1 || !records[0].Committed() || !records[0].Completed() {
+		t.Fatalf("receipts=%+v", records)
+	}
+}
+
+func TestOversizedHostExecutionFieldsAreBoundedBeforePublication(t *testing.T) {
+	s := sandboxForTest(t, DefaultConfig())
+	oversized := strings.Repeat("x", 33)
+	for _, tt := range []struct {
+		name           string
+		reported, want Execution
+	}{
+		{"local", Execution{oversized, "complete_reported"}, Execution{"returned", "complete_reported"}},
+		{"remote", Execution{"not_started", oversized}, Execution{"not_started", "unknown"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tool := Tool{Name: "bad", Invoke: func(context.Context, HostCall) (json.RawMessage, error) {
+				return nil, &CallError{Code: "host", Message: "failure", Execution: tt.reported}
+			}}
+			result, err := s.Run(t.Context(), `try {await tools.bad({})} catch (e) {text(e.execution.local + "/" + e.execution.remote)}`, RunOptions{Tools: []Tool{tool}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := textOutput(result); got != tt.want.Local+"/"+tt.want.Remote {
+				t.Errorf("script received %q, want %+v", got, tt.want)
+			}
+			if len(result.Calls) != 1 || result.Calls[0].Execution != tt.want {
+				t.Errorf("host records %+v, want %+v", result.Calls, tt.want)
+			}
+		})
+	}
+}
 
 func TestHostFailureCorrelationUsesErrorIdentity(t *testing.T) {
 	s := sandboxForTest(t, DefaultConfig())
