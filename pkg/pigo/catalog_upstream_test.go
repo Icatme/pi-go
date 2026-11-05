@@ -102,6 +102,28 @@ func TestOctoberOpenAIThinkingAndCostCatalog(t *testing.T) {
 	}
 }
 
+func TestOpenAITerraCapabilitiesAndPricing(t *testing.T) {
+	const id = "gpt-6.1-terra"
+	facts, ok := LookupModelCapabilities("openai", id)
+	if !ok || facts.WireAPI != "openai-responses" || facts.BaseURL != "https://api.openai.com" ||
+		facts.ContextWindow != 1050000 || facts.MaxOutputTokens != 128000 || !slices.Equal(facts.Input, []InputType{InputText, InputImage}) {
+		t.Fatalf("incorrect Terra model: %+v", facts)
+	}
+	levels := []ModelThinkingLevel{ModelThinkingLevelOff, ModelThinkingLevelLow, ModelThinkingLevelMedium, ModelThinkingLevelHigh, ModelThinkingLevelXHigh, ModelThinkingLevelMax}
+	caps := facts.Capabilities
+	if caps.Tools != CapabilitySupported || caps.Streaming != CapabilitySupported || caps.DefaultReasoningLevel != ModelThinkingLevelMedium ||
+		!slices.Equal(caps.SupportedReasoningLevels, levels) || caps.Temperature != CapabilitySupported || caps.TopP != CapabilitySupported ||
+		!slices.Equal(caps.TemperatureReasoningLevels, []ModelThinkingLevel{ModelThinkingLevelOff}) || !slices.Equal(caps.TopPReasoningLevels, []ModelThinkingLevel{ModelThinkingLevelOff}) {
+		t.Fatalf("incorrect Terra capabilities: %+v", caps)
+	}
+	model := GetModel("openai", id)
+	short := UsageCost{Input: 1, Output: 5, CacheRead: 0.05, CacheWrite: 1.25}
+	long := ModelCostTier{InputTokensAbove: 272000, Rates: UsageCost{Input: 2, Output: 7.5, CacheRead: 0.1, CacheWrite: 2.5}}
+	if model.Cost != short || !slices.Equal(model.CostTiers, []ModelCostTier{long}) {
+		t.Fatalf("incorrect Terra prices: %+v, %+v", model.Cost, model.CostTiers)
+	}
+}
+
 func TestClaude55AdaptiveCatalogAndWire(t *testing.T) {
 	for _, test := range []struct {
 		id           string
