@@ -4,17 +4,28 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 
 	"github.com/Icatme/pi-go/agent"
 )
 
 // ReportsSince returns terminal reports after the caller's count, in journal
-// order. Pass zero to replay all reports. Record the new count after delivery.
+// order. Pass zero to replay all reports. Record count+len(reports) only after
+// the consumer durably handles that batch; the cursor is a report count, not
+// an ingress count or delivery ID. A fanout has one report per target. Replays
+// retain DeliveryID, so an idempotent sink can deduplicate within this journal.
 func (a *SuperAgent) ReportsSince(count int) []Report {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return cloneReports(a.reports[min(max(count, 0), len(a.reports)):])
 }
+
+// Admission slots are immutable, including the frozen order of fanout targets.
+// Derive the public identity from that durable position, not completion order,
+// task assignment or a new random value on replay. This also upgrades old logs
+// without rewriting them or changing any task/provider identity. Future log
+// compaction/import must preserve these slots (or persist their identities).
+func deliveryID(index int) string { return "delivery-" + strconv.Itoa(index+1) }
 
 func cloneReports(reports []Report) []Report {
 	out := slices.Clone(reports)

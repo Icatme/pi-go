@@ -47,6 +47,37 @@ for all admitted events. Call `s.Close()` in the service shutdown path.
 The [runnable Go example](example_test.go) submits an event and reads its
 report using the offline model.
 
+## Consuming reports without losing fanout outcomes
+
+`Report.DeliveryID` (`delivery_id` in JSON) identifies one admitted delivery,
+including ignored or router-failed outcomes that have no task. Each recipient
+of a `SubmitThread` fanout has a distinct delivery ID, even though its reports
+share the same `(source, event_id)`. Ingress deduplication still uses that
+source/event pair; it is **not** a report-consumer key.
+
+Delivery IDs are opaque, stable across reopening the same journal, and local
+to that journal. Use `(host-owned stable journal namespace, delivery_id)` as
+the sink's idempotency key. Do not parse an ID, rely on its format, assume it
+is globally unique, or carry the same namespace onto an unrelated replacement
+journal. Existing journals acquire the same IDs on replay without a rewrite.
+
+`ReportsSince(cursor)` still takes a **count of reports**, not a delivery ID or
+an admission offset. Advance the count by the number of successfully consumed
+reports. Fanout may contribute several reports per ingress event; concurrent
+tasks may finish in a different order than admission. Keep the count scoped to
+the same journal. Starting again at zero is safe only with durable per-delivery
+deduplication at the sink. Commit the effect and dedup key atomically, or use a
+destination that enforces the same idempotency key. Persisting a cursor before
+the effect can lose work; saving the effect before its dedup key can repeat it.
+An in-memory map alone does not provide crash-safe exactly-once effects.
+
+The public Go example `ExampleSuperAgent_ReportsSince` shows a count cursor,
+two recipients for one event, and replay through an idempotent in-memory sink.
+`Job.DeliveryID` and `Progress.DeliveryID` correlate worker diagnostics with
+the report. They do not replace the existing `(task_id, source, event_id)`
+`RunTarget` control boundary. A main `Reply.ID` remains the separate outbox
+send/acknowledgement identity; a delivery ID is not a reply-send receipt.
+
 To control one invocation, capture its identity from a running entry in
 `s.Status().Tasks` when the host accepts the operator's command:
 
@@ -85,8 +116,10 @@ Get-Content superagent/testdata/events.jsonl | .\bin\pi-superagent.exe run -stat
 
 Run the same command twice. The second run acknowledges duplicate inputs and
 replays the stored reports. With stdin open, the process can accept further
-events and emit completed reports concurrently. Consumers can deduplicate
-replayed reports by `(source, event_id)`. An `ACCEPTED` line acknowledges
+events and emit completed reports concurrently. Consumers must deduplicate
+replayed reports by `(journal namespace, delivery_id)`, as described above.
+The CLI retains legacy `Open` routing; it does not enable `OpenMain` fanout.
+An `ACCEPTED` line acknowledges
 durable admission. The eventual `REPORT.status` gives the execution outcome.
 At EOF, `IDLE.tasks` shows the current task states. Replayed reports retain
 the facts and review flag recorded when each event finished.

@@ -185,7 +185,7 @@ func boundedText(text string, limit int, suffix string) string {
 	return text[:i] + suffix
 }
 
-// Submit durably accepts a delivery once. Reusing the same source and ID with
+// Submit durably accepts an external event once. Reusing the same source and ID with
 // different contents is an error, even after restart.
 // With OpenMain, an ordinary chat event reaches main regardless of earlier
 // tasks in that chat. Use SubmitTask for an explicit host task association.
@@ -430,7 +430,7 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 		default:
 			return errors.New("unexpected terminal transition")
 		}
-		a.reports = append(a.reports, Report{Source: e.trigger.Source, Thread: e.trigger.Thread, EventID: e.trigger.ID, TaskID: e.task, Status: tr.State, Text: tr.Text, Receipts: tr.Receipts, NeedsReview: tr.NeedsReview})
+		a.reports = append(a.reports, Report{DeliveryID: deliveryID(tr.Index), Source: e.trigger.Source, Thread: e.trigger.Thread, EventID: e.trigger.ID, TaskID: e.task, Status: tr.State, Text: tr.Text, Receipts: tr.Receipts, NeedsReview: tr.NeedsReview})
 		if a.main.id != "" && e.mainAdmitted && (e.state == "running" || (e.state == "queued" && tr.State == "blocked")) {
 			a.enqueueMain(tr.Index, &a.reports[len(a.reports)-1])
 		}
@@ -518,7 +518,7 @@ func (a *SuperAgent) dispatch() bool {
 				continue
 			}
 			if a.commit(transition{Index: i, State: "running"}) == nil {
-				job := Job{TaskID: t.id, ProviderSessionID: t.providerSessionID, Trigger: e.trigger}
+				job := Job{TaskID: t.id, DeliveryID: deliveryID(i), ProviderSessionID: t.providerSessionID, Trigger: e.trigger}
 				if len(t.snapshot) > 0 {
 					if err := decodeSnapshot(t.snapshot, &job.Snapshot); err != nil {
 						a.commit(transition{Index: i, State: "failed", Text: brief(err.Error())})
@@ -693,10 +693,14 @@ func (a *SuperAgent) Status() View {
 		row := TaskStatus{ID: id, Status: status, Summary: t.summary, Pending: t.pending}
 		if t.active != nil && !t.active.returned {
 			row.ActiveSource, row.ActiveEventID = t.active.target.Source, t.active.target.EventID
+			if index, ok := a.deliveryIndex(t.active.target); ok {
+				row.ActiveDeliveryID = deliveryID(index)
+			}
 		}
 		if t.review != 0 {
 			cause := a.events[t.review-1].trigger
 			row.ReviewSource, row.ReviewEventID = cause.Source, cause.ID
+			row.ReviewDeliveryID = deliveryID(t.review - 1)
 		}
 		v.Tasks = append(v.Tasks, row)
 	}
@@ -707,7 +711,7 @@ func (a *SuperAgent) Status() View {
 // WaitIdle returns the underlying journal error even while input is still open.
 func (a *SuperAgent) Done() <-chan struct{} { return a.ctx.Done() }
 
-// WaitIdle waits until each accepted event has a terminal report. Inspect
+// WaitIdle waits until all admitted deliveries and main inputs settle. Inspect
 // Status for routing and worker failures, including interrupted calls.
 func (a *SuperAgent) WaitIdle(ctx context.Context) error {
 	if ctx == nil {

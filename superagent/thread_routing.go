@@ -268,7 +268,7 @@ func (a *SuperAgent) applyThread(tr transition) error {
 	case "thread_handback":
 		e := &a.events[tr.Index]
 		e.handback = copyHandback(m.Handback)
-		input := MainInput{ID: a.nextMainInputID(), Kind: "handback", Trigger: e.trigger, TaskID: e.task, Handback: copyHandback(e.handback)}
+		input := MainInput{ID: a.nextMainInputID(), DeliveryID: deliveryID(tr.Index), Kind: "handback", Trigger: e.trigger, TaskID: e.task, Handback: copyHandback(e.handback)}
 		a.main.inbox = append(a.main.inbox, mainItem{input: input, event: tr.Index})
 	}
 	return nil

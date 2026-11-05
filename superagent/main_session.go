@@ -22,7 +22,10 @@ type MainRouter func(context.Context, MainJob) (MainOutcome, error)
 // Report contains the public summary and execution facts, never the private
 // Worker transcript or FailureCause. Its source/thread remain host-owned.
 type MainInput struct {
-	ID           string       `json:"id"`
+	ID string `json:"id"`
+	// DeliveryID correlates the originating admission slot, not the input's
+	// own identity or a control's target. It grants no task access.
+	DeliveryID   string       `json:"delivery_id"`
 	Kind         string       `json:"kind"` // user, task_input, control_result, worker_result or handback
 	Trigger      Trigger      `json:"trigger"`
 	TaskID       string       `json:"task_id,omitempty"`
@@ -62,7 +65,10 @@ type MainOutcome struct {
 // requirements cannot be replaced by a model's description of success.
 // Control similarly preserves correction facts for control_result replies.
 type Reply struct {
-	ID           string         `json:"id"`
+	ID string `json:"id"`
+	// DeliveryID correlates the input delivery. ID remains the distinct
+	// outbound reply identity used by the send/acknowledgment protocol.
+	DeliveryID   string         `json:"delivery_id"`
 	DecisionID   string         `json:"decision_id"`
 	InputID      string         `json:"input_id"`
 	DelegationID string         `json:"delegation_id,omitempty"`
@@ -159,7 +165,7 @@ func OpenMain(ctx context.Context, path string, parallel int, route MainRouter, 
 
 func (a *SuperAgent) enqueueMain(index int, report *Report) {
 	e := a.events[index]
-	input := MainInput{ID: a.nextMainInputID(), Kind: "user", Trigger: e.trigger}
+	input := MainInput{ID: a.nextMainInputID(), DeliveryID: deliveryID(index), Kind: "user", Trigger: e.trigger}
 	if report != nil {
 		input.Kind, input.Report, input.DelegationID = "worker_result", copyReport(report), e.delegation
 	} else if e.entryTask != "" {
@@ -462,7 +468,7 @@ func (a *SuperAgent) applyMain(tr transition, replay bool) error {
 			e.controls = append(e.controls, c.ID)
 		}
 		if m.Decision.Action == "reply" || m.Decision.Action == "clarify" {
-			reply := Reply{ID: m.ReplyID, DecisionID: m.DecisionID, InputID: m.InputID, DelegationID: item.input.DelegationID, Source: item.input.Trigger.Source, Thread: item.input.Trigger.Thread, EventID: item.input.Trigger.ID, Text: m.Decision.Text, Status: "pending", Report: copyReport(item.input.Report), Control: copyControl(item.input.Control), Handback: copyHandback(item.input.Handback)}
+			reply := Reply{ID: m.ReplyID, DeliveryID: item.input.DeliveryID, DecisionID: m.DecisionID, InputID: m.InputID, DelegationID: item.input.DelegationID, Source: item.input.Trigger.Source, Thread: item.input.Trigger.Thread, EventID: item.input.Trigger.ID, Text: m.Decision.Text, Status: "pending", Report: copyReport(item.input.Report), Control: copyControl(item.input.Control), Handback: copyHandback(item.input.Handback)}
 			reply.TaskID = item.input.TaskID
 			if reply.Report != nil {
 				reply.TaskID = reply.Report.TaskID

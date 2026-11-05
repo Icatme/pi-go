@@ -85,8 +85,15 @@ func ExampleSuperAgent_SubmitThread() {
 		panic(err)
 	}
 	var deliveries []string
+	seen := map[string]bool{} // Scoped to this journal, not globally unique IDs.
 	for _, report := range a.Status().Reports {
 		if report.Source == "github" {
+			// One source/event can produce several reports. Deduplicate replay by
+			// delivery ID, never by the source/event pair used at ingress.
+			if seen[report.DeliveryID] {
+				continue
+			}
+			seen[report.DeliveryID] = true
 			deliveries = append(deliveries, report.EventID+" "+names[report.TaskID]+" "+report.Status)
 		}
 	}
