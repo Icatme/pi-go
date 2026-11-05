@@ -84,6 +84,7 @@ type SuperAgent struct {
 	mainBatchRoute    MainBatchRouter
 	mainBatchOptions  MainBatchOptions
 	main              mainState
+	history           *historyCatalog // derived public index; never journaled
 	work              Worker
 	parallel, running int
 	routing           bool

@@ -282,5 +282,24 @@ model calls; task and Thread associations retain their existing permissions and
 frozen delivery semantics. Privileged Submit APIs remain outside this opt-in gate.
 
 See [M3a contract and migration](../docs/superagent-m3a.md) and the executable
-`ExampleOpenMainBatch`. Historical retrieval, large-history performance and live
-model throughput remain separate work.
+`ExampleOpenMainBatch`. Large-history performance and live model throughput remain
+separate work.
+
+## Public history references and recall
+
+Main callbacks receive `MainJob.History` (or `MainBatchJob.History`) and stable
+`MainInput.HistoryRefs`. Follow trigger, Thread, task and public-report links,
+including tasks outside the 128 recent candidates. Each read and continuation
+checks the durable journal domain and bounded JSON/page budget. The view is
+immutable for the callback and expires when it returns. References survive
+replay; cursors do not survive their view.
+
+`PiMainHistoryRouter` and `PiMainBatchHistoryRouter` optionally expose only the
+native `history_read` tool with isolated execution authority, bounded turns,
+marked input excerpts and a context check before every model request. Existing
+Pi main routers remain tool-free. Recall never expands attachment/control offers.
+Private Worker transcripts and raw tool outputs remain inaccessible.
+
+See [M3b contract and limits](../docs/superagent-m3b.md). Cross-inference spill
+continuation, safe long-context compaction, explicit tool-result publication and
+production-scale history performance are still later M3 work.

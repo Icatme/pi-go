@@ -14,8 +14,9 @@ import (
 )
 
 // MainRouter is a read-only inference callback. Unlike Worker, it must not
-// execute tools or external effects: an uncommitted decision may be retried
+// execute effectful tools or external effects: an uncommitted decision may be retried
 // after restart. All model-proposed actions are validated by the coordinator.
+// MainJob.History provides bounded public read-only recall within this callback.
 type MainRouter func(context.Context, MainJob) (MainOutcome, error)
 
 // MainInput is derived from durable admission, control or Worker transitions.
@@ -23,6 +24,8 @@ type MainRouter func(context.Context, MainJob) (MainOutcome, error)
 // Worker transcript or FailureCause. Its source/thread remain host-owned.
 type MainInput struct {
 	ID string `json:"id"`
+	// HistoryRefs are derived at dispatch, not new authority or journal data.
+	HistoryRefs []HistoryRef `json:"history_refs,omitempty"`
 	// DeliveryID correlates the originating admission slot, not the input's
 	// own identity or a control's target. It grants no task access.
 	DeliveryID   string       `json:"delivery_id"`
@@ -42,7 +45,8 @@ type MainJob struct {
 	Snapshot          agent.AgentSnapshot
 	Tasks             []TaskInfo
 	// Runs lists only the currently controllable invocations offered this turn.
-	Runs []RunTarget
+	Runs    []RunTarget
+	History *MainHistory `json:"-"`
 }
 
 // MainDecision selects one coordinator action. A result
@@ -228,6 +232,8 @@ func (a *SuperAgent) dispatchMain() bool {
 			job.Runs = append(job.Runs, r.target)
 		}
 	}
+	job.History = a.newMainHistory()
+	a.addHistoryRefs(&job.Input)
 	a.main.running = true
 	a.wg.Add(1)
 	go a.runMain(job)
@@ -255,6 +261,7 @@ func (a *SuperAgent) runMain(job MainJob) {
 		runs[target] = true
 	}
 	out, err := callMain(a.ctx, a.mainRoute, job)
+	job.History.close()
 	if out.Decision.Target != nil {
 		target := *out.Decision.Target
 		out.Decision.Target = &target
