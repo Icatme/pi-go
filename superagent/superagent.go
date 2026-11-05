@@ -39,6 +39,9 @@ type transition struct {
 type item struct {
 	trigger      Trigger
 	state, task  string
+	entryTask    string   // explicit host association, part of admission identity
+	chatEntry    bool     // admitted after the persistent chat routing boundary
+	controls     []string // durable controls aimed at this exact invocation
 	delegation   string
 	mainInput    bool
 	mainAdmitted bool
@@ -178,7 +181,26 @@ func boundedText(text string, limit int, suffix string) string {
 
 // Submit durably accepts a delivery once. Reusing the same source and ID with
 // different contents is an error, even after restart.
+// With OpenMain, an ordinary chat event reaches main regardless of earlier
+// tasks in that chat. Use SubmitTask for an explicit host task association.
 func (a *SuperAgent) Submit(t Trigger) (bool, error) {
+	return a.submit(t, "")
+}
+
+// SubmitTask admits an update explicitly associated by the trusted host with
+// one existing task in this journal's authorization domain. Unlike Submit,
+// this bypasses main inference; the main session receives a read-only summary.
+// It schedules a serial follow-up, not steering of an in-flight invocation.
+// Admission is not execution or delivery. Never infer taskID from untrusted
+// message text without host authorization or a validated main decision.
+func (a *SuperAgent) SubmitTask(t Trigger, taskID string) (bool, error) {
+	if !validIdentity(taskID) {
+		return false, errors.New("task input requires a valid task identity")
+	}
+	return a.submit(t, taskID)
+}
+
+func (a *SuperAgent) submit(t Trigger, taskID string) (bool, error) {
 	if err := validTrigger(t); err != nil {
 		return false, err
 	}
@@ -194,12 +216,15 @@ func (a *SuperAgent) Submit(t Trigger) (bool, error) {
 		return false, nil
 	}
 	if i, ok := a.accepted[[2]string{t.Source, t.ID}]; ok {
-		if a.events[i].trigger != t {
+		if a.events[i].trigger != t || a.events[i].entryTask != taskID {
 			return false, errors.New("event ID already exists with different contents")
 		}
 		return false, nil
 	}
-	err := a.commit(transition{State: "received", Index: len(a.events), Trigger: &t})
+	if taskID != "" && (!a.main.chatRouting || a.tasks[taskID] == nil || t.Kind == "noise") {
+		return false, errors.New("task input requires OpenMain, an existing task and a non-noise event")
+	}
+	err := a.commit(transition{State: "received", Index: len(a.events), Trigger: &t, Task: taskID})
 	return err == nil, err
 }
 
@@ -249,14 +274,17 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 		if err := validTrigger(*tr.Trigger); err != nil {
 			return err
 		}
+		if tr.Task != "" && (!a.main.chatRouting || a.tasks[tr.Task] == nil || tr.Trigger.Kind == "noise") {
+			return errors.New("invalid task-associated admission")
+		}
 		key := [2]string{tr.Trigger.Source, tr.Trigger.ID}
 		if _, exists := a.accepted[key]; exists {
 			return errors.New("duplicate event admission")
 		}
 		a.accepted[key] = tr.Index
-		a.events = append(a.events, item{trigger: *tr.Trigger, state: "received", mainAdmitted: a.main.id != ""})
+		a.events = append(a.events, item{trigger: *tr.Trigger, state: "received", entryTask: tr.Task, chatEntry: a.main.chatRouting, mainAdmitted: a.main.id != ""})
 		a.pending = append(a.pending, tr.Index)
-		if a.main.id != "" && tr.Trigger.Kind != "noise" && a.subscriptions[[2]string{tr.Trigger.Source, tr.Trigger.Thread}] == "" {
+		if a.main.id != "" && tr.Trigger.Kind != "noise" && (a.main.chatRouting || a.subscriptions[[2]string{tr.Trigger.Source, tr.Trigger.Thread}] == "") {
 			a.enqueueMain(tr.Index, nil)
 		}
 		return nil
@@ -284,7 +312,7 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 			return errors.New("invalid assignment")
 		}
 		thread := [2]string{e.trigger.Source, e.trigger.Thread}
-		if previous := a.subscriptions[thread]; previous != "" && previous != tr.Task {
+		if previous := a.subscriptions[thread]; !e.chatEntry && previous != "" && previous != tr.Task {
 			return errors.New("thread reassignment")
 		}
 		t = a.tasks[tr.Task]
@@ -306,7 +334,12 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 		if e.state == "routing" {
 			a.routing = false
 		}
-		a.subscriptions[thread] = tr.Task
+		if e.entryTask != "" && e.entryTask != tr.Task {
+			return errors.New("task admission cannot be reassigned")
+		}
+		if !e.chatEntry {
+			a.subscriptions[thread] = tr.Task
+		}
 		e.task = tr.Task
 		if e.delegation == "" {
 			e.delegation = t.delegation
@@ -340,13 +373,14 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 				return errors.New("invalid worker outcome")
 			}
 			finished := tr.State == "completed" || tr.State == "truncated" || tr.State == "completed_with_tool_errors"
+			var snap agent.AgentSnapshot
 			if finished || len(tr.Snapshot) > 0 {
-				var snap agent.AgentSnapshot
 				if len(tr.Snapshot) > maxSnapshotBytes || len(tr.Snapshot) == 0 || tr.Snapshot[0] != '{' || decodeSnapshot(tr.Snapshot, &snap) != nil || !belongsTo(snap, t.id) {
 					return errors.New("invalid worker snapshot")
 				}
 				t.snapshot = tr.Snapshot
 			}
+			a.recordControlInputs(tr.Index, snap)
 			if finished {
 				t.summary = brief(tr.Text)
 			}
@@ -416,7 +450,11 @@ func (a *SuperAgent) dispatch() bool {
 			if a.mainRoute != nil && e.mainInput {
 				continue
 			}
-			if id := a.subscriptions[[2]string{e.trigger.Source, e.trigger.Thread}]; id != "" {
+			id := e.entryTask
+			if !e.chatEntry {
+				id = a.subscriptions[[2]string{e.trigger.Source, e.trigger.Thread}]
+			}
+			if id != "" {
 				a.commit(transition{Index: i, State: "queued", Task: id})
 				return true
 			}

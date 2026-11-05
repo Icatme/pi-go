@@ -18,15 +18,17 @@ import (
 // after restart. All model-proposed actions are validated by the coordinator.
 type MainRouter func(context.Context, MainJob) (MainOutcome, error)
 
-// MainInput is derived from a durable admission or Worker terminal transition.
+// MainInput is derived from durable admission, control or Worker transitions.
 // Report contains the public summary and execution facts, never the private
 // Worker transcript or FailureCause. Its source/thread remain host-owned.
 type MainInput struct {
-	ID           string  `json:"id"`
-	Kind         string  `json:"kind"` // user or worker_result
-	Trigger      Trigger `json:"trigger"`
-	DelegationID string  `json:"delegation_id,omitempty"`
-	Report       *Report `json:"report,omitempty"`
+	ID           string       `json:"id"`
+	Kind         string       `json:"kind"` // user, task_input, control_result or worker_result
+	Trigger      Trigger      `json:"trigger"`
+	TaskID       string       `json:"task_id,omitempty"`
+	Control      *MainControl `json:"control,omitempty"`
+	DelegationID string       `json:"delegation_id,omitempty"`
+	Report       *Report      `json:"report,omitempty"`
 }
 
 type MainJob struct {
@@ -57,6 +59,7 @@ type MainOutcome struct {
 // Reply is a durable, host-readable outbox item. The authoritative Report
 // accompanies generated text so partial failure, committed effects and review
 // requirements cannot be replaced by a model's description of success.
+// Control similarly preserves correction facts for control_result replies.
 type Reply struct {
 	ID           string         `json:"id"`
 	DecisionID   string         `json:"decision_id"`
@@ -69,6 +72,7 @@ type Reply struct {
 	Text         string         `json:"text"`
 	Status       string         `json:"status"` // pending, needs_review, acknowledged
 	Report       *Report        `json:"report,omitempty"`
+	Control      *MainControl   `json:"control,omitempty"`
 	Attempts     []ReplyAttempt `json:"attempts,omitempty"`
 }
 
@@ -83,8 +87,10 @@ type mainState struct {
 	inbox          []mainItem
 	cursor         int
 	running        bool
+	chatRouting    bool // durable boundary: earlier admissions retain old semantics
 	replies        []Reply
 	controls       []MainControl
+	controlIndex   map[string]int
 	failures       []MainFailure
 	causes         map[string]error
 }
@@ -138,6 +144,11 @@ func OpenMain(ctx context.Context, path string, parallel int, route MainRouter, 
 	if err := a.recoverMainControls(); err != nil {
 		return nil, errors.Join(err, a.Close())
 	}
+	if !a.main.chatRouting {
+		if err := a.commit(transition{State: "main_chat_opened", Main: &mainTransition{}}); err != nil {
+			return nil, errors.Join(err, a.Close())
+		}
+	}
 	a.parallel, a.mainRoute, a.work = parallel, route, work
 	a.wg.Add(1)
 	go a.schedule()
@@ -146,14 +157,23 @@ func OpenMain(ctx context.Context, path string, parallel int, route MainRouter, 
 
 func (a *SuperAgent) enqueueMain(index int, report *Report) {
 	e := a.events[index]
-	input := MainInput{ID: a.main.id + "/input-" + strconv.Itoa(len(a.main.inbox)+1), Kind: "user", Trigger: e.trigger}
+	input := MainInput{ID: a.nextMainInputID(), Kind: "user", Trigger: e.trigger}
 	if report != nil {
 		input.Kind, input.Report, input.DelegationID = "worker_result", copyReport(report), e.delegation
+	} else if e.entryTask != "" {
+		input.Kind, input.TaskID = "task_input", e.entryTask
+		// The Worker receives the full event. The main observes bounded public
+		// input text, not a second actionable request or a private transcript.
+		input.Trigger.Text = brief(input.Trigger.Text)
 	} else {
 		a.events[index].mainInput = true
 		a.events[index].mainAdmitted = true
 	}
 	a.main.inbox = append(a.main.inbox, mainItem{input: input, event: index})
+}
+
+func (a *SuperAgent) nextMainInputID() string {
+	return a.main.id + "/input-" + strconv.Itoa(len(a.main.inbox)+1)
 }
 
 func copyReport(report *Report) *Report {
@@ -172,6 +192,7 @@ func (a *SuperAgent) dispatchMain() bool {
 	item := a.main.inbox[a.main.cursor]
 	job := MainJob{SessionID: a.main.id, ProviderSessionID: a.main.providerID, Input: item.input}
 	job.Input.Report = copyReport(job.Input.Report)
+	job.Input.Control = copyControl(job.Input.Control)
 	if len(a.main.snapshot) != 0 {
 		if err := decodeSnapshot(a.main.snapshot, &job.Snapshot); err != nil {
 			a.commit(transition{State: "main_failed", Text: "Main snapshot could not be read.", Main: &mainTransition{InputID: item.input.ID}})
@@ -287,6 +308,12 @@ func (a *SuperAgent) validateMain(tr transition) error {
 	if a.main.id == "" {
 		return errors.New("main session is not active")
 	}
+	if tr.State == "main_chat_opened" {
+		if a.main.chatRouting {
+			return errors.New("chat routing is already active")
+		}
+		return nil
+	}
 	if strings.HasPrefix(tr.State, "control_") {
 		return a.validateMainControl(tr)
 	}
@@ -320,13 +347,16 @@ func (a *SuperAgent) validateMain(tr transition) error {
 	if item.input.Kind == "worker_result" && d.Action != "reply" && d.Action != "ignore" {
 		return errors.New("worker result cannot authorize new work")
 	}
+	if (item.input.Kind == "task_input" || item.input.Kind == "control_result") && d.Action != "reply" && d.Action != "clarify" && d.Action != "ignore" {
+		return errors.New("informational input cannot authorize new work or control")
+	}
 	switch d.Action {
 	case "new", "attach":
 		if d.Text != "" || m.ReplyID != "" || m.Assignment == nil || m.Assignment.Index != item.event || m.Assignment.State != "queued" || m.Assignment.Main != nil {
 			return errors.New("invalid main assignment")
 		}
 		assignment := m.Assignment
-		if previous := a.subscriptions[[2]string{item.input.Trigger.Source, item.input.Trigger.Thread}]; previous != "" && previous != assignment.Task {
+		if previous := a.subscriptions[[2]string{item.input.Trigger.Source, item.input.Trigger.Thread}]; !a.events[item.event].chatEntry && previous != "" && previous != assignment.Task {
 			return errors.New("main assignment conflicts with thread subscription")
 		}
 		if d.Action == "new" {
@@ -369,11 +399,16 @@ func (a *SuperAgent) applyMain(tr transition, replay bool) error {
 	}
 	if strings.HasPrefix(tr.State, "control_") {
 		for _, id := range m.ControlIDs {
-			a.mainControl(id).Status = strings.TrimPrefix(tr.State, "control_")
+			c := a.mainControl(id)
+			c.Status = strings.TrimPrefix(tr.State, "control_")
+			a.enqueueControlResult(c)
 		}
 		return nil
 	}
 	switch tr.State {
+	case "main_chat_opened":
+		a.main.chatRouting = true
+		return nil
 	case "main_opened":
 		a.main.id, a.main.providerID = m.SessionID, m.ProviderSessionID
 		// The upgrade boundary is durable. Only previously unassigned user
@@ -410,9 +445,18 @@ func (a *SuperAgent) applyMain(tr transition, replay bool) error {
 		a.main.snapshot = slices.Clone(m.Snapshot)
 		if m.Decision.Action == "steer" || m.Decision.Action == "cancel" {
 			a.main.controls = append(a.main.controls, MainControl{ID: "control-" + m.InputID, DecisionID: m.DecisionID, InputID: m.InputID, Source: item.input.Trigger.Source, Thread: item.input.Trigger.Thread, EventID: item.input.Trigger.ID, Action: m.Decision.Action, Target: *m.Decision.Target, Text: m.Decision.Text, Status: "pending"})
+			c := &a.main.controls[len(a.main.controls)-1]
+			c.evidence = a.main.chatRouting
+			if a.main.controlIndex == nil {
+				a.main.controlIndex = make(map[string]int)
+			}
+			a.main.controlIndex[c.ID] = len(a.main.controls) - 1
+			e := a.controlEvent(c.Target)
+			e.controls = append(e.controls, c.ID)
 		}
 		if m.Decision.Action == "reply" || m.Decision.Action == "clarify" {
-			reply := Reply{ID: m.ReplyID, DecisionID: m.DecisionID, InputID: m.InputID, DelegationID: item.input.DelegationID, Source: item.input.Trigger.Source, Thread: item.input.Trigger.Thread, EventID: item.input.Trigger.ID, Text: m.Decision.Text, Status: "pending", Report: copyReport(item.input.Report)}
+			reply := Reply{ID: m.ReplyID, DecisionID: m.DecisionID, InputID: m.InputID, DelegationID: item.input.DelegationID, Source: item.input.Trigger.Source, Thread: item.input.Trigger.Thread, EventID: item.input.Trigger.ID, Text: m.Decision.Text, Status: "pending", Report: copyReport(item.input.Report), Control: copyControl(item.input.Control)}
+			reply.TaskID = item.input.TaskID
 			if reply.Report != nil {
 				reply.TaskID = reply.Report.TaskID
 			}
@@ -458,6 +502,7 @@ func (a *SuperAgent) Replies() []Reply {
 	out := slices.Clone(a.main.replies)
 	for i := range out {
 		out[i].Report = copyReport(out[i].Report)
+		out[i].Control = copyControl(out[i].Control)
 		out[i].Attempts = slices.Clone(out[i].Attempts)
 	}
 	return out

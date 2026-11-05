@@ -79,6 +79,22 @@ func TestMainSameChatIndependentWorkAndCorrection(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("independent test task waited for the logs task")
 	}
+	// B must also finish and report while A is still held, not merely start.
+	for done := false; !done; {
+		a.mu.Lock()
+		changed := a.changed
+		a.mu.Unlock()
+		for _, reply := range a.Replies() {
+			done = done || reply.EventID == "tests"
+		}
+		if !done {
+			select {
+			case <-changed:
+			case <-ctx.Done():
+				t.Fatal("test result waited for the logs task")
+			}
+		}
+	}
 	correction := Trigger{ID: "correction", Source: "im", Thread: "chat", Kind: "request", Text: "Only inspect the last hour of logs"}
 	submit(t, a, correction)
 	control := waitMainControl(t, a, "queued")
@@ -115,7 +131,7 @@ func TestMainSameChatIndependentWorkAndCorrection(t *testing.T) {
 		}
 	}
 	waitIdle(t, b)
-	if len(b.Status().Tasks) != 2 || len(b.MainControls()) != 1 || b.MainControls()[0].ID != control.ID || len(b.Replies()) != 2 {
+	if len(b.Status().Tasks) != 2 || len(b.MainControls()) != 1 || b.MainControls()[0].ID != control.ID || !b.MainControls()[0].InputAccepted || len(b.Replies()) != 2 {
 		t.Fatal("replay changed task/correction/reply identity")
 	}
 }

@@ -6,11 +6,15 @@ For durable structured steering/cancellation and exact execution boundaries,
 see [M1b](../docs/superagent-m1b.md) and `ExampleSuperAgent_MainControls`.
 For exact reply delivery attempts, verification, safe retries and echo filtering,
 see [M1c](../docs/superagent-m1c.md) and `ExampleSuperAgent_BeginReplyDelivery`.
+For same-chat independent work, explicit task updates, and persisted correction
+evidence, see [M2a](../docs/superagent-m2a.md) and `ExampleSuperAgent_SubmitTask`.
 The existing `Open` examples below retain the stateless Router contract.
 
 SuperAgent is an opt-in coordinator in the pi-go module. An incoming conversation
 can start a task or join one started elsewhere. Each task has its own Pi agent
-snapshot. A later event from a subscribed thread goes directly to that task.
+snapshot. With `OpenMain`, normal chat messages always reach main; only explicit
+`SubmitTask` updates go directly to a known task. With legacy `Open`, a later
+event from a subscribed thread goes directly to that task.
 Programs that use a single agent can continue to import `github.com/Icatme/pi-go/agent`.
 
 The [development plan](../docs/superagent-development-plan.md) tracks the
