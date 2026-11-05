@@ -258,7 +258,7 @@ func (a *SuperAgent) commit(tr transition) error {
 	if a.fatal != nil {
 		return a.fatal
 	}
-	if tr.Admission != nil || tr.State == "admission_received" {
+	if tr.Admission != nil || (tr.State == "admission_received" || tr.State == "channel_admission_received") {
 		if err := a.validateAdmission(tr); err != nil {
 			return err
 		}
@@ -308,7 +308,7 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 	if tr.Background != nil || strings.HasPrefix(tr.State, "background_") {
 		return a.applyBackground(tr)
 	}
-	if tr.Admission != nil || tr.State == "admission_received" {
+	if tr.Admission != nil || (tr.State == "admission_received" || tr.State == "channel_admission_received") {
 		return a.applyAdmission(tr, replay)
 	}
 	if replay {
