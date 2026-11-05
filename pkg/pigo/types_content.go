@@ -33,10 +33,10 @@ type ToolCall struct {
 	Namespace string
 	Arguments map[string]any
 	// RawArguments is the original JSON object text when the provider exposes
-	// it. It is available on completed calls from Responses, OpenAI chat
-	// completions, DeepSeek chat, Anthropic Messages and Command Code. Unlike Arguments, it
-	// preserves exact number literals and duplicate keys. It is ephemeral
-	// provider evidence and is not part of serialized conversation history.
+	// it. Unlike Arguments, it preserves exact number literals and duplicate
+	// keys. Providers including Responses, OpenAI chat completions, DeepSeek,
+	// Anthropic, Command Code, Google, and Mistral expose it on completed calls.
+	// This evidence is ephemeral and is excluded from serialized history.
 	RawArguments     string `json:"-"`
 	ThoughtSignature string
 }

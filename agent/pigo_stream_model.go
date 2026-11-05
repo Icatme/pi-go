@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Icatme/pi-go/internal/jsontext"
 	pigo "github.com/Icatme/pi-go/pkg/pigo"
 )
 
@@ -342,6 +343,10 @@ func convertPigoAssistantEvent(event pigo.AssistantMessageEvent) AssistantEvent 
 	switch event.Type {
 	case pigo.AssistantMessageEventDone:
 		converted.Message = convertPigoAssistantMessage(event.Message)
+		if converted.Message.StopReason == StopReasonError {
+			converted.Type = AssistantEventError
+			converted.Reason = StopReasonError
+		}
 	case pigo.AssistantMessageEventError:
 		converted.Message = convertPigoAssistantSnapshot(event.Error)
 	default:
@@ -358,8 +363,33 @@ func convertPigoAssistantEvent(event pigo.AssistantMessageEvent) AssistantEvent 
 
 func convertPigoAssistantMessage(message pigo.AssistantMessage) Message {
 	converted := convertPigoAssistantSnapshot(message)
+	// Validate completed provider input while its original member names are
+	// still available. A map alone cannot distinguish the two destinations
+	// of a duplicate path. Never persist discarded wire values in history.
+	// Failed and truncated calls already follow the engine's nonexecution path.
+	if !isErrorAssistantMessage(converted) && converted.StopReason != StopReasonLength {
+		if err := validateProviderToolArguments(message.Content); err != nil {
+			converted.ToolCalls = nil
+			converted.StopReason = StopReasonError
+			converted.ErrorMessage = "agent: invalid provider tool arguments: " + err.Error()
+			return converted
+		}
+	}
 	converted.Metadata = pigoContextObservationMetadata(message)
 	return converted
+}
+
+func validateProviderToolArguments(blocks []pigo.ContentBlock) error {
+	for _, block := range blocks {
+		call, ok := block.(pigo.ToolCall)
+		if !ok || call.RawArguments == "" {
+			continue
+		}
+		if err := jsontext.ValidateObject([]byte(call.RawArguments), 128); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func convertPigoAssistantSnapshot(message pigo.AssistantMessage) Message {

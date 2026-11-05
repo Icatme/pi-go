@@ -55,20 +55,7 @@ func Definitions(root *os.Root, options Options) ([]agent.ToolDefinition, error)
 			"entries":   map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}, "type": map[string]any{"type": "string", "enum": []string{"directory", "symlink", "file", "other"}}}, "required": []string{"name", "type"}, "additionalProperties": false}},
 			"truncated": map[string]any{"type": "boolean"}}, "required": []string{"entries", "truncated"}, "additionalProperties": false},
 		MaxArgumentBytes: 32 << 10,
-		ParseArguments: func(call agent.ToolCall) (any, error) {
-			raw := call.Arguments
-			if call.ParsedArgs != nil {
-				if err := jsontext.ValidateStrings(call.ParsedArgs); err != nil {
-					return nil, invalid(err)
-				}
-				var err error
-				raw, err = json.Marshal(call.ParsedArgs)
-				if err != nil {
-					return nil, invalid(err)
-				}
-			}
-			return parse(raw)
-		},
+		ParseArguments:   parseCallArguments(parse),
 		Execute: func(ctx context.Context, execution agent.ToolExecutionContext) (agent.ToolResult, error) {
 			if err := jsontext.ValidateStrings(execution.Args); err != nil {
 				return agent.ToolResult{}, invalid(err)
@@ -96,6 +83,29 @@ type entry struct {
 type output struct {
 	Entries   []entry `json:"entries"`
 	Truncated bool    `json:"truncated"`
+}
+
+// Callers may supply an edited ParsedArgs object. Validate a distinct raw
+// object first so a map cannot hide duplicate path or content fields.
+func parseCallArguments[T any](parse func([]byte) (T, error)) func(agent.ToolCall) (any, error) {
+	return func(call agent.ToolCall) (any, error) {
+		if call.ParsedArgs == nil {
+			return parse(call.Arguments)
+		}
+		if err := jsontext.ValidateStrings(call.ParsedArgs); err != nil {
+			return nil, invalid(err)
+		}
+		edited, err := json.Marshal(call.ParsedArgs)
+		if err != nil {
+			return nil, invalid(err)
+		}
+		if len(call.Arguments) > 0 && !bytes.Equal(call.Arguments, edited) {
+			if _, err := parse(call.Arguments); err != nil {
+				return nil, err
+			}
+		}
+		return parse(edited)
+	}
 }
 
 func parse(raw []byte) (arguments, error) {

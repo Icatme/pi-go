@@ -109,13 +109,15 @@ func TestMistralThinkingStream(t *testing.T) {
 }
 
 func TestMistralToolCallStream(t *testing.T) {
+	const raw = `{"location":"discard-first","location":"NYC"}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
 		chunks := []string{
 			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc123","function":{"name":"get_weather"}}]}}]}`,
-			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"loc"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"location\":\"discard-first\",\"loc"}}]}}]}`,
 			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ation\":\"NYC\"}"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_no_args","function":{"name":"get_weather"}}]}}]}`,
 			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
 		}
 		for _, chunk := range chunks {
@@ -144,12 +146,18 @@ func TestMistralToolCallStream(t *testing.T) {
 		}},
 	}, ProviderStreamOptions{APIKey: "placeholder-api-key"})
 
+	ended := make(map[string]string)
+	for event := range stream.Events() {
+		if event.Type == AssistantMessageEventToolCallEnd {
+			ended[event.ToolCall.ID] = event.ToolCall.RawArguments
+		}
+	}
 	result := stream.Result()
 	if result.StopReason != StopReasonToolUse {
 		t.Errorf("expected toolUse, got %q", result.StopReason)
 	}
-	if len(result.Content) != 1 {
-		t.Fatalf("expected 1 content block, got %d", len(result.Content))
+	if len(result.Content) != 2 {
+		t.Fatalf("expected 2 content blocks, got %d", len(result.Content))
 	}
 	call, ok := result.Content[0].(ToolCall)
 	if !ok || call.Name != "get_weather" {
@@ -160,6 +168,14 @@ func TestMistralToolCallStream(t *testing.T) {
 	}
 	if len(call.ID) != mistralToolCallIDLength {
 		t.Errorf("expected tool call id length %d, got %d (%q)", mistralToolCallIDLength, len(call.ID), call.ID)
+	}
+	missing := result.Content[1].(ToolCall)
+	if len(ended) != 2 || ended[call.ID] != raw || call.RawArguments != raw || ended[missing.ID] != "" || missing.RawArguments != "" || missing.Arguments == nil || len(missing.Arguments) != 0 {
+		t.Fatalf("incorrect completed-call evidence: events=%q calls=%+v", ended, result.Content)
+	}
+	_, replay := convertMistralAssistantContent(result.Content)
+	if len(replay) != 2 || replay[0].Function.Arguments != `{"location":"NYC"}` || replay[1].Function.Arguments != "{}" {
+		t.Errorf("unexpected request replay: %+v", replay)
 	}
 }
 
