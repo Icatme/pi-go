@@ -3236,3 +3236,19 @@
 - Windows Go 1.26.10 passed the full `pkg/pigo` tests and vet, plus focused
   race tests for Terra and sampling. A local HTTP fixture exercised function
   tools, reasoning, sampling and cache settings through `CompleteSimple`.
+
+
+## 2026-11-05 - M9b real-runtime serial protocol slice
+
+- Added `internal/runtimeeval` and `pi-superagent-runtime-eval`: actual
+  PiMainRouter/PiWorker and single Runner + host subtask queue, four arms with
+  identical 12-delivery inputs, one worker slot and request/call budget caps.
+- Test-first event/effect/receipt/reply/history conservation; five repeat checks,
+  source-scoped duplicates, callback fast paths, completed-journal reopen,
+  controlled tool barriers, cancellation and uncooperative-body joining.
+- Independent review corrected counter meaning (tasks, worker invocations,
+  worker/outer tool calls and effects are separate) and result metadata checks.
+- Scripted protocol evidence only, unknown token/cost/latency fields remain null.
+  No historical baseline, real model performance, full M9/release acceptance,
+  live services, user computer, additional paid work, CI, merge or deployment.
+  See [M9b boundaries and reproduction](superagent-m9b.md).
