@@ -2990,3 +2990,25 @@
 - No live provider/platform, production DB, user-local task, manual CI, merge or
   deployment. Shared files require a trusted private local directory. External
   effects still need exact-operation evidence; lease fencing cannot undo them.
+
+
+## 2026-11-05 - SuperAgent fixed-device protocol slice
+
+- Based on draft #170's exact tree, added optional host-authenticated fixed-device
+  backend protocol with durable request identity, acknowledgments, query/stop,
+  monotonic epoch fences and non-replaying restart. See [M7a](superagent-m7a.md).
+- Two independent subprocess devices cover request/response loss and process
+  death after effect before acknowledgment. Native Pi/M4/M6 integration covers
+  new Worker input while waiting, coordinator replacement, review/quota retention
+  and one original-call completion. Device credential canaries stay off the wire
+  and out of model, snapshots, coordinator log, replies and device registry.
+- Independent review fixes preserve receipt fingerprints across regressions,
+  reject impossible replay transitions and persist restart uncertainty correctly.
+- Explicit Create is provisioning only; Open never recreates missing state. No
+  real devices, user computer, model/provider, new access credentials, extra paid
+  execution, manual CI, merge or deployment. This is not fleet scheduling,
+  device-global durable quota, a persistent runner or power-loss validation.
+- Final Linux amd64 Go 1.26.10 root readonly tests, vet, full race, device race
+  x20 and separate examples tests/vet passed. Optional full module inventory
+  could not complete with GOPROXY=off because some indirect-module metadata is
+  uncached; no dependency versions changed and no manual CI was requested.
