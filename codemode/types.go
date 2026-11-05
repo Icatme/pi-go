@@ -140,8 +140,19 @@ type CallError struct {
 	Err        error     `json:"-"`
 }
 
-func (e *CallError) Error() string { return e.Message }
-func (e *CallError) Unwrap() error { return e.Err }
+func (e *CallError) Error() string {
+	if e == nil {
+		return "codemode: host returned a nil *CallError"
+	}
+	return e.Message
+}
+
+func (e *CallError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
 
 type CallRecord struct {
 	ID         int       `json:"id"`

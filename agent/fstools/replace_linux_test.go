@@ -3,13 +3,60 @@
 package fstools
 
 import (
+	"context"
 	"errors"
 	"github.com/Icatme/pi-go/agent"
 	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestWriteDenialAfterStagingReportsNotPublished(t *testing.T) {
+	for _, operation := range []string{"replace", "edit"} {
+		t.Run(operation, func(t *testing.T) {
+			dir, root, tool := replaceFixture(t, ReplaceOptions{})
+			if err := os.WriteFile(filepath.Join(dir, "target"), []byte("old"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			args := createArgs("target", "new")
+			if operation == "edit" {
+				var err error
+				tool, err = EditDefinition(root, EditOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				args = previewArgs("target", "old", "new")
+			}
+			denyAfterStaging := func(context.Context) error {
+				entries, err := os.ReadDir(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, entry := range entries {
+					if strings.HasPrefix(entry.Name(), ".pigo-replace-") {
+						return errors.New("permission revoked before rename")
+					}
+				}
+				return nil
+			}
+			out, err := executeCaptured(t, t.Context(), tool.Execute, agent.ToolExecutionContext{Args: args, CheckPermission: denyAfterStaging})
+			var failure *agent.ToolExecutionError
+			if !errors.As(err, &failure) || failure.Code != agent.ToolFailurePolicyDenied || failure.Reason != operation+"_not_published" || out.committed() {
+				t.Fatalf("unexpected publication facts: error=%+v committed=%v", failure, out.committed())
+			}
+			content, err := os.ReadFile(filepath.Join(dir, "target"))
+			if err != nil || string(content) != "old" {
+				t.Fatalf("target after denial: %q, %v", content, err)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("staging cleanup: %v, %v", entries, err)
+			}
+		})
+	}
+}
 
 func TestReplaceRejectsObservedSpecialNames(t *testing.T) {
 	dir, _, tool := replaceFixture(t, ReplaceOptions{})
@@ -69,7 +116,7 @@ func TestReplaceStagingOwnershipAndLastWriterWins(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err = p.publishStaged(stage)
+			err = p.publishStaged(stage, func() {})
 			if (mode == "collision" || mode == "late denial") != (err != nil) {
 				t.Fatalf("%v", err)
 			}
@@ -142,6 +189,17 @@ func TestReplaceFixedParentAndTargetRace(t *testing.T) {
 	if string(got) != "outside" || !st.Mode().IsRegular() {
 		t.Fatal("followed final link")
 	}
+	// A racing directory makes rename itself fail after the last check. Keep
+	// the conservative unknown outcome once a destination syscall was issued.
+	p, err = newPendingReplace(root, "raced-dir", func() error { return os.Mkdir(filepath.Join(dir, "raced-dir"), 0700) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := publishFileCaptured(t, t.Context(), agent.ToolExecutionContext{}, p, []byte("new"), "replace")
+	var failure *agent.ToolExecutionError
+	if !errors.As(err, &failure) || failure.Reason != "replace_publication_unknown" || outcome.committed() {
+		t.Fatalf("unexpected rename failure: %+v, committed=%v", failure, outcome.committed())
+	}
 }
 
 func TestReplaceStagingCannotBeDestination(t *testing.T) {
@@ -153,7 +211,7 @@ func TestReplaceStagingCannotBeDestination(t *testing.T) {
 	}
 	p := pending.(*linuxPendingReplace)
 	for _, name := range []string{"target", "", ".", "..", "a/b"} {
-		if err := p.publishStaged(name); err == nil {
+		if err := p.publishStaged(name, func() { t.Fatal("attempted invalid destination") }); err == nil {
 			t.Fatal("accepted", name)
 		}
 		entries, readErr := os.ReadDir(dir)

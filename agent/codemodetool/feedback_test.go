@@ -201,6 +201,28 @@ func TestFailureAfterWriteDoesNotReplayAndRetainsCause(t *testing.T) {
 	}
 }
 
+func TestNativeTypedNilErrorRetainsCauseAndSafeMessage(t *testing.T) {
+	var cause *agent.ToolExecutionError
+	leaf := agent.ToolDefinition{Name: "bad", Execute: func(context.Context, agent.ToolExecutionContext) (agent.ToolResult, error) {
+		return agent.ToolResult{}, cause
+	}}
+	tool, err := New(newSandbox(t), []Binding{Native(leaf, "local")}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := modelVisibleCodemodeCall(t, tool, `try {await tools.bad({})} catch (e) {text(e.message)}`)
+	if result.IsError || !strings.Contains(contentText(result.Content), "tool call failed; inspect the host report") {
+		t.Fatalf("unexpected script-visible result: %+v", result)
+	}
+	if result.ChildCalls == nil || len(result.ChildCalls.Calls) != 1 {
+		t.Fatalf("unexpected child ledger: %+v", result.ChildCalls)
+	}
+	record := result.ChildCalls.Calls[0]
+	if record.Failure == nil || record.Failure.Code != agent.ToolFailureProtocol || !errors.Is(record.Err, cause) {
+		t.Fatalf("lost host classification or cause: %+v", record)
+	}
+}
+
 func TestRawLeafGoErrorDoesNotBecomeModelDiagnosticOrEventText(t *testing.T) {
 	secret := errors.New("SECRET_CREDENTIAL_IN_RAW_GO_ERROR")
 	leaf := agent.ToolDefinition{Name: "bad", Execute: func(context.Context, agent.ToolExecutionContext) (agent.ToolResult, error) {

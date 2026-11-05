@@ -376,8 +376,7 @@ func toolOutcomeFromExecution(prepared preparedToolCall, result ToolResult, exec
 		if result.Execution == nil || result.Execution.Remote == "" {
 			outcome.execution.Remote = ToolRemoteUnknown
 		}
-		var typed *ToolExecutionError
-		if errors.As(execErr, &typed) && typed.Execution.Remote != "" {
+		if typed, _ := errors.AsType[*ToolExecutionError](execErr); typed != nil && typed.Execution.Remote != "" {
 			outcome.execution = *cloneToolExecutionInfo(&typed.Execution)
 			outcome.execution.Local = ToolLocalReturned
 		}
@@ -440,8 +439,8 @@ func validateToolOutcome(prepared preparedToolCall, outcome toolOutcome) toolOut
 }
 
 func safeChildError(err error, code ToolFailureCode, message string) error {
-	var typed *ToolExecutionError
-	if errors.As(err, &typed) && typed.Message != "" {
+	typed, _ := errors.AsType[*ToolExecutionError](err)
+	if typed != nil && typed.Message != "" {
 		return err
 	}
 	reason := ""
@@ -523,8 +522,7 @@ func setOutcomeFailure(outcome *toolOutcome, err error, code ToolFailureCode, re
 		combined = errors.Join(err, outcome.err)
 	}
 	reason := ""
-	var typed *ToolExecutionError
-	if errors.As(err, &typed) {
+	if typed, _ := errors.AsType[*ToolExecutionError](err); typed != nil {
 		reason = typed.Reason
 	}
 	message := boundedUTF8(err.Error(), min(8192, resultLimit))

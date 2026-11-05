@@ -103,16 +103,8 @@ func parse(raw []byte) (arguments, error) {
 	if len(raw) > 32<<10 {
 		return args, invalid(errors.New("argument limit"))
 	}
-	if err := jsontext.ValidateUnicode(raw); err != nil {
+	if err := decodeStringArguments(raw, map[string]*string{"path": &args.Path}); err != nil {
 		return args, invalid(err)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&args); err != nil {
-		return args, invalid(err)
-	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return args, invalid(errors.New("expected one argument object"))
 	}
 	p := args.Path
 	if p == "" || len(p) > 4096 || !utf8.ValidString(p) || strings.ContainsAny(p, "\\:\x00") || strings.HasPrefix(p, "/") {
@@ -125,6 +117,43 @@ func parse(raw []byte) (arguments, error) {
 	}
 	args.Path = path.Clean(p)
 	return args, nil
+}
+
+// A struct decoder folds field names and overwrites duplicate keys. Check
+// each required spelling before arguments are normalized for schema validation.
+func decodeStringArguments(raw []byte, fields map[string]*string) error {
+	if err := jsontext.ValidateUnicode(raw); err != nil {
+		return err
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := d.Token(); err != nil || token != json.Delim('{') {
+		return errors.New("expected an argument object")
+	}
+	for d.More() {
+		key, err := d.Token()
+		if err != nil {
+			return err
+		}
+		name, ok := key.(string)
+		dest := fields[name]
+		if !ok || dest == nil {
+			return errors.New("unknown or repeated argument")
+		}
+		token, err := d.Token()
+		if err != nil {
+			return err
+		}
+		value, ok := token.(string)
+		if !ok {
+			return errors.New("expected a string argument")
+		}
+		*dest = value
+		delete(fields, name)
+	}
+	if len(fields) != 0 {
+		return errors.New("missing required argument")
+	}
+	return nil
 }
 
 func invalid(err error) error {

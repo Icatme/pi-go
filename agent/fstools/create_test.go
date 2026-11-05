@@ -162,7 +162,8 @@ func (f *fakeCreate) Write(b []byte) (int, error) {
 	return n, nil
 }
 func (f *fakeCreate) Sync() error { return f.syncErr }
-func (f *fakeCreate) Publish() error {
+func (f *fakeCreate) Publish(markAttempt func()) error {
+	markAttempt()
 	f.published++
 	if f.afterPublish != nil {
 		f.afterPublish()

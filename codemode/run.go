@@ -451,7 +451,8 @@ func (r *runState) finish(call invocation, raw json.RawMessage, invokeErr error,
 	}
 	var failure *CallError
 	if invokeErr != nil {
-		if !errors.As(invokeErr, &failure) {
+		failure, _ = errors.AsType[*CallError](invokeErr)
+		if failure == nil {
 			code := "host"
 			if errors.Is(invokeErr, context.Canceled) {
 				code = "canceled"
@@ -471,10 +472,10 @@ func (r *runState) finish(call invocation, raw json.RawMessage, invokeErr error,
 		if failure.CallID == "" {
 			failure.CallID = strconv.Itoa(call.jsID)
 		}
-		if failure.Execution.Local == "" {
+		if failure.Execution.Local == "" || len(failure.Execution.Local) > 32 {
 			failure.Execution.Local = facts.Local
 		}
-		if failure.Execution.Remote == "" {
+		if failure.Execution.Remote == "" || len(failure.Execution.Remote) > 32 {
 			failure.Execution.Remote = "unknown"
 		}
 		facts = failure.Execution
@@ -526,9 +527,6 @@ func (r *runState) finish(call invocation, raw json.RawMessage, invokeErr error,
 		}
 		if len(failure.CallID) > 256 {
 			failure.CallID = strconv.Itoa(call.jsID)
-		}
-		if len(failure.Execution.Local) > 32 || len(failure.Execution.Remote) > 32 {
-			failure.Execution = Execution{Local: facts.Local, Remote: "unknown"}
 		}
 		code = failure.Code
 		if len(failure.ReasonCode) > 128 {

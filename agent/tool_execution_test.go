@@ -9,7 +9,24 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Icatme/pi-go/executionreceipt"
 )
+
+func TestTypedNilToolErrorPreservesFailureAndReceipt(t *testing.T) {
+	var cause *ToolExecutionError
+	tool := ToolDefinition{Name: "write", Execute: func(ctx context.Context, _ ToolExecutionContext) (ToolResult, error) {
+		executionreceipt.ReportLocalCommit(ctx)
+		return ToolResult{}, cause
+	}}
+	out, h, err := RunToolCallWithReceipts(t.Context(), ToolCall{Name: "write"}, RunToolCallOptions{Tools: []ToolDefinition{tool}}, 1)
+	if err != nil || !out.IsError || out.Failure == nil || out.Failure.Code != ToolFailureProtocol || !errors.Is(out.Err, cause) {
+		t.Fatalf("outcome=%+v err=%v", out, err)
+	}
+	if records := h.Snapshot(); len(records) != 1 || !records[0].Committed() || !records[0].Completed() {
+		t.Fatalf("receipts=%+v", records)
+	}
+}
 
 func TestExecutionOutcomePreservesErrorPartialAndRemoteFacts(t *testing.T) {
 	cause := errors.New("mapping failed")

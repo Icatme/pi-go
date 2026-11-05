@@ -71,6 +71,9 @@ type ToolExecutionError struct {
 }
 
 func (e *ToolExecutionError) Error() string {
+	if e == nil {
+		return "agent: tool returned a nil *ToolExecutionError"
+	}
 	if e.Message != "" {
 		return e.Message
 	}
@@ -83,7 +86,12 @@ func (e *ToolExecutionError) Error() string {
 	return string(e.Code)
 }
 
-func (e *ToolExecutionError) Unwrap() error { return e.Err }
+func (e *ToolExecutionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
 
 // ToolPermissionHook checks current authorization without changing arguments.
 // It runs after scheduling, and adapters call CheckPermission again immediately
@@ -121,8 +129,7 @@ func cloneToolFailure(failure *ToolFailure) *ToolFailure {
 }
 
 func failureCode(err error, fallback ToolFailureCode) ToolFailureCode {
-	var typed *ToolExecutionError
-	if errors.As(err, &typed) && typed.Code != "" {
+	if typed, _ := errors.AsType[*ToolExecutionError](err); typed != nil && typed.Code != "" {
 		return typed.Code
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
@@ -136,8 +143,7 @@ func failureCode(err error, fallback ToolFailureCode) ToolFailureCode {
 
 func newToolFailure(err error, code ToolFailureCode, execution ToolExecutionInfo) *ToolExecutionError {
 	reason := ""
-	var typed *ToolExecutionError
-	if errors.As(err, &typed) {
+	if typed, _ := errors.AsType[*ToolExecutionError](err); typed != nil {
 		reason = typed.Reason
 	}
 	return &ToolExecutionError{Code: failureCode(err, code), Reason: reason, Execution: execution, Err: err}

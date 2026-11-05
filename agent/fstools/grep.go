@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"regexp"
 	"regexp/syntax"
@@ -126,16 +125,8 @@ func parseGrep(raw []byte) (grepArguments, *syntax.Regexp, error) {
 	if len(raw) > 32<<10 {
 		return bad(errors.New("argument limit"))
 	}
-	if err := jsontext.ValidateUnicode(raw); err != nil {
+	if err := decodeStringArguments(raw, map[string]*string{"path": &args.Path, "pattern": &args.Pattern}); err != nil {
 		return bad(err)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&args); err != nil {
-		return bad(err)
-	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return bad(errors.New("expected one argument object"))
 	}
 	encoded, _ := json.Marshal(arguments{Path: args.Path})
 	normalized, err := parse(encoded)

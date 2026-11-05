@@ -42,9 +42,10 @@ func newPendingCreate(root *os.Root, filename string) (pendingCreation, error) {
 	}
 	return &linuxPendingCreate{File: os.NewFile(uintptr(fd), "fstools-anonymous-create"), parent: parent, proc: proc, name: name}, nil
 }
-func (p *linuxPendingCreate) Publish() error {
+func (p *linuxPendingCreate) Publish(markAttempt func()) error {
 	// The source is a host-generated decimal descriptor name, not model input.
 	// Do not add O_EXCL to O_TMPFILE: that would forbid this atomic publication.
+	markAttempt()
 	err := unix.Linkat(int(p.proc.Fd()), strconv.Itoa(int(p.File.Fd())), int(p.parent.Fd()), p.name, unix.AT_SYMLINK_FOLLOW)
 	runtime.KeepAlive(p)
 	return err

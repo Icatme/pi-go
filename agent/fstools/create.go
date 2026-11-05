@@ -1,11 +1,9 @@
 package fstools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"strings"
 
@@ -94,18 +92,11 @@ func parseCreate(raw []byte, maxBytes, maxArgs int) (createArguments, error) {
 	if len(raw) > maxArgs {
 		return bad(errors.New("argument limit"))
 	}
-	if err := jsontext.ValidateUnicode(raw); err != nil {
+	args.Content = new(string)
+	if err := decodeStringArguments(raw, map[string]*string{"path": &args.Path, "content": args.Content}); err != nil {
 		return bad(err)
 	}
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&args); err != nil {
-		return bad(err)
-	}
-	if err := d.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return bad(errors.New("expected one object"))
-	}
-	if args.Content == nil || len(*args.Content) > maxBytes || strings.ContainsRune(*args.Content, 0) {
+	if len(*args.Content) > maxBytes || strings.ContainsRune(*args.Content, 0) {
 		return bad(errors.New("invalid content"))
 	}
 	if args.Path == "." || strings.HasSuffix(args.Path, "/") || strings.HasSuffix(args.Path, "/.") {
@@ -128,7 +119,8 @@ func parseCreate(raw []byte, maxBytes, maxArgs int) (createArguments, error) {
 type pendingCreation interface {
 	Write([]byte) (int, error)
 	Sync() error
-	Publish() error
+	// Mark the attempt immediately before the syscall that publishes to the destination.
+	Publish(markAttempt func()) error
 	SyncDirectory() error
 	Close() error
 }
