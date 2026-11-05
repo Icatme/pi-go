@@ -2856,3 +2856,17 @@
   1.26.2 passed race tests for agent, fstools, codemodetool, codemode and
   agent/session, including Linux publication regressions, and vet for the
   agent and codemode package trees.
+
+## 2026-11-05 - GPT-6.1 Terra on the OpenAI Responses API
+
+- Registered `openai/gpt-6.1-terra` with text and image input, a 1,050,000-token
+  context window and 128,000 output tokens. Its default reasoning effort is
+  medium. Explicit off sends `none` and enables temperature and top-p.
+  [Model specification](https://developers.openai.com/api/docs/models/gpt-6.1-terra)
+- Added standard and above-272K input pricing, including cached reads and
+  30-minute writes. Long cache retention sends `prompt_cache_options.ttl`.
+  [Pricing](https://developers.openai.com/api/docs/pricing) and
+  [parameter guide](https://developers.openai.com/api/docs/guides/latest-model#gpt-6-astra-update-api-and-model-parameters)
+- Windows Go 1.26.10 passed the full `pkg/pigo` tests and vet, plus focused
+  race tests for Terra and sampling. A local HTTP fixture exercised function
+  tools, reasoning, sampling and cache settings through `CompleteSimple`.
