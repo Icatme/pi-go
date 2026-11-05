@@ -1,0 +1,5 @@
+{"id":"a1","source":"console","thread":"release","kind":"request","text":"Prepare the release checklist."}
+{"id":"b1","source":"console","thread":"support","kind":"request","text":"Summarize the support queue."}
+{"id":"a1","source":"console","thread":"release","kind":"request","text":"Prepare the release checklist."}
+{"id":"a2","source":"console","thread":"release","kind":"signal","text":"The build passed. Update the checklist."}
+{"id":"c1","source":"monitor","thread":"heartbeat","kind":"noise","text":"Heartbeat."}

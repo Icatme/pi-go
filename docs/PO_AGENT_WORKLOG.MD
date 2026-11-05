@@ -2856,3 +2856,105 @@
   1.26.2 passed race tests for agent, fstools, codemodetool, codemode and
   agent/session, including Linux publication regressions, and vet for the
   agent and codemode package trees.
+
+## 2026-11-05 - Local SuperAgent prototype in the pi-go module
+
+- Added `superagent.SuperAgent` and `cmd/pi-superagent` to this repository. The
+  coordinator uses Pi's existing Runner for routing and per-task worker runs,
+  and session JSONL storage for event admission, subscriptions and snapshots.
+- Verified separate task histories, cross-source follow-up, admission deduplication,
+  report replay and continued stdin service while workers run. Abruptly terminating
+  a worker process leaves an interrupted event on reopen. No automatic replay of
+  an already-started call is attempted.
+- Windows Go 1.26.4 root tests and vet passed with live-model flags off. WSL
+  Linux Go 1.26.2 race passed for the new package and command. Built and ran
+  the Windows CLI offline. Production messaging connectors, external watchdog
+  and remote execution are outside this local prototype.
+
+## 2026-11-05 - SuperAgent tool outcomes and recovery review
+
+- PiWorker uses the receipt-aware Runner and waits for admitted executors to
+  exit, including late Codemode children. Reports distinguish a completed model
+  run, a length-limited answer and a run that ended after tool errors. PiRouter
+  rejects partial/failed decisions and honors the provider stream veto hook.
+- A started worker with an uncertain result fences its task. Previously admitted
+  follow-ups are blocked, including late attachments. Trusted reconciliation
+  names the exact cause event and records a note; only fresh instructions can
+  resume work. Offline reconciliation does not dispatch queued events.
+- Reports retain host-reported local commits independently of tool success.
+  Raw callback errors are available to the current host through FailureCause.
+  CLI returns the journal error if its terminal write fails with stdin open.
+- Verified real Linux create_file publication followed by a rejected result,
+  persistent receipts, blocked follow-up after a process kill following an
+  external write, and Windows byte-lock failure during the final append.
+  Windows offline root tests and vet passed. Linux race passed for superagent
+  and its CLI. Rebuilt the local Windows EXE and ran the offline demo.
+
+## 2026-11-05 - Live SuperAgent task control
+
+- Added run-targeted steering and cooperative cancellation, and live task
+  subscriptions. Targets use task ID and the source event identity so an old
+  command cannot steer or abort a later invocation. PiWorker polls steering
+  through its native receipt-aware Runner hooks; queued controls settle as
+  delivered or undelivered. Progress carries bounded, task-scoped phase updates.
+- The local JSONL CLI supports status, steer, abort, subscribe and unsubscribe
+  on the running process. A control error is reported for that frame. Steering
+  responses correlate admission and delivery. EOF drains outstanding receipt
+  responses before the final state is printed.
+- Verified native one-at-a-time and all steering delivery, ordinary queued
+  follow-ups, other-task isolation, late local commits after abort, review
+  fences, stale targeting, slow readers, unsubscribe and full-duplex CLI I/O.
+  Windows offline root-module tests and vet passed. WSL Linux race passed for
+  superagent and cmd/pi-superagent. Built the Windows EXE and exercised the
+  local demo and interactive control protocol without provider calls.
+
+## 2026-11-05 - SuperAgent review fixes and Agent parity
+
+- Reproduced the duplicate-path write using a local Responses server, the
+  native receipt-aware Runner and Linux `atomic_replace`. The Agent now
+  rejects an executable model batch with ambiguous wire arguments before
+  dispatch. Google and Mistral also retain the original argument object for
+  this check. All eight filesystem tools validate direct raw and parsed inputs.
+  The regression checks both file contents and zero receipts, plus a successful
+  one-path replacement.
+- PiWorker counts top-level completions against the model's requested calls.
+  Nested success and failure cases cover both `Terminate` and `FinishTurn`,
+  including parent-linked commit receipts and the resulting review status.
+- Failed and aborted Pi runs retain their accepted task transcript and
+  delivered steering. The journal stores the failure status and receipts
+  alongside that snapshot. Regression tests cover reopening the journal,
+  operator reconciliation, a fresh follow-up, and progress callback failure.
+- Windows offline root-module tests and vet passed. Linux race tests passed for
+  agent, agent/fstools, internal/jsontext, pkg/pigo, superagent and cmd/pi-superagent.
+  Rebuilt the local Windows EXE and ran its offline demo through IDLE.
+
+## 2026-11-05 - Embedded SuperAgent controls and remaining review fixes
+
+- The CLI dispatches input independently of stdout. Its ordered frame queue
+  spills to OS temporary files during backpressure. A real tool regression
+  blocks stdout with 300 status requests, aborts before file publication,
+  and lets another task complete before output resumes. Broken-output cleanup,
+  initial subscription progress at EOF and steering receipt delivery after a
+  terminal journal write failure have separate coverage.
+- Direct Go calls also cancel the worker with an unread progress subscription.
+  Completed workers expose a finalizing phase until their report is committed.
+  Canceling a subscription immediately frees its slot. Added an executable Go
+  package example and made service embedding the first documented entry point.
+- New tasks persist independent provider session IDs. Old journals retain
+  their original provider affinity. PiWorker restores the selected model with
+  current host configuration and routes JSON-shaped steering as ordinary text.
+  Linux filesystem publication now releases staging before classifying a host
+  permission panic, including a typed-nil error.
+- Windows offline root-module tests and vet passed. Linux race tests passed
+  for agent, agent/fstools, superagent and cmd/pi-superagent. The offline CLI
+  demo reached IDLE. Changes are local.
+
+## 2026-11-05 - SuperAgent library development plan
+
+- Added [the staged development plan](superagent-development-plan.md) and
+  linked it from the package README. It maps PDF sections 2–7 to nine
+  milestones with dependencies, implementation boundaries and acceptance tests.
+- The first executable slice connects a Worker report to the resident Router
+  and a durable host reply. Unsolicited discovery of new business work and
+  speculative execution are deferred. Recovery of authorized work and
+  independent Watchdog supervision remain in scope.
