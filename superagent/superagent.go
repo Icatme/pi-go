@@ -24,6 +24,7 @@ const maxReportBytes = 64 << 10
 
 type transition struct {
 	validatedSnapshot *validatedSnapshot // process-local content proof; never serialized
+	Thread            *threadTransition  `json:"thread,omitempty"`
 	Main              *mainTransition    `json:"main,omitempty"`
 	State             string             `json:"state"`
 	Index             int                `json:"index"`
@@ -39,6 +40,10 @@ type transition struct {
 type item struct {
 	trigger      Trigger
 	state, task  string
+	threadEntry  bool // explicit subscription admission; targets are frozen
+	admission    int  // first delivery index of the external admission
+	handback     *Handback
+	routeActions int
 	entryTask    string   // explicit host association, part of admission identity
 	chatEntry    bool     // admitted after the persistent chat routing boundary
 	controls     []string // durable controls aimed at this exact invocation
@@ -81,14 +86,15 @@ type SuperAgent struct {
 	changed           chan struct{}
 	fatal, closeErr   error
 
-	events        []item
-	accepted      map[[2]string]int
-	pending       []int
-	tasks         map[string]*task
-	taskIDs       []string
-	subscriptions map[[2]string]string
-	sequence      int
-	reports       []Report
+	events              []item
+	accepted            map[[2]string]int
+	pending             []int
+	tasks               map[string]*task
+	taskIDs             []string
+	subscriptions       map[[2]string]string // legacy bindings: preserve pre-upgrade routing
+	threadSubscriptions map[[2]string][]string
+	sequence            int
+	reports             []Report
 }
 
 // Open resumes queued events. An operation whose start was synced but whose
@@ -184,7 +190,7 @@ func boundedText(text string, limit int, suffix string) string {
 // With OpenMain, an ordinary chat event reaches main regardless of earlier
 // tasks in that chat. Use SubmitTask for an explicit host task association.
 func (a *SuperAgent) Submit(t Trigger) (bool, error) {
-	return a.submit(t, "")
+	return a.submit(t, "", false)
 }
 
 // SubmitTask admits an update explicitly associated by the trusted host with
@@ -197,10 +203,10 @@ func (a *SuperAgent) SubmitTask(t Trigger, taskID string) (bool, error) {
 	if !validIdentity(taskID) {
 		return false, errors.New("task input requires a valid task identity")
 	}
-	return a.submit(t, taskID)
+	return a.submit(t, taskID, false)
 }
 
-func (a *SuperAgent) submit(t Trigger, taskID string) (bool, error) {
+func (a *SuperAgent) submit(t Trigger, taskID string, threadEntry bool) (bool, error) {
 	if err := validTrigger(t); err != nil {
 		return false, err
 	}
@@ -216,13 +222,21 @@ func (a *SuperAgent) submit(t Trigger, taskID string) (bool, error) {
 		return false, nil
 	}
 	if i, ok := a.accepted[[2]string{t.Source, t.ID}]; ok {
-		if a.events[i].trigger != t || a.events[i].entryTask != taskID {
+		if a.events[i].trigger != t || (a.events[i].threadEntry != threadEntry || (!threadEntry && a.events[i].entryTask != taskID)) {
 			return false, errors.New("event ID already exists with different contents")
 		}
 		return false, nil
 	}
 	if taskID != "" && (!a.main.chatRouting || a.tasks[taskID] == nil || t.Kind == "noise") {
 		return false, errors.New("task input requires OpenMain, an existing task and a non-noise event")
+	}
+	if threadEntry {
+		if !a.main.chatRouting || t.Kind == "noise" {
+			return false, errors.New("thread input requires OpenMain and a non-noise event")
+		}
+		targets := slices.Clone(a.threadSubscriptions[[2]string{t.Source, t.Thread}])
+		err := a.commit(transition{State: "thread_received", Index: len(a.events), Trigger: &t, Thread: &threadTransition{Targets: targets}})
+		return err == nil, err
 	}
 	err := a.commit(transition{State: "received", Index: len(a.events), Trigger: &t, Task: taskID})
 	return err == nil, err
@@ -231,6 +245,11 @@ func (a *SuperAgent) submit(t Trigger, taskID string) (bool, error) {
 func (a *SuperAgent) commit(tr transition) error {
 	if a.fatal != nil {
 		return a.fatal
+	}
+	if tr.Thread != nil || strings.HasPrefix(tr.State, "thread_") {
+		if err := a.validateThread(tr); err != nil {
+			return err
+		}
 	}
 	if tr.Main != nil {
 		if err := a.validateMain(tr); err != nil {
@@ -251,7 +270,7 @@ func (a *SuperAgent) commit(tr transition) error {
 		a.sequence++
 		// Replaying the journal does not emit live progress. Register active
 		// control before publishing the running transition in dispatch.
-		if a.work != nil && tr.State != "running" && tr.Main == nil {
+		if a.work != nil && tr.State != "running" && tr.Main == nil && tr.Thread == nil {
 			e := a.events[tr.Index]
 			if e.task != "" {
 				a.publishLocked(RunTarget{TaskID: e.task, Source: e.trigger.Source, EventID: e.trigger.ID}, tr.State)
@@ -267,6 +286,9 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 	if replay {
 		// Disk records never inherit a live validation result.
 		tr.validatedSnapshot = nil
+	}
+	if tr.Thread != nil || strings.HasPrefix(tr.State, "thread_") {
+		return a.applyThread(tr)
 	}
 	if tr.Main != nil || strings.HasPrefix(tr.State, "main_") || strings.HasPrefix(tr.State, "reply_") || strings.HasPrefix(tr.State, "control_") {
 		return a.applyMain(tr, replay)
@@ -286,7 +308,7 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 			return errors.New("duplicate event admission")
 		}
 		a.accepted[key] = tr.Index
-		a.events = append(a.events, item{trigger: *tr.Trigger, state: "received", entryTask: tr.Task, chatEntry: a.main.chatRouting, mainAdmitted: a.main.id != ""})
+		a.events = append(a.events, item{trigger: *tr.Trigger, state: "received", admission: tr.Index, entryTask: tr.Task, chatEntry: a.main.chatRouting, mainAdmitted: a.main.id != ""})
 		a.pending = append(a.pending, tr.Index)
 		if a.main.id != "" && tr.Trigger.Kind != "noise" && (a.main.chatRouting || a.subscriptions[[2]string{tr.Trigger.Source, tr.Trigger.Thread}] == "") {
 			a.enqueueMain(tr.Index, nil)
@@ -342,6 +364,12 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 			return errors.New("task admission cannot be reassigned")
 		}
 		if !e.chatEntry {
+			// Import a legacy binding only when first established. A pending
+			// legacy input still follows that binding after upgrade, but cannot
+			// undo an explicit unsubscribe from future Thread deliveries.
+			if a.subscriptions[thread] == "" && !slices.Contains(a.threadSubscriptions[thread], tr.Task) {
+				a.threadSubscriptions[thread] = append(a.threadSubscriptions[thread], tr.Task)
+			}
 			a.subscriptions[thread] = tr.Task
 		}
 		e.task = tr.Task
@@ -502,6 +530,14 @@ func (a *SuperAgent) dispatch() bool {
 				t.active = active
 				job.TakeSteering = func(ctx context.Context, mode agent.QueueMode) ([]agent.Message, error) {
 					return a.takeSteering(ctx, active, mode)
+				}
+				if a.main.chatRouting {
+					job.SetThreadSubscription = func(ctx context.Context, subscribed bool) error {
+						return a.workerSubscription(ctx, i, active, subscribed)
+					}
+					job.HandBack = func(ctx context.Context, reason, handled string) error {
+						return a.workerHandback(ctx, i, active, reason, handled)
+					}
 				}
 				job.NotifyProgress = func(kind string) { a.notifyWorkerProgress(active, kind) }
 				a.publishLocked(active.target, "running")

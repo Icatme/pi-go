@@ -53,6 +53,13 @@ type Job struct {
 	TakeSteering func(context.Context, agent.QueueMode) ([]agent.Message, error) `json:"-"`
 	// NotifyProgress accepts turn_start, turn_end, tool_start and tool_end.
 	NotifyProgress func(kind string) `json:"-"`
+	// SetThreadSubscription changes only this task/current Thread while this
+	// invocation is active. Present only with OpenMain. A host must explicitly
+	// expose it if a model is allowed to request subscription changes.
+	SetThreadSubscription func(context.Context, bool) error `json:"-"`
+	// HandBack records the original event, reason and handled scope for main
+	// clarification. It does not cancel execution or erase effects/receipts.
+	HandBack func(ctx context.Context, reason, handled string) error `json:"-"`
 }
 
 type Outcome struct {

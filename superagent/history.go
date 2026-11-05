@@ -1,6 +1,8 @@
 package superagent
 
 import (
+	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/Icatme/pi-go/agent"
@@ -24,12 +26,23 @@ func cloneReports(reports []Report) []Report {
 
 // FailureCause returns the original routing or execution error to a trusted
 // host for diagnostics. Causes are process-local and can contain private data.
-// Replaying a journal restores public reports and receipts, not these errors.
+// With multiple deliveries it joins their task-labeled errors. Use
+// DeliveryFailureCause for one target. Replaying restores reports, not errors.
 func (a *SuperAgent) FailureCause(source, eventID string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if index, ok := a.accepted[[2]string{source, eventID}]; ok {
-		return a.events[index].cause
+		var causes []error
+		for i := index; i < len(a.events) && a.events[i].admission == index; i++ {
+			if err := a.events[i].cause; err != nil {
+				if a.events[i].task == "" {
+					causes = append(causes, err)
+				} else {
+					causes = append(causes, fmt.Errorf("%s: %w", a.events[i].task, err))
+				}
+			}
+		}
+		return errors.Join(causes...)
 	}
 	return nil
 }
@@ -51,4 +64,15 @@ func (a *SuperAgent) TaskSnapshot(id string) (agent.AgentSnapshot, bool, error) 
 		return agent.AgentSnapshot{}, false, err
 	}
 	return snapshot, true, nil
+}
+
+// DeliveryFailureCause returns the private in-process error for one exact
+// delivery. It never substitutes a different task sharing the external event.
+func (a *SuperAgent) DeliveryFailureCause(target RunTarget) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if index, ok := a.deliveryIndex(target); ok {
+		return a.events[index].cause
+	}
+	return nil
 }

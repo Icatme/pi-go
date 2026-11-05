@@ -1,6 +1,6 @@
 # SuperAgent 开发计划
 
-2026-11-05 · 状态：M1a–M1c 与 M2a 已有离线验证的开发切片，尚未合并发布；其余切片待实施 · 主入口：`github.com/Icatme/pi-go/superagent`
+2026-11-05 · 状态：M1a–M1c 与 M2a–M2b 已有离线验证的开发切片，尚未合并发布；其余切片待实施 · 主入口：`github.com/Icatme/pi-go/superagent`
 
 宿主服务启动时创建一个 SuperAgent。用户始终和同一个主 Agent 交互：主 Agent 可以直接回答、把独立任务交给不同 Pi Worker、把更正交给正在工作的 Worker，并在收到结果后决定如何向用户汇报。一个 Worker 等待模型、工具或设备期间，其他对话和任务仍可推进。
 

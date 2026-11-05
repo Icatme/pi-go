@@ -56,8 +56,8 @@ func (a *SuperAgent) mainControl(id string) *MainControl {
 }
 
 func (a *SuperAgent) controlEvent(target RunTarget) *item {
-	i, ok := a.accepted[[2]string{target.Source, target.EventID}]
-	if !ok || a.events[i].task != target.TaskID {
+	i, ok := a.deliveryIndex(target)
+	if !ok {
 		return nil
 	}
 	return &a.events[i]
