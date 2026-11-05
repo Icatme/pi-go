@@ -96,3 +96,49 @@ func ExampleSuperAgent_MainControls() {
 	fmt.Println(action.EventID, action.Status, a.Status().Tasks[0].Status)
 	// Output: stop cancel_requested needs_review
 }
+
+func ExampleSuperAgent_BeginReplyDelivery() {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "superagent-reply-*")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(dir)
+	router := func(_ context.Context, job superagent.MainJob) (superagent.MainOutcome, error) {
+		return superagent.MainOutcome{Decision: superagent.MainDecision{Action: "clarify", Text: "Which build?"}, Snapshot: job.Snapshot}, nil
+	}
+	worker := func(_ context.Context, job superagent.Job) (superagent.Outcome, error) {
+		return superagent.Outcome{Snapshot: agent.AgentSnapshot{SessionID: job.TaskID}}, nil
+	}
+	a, err := superagent.OpenMain(ctx, filepath.Join(dir, "main.jsonl"), 1, router, worker)
+	if err != nil {
+		panic(err)
+	}
+	defer a.Close()
+	if _, err := a.Submit(superagent.Trigger{ID: "ask", Source: "im", Thread: "build", Kind: "request", Text: "Check the build"}); err != nil {
+		panic(err)
+	}
+	if err := a.WaitIdle(ctx); err != nil {
+		panic(err)
+	}
+	reply := a.Replies()[0]
+	delivery, err := a.BeginReplyDelivery(reply.ID)
+	if err != nil {
+		panic(err)
+	}
+	// An in-memory transport stands in for an external adapter. In production,
+	// send only after Begin succeeds, to reply.Source/reply.Thread, using reply.ID
+	// as the platform idempotency key. Keep delivery for the exact callback.
+	channel := make(chan superagent.Reply, 1)
+	channel <- reply
+	message := <-channel
+	if err := a.ObserveReply(message.Source, message.Thread, delivery, "platform-message-1"); err != nil {
+		panic(err)
+	}
+	accepted, err := a.Submit(superagent.Trigger{ID: "platform-message-1", Source: message.Source, Thread: message.Thread, Kind: "signal", Text: message.Text})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(message.Text, a.Replies()[0].Status, accepted)
+	// Output: Which build? acknowledged false
+}

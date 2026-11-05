@@ -190,6 +190,9 @@ func (a *SuperAgent) Submit(t Trigger) (bool, error) {
 	if err := a.ctx.Err(); err != nil {
 		return false, err
 	}
+	if a.isReplyEcho(t) {
+		return false, nil
+	}
 	if i, ok := a.accepted[[2]string{t.Source, t.ID}]; ok {
 		if a.events[i].trigger != t {
 			return false, errors.New("event ID already exists with different contents")

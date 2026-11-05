@@ -141,6 +141,21 @@ func TestReplyDeliveryReconcileRetryAndEchoRecovery(t *testing.T) {
 			t.Fatalf("unrelated message filtered: %+v %v", trigger, err)
 		}
 	}
+	// An unrelated thread can have admitted the same raw source/message ID.
+	// The registered original echo still takes precedence over business dedupe.
+	if ok, err := a.Submit(superagent.Trigger{ID: "message-1", Source: "im", Thread: "chat", Kind: "request", Text: reply.Text}); ok || err != nil {
+		t.Fatalf("known echo conflicted with another thread: %v %v", ok, err)
+	}
+	if err := a.WaitIdle(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	a = replyHost(t, path, &calls)
+	if ok, err := a.Submit(superagent.Trigger{ID: "message-1", Source: "im", Thread: "chat", Kind: "signal", Text: "edited echo"}); ok || err != nil {
+		t.Fatalf("known echo conflicted after restart: %v %v", ok, err)
+	}
 }
 
 func TestReplyDeliveryClaimHasOneWinner(t *testing.T) {
