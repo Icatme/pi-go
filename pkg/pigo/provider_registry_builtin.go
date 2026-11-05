@@ -706,6 +706,21 @@ func newOpenAIResponsesProviderModule() ProviderModule {
 		BuildOptions:     buildOpenAIResponsesProviderStreamOptions,
 		NormalizeOptions: normalizeOpenAIResponsesProviderStreamOptions,
 		Models: map[string]Model{
+			"gpt-6.1-terra": {
+				ID:               "gpt-6.1-terra",
+				Name:             "GPT-6.1 Terra",
+				API:              "openai-responses",
+				BaseURL:          "https://api.openai.com",
+				Reasoning:        true,
+				ThinkingLevelMap: openAIGPT6ThinkingLevelMap("gpt-6.1-terra", false),
+				Capabilities:     openAIResponsesSamplingCapabilities(ModelThinkingLevelMedium, []ModelThinkingLevel{ModelThinkingLevelOff}),
+				Input:            []InputType{InputText, InputImage},
+				ContextWindow:    1050000,
+				MaxTokens:        128000,
+				Cost:             UsageCost{Input: 1, Output: 5, CacheRead: 0.05, CacheWrite: 1.25},
+				CostTiers:        []ModelCostTier{{InputTokensAbove: 272000, Rates: UsageCost{Input: 2, Output: 7.5, CacheRead: 0.1, CacheWrite: 2.5}}},
+				Compat:           &OpenAIResponsesCompat{SupportsExplicitPromptCacheMode: &supportsExplicitPromptCacheMode},
+			},
 			"gpt-6.1-sol": {
 				ID:               "gpt-6.1-sol",
 				Name:             "GPT-6.1 Sol",

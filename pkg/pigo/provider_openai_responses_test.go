@@ -111,6 +111,62 @@ func TestBuildOpenAIResponsesRequestSerializesSamplingAndParallelToolCalls(t *te
 	})
 }
 
+func TestCompleteSimpleOpenAITerraResponses(t *testing.T) {
+	model := GetModel("openai", "gpt-6.1-terra")
+	if model == nil {
+		t.Fatal("missing OpenAI Terra model")
+	}
+	ctx := Context{Messages: []Message{UserMessage{Content: "lookup"}}, Tools: []Tool{anchorFunction("lookup")}}
+	for _, test := range []struct {
+		level ThinkingLevel
+		wire  string
+	}{
+		{ThinkingLevel(ModelThinkingLevelOff), "none"},
+		{ThinkingLevelMax, "max"},
+	} {
+		t.Run(test.wire, func(t *testing.T) {
+			requests := make(chan openAIResponsesRequest, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/responses" {
+					t.Errorf("request path = %q", r.URL.Path)
+				}
+				var request openAIResponsesRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				requests <- request
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(buildOpenAICodexSSE(customTerminal())))
+			}))
+			defer server.Close()
+			model.BaseURL = server.URL
+			options := SimpleStreamOptions{APIKey: "test-key", Reasoning: test.level, CacheRetention: CacheRetentionLong}
+			temperature, topP := 0.5, 0.8
+			if test.wire == "none" {
+				options.Temperature, options.TopP = &temperature, &topP
+			}
+			result := CompleteSimple(*model, ctx, options)
+			if result.StopReason != StopReasonStop {
+				t.Fatalf("completion failed: %+v", result)
+			}
+			request := <-requests
+			if request.Model != model.ID || !request.Stream || request.Reasoning == nil || request.Reasoning.Effort != test.wire {
+				t.Fatalf("request = %+v", request)
+			}
+			if len(request.Tools) != 1 || request.Tools[0]["name"] != "lookup" || request.Tools[0]["type"] != "function" {
+				t.Fatalf("function declaration = %+v", request.Tools)
+			}
+			if request.PromptCacheRetention != "" || request.PromptCacheOptions == nil || request.PromptCacheOptions.TTL != "30m" {
+				t.Fatalf("cache fields = %q, %+v", request.PromptCacheRetention, request.PromptCacheOptions)
+			}
+			if test.wire == "none" && (request.Temperature == nil || *request.Temperature != temperature || request.TopP == nil || *request.TopP != topP) {
+				t.Fatalf("sampling fields = %+v, %+v", request.Temperature, request.TopP)
+			}
+		})
+	}
+}
+
 func TestOpenAIResponsesSamplingMatchesExactModelReasoningConstraints(t *testing.T) {
 	topP := 0.25
 	temperature := 0.4
@@ -121,6 +177,18 @@ func TestOpenAIResponsesSamplingMatchesExactModelReasoningConstraints(t *testing
 		options   ProviderStreamOptions
 		wantError string
 	}{
+		{
+			name:      "Terra default medium rejects temperature",
+			modelID:   "gpt-6.1-terra",
+			options:   ProviderStreamOptions{Temperature: &temperature},
+			wantError: errOpenAIResponsesSamplingReasoning.Error(),
+		},
+		{
+			name:      "Terra high rejects top_p overrides",
+			modelID:   "gpt-6.1-terra",
+			options:   ProviderStreamOptions{SamplingParams: SamplingParams{"top_p": topP}, Reasoning: ThinkingLevelHigh},
+			wantError: errOpenAIResponsesSamplingReasoning.Error(),
+		},
 		{
 			name:    "GPT-5.4 omitted reasoning uses documented none default",
 			modelID: "gpt-5.4",
