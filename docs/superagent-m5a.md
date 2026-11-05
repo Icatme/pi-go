@@ -24,6 +24,13 @@
 类型数字 ID 碰撞。加入并发原子准入、跨对象类型、重开、未知结果、丢失回执、
 回执冲突、源级限流、内容/目的地绑定、主机配置冻结和身份伪造回归。
 
+后续全栈审查还复现了合法编辑被拒：GitHub 维护者可以编辑他人的评论，此时
+`sender.id` 是编辑者而 `comment.user.id` 仍是原作者。仅对两类受支持的 `edited`
+评论放宽两者相等要求，仍独立验证原作者 ID，并把 Principal 与权限绑定到经宿主
+认证的 sender。新增允许/拒绝编辑者、伪造身份/目标、宿主意图、重开和回显回归。
+`created` 评论及 `submitted` 评审继续要求 sender 与作者相同。该修复不处理并行
+进行的 history 准入可见性安全问题，组合后的开发栈仍需重新验证。
+
 接口、协议范围与局限详见 [信道合同](../superagent/channel/README.md)。
 可执行外部包示例见 [ExampleNew](../superagent/channel/example_test.go)。
 

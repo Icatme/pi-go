@@ -111,6 +111,55 @@ func TestNormalizeGitHubEventsAndExactNumbers(t *testing.T) {
 	}
 }
 
+func TestNormalizeGitHubEditedCommentActor(t *testing.T) {
+	for _, event := range []string{"issue_comment", "pull_request_review_comment"} {
+		t.Run(event, func(t *testing.T) {
+			body, id := ingressGitHubFixture(event, "edited", "Updated request")
+			// The editor is sender, while comment.user is the original author.
+			body = []byte(strings.Replace(string(body), `"user":{"id":9007199254740995}`, `"user":{"id":9007199254740996}`, 1))
+			id.ExplicitRequest, id.TaskID = true, "host-task"
+			got, err := Normalize(GitHub, "host.github", id, body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Principal != id.Principal || got.Group != id.Organization || got.Trigger.Thread != id.Thread || got.Trigger.ID != id.EventID || got.MessageID != event+":"+id.MessageID || got.Trigger.Text != "Updated request" || !got.ExplicitRequest || got.TaskID != id.TaskID || got.ToThread {
+				t.Fatalf("editor or host association lost: %+v", got)
+			}
+			spoofed := id
+			spoofed.Principal = "9007199254740996"
+			if _, err := Normalize(GitHub, "host.github", spoofed, body); err == nil {
+				t.Fatal("original author accepted as the authenticated editor")
+			}
+		})
+	}
+}
+
+func TestNormalizeGitHubContentAuthorValidation(t *testing.T) {
+	for _, event := range []string{"issue_comment", "pull_request_review_comment", "pull_request_review"} {
+		actions := []string{"created", "edited"}
+		if event == "pull_request_review" {
+			actions = []string{"submitted"}
+		}
+		for _, action := range actions {
+			t.Run(event+"/"+action, func(t *testing.T) {
+				body, id := ingressGitHubFixture(event, action, "hello")
+				for _, author := range []string{`null`, `{}`, `{"id":null}`, `{"id":0}`, `{"id":-1}`, `{"id":1.5}`, `{"id":1e0}`, `{"id":"7"}`, `{"id":18446744073709551616}`} {
+					bad := strings.Replace(string(body), `"user":{"id":9007199254740995}`, `"user":`+author, 1)
+					if _, err := Normalize(GitHub, "host.github", id, []byte(bad)); err == nil {
+						t.Fatalf("accepted malformed author %s", author)
+					}
+				}
+				if action != "edited" {
+					bad := strings.Replace(string(body), `"user":{"id":9007199254740995}`, `"user":{"id":8}`, 1)
+					if _, err := Normalize(GitHub, "host.github", id, []byte(bad)); err == nil {
+						t.Fatal("creation/submission accepted another author")
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestNormalizeGitHubRejectsSpoofingAndEvents(t *testing.T) {
 	body, id := ingressGitHubFixture("issue_comment", "created", "hello")
 	for name, change := range map[string]func(*Identity){
