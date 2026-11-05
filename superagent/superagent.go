@@ -236,7 +236,7 @@ func (a *SuperAgent) commit(tr transition) error {
 }
 
 func (a *SuperAgent) apply(tr transition, replay bool) error {
-	if tr.Main != nil || strings.HasPrefix(tr.State, "main_") || strings.HasPrefix(tr.State, "reply_") {
+	if tr.Main != nil || strings.HasPrefix(tr.State, "main_") || strings.HasPrefix(tr.State, "reply_") || strings.HasPrefix(tr.State, "control_") {
 		return a.applyMain(tr, replay)
 	}
 	if tr.State == "received" {
@@ -399,6 +399,9 @@ func (a *SuperAgent) schedule() {
 // Called under mu. Only the scheduler starts callbacks, after syncing their
 // start. The scheduler itself stays alive in wg until it stops admitting work.
 func (a *SuperAgent) dispatch() bool {
+	if a.dispatchMainControl() {
+		return true
+	}
 	for _, i := range a.pending {
 		e := a.events[i]
 		switch e.state {
@@ -526,7 +529,7 @@ func (a *SuperAgent) runJob(i int, job Job, active *activeRun) {
 		active.aborted = true
 	}
 	active.returned = true
-	active.dropSteering()
+	a.dropRunSteeringLocked(active)
 	a.publishLocked(active.target, "finalizing")
 	a.mu.Unlock()
 	tr := transition{Index: i, State: out.Status, Receipts: slices.Clone(out.Receipts), NeedsReview: out.NeedsReview, Text: boundedText(out.Summary, maxReportBytes, "\n[Report truncated at 64 KiB. See task snapshot: "+job.TaskID+"]")}
@@ -657,6 +660,12 @@ func (a *SuperAgent) WaitIdle(ctx context.Context) error {
 		a.mu.Lock()
 		err := a.fatal
 		pending := len(a.pending) > 0 || a.main.cursor < len(a.main.inbox)
+		for _, control := range a.main.controls {
+			if control.Status == "pending" {
+				pending = true
+				break
+			}
+		}
 		if err == nil && pending {
 			err = a.ctx.Err()
 		}

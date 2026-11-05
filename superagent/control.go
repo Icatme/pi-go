@@ -32,8 +32,9 @@ func (r *activeRun) phase() string {
 }
 
 type steering struct {
-	text    string
-	receipt *SteerReceipt
+	text      string
+	controlID string
+	receipt   *SteerReceipt
 }
 
 const maxPendingSteers = 16
@@ -66,7 +67,18 @@ func (r *SteerReceipt) Wait(ctx context.Context) (bool, error) {
 	}
 }
 
-func (r *activeRun) dropSteering() {
+func (a *SuperAgent) dropRunSteeringLocked(r *activeRun) {
+	var ids []string
+	for _, s := range r.queue {
+		if s.controlID != "" {
+			ids = append(ids, s.controlID)
+		}
+	}
+	// A failed append has already cancelled the coordinator. Do not recursively
+	// write during fatal cleanup; replay settles the remaining queued records.
+	if len(ids) > 0 && a.fatal == nil {
+		a.commitControls("not_delivered", ids)
+	}
 	for _, s := range r.queue {
 		close(s.receipt.done)
 	}
@@ -76,7 +88,7 @@ func (r *activeRun) dropSteering() {
 func (a *SuperAgent) dropSteeringLocked() {
 	for _, t := range a.tasks {
 		if t.active != nil {
-			t.active.dropSteering()
+			a.dropRunSteeringLocked(t.active)
 		}
 	}
 }
@@ -132,7 +144,7 @@ func (a *SuperAgent) Abort(target RunTarget) error {
 	}
 	if !r.aborted {
 		r.aborted = true
-		r.dropSteering()
+		a.dropRunSteeringLocked(r)
 		a.publishLocked(target, "abort_requested")
 	}
 	a.mu.Unlock()
@@ -168,6 +180,18 @@ func (a *SuperAgent) takeSteering(ctx context.Context, r *activeRun, mode agent.
 	}
 	if n == 0 {
 		return nil, nil
+	}
+	var ids []string
+	for _, s := range r.queue[:n] {
+		if s.controlID != "" {
+			ids = append(ids, s.controlID)
+		}
+	}
+	if len(ids) > 0 {
+		// QueueModeAll is one durable boundary, never a partial batch.
+		if err := a.commitControls("delivered", ids); err != nil {
+			return nil, err
+		}
 	}
 	messages := make([]agent.Message, 0, n)
 	for _, s := range r.queue[:n] {

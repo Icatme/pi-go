@@ -1,5 +1,8 @@
 # M1a: persistent main-session contract
 
+> Follow-on: [M1b](superagent-m1b.md) adds structured steering/cancellation
+> and clarification decisions. The remainder records the original M1a scope.
+
 This slice adds the Go-host loop `Submit → main decision → Worker → main reply`
 on the existing scheduler. It is not the complete M1/M2 implementation. In
 particular, steering/cancellation decisions, multi-topic chat routing,

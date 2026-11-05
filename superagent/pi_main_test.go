@@ -176,3 +176,53 @@ func TestOfflinePiMainDelegatesAndReplies(t *testing.T) {
 		t.Fatalf("replies=%+v failures=%+v", got, a.MainFailures())
 	}
 }
+
+func TestPiMainControlParserRequiresExactNestedTarget(t *testing.T) {
+	target := `{"task_id":"task-1","source":"im","event_id":"start"}`
+	for _, raw := range []string{
+		`{"action":"steer","target":` + target + `,"text":"correct"}`,
+		`{"action":"cancel","target":` + target + `}`,
+		`{"action":"clarify","text":"Which task?"}`,
+	} {
+		if _, err := parseMainDecision(raw); err != nil {
+			t.Fatalf("rejected %s: %v", raw, err)
+		}
+	}
+	for _, raw := range []string{
+		`{"action":"cancel","target":null}`,
+		`{"action":"cancel","target":{"task_id":"task-1","source":"im"}}`,
+		`{"action":"cancel","target":{"task_id":"task-1","source":"im","event_id":"start","event_id":"later"}}`,
+		`{"action":"cancel","target":{"task_id":"task-1","source":"im","Event_ID":"start"}}`,
+		`{"action":"cancel","target":{"task_id":"task-1","source":"im","event_id":3}}`,
+		`{"action":"cancel","target":` + target + `,"target":` + target + `}`,
+		`{"action":"cancel","target":` + target + `,"text":"extra"}`,
+		`{"action":"steer","target":` + target + `}`,
+		`{"action":"steer","target":` + target + `,"text":" "}`,
+		`{"action":"reply","target":` + target + `}`,
+	} {
+		if _, err := parseMainDecision(raw); err == nil {
+			t.Errorf("accepted %s", raw)
+		}
+	}
+}
+
+func TestPiMainModelReceivesExactRunTargets(t *testing.T) {
+	target := RunTarget{TaskID: "task-1", Source: "im", EventID: "start"}
+	router, err := PiMainRouter(agent.AgentDefinition{Model: agent.StreamFunc(func(_ context.Context, req agent.ModelRequest) (agent.AssistantStream, error) {
+		var input mainModelInput
+		if err := json.Unmarshal([]byte(messageText(req.Messages[len(req.Messages)-1])), &input); err != nil {
+			return nil, err
+		}
+		if len(input.Runs) != 1 || input.Runs[0] != target {
+			t.Errorf("runs: %+v", input.Runs)
+		}
+		return offlineAnswer(`{"action":"cancel","target":{"task_id":"task-1","source":"im","event_id":"start"}}`), nil
+	})}, 64<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := router(t.Context(), MainJob{SessionID: "main", ProviderSessionID: "provider", Snapshot: agent.AgentSnapshot{SessionID: "main"}, Runs: []RunTarget{target}})
+	if err != nil || out.Decision.Target == nil || *out.Decision.Target != target {
+		t.Fatalf("target: %+v %v", out.Decision, err)
+	}
+}

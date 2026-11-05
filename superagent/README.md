@@ -2,6 +2,8 @@
 
 For the persistent main-session Go host API, its upgrade boundary and durable
 reply contract, see [M1a](../docs/superagent-m1a.md) and `ExampleOpenMain`.
+For durable structured steering/cancellation and exact execution boundaries,
+see [M1b](../docs/superagent-m1b.md) and `ExampleSuperAgent_MainControls`.
 The existing `Open` examples below retain the stateless Router contract.
 
 SuperAgent is an opt-in coordinator in the pi-go module. An incoming conversation
