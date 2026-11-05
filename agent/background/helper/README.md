@@ -23,6 +23,12 @@ shell runner, daemon installer, remote executor, or production acceptance**.
    its normal coordinator authorizer. This can also back the optional device
    adapter, but no device, listener, account or transport is configured here.
 
+The device adapter passes its `Binding.Workspace` as the helper request scope;
+the coordinator instead pins the device client's full `Scope()`. The Linux M7b
+external-package tests exercise this composition with actual endpoint and helper
+processes. See [M7b acceptance](../../../docs/superagent-m7b.md); no second durable
+backend or automatic device provisioning is needed.
+
 `Create`/`Open` pin scope, policy, capacity, tool list, absolute executable paths,
 fixed arguments and SHA-256 binary contents in the registry header. Changing
 them is not an in-place upgrade protocol. Executable bytes are checked again

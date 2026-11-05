@@ -33,6 +33,13 @@ authentication service, production daemon, shell runner or completed M7.
 `ExampleNewClient` and `TestDeviceSharedJournalNativeCompletion` demonstrate the
 external Go API without a real device, real provider or credential.
 
+The Linux-only `durable_*_test.go` external-package fixtures additionally compose
+the existing M6 same-host journal, an independent HTTP endpoint process and M4c
+durable helper processes. The helper's scope is `Binding.Workspace`; the
+coordinator grant is `client.Scope()`. They verify endpoint death, exact-ID
+recovery, fixed-owner epoch fencing, lost acknowledgments, stop recovery and
+private-result projection. See [M7b acceptance](../../docs/superagent-m7b.md).
+
 ## Authority and fencing
 
 The bounded JSON POST protocol has version 1 and four commands: `describe`,
@@ -67,6 +74,13 @@ different arguments, call ID or tool is rejected. An identical duplicate never
 calls Start again. Stop persists intent before requesting cancellation, including
 permanent tombstones for unknown IDs. A prestart tombstone cannot dispatch later.
 Stop intent is not exit evidence and does not erase committed facts.
+
+Direct `Inspect` does not redeliver a Stop that crashed between this registry's
+intent and the backend call. A direct host must retain that intent and explicitly
+repeat `Stop` for the same ID. The existing M4 coordinator's recovery watcher
+already repeats its durable stop intent until acknowledged. Once the helper's
+own stop is durable, helper inspection can redeliver its notification under
+separate current stop authority. These are distinct persistence boundaries.
 
 On a lost connection the client reports an uncertain/unavailable result. It never
 retries Start, changes ID, selects another device or resends on reconnect. Query

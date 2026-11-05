@@ -3175,3 +3175,28 @@
 - Full offline validation and exact final-tree evidence are in the draft PR.
   See [M5b](superagent-m5b.md). No real GitHub/GHES, existing credentials, user
   computer, live model, Codex/extra paid execution, manual CI, merge or deployment.
+
+
+## 2026-11-05 - SuperAgent durable device chain integration slice
+
+- M7b builds on draft #181 HEAD 998760a7 / exact tree 385244ee. It composes
+  existing M6a sharedsqlite, M7a HTTP device and M4c helper implementations;
+  production code, journal formats, module files and dependencies are unchanged.
+- External-package fixtures run only our own endpoint/native test executables
+  over loopback. Real endpoint process death leaves the helper alive; both
+  registries reopen without dispatch, and recovery observes the original ID.
+- Per-owner transports retain their original epoch. Explicit M6 Close/reopen
+  takeover rejects all old commands before a replacement device command; native
+  pre-effect permission remains bound to the original manifest epoch.
+- Lost Start/Stop acknowledgments, faults before/after helper calls, native
+  process failure, stop-before-start tombstones and late commits retain the
+  existing unknown/review/quota barriers. Direct M7 inspection is read-only;
+  the existing M4 replay watcher redelivers its persisted same-ID stop intent.
+- Private result canary is produced in helper snapshots but absent from device
+  HTTP/registry, coordinator state, Worker inputs, reports and replies. No raw
+  result transport, credential-in-arguments guarantee or external exactly-once
+  claim is added. Fixtures cover process crashes, not host reboot/power loss.
+- Verification commands, exact final-tree evidence and independent review are
+  recorded in the draft PR; see [M7b](superagent-m7b.md). No real device/model,
+  production service, user computer, Codex/extra paid execution, CI trigger,
+  merge or deployment. Real cross-host/TLS/production authority remain untested.
