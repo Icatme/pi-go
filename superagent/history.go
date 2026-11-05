@@ -9,7 +9,9 @@ import (
 	"github.com/Icatme/pi-go/agent"
 )
 
-// ReportsSince returns terminal reports after the caller's count, in journal
+// ReportsSince returns terminal reports to the trusted host, including ignored
+// admission audit outcomes that are excluded from model-visible MainHistory.
+// It returns reports after the caller's count, in journal
 // order. Pass zero to replay all reports. Record count+len(reports) only after
 // the consumer durably handles that batch; the cursor is a report count, not
 // an ingress count or delivery ID. A fanout has one report per target. Replays

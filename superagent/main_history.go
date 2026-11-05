@@ -56,7 +56,9 @@ type historyNode struct {
 	version [sha256.Size]byte
 }
 
-// MainHistory is a read-only, immutable view owned by one main callback. It
+// MainHistory excludes gate-rejected admissions and noise, including their
+// reports and links. Host audit records are not model-visible public history.
+// It is a read-only, immutable view owned by one main callback. It
 // expires when the callback returns, or coordinator/journal ownership is canceled.
 // Each view permits at most 64 attempted reads and 256 KiB of response JSON.
 // A returned cursor can continue in a later callback of the same coordinator,
@@ -275,6 +277,22 @@ type historyEdge struct {
 	relation string
 }
 
+// Visibility follows the immutable ingress decision, not the delivery's final
+// state: a router may legitimately ignore an admitted public request. Legacy
+// and privileged Submit records have no admission gate, but still exclude
+// noise. Fanout deliveries inherit their original admission's decision.
+func (a *SuperAgent) historyVisible(index int) bool {
+	if index < 0 || index >= len(a.events) {
+		return false
+	}
+	root := a.events[index].admission
+	if root < 0 || root > index || a.events[root].admission != root {
+		return false
+	}
+	e := a.events[root]
+	return e.trigger.Kind != "noise" && (e.admissionRecord == nil || e.admissionRecord.Decision == "accepted")
+}
+
 func (a *SuperAgent) newMainHistory() *MainHistory {
 	if a.history == nil {
 		a.history = &historyCatalog{nodes: map[historyKey]*historyNode{}, edges: map[historyEdge]bool{}, threads: map[[2]string]string{}, assigned: map[int]string{}}
@@ -314,7 +332,7 @@ func (a *SuperAgent) newMainHistory() *MainHistory {
 	}
 	for i := c.events; i < len(a.events); i++ {
 		e := a.events[i]
-		if e.admission != i {
+		if e.admission != i || !a.historyVisible(i) {
 			continue
 		}
 		id := deliveryID(i)
@@ -335,7 +353,7 @@ func (a *SuperAgent) newMainHistory() *MainHistory {
 	// Assignment can follow admission. Scan cheap identity fields only; no
 	// snapshot serialization, hashing or private transcript copying occurs.
 	for i, e := range a.events {
-		if e.task == "" || c.assigned[i] != "" {
+		if e.task == "" || c.assigned[i] != "" || !a.historyVisible(i) {
 			continue
 		}
 		c.assigned[i] = e.task
@@ -347,8 +365,11 @@ func (a *SuperAgent) newMainHistory() *MainHistory {
 		link(task, trigger, "trigger", e.trigger.Text)
 	}
 	for _, report := range a.reports[c.reports:] {
-		put("report", report.DeliveryID, report)
 		index, _ := strconv.Atoi(report.DeliveryID[len("delivery-"):])
+		if !a.historyVisible(index - 1) {
+			continue
+		}
+		put("report", report.DeliveryID, report)
 		trigger, r := ref("trigger", deliveryID(a.events[index-1].admission)), ref("report", report.DeliveryID)
 		link(trigger, r, "report", report.Text)
 		link(r, trigger, "trigger", "")
@@ -371,7 +392,11 @@ func (a *SuperAgent) newMainHistory() *MainHistory {
 }
 
 func (a *SuperAgent) addHistoryRefs(input *MainInput) {
-	i := a.accepted[[2]string{input.Trigger.Source, input.Trigger.ID}]
+	input.HistoryRefs = nil
+	i, ok := a.accepted[[2]string{input.Trigger.Source, input.Trigger.ID}]
+	if !ok || !a.historyVisible(i) {
+		return
+	}
 	input.HistoryRefs = []HistoryRef{{Domain: a.main.id, Kind: "trigger", ID: deliveryID(i)}, {Domain: a.main.id, Kind: "thread", ID: a.history.threads[[2]string{input.Trigger.Source, input.Trigger.Thread}]}}
 	if input.Report != nil {
 		input.HistoryRefs = append(input.HistoryRefs, HistoryRef{Domain: a.main.id, Kind: "report", ID: input.Report.DeliveryID})

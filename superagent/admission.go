@@ -167,8 +167,9 @@ func (a *SuperAgent) admissionReceipt(index int, duplicate bool) AdmissionReceip
 	return receipt
 }
 
-// Admissions returns one detached audit record per filtered external ingress,
-// not one per fanout delivery. Original untrusted text stays in the journal.
+// Admissions returns one detached audit record per filtered external ingress
+// to the trusted host, not one per fanout delivery. Original untrusted text
+// stays in the journal; rejected records must not be forwarded to models.
 func (a *SuperAgent) Admissions() []AdmissionRecord {
 	a.mu.Lock()
 	defer a.mu.Unlock()
