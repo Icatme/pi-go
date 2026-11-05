@@ -10,6 +10,10 @@ For same-chat independent work, explicit task updates, and persisted correction
 evidence, see [M2a](../docs/superagent-m2a.md) and `ExampleSuperAgent_SubmitTask`.
 For optional same-host SQLite leases, fencing and JSONL import, see
 [M6a](../docs/superagent-m6a.md) and `ExampleOpenMainJournal`.
+The optional [PostgreSQL adapter](sharedpostgres/README.md) uses a host-owned
+`database/sql` connection and the same coordinator interface. Its client protocol
+has offline coverage, but real PostgreSQL/host/network fault validation has not
+run; M6b remains a draft development slice, not production acceptance.
 For opt-in read-only Watchdog inspection, independent clock/session and durable
 recheck evidence, see [M8a](../docs/superagent-m8a.md) and
 `ExampleSuperAgent_CheckWatchdog`. No automatic recovery actions are exposed.

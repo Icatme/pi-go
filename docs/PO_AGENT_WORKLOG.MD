@@ -3105,3 +3105,24 @@
 - No journal schema/dependency change, live service/model/device, user machine,
   Codex/extra paid execution, manual CI, merge or deployment. Linux amd64 Go
   1.26.10 only; PowerShell/Windows/macOS execution is not claimed.
+
+
+## 2026-11-05 - SuperAgent optional PostgreSQL journal development slice
+
+- Built M6b on #178 exact HEAD 6292543b / tree 3fd1dd4. New optional
+  sharedpostgres implements the existing LeasedJournal without changing the
+  scheduler, JSONL or SQLite APIs. The host supplies database/sql, TLS/credentials
+  and one-time schema migration; the library opens no DSN or server.
+- Post-lock clock_timestamp and final original-grant checks fence owner/epoch/seq
+  in one transaction. An independent monotonic deadline cancels ownership despite
+  blocked I/O. Unknown or late COMMIT receipts never update cache or retry work.
+- bytea imports preserve raw header/LogItem bytes, including legacy batches,
+  without repairing or writing the quiesced source. Only absent domains import.
+- Offline test-first scripts cover lease timing, rollback, uncertainty, corruption,
+  fencing, caller-owned DB and migration. Eight live PG tests are explicitly
+  double-gated and were NOT run: no PostgreSQL service was available. Independent
+  read-only review found no blocker and passed offline race x5 and vet.
+- Real PostgreSQL, independent processes/hosts, TCP partitions and database restart
+  remain unverified; keep the PR draft. See [M6b](superagent-m6b.md) and its package
+  README. No local user machine, credentials, service, Codex/extra paid task,
+  manual CI, merge or deployment; remote Linux Go 1.26.10 only.
