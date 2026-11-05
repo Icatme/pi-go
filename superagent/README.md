@@ -10,6 +10,10 @@ For same-chat independent work, explicit task updates, and persisted correction
 evidence, see [M2a](../docs/superagent-m2a.md) and `ExampleSuperAgent_SubmitTask`.
 For optional same-host SQLite leases, fencing and JSONL import, see
 [M6a](../docs/superagent-m6a.md) and `ExampleOpenMainJournal`.
+The opt-in [local helper backend](../agent/background/helper/README.md) adds
+durable background identities and host-registered Linux helper processes.
+Recovery observes the original operation without relaunch; unknown execution
+retains review and quota. It is not a sandbox or real-device acceptance.
 The optional [PostgreSQL adapter](sharedpostgres/README.md) uses a host-owned
 `database/sql` connection and the same coordinator interface. Its client protocol
 has offline coverage, but real PostgreSQL/host/network fault validation has not

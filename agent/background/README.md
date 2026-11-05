@@ -7,6 +7,10 @@ model invocation, scheduler, service, or external execution is added here.
 Registered host tools retain their existing capabilities and must be trusted.
 This is not a sandbox or an authorization grant.
 
+For opt-in Linux helper processes and durable operation identities, see the
+separate [helper backend](helper/README.md). `Local` remains in-process and
+unchanged; the helper is explicitly configured by the host, never implicit.
+
 - Use an explicit host lifetime, not a worker/dispatch context. Cancellation of
   a successful `Start` caller does not cancel its operation. Cancel the host or
   call `Stop` to request cancellation.
