@@ -72,8 +72,8 @@ type task struct {
 	legacyReview        bool // pre-barrier journal may already record later executions
 }
 
-// SuperAgent owns one exclusive JSONL writer. Call Close to cancel callbacks,
-// wait for them to return, and release the journal lock.
+// SuperAgent owns one exclusive journal writer. Call Close to cancel callbacks,
+// wait for them to return, and release journal ownership.
 type SuperAgent struct {
 	progress          progressHub
 	mu                sync.Mutex
@@ -81,7 +81,8 @@ type SuperAgent struct {
 	closeOnce         sync.Once
 	ctx               context.Context
 	cancel            context.CancelFunc
-	store             *session.JSONLStorage
+	store             journalStore
+	stopJournalWatch  func() bool
 	route             Router
 	mainRoute         MainRouter
 	mainBatchRoute    MainBatchRouter
@@ -799,6 +800,9 @@ func (a *SuperAgent) Close() error {
 		a.closeProgressLocked()
 		a.mu.Unlock()
 		a.wg.Wait()
+		if a.stopJournalWatch != nil {
+			a.stopJournalWatch()
+		}
 		a.closeErr = errors.Join(a.fatal, a.store.Close())
 	})
 	return a.closeErr

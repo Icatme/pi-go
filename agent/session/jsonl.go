@@ -285,6 +285,10 @@ func (s *JSONLStorage) requireWritable() error {
 }
 
 func loadJSONL(file *os.File, path string) (Header, *logState, error) {
+	return loadJSONLMode(file, path, true)
+}
+
+func loadJSONLMode(file *os.File, path string, repair bool) (Header, *logState, error) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return Header{}, nil, sessionError(ErrorStorage, fmt.Sprintf("seek session file %s", path), err)
 	}
@@ -304,6 +308,9 @@ func loadJSONL(file *os.File, path string) (Header, *logState, error) {
 		if errors.Is(readErr, io.EOF) {
 			if len(line) == 0 {
 				break
+			}
+			if !repair {
+				return Header{}, nil, corruptLine(path, lineNumber, "log item is not newline terminated", nil)
 			}
 			var item any
 			decodeErr := json.Unmarshal(line, &item)
