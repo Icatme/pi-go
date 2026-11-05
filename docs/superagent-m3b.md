@@ -3,6 +3,10 @@
 This development slice adds domain-scoped public-history references and a bounded,
 read-only recall surface. It does not complete M3 or authorize new work.
 
+This records the original M3b contract. [M3c](superagent-m3c.md) supersedes the
+per-view cursor restriction with authenticated, exact-revision continuation
+within one coordinator lifetime. Reader expiry and per-callback budgets remain.
+
 ## Acceptance and failure tests, defined before implementation
 
 - With at least 130 tasks, resolve current IM input → Thread → old trigger → old
