@@ -44,7 +44,7 @@ func TestMainCorrectionUsesExactSavedInputEvidence(t *testing.T) {
 				messages[0].Parts = []agent.Part{agent.NewTextPart("different")}
 			}
 			if mode != "crash_after_dequeue" {
-				snapshot, err := encodeSnapshot(agent.AgentSnapshot{SessionID: "task-1", Messages: messages}, "task-1")
+				snapshot, validated, err := encodeSnapshot(agent.AgentSnapshot{SessionID: "task-1", Messages: messages}, "task-1")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -52,7 +52,7 @@ func TestMainCorrectionUsesExactSavedInputEvidence(t *testing.T) {
 				if mode == "interrupted_accepted" {
 					state = "interrupted"
 				}
-				if err := a.commit(transition{State: state, Index: 0, Snapshot: snapshot, NeedsReview: state == "interrupted", Text: "worker ended"}); err != nil {
+				if err := a.commit(transition{State: state, Index: 0, Snapshot: snapshot, validatedSnapshot: validated, NeedsReview: state == "interrupted", Text: "worker ended"}); err != nil {
 					t.Fatal(err)
 				}
 			}
