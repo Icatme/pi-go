@@ -3200,3 +3200,25 @@
   recorded in the draft PR; see [M7b](superagent-m7b.md). No real device/model,
   production service, user computer, Codex/extra paid execution, CI trigger,
   merge or deployment. Real cross-host/TLS/production authority remain untested.
+
+
+## 2026-11-05 - SuperAgent host-authorized Watchdog refresh slice
+
+- M8b builds on draft #182 HEAD f13027d0 / exact tree d1a10893. Check/RunWatchdog
+  remain read-only; a separate explicit host authorizer binds one current finding,
+  task revision, original run/delivery and background operation to one Inspect.
+- Durable reservation precedes the original backend's exact-ID read. Duplicate
+  calls/restart return the same record without repeating Inspect; pending never
+  auto-resumes. Atomic result + background facts preserve unknown/review/quota
+  barriers and the existing task's single private completion on proven exit.
+- New task input, newer finding, changed facts or old runtime invalidate unused
+  decisions. Replay compares durable task facts and reconstructed running delivery,
+  not process-local counters. SQLite takeover fences late authorization/results.
+- Test-first API failure, offline boundary/replay/privacy/concurrency tests and
+  external example cover the slice. Independent review identified incomplete
+  replay freshness checks; fixed and re-reviewed with direct replay counterexamples
+  plus legitimate active-Worker and terminal close/reopen coverage.
+- Exact frozen-tree validation and publication evidence are in the draft PR; see
+  [M8b](superagent-m8b.md). No Start/Stop/retry/Steer/new task or general repair API,
+  real device/model/platform, user computer, Codex/extra paid execution, manual CI,
+  merge or deployment. Existing background watchers retain their own contract.
