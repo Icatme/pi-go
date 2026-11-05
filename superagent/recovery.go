@@ -2,6 +2,7 @@ package superagent
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"os"
 	"strings"
@@ -33,7 +34,7 @@ func openState(ctx context.Context, path string, create bool) (*SuperAgent, erro
 
 func restoreState(ctx context.Context, store journalStore) (*SuperAgent, error) {
 	ctx, cancel := context.WithCancel(ctx)
-	a := &SuperAgent{ctx: ctx, cancel: cancel, store: store, changed: make(chan struct{}), accepted: make(map[[2]string]int), tasks: make(map[string]*task), subscriptions: make(map[[2]string]string), threadSubscriptions: make(map[[2]string][]string)}
+	a := &SuperAgent{watchdogRuntime: rand.Text(), ctx: ctx, cancel: cancel, store: store, changed: make(chan struct{}), accepted: make(map[[2]string]int), tasks: make(map[string]*task), subscriptions: make(map[[2]string]string), threadSubscriptions: make(map[[2]string][]string)}
 	if err := a.restore(); err != nil {
 		cancel()
 		return nil, errors.Join(err, store.Close())

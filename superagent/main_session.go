@@ -406,7 +406,7 @@ func (a *SuperAgent) validateMain(tr transition) error {
 	}
 	switch d.Action {
 	case "new", "attach":
-		if d.Text != "" || m.ReplyID != "" || m.Assignment == nil || m.Assignment.Index != item.event || m.Assignment.State != "queued" || m.Assignment.Main != nil || m.Assignment.Thread != nil || m.Assignment.Admission != nil {
+		if d.Text != "" || m.ReplyID != "" || m.Assignment == nil || m.Assignment.Index != item.event || m.Assignment.State != "queued" || m.Assignment.Main != nil || m.Assignment.Thread != nil || m.Assignment.Admission != nil || m.Assignment.Watchdog != nil {
 			return errors.New("invalid main assignment")
 		}
 		assignment := m.Assignment

@@ -3012,3 +3012,26 @@
   x20 and separate examples tests/vet passed. Optional full module inventory
   could not complete with GOPROXY=off because some indirect-module metadata is
   uncached; no dependency versions changed and no manual CI was requested.
+
+
+## 2026-11-05 - SuperAgent read-only Watchdog slice
+
+- Based on unmerged draft #171's exact tree, added independent diagnostic
+  session/model memory and injected clock, with a persistent bounded patrol
+  cursor and atomic evidence/recheck records on the existing fenced writer.
+  See [M8a](superagent-m8a.md). No retry/cancel/send/new-task actions are exposed.
+- Normal slow work, queue waiting, live tools, explicitly observed device
+  disconnection, suspected model loops and review barriers remain distinct.
+  Uncertain external effects keep review; stale results are historical only.
+- Failing tests preceded implementation. Independent review corrected goal
+  provenance, reconciled-ready handling, numeric model-memory fidelity, settled
+  task classification and strict replay memory/source validation.
+- Fake-clock, controllable-model, restart/cursor, append failure and actual
+  sharedsqlite epoch-takeover fixtures are included. No provider/real device,
+  user computer, extra paid execution, manual CI, merge or deployment was used.
+- This is the read-only M8a slice, not an authorized repair executor, independent
+  out-of-process control plane, automatic notification or full M8 completion.
+- Final Linux amd64 Go 1.26.10 readonly tests, vet, full race, Watchdog race
+  x20 and separate examples tests/vet passed. Optional full module inventory
+  remains blocked by uncached indirect metadata with GOPROXY=off; dependencies
+  are unchanged. Final independent rereview found no remaining blocker.
