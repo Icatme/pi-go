@@ -303,3 +303,23 @@ Private Worker transcripts and raw tool outputs remain inaccessible.
 See [M3b contract and limits](../docs/superagent-m3b.md). Cross-inference spill
 continuation, safe long-context compaction, explicit tool-result publication and
 production-scale history performance are still later M3 work.
+
+## Controlled background tools (M4a)
+
+`OpenMainBackground` explicitly registers bounded, host-authorized backends.
+`Job.Background` supplies per-Worker launch/query/stop capabilities;
+`PiBackgroundWorker` exposes their native model tools without changing ordinary
+synchronous tools. Operations persist their original task/delivery/call, grant
+and quota before dispatch, and release capacity only after verified real exit.
+The same task can process new input while an operation runs. Completion arrives
+once as a new task event, preserving native call/result ordering.
+
+`agent/background.NewLocal` is an opt-in in-process backend, not a shell,
+sandbox or durable process service. Lost registry state remains unknown and
+fenced; it is never automatically relaunched. Stop, Worker Abort, actual exit
+and committed effects are separate facts. Raw output stays private, while
+`Report.Background` preserves output-free authoritative completion facts.
+
+See [M4a contract and limitations](../docs/superagent-m4a.md) and
+`ExampleOpenMainBackground`. Close and WaitIdle do not mean independent
+background tools have stopped; the host owns their lifetime.

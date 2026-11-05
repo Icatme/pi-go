@@ -50,6 +50,9 @@ type AdmissionReceipt struct {
 }
 
 func validAdmissionEnvelope(e AdmissionEnvelope) error {
+	if e.Trigger.Source == backgroundSource {
+		return errors.New("reserved background source")
+	}
 	if err := validTrigger(e.Trigger); err != nil {
 		return err
 	}

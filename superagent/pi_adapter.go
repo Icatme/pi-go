@@ -110,7 +110,14 @@ func PiWorker(def agent.AgentDefinition) (Worker, error) {
 				initial.Model.Metadata = hostModel.Metadata
 			}
 		}
-		prompt, err := json.Marshal(job.Trigger)
+		var payload any = job.Trigger
+		if job.BackgroundCompletion != nil {
+			payload = struct {
+				Trigger    Trigger               `json:"trigger"`
+				Completion *BackgroundCompletion `json:"background_completion"`
+			}{job.Trigger, job.BackgroundCompletion}
+		}
+		prompt, err := json.Marshal(payload)
 		if err != nil {
 			return Outcome{}, err
 		}

@@ -37,7 +37,9 @@ func openState(ctx context.Context, path string, create bool) (*SuperAgent, erro
 	return a, nil
 }
 
-func (t *task) blocks(index int) bool { return t.review != 0 || index < t.admitFrom }
+func (t *task) blocks(index int) bool {
+	return t.review != 0 || t.backgroundReview != 0 || index < t.admitFrom || index < t.backgroundAdmitFrom
+}
 
 func validNote(note string) bool {
 	return strings.TrimSpace(note) != "" && len(note) <= 4096 && utf8.ValidString(note)

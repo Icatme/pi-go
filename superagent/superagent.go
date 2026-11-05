@@ -23,19 +23,20 @@ const maxSnapshotBytes = 8 << 20
 const maxReportBytes = 64 << 10
 
 type transition struct {
-	Admission         *AdmissionRecord   `json:"admission,omitempty"`
-	validatedSnapshot *validatedSnapshot // process-local content proof; never serialized
-	Thread            *threadTransition  `json:"thread,omitempty"`
-	Main              *mainTransition    `json:"main,omitempty"`
-	State             string             `json:"state"`
-	Index             int                `json:"index"`
-	Trigger           *Trigger           `json:"trigger,omitempty"`
-	Task              string             `json:"task,omitempty"`
-	ProviderSessionID string             `json:"provider_session_id,omitempty"`
-	Text              string             `json:"text,omitempty"`
-	Snapshot          json.RawMessage    `json:"snapshot,omitempty"`
-	Receipts          []ToolReceipt      `json:"receipts,omitempty"`
-	NeedsReview       bool               `json:"needs_review,omitempty"`
+	Background        *backgroundTransition `json:"background,omitempty"`
+	Admission         *AdmissionRecord      `json:"admission,omitempty"`
+	validatedSnapshot *validatedSnapshot    // process-local content proof; never serialized
+	Thread            *threadTransition     `json:"thread,omitempty"`
+	Main              *mainTransition       `json:"main,omitempty"`
+	State             string                `json:"state"`
+	Index             int                   `json:"index"`
+	Trigger           *Trigger              `json:"trigger,omitempty"`
+	Task              string                `json:"task,omitempty"`
+	ProviderSessionID string                `json:"provider_session_id,omitempty"`
+	Text              string                `json:"text,omitempty"`
+	Snapshot          json.RawMessage       `json:"snapshot,omitempty"`
+	Receipts          []ToolReceipt         `json:"receipts,omitempty"`
+	NeedsReview       bool                  `json:"needs_review,omitempty"`
 }
 
 type item struct {
@@ -56,17 +57,19 @@ type item struct {
 }
 
 type task struct {
-	delegation        string
-	active            *activeRun
-	progressSeq       uint64
-	id, summary, last string
-	providerSessionID string
-	snapshot          json.RawMessage
-	pending           int
-	running           bool
-	review            int  // one-based admission index; zero means clear
-	admitFrom         int  // events already admitted at reconciliation remain blocked
-	legacyReview      bool // pre-barrier journal may already record later executions
+	backgroundReview    int
+	backgroundAdmitFrom int
+	delegation          string
+	active              *activeRun
+	progressSeq         uint64
+	id, summary, last   string
+	providerSessionID   string
+	snapshot            json.RawMessage
+	pending             int
+	running             bool
+	review              int  // one-based admission index; zero means clear
+	admitFrom           int  // events already admitted at reconciliation remain blocked
+	legacyReview        bool // pre-barrier journal may already record later executions
 }
 
 // SuperAgent owns one exclusive JSONL writer. Call Close to cancel callbacks,
@@ -84,6 +87,7 @@ type SuperAgent struct {
 	mainBatchRoute    MainBatchRouter
 	mainBatchOptions  MainBatchOptions
 	main              mainState
+	background        backgroundState
 	history           *historyCatalog // derived public index; never journaled
 	work              Worker
 	parallel, running int
@@ -212,6 +216,9 @@ func (a *SuperAgent) SubmitTask(t Trigger, taskID string) (bool, error) {
 }
 
 func (a *SuperAgent) submit(t Trigger, taskID string, threadEntry bool) (bool, error) {
+	if t.Source == backgroundSource {
+		return false, errors.New("reserved background source")
+	}
 	if err := validTrigger(t); err != nil {
 		return false, err
 	}
@@ -266,6 +273,11 @@ func (a *SuperAgent) commit(tr transition) error {
 			return err
 		}
 	}
+	if tr.Background != nil || strings.HasPrefix(tr.State, "background_") {
+		if err := a.validateBackground(tr); err != nil {
+			return err
+		}
+	}
 	data, err := json.Marshal(tr)
 	if err == nil {
 		_, err = a.store.AppendEntry(session.MainLane, session.NewEntry{Type: session.EntryTypeCustom, ID: strconv.Itoa(a.sequence + 1), Custom: &session.CustomData{CustomType: journalKind, Payload: data}})
@@ -280,7 +292,7 @@ func (a *SuperAgent) commit(tr transition) error {
 		a.sequence++
 		// Replaying the journal does not emit live progress. Register active
 		// control before publishing the running transition in dispatch.
-		if a.work != nil && tr.State != "running" && tr.Main == nil && tr.Thread == nil {
+		if a.work != nil && tr.State != "running" && tr.Main == nil && tr.Thread == nil && tr.Background == nil {
 			e := a.events[tr.Index]
 			if e.task != "" {
 				a.publishLocked(RunTarget{TaskID: e.task, Source: e.trigger.Source, EventID: e.trigger.ID}, tr.State)
@@ -293,6 +305,9 @@ func (a *SuperAgent) commit(tr transition) error {
 }
 
 func (a *SuperAgent) apply(tr transition, replay bool) error {
+	if tr.Background != nil || strings.HasPrefix(tr.State, "background_") {
+		return a.applyBackground(tr)
+	}
 	if tr.Admission != nil || tr.State == "admission_received" {
 		return a.applyAdmission(tr, replay)
 	}
@@ -444,6 +459,10 @@ func (a *SuperAgent) apply(tr transition, replay bool) error {
 			return errors.New("unexpected terminal transition")
 		}
 		a.reports = append(a.reports, Report{DeliveryID: deliveryID(tr.Index), Source: e.trigger.Source, Thread: e.trigger.Thread, EventID: e.trigger.ID, TaskID: e.task, Status: tr.State, Text: tr.Text, Receipts: tr.Receipts, NeedsReview: tr.NeedsReview})
+		if e.trigger.Source == backgroundSource {
+			o, _ := a.backgroundOperation(e.trigger.ID)
+			a.reports[len(a.reports)-1].Background = completionOf(o, false)
+		}
 		if a.main.id != "" && e.mainAdmitted && (e.state == "running" || (e.state == "queued" && tr.State == "blocked")) {
 			a.enqueueMain(tr.Index, &a.reports[len(a.reports)-1])
 		}
@@ -551,6 +570,13 @@ func (a *SuperAgent) dispatch() bool {
 					job.HandBack = func(ctx context.Context, reason, handled string) error {
 						return a.workerHandback(ctx, i, active, reason, handled)
 					}
+				}
+				if a.background.options != nil {
+					job.Background = &BackgroundControl{a: a, index: i, active: active}
+				}
+				if e.trigger.Source == backgroundSource {
+					op, _ := a.backgroundOperation(e.trigger.ID)
+					job.BackgroundCompletion = completionOf(op, true)
 				}
 				job.NotifyProgress = func(kind string) { a.notifyWorkerProgress(active, kind) }
 				a.publishLocked(active.target, "running")
@@ -694,7 +720,7 @@ func (a *SuperAgent) Status() View {
 		t := a.tasks[id]
 		status := t.last
 		switch {
-		case t.review != 0:
+		case t.review != 0 || t.backgroundReview != 0:
 			status = "needs_review"
 		case t.active != nil:
 			status = t.active.phase()
@@ -715,6 +741,11 @@ func (a *SuperAgent) Status() View {
 			row.ReviewSource, row.ReviewEventID = cause.Source, cause.ID
 			row.ReviewDeliveryID = deliveryID(t.review - 1)
 		}
+		for _, o := range a.background.operations {
+			if o.TaskID == id && o.NeedsReview {
+				row.BackgroundReview = append(row.BackgroundReview, o.ID)
+			}
+		}
 		v.Tasks = append(v.Tasks, row)
 	}
 	return v
@@ -724,8 +755,9 @@ func (a *SuperAgent) Status() View {
 // WaitIdle returns the underlying journal error even while input is still open.
 func (a *SuperAgent) Done() <-chan struct{} { return a.ctx.Done() }
 
-// WaitIdle waits until all admitted deliveries and main inputs settle. Inspect
-// Status for routing and worker failures, including interrupted calls.
+// WaitIdle waits until all admitted deliveries and main inputs settle. It does
+// not wait for independent background operations to exit. Inspect Status and
+// BackgroundOperations for failures, pending operations and review barriers.
 func (a *SuperAgent) WaitIdle(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("superagent: WaitIdle requires a context")
