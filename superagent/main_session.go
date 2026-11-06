@@ -23,10 +23,11 @@ type MainRouter func(context.Context, MainJob) (MainOutcome, error)
 // Worker transcript or FailureCause. Its source/thread remain host-owned.
 type MainInput struct {
 	ID           string       `json:"id"`
-	Kind         string       `json:"kind"` // user, task_input, control_result or worker_result
+	Kind         string       `json:"kind"` // user, task_input, control_result, worker_result or handback
 	Trigger      Trigger      `json:"trigger"`
 	TaskID       string       `json:"task_id,omitempty"`
 	Control      *MainControl `json:"control,omitempty"`
+	Handback     *Handback    `json:"handback,omitempty"`
 	DelegationID string       `json:"delegation_id,omitempty"`
 	Report       *Report      `json:"report,omitempty"`
 }
@@ -73,6 +74,7 @@ type Reply struct {
 	Status       string         `json:"status"` // pending, needs_review, acknowledged
 	Report       *Report        `json:"report,omitempty"`
 	Control      *MainControl   `json:"control,omitempty"`
+	Handback     *Handback      `json:"handback,omitempty"`
 	Attempts     []ReplyAttempt `json:"attempts,omitempty"`
 }
 
@@ -193,6 +195,7 @@ func (a *SuperAgent) dispatchMain() bool {
 	job := MainJob{SessionID: a.main.id, ProviderSessionID: a.main.providerID, Input: item.input}
 	job.Input.Report = copyReport(job.Input.Report)
 	job.Input.Control = copyControl(job.Input.Control)
+	job.Input.Handback = copyHandback(job.Input.Handback)
 	if len(a.main.snapshot) != 0 {
 		if err := decodeSnapshot(a.main.snapshot, &job.Snapshot); err != nil {
 			a.commit(transition{State: "main_failed", Text: "Main snapshot could not be read.", Main: &mainTransition{InputID: item.input.ID}})
@@ -348,6 +351,9 @@ func (a *SuperAgent) validateMain(tr transition) error {
 	if d.Action != "steer" && d.Action != "cancel" && d.Target != nil {
 		return errors.New("unexpected main control target")
 	}
+	if item.input.Kind == "handback" && d.Action != "clarify" {
+		return errors.New("handback requires clarification; automatic rerouting is not permitted")
+	}
 	if item.input.Kind == "worker_result" && d.Action != "reply" && d.Action != "ignore" {
 		return errors.New("worker result cannot authorize new work")
 	}
@@ -356,7 +362,7 @@ func (a *SuperAgent) validateMain(tr transition) error {
 	}
 	switch d.Action {
 	case "new", "attach":
-		if d.Text != "" || m.ReplyID != "" || m.Assignment == nil || m.Assignment.Index != item.event || m.Assignment.State != "queued" || m.Assignment.Main != nil {
+		if d.Text != "" || m.ReplyID != "" || m.Assignment == nil || m.Assignment.Index != item.event || m.Assignment.State != "queued" || m.Assignment.Main != nil || m.Assignment.Thread != nil {
 			return errors.New("invalid main assignment")
 		}
 		assignment := m.Assignment
@@ -459,7 +465,7 @@ func (a *SuperAgent) applyMain(tr transition, replay bool) error {
 			e.controls = append(e.controls, c.ID)
 		}
 		if m.Decision.Action == "reply" || m.Decision.Action == "clarify" {
-			reply := Reply{ID: m.ReplyID, DecisionID: m.DecisionID, InputID: m.InputID, DelegationID: item.input.DelegationID, Source: item.input.Trigger.Source, Thread: item.input.Trigger.Thread, EventID: item.input.Trigger.ID, Text: m.Decision.Text, Status: "pending", Report: copyReport(item.input.Report), Control: copyControl(item.input.Control)}
+			reply := Reply{ID: m.ReplyID, DecisionID: m.DecisionID, InputID: m.InputID, DelegationID: item.input.DelegationID, Source: item.input.Trigger.Source, Thread: item.input.Trigger.Thread, EventID: item.input.Trigger.ID, Text: m.Decision.Text, Status: "pending", Report: copyReport(item.input.Report), Control: copyControl(item.input.Control), Handback: copyHandback(item.input.Handback)}
 			reply.TaskID = item.input.TaskID
 			if reply.Report != nil {
 				reply.TaskID = reply.Report.TaskID
@@ -507,6 +513,7 @@ func (a *SuperAgent) Replies() []Reply {
 	for i := range out {
 		out[i].Report = copyReport(out[i].Report)
 		out[i].Control = copyControl(out[i].Control)
+		out[i].Handback = copyHandback(out[i].Handback)
 		out[i].Attempts = slices.Clone(out[i].Attempts)
 	}
 	return out
