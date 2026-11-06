@@ -3266,3 +3266,20 @@
   means coordinator/journal reopen; ACK loss is injection, not a TCP partition.
 - Full offline verification, independent review and exact-tree publication
   evidence are recorded in the draft PR. See [M6c](superagent-m6c.md).
+
+## 2026-11-05 - M9c concurrent actual-runtime load conservation
+
+- Added a separate 300-delivery/280-identity/20-task fixture through actual
+  unbatched/batched subscribed SuperAgent and Pi adapters. Sixteen concurrent
+  ingress goroutines, four gated native tool bodies, raw reports/receipts/replies
+  and private histories are checked against post-execution expectations.
+- Fixed virtual tool-gate service is explicitly separate from real runtime
+  clocks. Variable batch grouping and script calls are retained as observations,
+  not claimed as live-model performance, prompt-policy gains or historical data.
+- Added test-first scorer corruption, malformed batch response, whole-run
+  cancellation/join and completed-journal replay/conflicting-duplicate coverage.
+- No production runtime, provider, dependency, schema or CI changes. Full offline
+  checks, independent review and exact-tree publication are recorded in the
+  draft PR. No final M9/release acceptance, real services, user computer,
+  extra paid execution, CI dispatch, merge or deployment.
+  See [M9c boundaries and reproduction](superagent-m9c.md).
