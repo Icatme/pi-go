@@ -3487,3 +3487,17 @@
   external channel, manual CI or release was run; this review did not rerun
   full-root race testing. Merge uses the tested head as its safety guard,
   followed by resulting tree/ancestry and local master synchronization checks.
+
+## 2026-11-06 - Prepare v0.21.0 source release
+
+- Bumped the package version and examples module reference to v0.21.0 for
+  the CLI main-session feature merged in #191 and test correction in #190.
+  Release notes describe reply consumption, stable replay and the one-way
+  legacy journal upgrade. No dependency or runtime implementation changed.
+- Reused the integrated root/examples tests and vet, focused race tests and
+  Windows CLI executable validation recorded above. Release-specific checks
+  cover matching version references, readonly module resolution, compilation
+  and diff hygiene; no redundant full-suite run is needed for metadata changes.
+- Publication scope is the release commit on master and an annotated source
+  tag, pushed together with remote target verification. No GitHub Release,
+  binary assets, manual CI or deployment is included.
