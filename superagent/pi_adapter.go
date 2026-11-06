@@ -451,6 +451,14 @@ func OfflineModel() agent.StreamModel {
 				}
 			} else if input.Input.Kind == "user" && input.Input.Trigger.Kind == "request" {
 				decision.Action = "new"
+			} else if input.Input.Kind == "user" && input.Input.Trigger.Kind == "signal" {
+				words := strings.Fields(input.Input.Trigger.Text)
+				for _, task := range input.Tasks {
+					if len(words) != 0 && words[0] == "@"+task.ID {
+						decision = MainDecision{Action: "attach", TaskID: task.ID}
+						break
+					}
+				}
 			}
 			data, err := json.Marshal(decision)
 			if err != nil {

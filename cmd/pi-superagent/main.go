@@ -52,7 +52,8 @@ func command(ctx context.Context, args []string, in io.Reader, out, diagnostics 
 	opts.Usage = func() {
 		fmt.Fprintln(diagnostics, usage)
 		fmt.Fprintln(diagnostics, "REPORT replays each outcome and its tool receipts with a stable journal-local delivery_id. Deduplicate by journal namespace and delivery_id, not source/event_id.")
-		fmt.Fprintln(diagnostics, "IDLE.tasks shows current review requirements after the input ends. This CLI retains legacy Open routing.")
+		fmt.Fprintln(diagnostics, "OpenMain routes every chat input independently. REPLY carries the main session's stable id, destination and public report facts; deduplicate by journal namespace and id.")
+		fmt.Fprintln(diagnostics, "stdout is an observation, never proof of external delivery. ack_reply records direct consumption only. IDLE.tasks shows current review requirements.")
 		if !demo {
 			fmt.Fprintln(diagnostics, controlHelp)
 		}
@@ -60,6 +61,7 @@ func command(ctx context.Context, args []string, in io.Reader, out, diagnostics 
 	}
 	state := opts.String("state", "", "path to the local supervisor state file")
 	workers := opts.Int("workers", 2, "maximum active workers")
+	mainContext := opts.Int("main-context-bytes", 1<<20, "main session context budget in bytes (1024–8388608; overflow fails explicitly)")
 	var provider, model string
 	if !demo {
 		opts.StringVar(&provider, "provider", "", "pi-go provider (requires -model)")
@@ -89,7 +91,7 @@ func command(ctx context.Context, args []string, in io.Reader, out, diagnostics 
 	if err != nil {
 		return err
 	}
-	route, err := superagent.PiRouter(def)
+	route, err := superagent.PiMainRouter(def, *mainContext)
 	if err != nil {
 		return err
 	}
@@ -97,7 +99,7 @@ func command(ctx context.Context, args []string, in io.Reader, out, diagnostics 
 	if err != nil {
 		return err
 	}
-	s, err := superagent.Open(ctx, *state, *workers, route, work)
+	s, err := superagent.OpenMain(ctx, *state, *workers, route, work)
 	if err != nil {
 		return err
 	}
@@ -161,9 +163,11 @@ func modelDefinition(provider, model string) (agent.AgentDefinition, error) {
 }
 
 type outputSession struct {
-	s      *superagent.SuperAgent
-	out    frameEncoder
-	cursor int
+	s             *superagent.SuperAgent
+	out           frameEncoder
+	cursor        int
+	replyCursor   int
+	failureCursor int
 }
 
 func (s *outputSession) submit(event superagent.Trigger) error {
@@ -179,14 +183,24 @@ func (s *outputSession) submit(event superagent.Trigger) error {
 }
 
 func (s *outputSession) flush() error {
-	reports := s.s.ReportsSince(s.cursor)
-	if err := writeReports(s.out, reports); err != nil {
+	batch := s.batch()
+	if err := writeFrame(s.out, batch); err != nil {
 		// A partial write may have emitted some reports. Retry the batch with
 		// its original IDs rather than skip an unacknowledged outcome.
 		return err
 	}
-	s.cursor += len(reports)
+	s.advance(batch)
 	return nil
+}
+
+func (s *outputSession) batch() outputBatch {
+	return outputBatch{s.s.ReportsSince(s.cursor), s.s.Replies()[s.replyCursor:], s.s.MainFailures()[s.failureCursor:]}
+}
+
+func (s *outputSession) advance(batch outputBatch) {
+	s.cursor += len(batch.reports)
+	s.replyCursor += len(batch.replies)
+	s.failureCursor += len(batch.failures)
 }
 
 func writeReports(out frameEncoder, reports []superagent.Report) error {
@@ -207,7 +221,7 @@ func (s *outputSession) run(ctx context.Context, in io.Reader) error {
 	frames := &frameQueue{ready: make(chan any, 128)}
 	done := make(chan error, 1)
 	go func() {
-		live := &outputSession{s: s.s, out: frames, cursor: s.cursor}
+		live := &outputSession{s: s.s, out: frames, cursor: s.cursor, replyCursor: s.replyCursor, failureCursor: s.failureCursor}
 		err := live.dispatch(ctx, in, frames)
 		if frames.err != nil {
 			// Staging itself failed. Stop work even if stdout is still blocked.
@@ -279,16 +293,16 @@ func (s *outputSession) dispatch(ctx context.Context, in io.Reader, frames *fram
 	controls := newControls(ctx, s)
 	defer controls.close()
 	flush := func() error {
-		reports := s.s.ReportsSince(s.cursor)
-		if len(reports) == 0 {
+		batch := s.batch()
+		if len(batch.reports)+len(batch.replies)+len(batch.failures) == 0 {
 			return nil
 		}
-		if err := frames.Encode(reports); err != nil {
+		if err := frames.Encode(batch); err != nil {
 			return err
 		}
 		// This process-local cursor acknowledges staging, not delivery to the
 		// external consumer. Restart replays the journal from count zero.
-		s.cursor += len(reports)
+		s.advance(batch)
 		return nil
 	}
 	var idleDone bool
@@ -402,8 +416,8 @@ func decodeTrigger(raw []byte) (superagent.Trigger, error) {
 }
 
 func (s *outputSession) demo(ctx context.Context) error {
-	a := superagent.Trigger{ID: "demo-1", Source: "console", Thread: "release", Kind: "request", Text: "Prepare the release checklist."}
-	b := superagent.Trigger{ID: "demo-2", Source: "console", Thread: "support", Kind: "request", Text: "Summarize the support queue."}
+	a := superagent.Trigger{ID: "demo-1", Source: "console", Thread: "planning", Kind: "request", Text: "Prepare the release checklist."}
+	b := superagent.Trigger{ID: "demo-2", Source: "console", Thread: "planning", Kind: "request", Text: "Summarize the support queue."}
 	for _, event := range []superagent.Trigger{a, b, a} {
 		if err := s.submit(event); err != nil {
 			return err
@@ -415,18 +429,21 @@ func (s *outputSession) demo(ctx context.Context) error {
 	if err := s.flush(); err != nil {
 		return err
 	}
-	var id string
+	var id, supportID string
 	for _, r := range s.s.Status().Reports {
 		if r.Source == a.Source && r.EventID == a.ID && r.TaskID != "" {
 			id = r.TaskID
 		}
+		if r.Source == b.Source && r.EventID == b.ID && r.TaskID != "" {
+			supportID = r.TaskID
+		}
 	}
-	if id == "" {
-		return errors.New("demo release request produced no task")
+	if id == "" || supportID == "" {
+		return errors.New("demo request produced no task")
 	}
 	for _, event := range []superagent.Trigger{
 		{ID: "demo-3", Source: "build", Thread: "check", Kind: "signal", Text: "@" + id + " Build passed. Update the checklist."},
-		{ID: "demo-4", Source: b.Source, Thread: b.Thread, Kind: "request", Text: "Add the latest support update."},
+		{ID: "demo-4", Source: b.Source, Thread: b.Thread, Kind: "signal", Text: "@" + supportID + " Add the latest support update."},
 		{ID: "demo-5", Source: "monitor", Thread: "heartbeat", Kind: "noise", Text: "Heartbeat."},
 	} {
 		if err := s.submit(event); err != nil {

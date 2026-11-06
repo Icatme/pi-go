@@ -42,8 +42,17 @@ func TestDemoUsesDistinctTasksAndAttachesCrossSourceSignal(t *testing.T) {
 	if err := command(t.Context(), []string{"demo"}, nil, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
+	for _, reply := range cliReplies(t, out.Bytes()) {
+		source, thread := "console", "planning"
+		if reply.EventID == "demo-3" {
+			source, thread = "build", "check"
+		}
+		if reply.Source != source || reply.Thread != thread || reply.Report == nil || reply.Report.Source != source || reply.Report.Thread != thread {
+			t.Fatalf("reply destination changed: %+v", reply)
+		}
+	}
 	reports := map[string]frame{}
-	accepted, duplicates := 0, 0
+	accepted, duplicates, replies := 0, 0, 0
 	for _, f := range decodeFrames(t, &out) {
 		switch f.Type {
 		case "ACCEPTED":
@@ -52,6 +61,8 @@ func TestDemoUsesDistinctTasksAndAttachesCrossSourceSignal(t *testing.T) {
 			duplicates++
 		case "REPORT":
 			reports[f.EventID] = f
+		case "REPLY":
+			replies++
 		case "IDLE":
 			if len(f.Tasks) != 2 {
 				t.Fatalf("tasks: %+v", f.Tasks)
@@ -61,7 +72,7 @@ func TestDemoUsesDistinctTasksAndAttachesCrossSourceSignal(t *testing.T) {
 		}
 	}
 	a, b := reports["demo-1"], reports["demo-2"]
-	if accepted != 5 || duplicates != 1 || len(reports) != 5 || a.TaskID == "" || b.TaskID == "" || a.TaskID == b.TaskID || reports["demo-3"].TaskID != a.TaskID || reports["demo-3"].Source == a.Source || reports["demo-4"].TaskID != b.TaskID || reports["demo-5"].Status != "ignored" {
+	if accepted != 5 || duplicates != 1 || replies != 4 || len(reports) != 5 || a.TaskID == "" || b.TaskID == "" || a.TaskID == b.TaskID || a.Thread != b.Thread || reports["demo-3"].TaskID != a.TaskID || reports["demo-3"].Source == a.Source || reports["demo-4"].TaskID != b.TaskID || reports["demo-5"].Status != "ignored" {
 		t.Fatalf("accepted=%d duplicates=%d reports=%+v", accepted, duplicates, reports)
 	}
 }

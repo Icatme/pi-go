@@ -137,7 +137,7 @@ go build -o bin/pi-superagent.exe ./cmd/pi-superagent
 .\bin\pi-superagent.exe demo
 ```
 
-The demo starts two tasks. A simulated build event joins the release task on
+The demo starts two independent tasks in one chat. A simulated build event joins the release task on
 its second turn while the support task keeps its own history. One repeated
 delivery is acknowledged as a duplicate. The model in this demo is a
 deterministic fixture running through the same Pi Runner as a configured model.
@@ -150,14 +150,39 @@ Get-Content superagent/testdata/events.jsonl | .\bin\pi-superagent.exe run -stat
 ```
 
 Run the same command twice. The second run acknowledges duplicate inputs and
-replays the stored reports. With stdin open, the process can accept further
-events and emit completed reports concurrently. Consumers must deduplicate
+replays the stored reports and main-session replies. With stdin open, the process can accept further
+events and emit completed reports and replies concurrently. Consumers must deduplicate
 replayed reports by `(journal namespace, delivery_id)`, as described above.
-The CLI retains legacy `Open` routing; it does not enable `OpenMain` fanout.
-An `ACCEPTED` line acknowledges
+Both `run` and `demo` use `OpenMain` with `PiMainRouter`; a shared chat never
+automatically attaches a new request to an old task. An `ACCEPTED` line acknowledges
 durable admission. The eventual `REPORT.status` gives the execution outcome.
 At EOF, `IDLE.tasks` shows the current task states. Replayed reports retain
 the facts and review flag recorded when each event finished.
+
+`REPLY` is a main-session outbox observation with a stable `id`, host-owned
+`source`/`thread`, original `report` and any structured `reports` citations.
+Deduplicate replies by `(journal namespace, id)`, not delivery ID: several
+replies can concern the same input delivery. All replies replay on restart,
+including their current `pending`, `needs_review` or `acknowledged` status.
+Successful stdout output neither consumes the reply nor proves platform delivery.
+After directly consuming one reply, send:
+
+```json
+{"op":"ack_reply","reply_id":"<copy the actual REPLY id>","request_id":"read-1"}
+```
+
+`REPLY_ACKNOWLEDGED` confirms durable direct consumption only. It is idempotent
+and cannot resolve an external send attempt. A transport adapter must instead
+use the Go `BeginReplyDelivery` / `ResolveReplyDelivery` / `ObserveReply` protocol
+with verified evidence. Never blindly forward replayed output to a platform.
+`MAIN_ERROR` exposes a persisted, safe main-router failure by `input_id`, not
+private provider errors. `-main-context-bytes` defaults to 1 MiB and fails
+explicitly instead of truncating main history. See the [CLI migration contract](../docs/superagent-cli-main.md).
+
+Stop old writers before opening an old journal with this CLI. Existing reports,
+tasks and Worker/provider history are preserved, without treating completed
+legacy reports as fresh main inputs. This is a one-way `OpenMain` upgrade;
+legacy `Open` cannot subsequently write that journal.
 
 The CLI accepts one UTF-8 JSON object per line:
 
@@ -169,7 +194,7 @@ The CLI accepts one UTF-8 JSON object per line:
 Reusing an ID with different contents raises an error. The host classifies
 events as `request`, `signal`, or `noise`. Noise receives an ignored outcome
 before any model call. The offline fixture recognizes an explicit
-`@task-1`-style reference at the start of a signal on a new thread. A real
+`@task-1`-style reference at the start of a signal, including in the same chat. A real
 router uses the event text and task summaries to make that decision.
 
 Supply both `-provider` and `-model` to use a registered pi-go provider with
@@ -217,7 +242,9 @@ or an output error. The Go API calls the coordinator directly.
   control and lifecycle phases. Each subscriber buffers the latest 16 updates;
   a sequence gap identifies missed updates. Consult `REPORT` for the durable
   outcome. A subscription exposes phase names rather than the contents of
-  model messages, tool calls or results.
+  model messages, tool calls or results. These process-local observations do not
+  change durable `SetThreadSubscription` routing authorization. This CLI does
+  not expose Thread-subscription or `SubmitThread` commands.
 
 Cancel the subscription context to unsubscribe. Custom workers poll `Job.TakeSteering` at their own
 safe boundaries, observe their job context for cancellation, and may call

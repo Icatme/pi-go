@@ -84,7 +84,9 @@ a task from a Thread. A progress `DeliveryID` is correlation, not completion.
 
 ## CLI and executable examples
 
-The CLI intentionally retains legacy `Open` routing. Its `REPORT` frames now
+The original M2c slice intentionally retained legacy `Open` routing. The
+[subsequent CLI migration](superagent-cli-main.md) replaces it with `OpenMain`
+and adds explicit main-reply consumption. Its `REPORT` frames
 carry `delivery_id`, including on restart, and help text gives the new dedup
 contract. `ACCEPTED`/`DUPLICATE` remain ingress acknowledgments. Failed direct
 report output no longer advances the cursor; a partial write may replay a
@@ -97,7 +99,7 @@ consumption and replay into a journal-namespaced idempotent sink. Its in-memory
 map is instructional, not a durable production sink. Existing legacy Open and
 Thread examples now expose or check delivery identity too. CLI serialization
 tests use a real `OpenMain` fanout to ensure the shared output path never
-collapses targets, without silently changing the CLI's ingress behavior.
+collapses targets, without silently changing the original slice's ingress behavior.
 
 ## Verification and boundaries
 

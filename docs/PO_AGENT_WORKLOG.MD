@@ -3417,6 +3417,45 @@
   tests/vet, and Linux helper/device/SQLite race checks completed successfully.
   No further test runs are required for this metadata-only release change.
 
+## 2026-11-06 - Connect CLI to the persistent main session
+
+- Started from master 74bb8f8, then incorporated the complete v0.20.0 source
+  release tree at 7a90824 before final validation. `run` and `demo` now reuse
+  `OpenMain` / `PiMainRouter`; no coordinator or storage implementation was
+  duplicated. No module changes; root module and compiled-package enumeration
+  confirm no PostgreSQL driver. Host-owned Journal/LeasedJournal is unchanged.
+- Added stable REPLY frames with host-owned destinations, authoritative report
+  references and existing public facts, plus safe MAIN_ERROR observations.
+  Explicit, idempotent `ack_reply` acknowledges only direct consumption.
+  Neither stdout success nor this read acknowledgement certifies an external
+  send; uncertain attempts cannot be cleared by the control.
+- Acceptance tests failed first on the legacy CLI's missing replies and missing
+  partial-reply-output handling. New tests cover same-chat independent tasks,
+  explicit follow-up, stable replay, acknowledgement recovery/boundaries,
+  public facts/privacy, partial output, mixed-frame disk spooling, context-budget
+  failure visibility and one-way legacy upgrade without changed Worker history.
+  Existing exact steer/abort and blocked-stdout tests now exercise OpenMain,
+  same-chat isolation and progress-vs-Thread subscription boundaries.
+- Offline remote Linux amd64, cached official Go 1.26.10, readonly modules and
+  disabled live flags: root `go test -mod=readonly -count=1 ./...`,
+  `go test -mod=readonly -race -count=1 ./...` and `go vet -mod=readonly ./...`
+  passed. The same test/race/vet checks passed in `examples/`.
+  CLI race tests passed 20 repetitions; the new main-session subset also passed
+  10 race repetitions. Root runtimeeval race coverage took 257 seconds, not a
+  skipped stage. The existing stale-catalog accounting test passed this run;
+  its separate correction is not included in this slice.
+- Executable offline demo/replay verified two independent tasks, five reports
+  and four identical pending replies without transport attempts. Windows amd64
+  and macOS arm64 CLI tests cross-compiled; neither platform was runtime-tested.
+- Independent review found a Windows-only test assertion issue: FileMode cannot
+  prove Unix permissions there. Restricted that assertion to non-Windows;
+  reviewer accepted the correction. No unresolved blocking finding. The existing
+  Replies snapshot API still copies full history while polling; long-journal
+  polling optimization is separate work, not a claimed benchmark improvement.
+- No real provider/channel, user-machine access, Codex execution, additional
+  billed service, manual CI dispatch, merge or deployment. Migration and
+  consumer details: [CLI main-session contract](superagent-cli-main.md).
+
 ## 2026-11-06 - Review PR #190 stale-call request accounting
 
 - Reviewed the fixture and dispatch guard: receiving middleware counts tool
@@ -3429,3 +3468,22 @@
   disabled and module resolution was readonly. Manual CI was not dispatched.
 - PR merge is authorized by the user. The reviewed head will guard the merge,
   with resulting tree and ancestry verification before moving to PR #191.
+
+## 2026-11-06 - Review and integrate PR #191 CLI main session
+
+- PR #190 was merged first and its resulting tree and ancestry were verified.
+  Updated #191 with the new master, resolving only the appended worklog
+  conflict and retaining both records. Reviewed routing, exact controls,
+  reply acknowledgement, output staging/replay and legacy migration against
+  the existing coordinator contracts; no blocking runtime defect was found.
+- Windows Go 1.26.4: root and examples full tests and vet passed. Focused
+  CLI/SuperAgent tests and race tests passed. Changed Go files pass gofmt
+  after checkout line-ending normalization; git diff --check is clean.
+- Compiled and ran the Windows CLI offline: two tasks, five reports, four
+  stable replay replies, no transport attempts, and idempotent acknowledgement
+  persisted across restart. Temporary executable and journal were removed.
+- Opening a legacy journal remains a one-way main-session upgrade. No new
+  dependencies or compatibility wrappers were introduced. No live provider,
+  external channel, manual CI or release was run; this review did not rerun
+  full-root race testing. Merge uses the tested head as its safety guard,
+  followed by resulting tree/ancestry and local master synchronization checks.

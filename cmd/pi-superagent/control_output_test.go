@@ -123,10 +123,7 @@ func TestAbortWhileStdoutIsBlocked(t *testing.T) {
 		}
 		return superagent.Outcome{Summary: "finished"}, out.Err
 	}
-	route := func(context.Context, superagent.Trigger, []superagent.TaskInfo) (superagent.Route, error) {
-		return superagent.Route{Action: "new"}, nil
-	}
-	s, err := superagent.Open(ctx, filepath.Join(dir, "events.jsonl"), 2, route, worker)
+	s, err := superagent.OpenMain(ctx, filepath.Join(dir, "events.jsonl"), 2, controlMainRouter, worker)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +149,7 @@ func TestAbortWhileStdoutIsBlocked(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("tool never started")
 	}
-	write(`{"id":"other","source":"console","thread":"support","kind":"request","text":"continue independently"}`)
+	write(`{"id":"other","source":"console","thread":"ops","kind":"request","text":"continue independently"}`)
 	select {
 	case <-otherStarted:
 	case <-ctx.Done():
