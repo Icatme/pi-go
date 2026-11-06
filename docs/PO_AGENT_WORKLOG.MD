@@ -3324,3 +3324,28 @@
   M9/four-strategy/release acceptance, or model token/cost evidence. No user
   computer, extra paid execution, CI dispatch, merge or deployment.
   See [M9d boundaries and reproduction](superagent-m9d.md).
+
+## 2026-11-06 - SuperAgent PR merge review
+
+- Reviewed #157–#161 and #163–#188 in dependency order. Joined the original
+  #161 and #176 histories at their adapted implementations in #163 and #178.
+  Preserved the separate edited-comment actor worklog entry from #176.
+- Rejected hidden actions during failed main-input replay and fenced late
+  background inspections after coordinator shutdown. The coordinator and durable
+  helper now reject invalid arguments before authorization or quota reservation.
+- Fixed drive-qualified SQLite filenames on Windows and blocked network/device
+  paths. The device client now checks acceptance and native receipt evidence
+  before trusting an active or terminal state.
+- Repaired the late-commit PostgreSQL fixture to supply a native agent receipt.
+  All eight journal and five coordinator cases passed on isolated PostgreSQL
+  17.9 and 18.3 instances, both normally and under the Go race detector. These
+  runs used one primary at a time and independent client pools.
+- Added corrupt-evidence regressions for serial, concurrent, and crash
+  evaluation. An empty effect, an extra reply to ignored input, or a reply
+  tied to a different decision can no longer pass the corresponding scorer.
+- The 256-event durable backlog exceeded the five-second small-fixture guard
+  under concurrent test load on Windows. Its drain now has a separate
+  one-minute deadline and still checks every terminal event and worker.
+- Windows tests covered SQLite process contention and recovery. Linux helper
+  and device process suites ran in WSL2. Provider calls, physical devices,
+  cross-host failover, deployment, and release publication were outside scope.

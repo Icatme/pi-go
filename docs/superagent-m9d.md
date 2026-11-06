@@ -78,9 +78,10 @@ effect counts unchanged.
   text quoting the actual failure/review/commit facts. No messages are sent.
 - Private input order, task isolation and the durable correction marker;
   checkpoint evidence unchanged after process recovery.
-- Eleven corrupted-evidence cases per normal arm and twelve per crash arm:
-  missing/duplicate/misassigned reports, lost commits/effects, duplicate effects,
-  wrong or missing replies, misdirected correction, contaminated/missing snapshots,
+- Fourteen corrupted-evidence cases per normal arm and fifteen per crash arm:
+  missing/duplicate/misassigned reports, lost commits/effects, duplicate or empty effects,
+  wrong or missing replies, replies for ignored inputs, mismatched decision IDs,
+  misdirected correction, contaminated/missing snapshots,
   and invented crash receipts must fail the oracle.
 
 The test-first target failed to compile before its fixture existed. An initial

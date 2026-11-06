@@ -27,7 +27,7 @@ func validateMixed(t *testing.T, a *superagent.SuperAgent, cp mixedCheckpoint, e
 	if err := checkMixedEvidence(cp, evidence, crash); err != nil {
 		t.Fatal(err)
 	}
-	for _, fault := range []string{"drop_report", "duplicate_delivery", "wrong_task", "receipt_commit", "effect_missing", "effect_duplicate", "reply", "correction", "history", "missing_snapshot", "missing_reply", "invent_crash_receipt"} {
+	for _, fault := range []string{"drop_report", "duplicate_delivery", "wrong_task", "receipt_commit", "effect_missing", "effect_duplicate", "effect_empty", "reply", "ignored_reply", "wrong_decision", "correction", "history", "missing_snapshot", "missing_reply", "invent_crash_receipt"} {
 		if fault == "invent_crash_receipt" && !crash {
 			continue
 		}
@@ -58,8 +58,24 @@ func validateMixed(t *testing.T, a *superagent.SuperAgent, cp mixedCheckpoint, e
 				bad.Effects = bad.Effects[1:]
 			case "effect_duplicate":
 				bad.Effects = append(bad.Effects, bad.Effects[0])
+			case "effect_empty":
+				bad.Effects[0] = mixedCall{}
 			case "reply":
 				bad.Replies[0].DeliveryID = "foreign"
+			case "ignored_reply":
+				for _, r := range bad.View.Reports {
+					if r.TaskID != "" {
+						continue
+					}
+					body, err := json.Marshal(r)
+					if err != nil {
+						t.Fatal(err)
+					}
+					bad.Replies = append(bad.Replies, superagent.Reply{ID: "reply-extra", InputID: "extra", DecisionID: "main-decision-extra", DeliveryID: r.DeliveryID, Status: "pending", Source: r.Source, Thread: r.Thread, EventID: r.EventID, Report: &r, Text: string(body)})
+					break
+				}
+			case "wrong_decision":
+				bad.Replies[len(bad.Replies)-1].DecisionID = "main-decision-foreign"
 			case "correction":
 				bad.Controls[0].Target.TaskID = cp.Tasks["A"]
 			case "history":
@@ -188,7 +204,8 @@ func checkMixedEvidence(cp mixedCheckpoint, evidence mixedEvidence, crash bool) 
 	}
 	seen := map[string]bool{}
 	for _, effect := range evidence.Effects {
-		if seen[effect.key()] || wantEffects[effect.key()] != effect {
+		want, ok := wantEffects[effect.key()]
+		if !ok || seen[effect.key()] || want != effect {
 			return fmt.Errorf("duplicate or wrong physical effect: %+v", effect)
 		}
 		seen[effect.key()] = true
@@ -206,7 +223,7 @@ func checkMixedEvidence(cp mixedCheckpoint, evidence mixedEvidence, crash bool) 
 	replied := map[string]bool{}
 	ids := map[string]bool{}
 	for _, reply := range evidence.Replies {
-		if reply.ID == "" || ids[reply.ID] || reply.InputID == "" || reply.DecisionID == "" || reply.Status != "pending" || reply.Report == nil {
+		if reply.InputID == "" || reply.ID != "reply-"+reply.InputID || ids[reply.ID] || reply.DecisionID != "main-decision-"+reply.InputID || reply.Status != "pending" || reply.Report == nil || reply.TaskID == "" {
 			return fmt.Errorf("reply identity/state: %+v", reply)
 		}
 		ids[reply.ID] = true
