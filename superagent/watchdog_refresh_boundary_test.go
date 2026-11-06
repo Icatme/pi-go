@@ -197,7 +197,7 @@ func TestWatchdogRefreshFailureKeepsBarriersAndRedacts(t *testing.T) {
 }
 
 type refreshFailStore struct {
-	journalStore
+	Journal
 	state string
 }
 
@@ -209,7 +209,7 @@ func (s refreshFailStore) AppendEntry(lane string, e session.NewEntry) (session.
 	if tr.State == s.state {
 		return session.Entry{}, errors.New("fixture write failure")
 	}
-	return s.journalStore.AppendEntry(lane, e)
+	return s.Journal.AppendEntry(lane, e)
 }
 func TestWatchdogRefreshAppendFailures(t *testing.T) {
 	for _, state := range []string{"watchdog_refresh_reserved", "watchdog_refresh_finished"} {

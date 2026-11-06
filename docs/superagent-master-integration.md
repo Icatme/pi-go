@@ -1,5 +1,12 @@
 # SuperAgent stack and v0.19.1 integration
 
+Historical integration report. On 2026-11-06 the storage boundary changed to the
+public `Journal` and `LeasedJournal` interfaces plus the bundled same-host SQLite adapter.
+PostgreSQL implementations, dependencies and acceptance tests belong to the host.
+The source-preservation and PostgreSQL test statements below describe the original
+integration inputs. Current embedding guidance is in the
+[SuperAgent README](../superagent/README.md).
+
 2026-11-05. Review-only integration of the unmerged SuperAgent development
 stack with current master. This is not a release, deployment, or acceptance of
 the individual draft milestones.
