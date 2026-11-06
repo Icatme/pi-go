@@ -89,6 +89,11 @@ func (c *Client) Inspect(ctx context.Context, id string) (background.Observation
 	if o == nil || r.Description != nil || o.ID != id || len(o.Output) != 0 || (o.State != "running" && o.State != "unknown" && o.State != "exited") || len(o.Receipts) > 1 {
 		return background.Observation{}, ErrUnavailable
 	}
+	// A bound operation always has a projected root. Only unknown (including
+	// an unbound stop tombstone) can be reported without acceptance.
+	if o.State != "unknown" && !r.Accepted || r.Accepted && len(o.Receipts) != 1 {
+		return background.Observation{}, ErrUnavailable
+	}
 	for _, receipt := range o.Receipts {
 		if receipt.Token != 1 || receipt.ParentToken != 0 || receipt.Domain != "agent" || !validID(receipt.CallID) || !slices.Contains(c.tools, receipt.ToolName) || receipt.Completed != (o.State == "exited") {
 			return background.Observation{}, ErrUnavailable
