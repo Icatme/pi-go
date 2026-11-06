@@ -10,11 +10,21 @@ import (
 	"slices"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // These are API/journal correctness gates, not wall-clock benchmarks. The first
 // callback is held until all submissions finish, making the backlog independent
-// of scheduler timing. Timeouts in receive/waitIdle are deadlock guards only.
+// of scheduler timing. Allow for hundreds of durable writes during the drain.
+func waitForEvaluationBacklog(t *testing.T, a *SuperAgent) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	if err := a.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func evaluationEvents(count int) []Trigger {
 	events := make([]Trigger, count)
 	for i := range events {
@@ -112,7 +122,7 @@ func TestEvaluationMainBatchBacklogConservation(t *testing.T) {
 					t.Fatal("first callback did not hold backlog")
 				}
 				close(release)
-				waitIdle(t, a)
+				waitForEvaluationBacklog(t, a)
 				wantCalls := 1 + (unique-1+maxItems-1)/maxItems
 				if int(calls.Load()) != wantCalls {
 					t.Fatalf("calls=%d want=%d", calls.Load(), wantCalls)
@@ -223,7 +233,7 @@ func TestEvaluationLegacyOpenBacklogCompatibility(t *testing.T) {
 	}
 	evaluationDuplicates(t, a, events[:44])
 	close(release)
-	waitIdle(t, a)
+	waitForEvaluationBacklog(t, a)
 	statuses := map[string]string{}
 	for _, event := range events {
 		statuses[event.ID] = "completed"
@@ -305,7 +315,7 @@ func TestEvaluationMainBatchWorkerResultConservation(t *testing.T) {
 	}
 	evaluationDuplicates(t, a, events)
 	close(release)
-	waitIdle(t, a)
+	waitForEvaluationBacklog(t, a)
 	if workers.Load() != count || len(a.Status().Tasks) != count || len(a.Replies()) != count || len(a.MainFailures()) != 0 {
 		t.Fatalf("delegation/result count mismatch: workers=%d tasks=%d replies=%d failures=%v", workers.Load(), len(a.Status().Tasks), len(a.Replies()), a.MainFailures())
 	}
