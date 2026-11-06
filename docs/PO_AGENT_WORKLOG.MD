@@ -3362,3 +3362,47 @@
 - All merges use the reviewed head as a guard and compare the resulting Git
   tree with the tested candidate. Commit IDs are used only for merge safety
   and ancestry checks.
+
+## 2026-11-06 - M1d structured public report references
+
+- Confirmed the explicit multi-report M1c gap remained on draft #188. Added
+  bounded exact-domain report selections for reply/clarify and coordinator-owned
+  citations preserving original status, partial failure, committed receipt and
+  review facts. Original single-report fields and transport semantics remain.
+- Frozen callback visibility plus durable public-ingress validation reject
+  unavailable/hidden/foreign/duplicate identities. No private snapshots or raw
+  background output are read. Single/batch, all four Pi main adapters, replay
+  boundaries, unknown sends and external Go embedding are covered offline.
+- Test-first missing-field compilation failure precedes implementation. Independent
+  review corrected batch view lifetime; final checks and exact-tree publication
+  are recorded in the draft PR. No semantic claim about generated prose, outbound
+  rendering change, real service, extra paid execution, CI dispatch, merge or
+  deployment. See [M1d contract and limitations](superagent-m1d.md).
+- Publication caught #188 advancing from c55c41d to 13ff33b. Reconstructed and
+  verified the exact new base tree, preserved all parallel review changes, and
+  retained its failed-entry hidden-action guard using a slice-aware empty check.
+  Re-ran full validation and independent review rather than reusing old results.
+  The preceding Windows/WSL/PostgreSQL work remains separately attributed.
+
+## 2026-11-06 - Keep database integrations host-owned
+
+- Applied the requested AI-library boundary before the aggregate stack enters
+  master. Removed the PostgreSQL implementation, schema, gated tests, pgx and
+  its parser/pool dependencies from the root module. Historical M6b/M6c reports
+  are explicitly superseded by this boundary.
+- Exported the existing Journal contract and embedded it in LeasedJournal.
+  Hosts can implement their own database persistence and supply it through
+  OpenMainJournal, with public session types and explicit ownership semantics.
+  The bundled SQLite adapter supports same-host local-disk coordination.
+- Replaced #186's PostgreSQL acceptance scope with a SQLite regression for a
+  durable reply claim whose acknowledgement is lost. It preserves the original
+  attempt, refuses repeat sending and verifies recovery without Worker replay.
+  The other coordinator scenarios already have SQLite/neutral coverage.
+- Root module enumeration and all-package test dependencies contain no
+  PostgreSQL drivers. The separate Mattermost example's upstream module graph
+  still lists lib/pq; go mod why and compiled-package enumeration confirm that
+  the examples do not use it. No example-library upgrade was made.
+- Root and examples tests/vet passed, along with SuperAgent/SQLite race tests.
+  The new #189 report-reference slice was reviewed against this storage
+  boundary and passed focused race tests. Earlier recorded PostgreSQL runs
+  describe the superseded candidate.
