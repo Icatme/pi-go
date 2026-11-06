@@ -112,6 +112,10 @@ snapshots/receipts. Conflicting ingress duplicates are rejected in every arm.
 
 ## Remaining gates
 
+[M9c](superagent-m9c.md) separately adds a 300-delivery, 20-task concurrent
+actual-runtime batching/conservation fixture. It does not turn these serial
+four-arm probes into a scheduling or prompt-policy benchmark.
+
 The original 300-message workload, cancellations/fanout under backlog, concurrent
 arrival schedules, asynchronous single-Pi delegation, tool-service budgets,
 first-reply/completion distributions, throughput, semantic routing quality,
