@@ -8,9 +8,23 @@ import (
 	"github.com/Icatme/pi-go/agent/session"
 )
 
-// journalStore is the narrow, single-lane subset of session.Storage actually
-// used by the coordinator. Storage's lane and branching API stays unchanged.
-type journalStore interface {
+// Journal stores the coordinator's ordered main-lane log. Hosts can implement
+// this interface with their own storage and add LeasedJournal ownership for
+// OpenMainJournal. All wire types come from the public agent/session package.
+//
+// Open and validate a coherent snapshot before passing the journal to the
+// coordinator. Header must use session.HeaderKindSession,
+// session.CurrentFormatVersion and ID "superagent", with no parent session.
+// Log contains committed session.LogItemEntry records in sequence order.
+// Entry IDs are decimal sequence numbers starting at 1; each ParentID names
+// its predecessor, with an empty parent for the first entry.
+//
+// AppendEntry accepts session.MainLane and the coordinator's supplied ID and
+// CustomData. Preserve the opaque transition payload and atomically assign the
+// sequence, parent and timestamp. Return success only after durable commit,
+// then include that entry in Log. Header, Log and AppendEntry return detached
+// values. A host backend must surface initialization/read errors before handoff.
+type Journal interface {
 	Header() session.Header
 	Log() []session.LogItem
 	AppendEntry(string, session.NewEntry) (session.Entry, error)
@@ -29,7 +43,7 @@ type journalStore interface {
 // not fence external executors or provide cross-process ownership.
 // Implementations are trusted host infrastructure, not model-selected objects.
 type LeasedJournal interface {
-	journalStore
+	Journal
 	Context() context.Context
 }
 
@@ -45,10 +59,11 @@ type MainJournalOptions struct {
 	Background   *BackgroundOptions
 }
 
-// OpenMainJournal starts a main coordinator on an already claimed journal.
-// The same-host sharedsqlite adapter is optional; OpenMain keeps its existing
-// single-process JSONL behavior. A lease covers the whole authorization domain,
-// not each individual task; parallel workers still run inside that owner.
+// OpenMainJournal starts a main coordinator on an already claimed journal
+// supplied by the host. The journal can use sharedsqlite or an external
+// database adapter that implements LeasedJournal. The host owns connection
+// setup, schema migration and ownership acquisition. A lease covers the whole
+// authorization domain; parallel workers run inside that owner.
 //
 // After argument validation this function takes ownership of journal, including
 // on replay failure. Close waits for callbacks before closing the journal.
