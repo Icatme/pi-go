@@ -3349,3 +3349,16 @@
 - Windows tests covered SQLite process contention and recovery. Linux helper
   and device process suites ran in WSL2. Provider calls, physical devices,
   cross-host failover, deployment, and release publication were outside scope.
+- Final Windows Go 1.26.4 root tests and vet passed. Race coverage passed for
+  every root package across the full invocation and a final SuperAgent-package
+  rerun after fixing the backlog deadline. The earlier full invocation failed
+  that deadline and is retained as a failed attempt. The separate examples
+  module passed tests, race, vet, and module-graph resolution.
+- Dependency activity was checked before merging. pgx v5.11.0 is actively
+  maintained and confined to database tests. Its indirect pgservicefile and
+  pgpassfile parsers last changed in 2024 and 2023, respectively. They remain
+  pinned because the maintained driver uses them, while these tests use
+  explicit isolated DSNs. Their low maintenance activity remains a risk.
+- All merges use the reviewed head as a guard and compare the resulting Git
+  tree with the tested candidate. Commit IDs are used only for merge safety
+  and ancestry checks.
