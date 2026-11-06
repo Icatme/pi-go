@@ -17,6 +17,12 @@ import (
 )
 
 func TestPiBackgroundNativeProtocolAndSameWorkerInput(t *testing.T) {
+	for _, batch := range []bool{false, true} {
+		t.Run(fmt.Sprintf("batch_%v", batch), func(t *testing.T) { testPiBackgroundNativeProtocolAndSameWorkerInput(t, batch) })
+	}
+}
+
+func testPiBackgroundNativeProtocolAndSameWorkerInput(t *testing.T, batch bool) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	defer func() {
 		select {
@@ -86,7 +92,13 @@ func TestPiBackgroundNativeProtocolAndSameWorkerInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := OpenMainBackground(t.Context(), filepath.Join(t.TempDir(), "native.jsonl"), 1, bgMain, work, backgroundOptions(backend))
+	var a *SuperAgent
+	if batch {
+		options := backgroundOptions(backend)
+		a, err = OpenMainJournal(t.Context(), leasedMemory(t), MainJournalOptions{Parallel: 1, BatchRouter: backgroundBatch, BatchOptions: MainBatchOptions{MaxItems: 8, MaxInputBytes: 1 << 20}, Worker: work, Background: &options})
+	} else {
+		a, err = OpenMainBackground(t.Context(), filepath.Join(t.TempDir(), "native.jsonl"), 1, bgMain, work, backgroundOptions(backend))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3061,3 +3061,22 @@
   x5, separate examples tests/vet and deterministic CLI baseline checks passed.
   Final independent review found no remaining blocker. PowerShell was not
   available on this cloud verification host; no Windows validation is claimed.
+
+
+## 2026-11-05 - SuperAgent batch/background composition acceptance
+
+- Inspected draft #173 exact HEAD/tree before implementing the M4a deferred
+  batch-main item. M6a already exposes BatchRouter plus Background through
+  OpenMainJournal. Direct integration tests passed without a production change;
+  no reproduced runtime defect or new constructor is claimed. See [M4b](superagent-m4b.md).
+- Added public combined-constructor coverage for ordered mixed backlog and
+  reversed decisions, original Worker/provider/delivery identity, private output,
+  stop plus late commit, authorization/quota/stale capability and unknown barriers.
+- Native Pi protocol acceptance now runs in single and batch main modes. Real
+  same-host SQLite takeover covers held inference, stale-owner fencing, exact-ID
+  backend recovery, no Start replay and terminal reopen deduplication.
+- Corrected the outdated plan and M4a limitation; durable remote execution still
+  remains out of scope. Production code, journal format and dependencies unchanged.
+- No live model/service/device, user computer, Codex/extra paid execution, manual
+  CI, merge or deployment. Linux-only verification and independent review results
+  are recorded in the PR; no PowerShell or Windows execution is claimed.

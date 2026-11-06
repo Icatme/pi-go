@@ -128,8 +128,10 @@ operation. Registry/history retention is unbounded and needs later compaction.
 Host callback code, authorization race-free enforcement, isolation, filesystem,
 network, descendants and resource policy remain the backend's responsibility.
 No shell, binary, account, credentials, remote environment or tool is enabled
-implicitly. Batch-main integration and durable remote/backend reconciliation
-adapters remain later slices.
+implicitly. Batch-main integration was deferred in this slice and subsequently
+provided by M6a's `OpenMainJournal`; [M4b](superagent-m4b.md) verifies that
+composition directly. Durable remote/backend reconciliation adapters remain
+later slices.
 
 ## Verification
 
