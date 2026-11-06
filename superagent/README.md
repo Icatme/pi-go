@@ -332,3 +332,13 @@ background tools have stopped; the host owns their lifetime.
 delivery contracts with offline protocol simulators, durable platform identities,
 receipt cursors and source-level rate gates. It contains no live service client.
 See [the channel contract](channel/README.md) and [M5a scope](../docs/superagent-m5a.md).
+
+## Optional fixed-device execution (M7a)
+
+`superagent/device` adapts one explicitly selected device to the background
+lifecycle. Host authentication and current-authority checks, a private durable
+registry, monotonic ownership fences and exact-operation queries prevent blind
+relaunch on disconnect. Use the client's full-grant Scope in BackgroundTool;
+credentials and raw tool output stay on the device. No listener, pairing,
+automatic device selection, fleet quota or production service is enabled.
+See [the device contract](device/README.md) and [M7a scope](../docs/superagent-m7a.md).

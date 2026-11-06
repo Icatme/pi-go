@@ -62,6 +62,16 @@ func CreateJSONLStorage(path string, header Header) (*JSONLStorage, error) {
 // complete unterminated item, malformed line, sequence gap, or invalid parent
 // is rejected.
 func OpenJSONLStorage(path string) (*JSONLStorage, error) {
+	return openJSONLStorage(path, true)
+}
+
+// OpenJSONLStorageStrict opens a registry without repairing any incomplete tail.
+// Durable execution adapters use it when uncertain records must fail closed.
+func OpenJSONLStorageStrict(path string) (*JSONLStorage, error) {
+	return openJSONLStorage(path, false)
+}
+
+func openJSONLStorage(path string, repair bool) (*JSONLStorage, error) {
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -69,18 +79,22 @@ func OpenJSONLStorage(path string) (*JSONLStorage, error) {
 		}
 		return nil, sessionError(ErrorStorage, fmt.Sprintf("open session file %s", path), err)
 	}
-	return openJSONLStorageFile(path, file)
+	return openJSONLStorageFileMode(path, file, repair)
 }
 
 // openJSONLStorageFile takes ownership of an already opened handle.
 // Repositories use it only after verifying the handle still identifies the
 // regular file inspected inside their root, before replay may repair a tail.
 func openJSONLStorageFile(path string, file *os.File) (*JSONLStorage, error) {
+	return openJSONLStorageFileMode(path, file, true)
+}
+
+func openJSONLStorageFileMode(path string, file *os.File, repair bool) (*JSONLStorage, error) {
 	if err := lockSessionFile(file); err != nil {
 		_ = file.Close()
 		return nil, err
 	}
-	header, state, err := loadJSONL(file, path)
+	header, state, err := loadJSONLMode(file, path, repair)
 	if err != nil {
 		_ = file.Close()
 		return nil, err
