@@ -354,6 +354,9 @@ func (a *SuperAgent) validateMain(tr transition) error {
 		if !validNote(tr.Text) {
 			return errors.New("invalid main failure")
 		}
+		if m.Decision != (MainDecision{}) || m.DecisionID != "" || m.Assignment != nil || m.ReplyID != "" || len(m.Snapshot) != 0 {
+			return errors.New("failed main input cannot contain a decision, assignment, reply or snapshot")
+		}
 		return nil
 	}
 	if tr.State != "main_decided" || m.DecisionID != "main-decision-"+m.InputID {
