@@ -1,9 +1,10 @@
 # Optional single-primary PostgreSQL journal
 
-Development slice M6b. **Real PostgreSQL tests have not been run for this PR.**
-Offline scripted-driver checks exercise client ordering and failure handling,
-not PostgreSQL locks, transaction isolation, durability or network failures.
-This is not a production-ready or cross-host deployment claim.
+The eight PostgreSQL journal tests and five coordinator tests passed against
+PostgreSQL 17.9 and 18.3 during merge review, including with the Go race
+detector. The client ran on Windows against each isolated primary in a local
+Linux container. The offline scripted driver separately checks client ordering
+and failure handling.
 
 `sharedpostgres.Open(ctx, db, Options{Domain: "workspace-A", Owner: "instance-A"})`
 returns a `superagent.LeasedJournal` for `superagent.OpenMainJournal`. The existing
@@ -125,7 +126,6 @@ test renewal loop, not a process or host. "Restart" here means closing/reopening
 the coordinator and journal, **not restarting PostgreSQL**. See the exact scope
 and reproduction in [M6c](../../docs/superagent-m6c.md).
 
-Still required before deployment: execute the suite on an authorized disposable
-PG 17/18 service; add independent process kill/pause/takeover, actual TCP loss at
-commit boundaries, database restart, disk durability and two-host fault testing.
-No claims of those tests passing can be inferred from offline test success.
+Remaining deployment checks include independent process kill/pause/takeover,
+actual TCP loss at commit boundaries, database restart, disk durability and
+two-host fault testing.
