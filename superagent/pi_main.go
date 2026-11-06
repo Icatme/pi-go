@@ -25,10 +25,70 @@ type mainModelInput struct {
 // than silently dropping causal or authorization history when the budget fills.
 // No execution hooks, tool resolvers, request hooks or tools are inherited.
 func PiMainRouter(def agent.AgentDefinition, maxContextBytes int) (MainRouter, error) {
+	infer, err := newPiMainInference(def, mainInstructions, maxContextBytes)
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context, job MainJob) (MainOutcome, error) {
+		raw, snapshot, err := infer(ctx, job, mainModelInput{Input: job.Input, Tasks: job.Tasks, Runs: job.Runs})
+		if err != nil {
+			return MainOutcome{}, err
+		}
+		decision, err := parseMainDecision(raw)
+		if err != nil {
+			return MainOutcome{}, err
+		}
+		return MainOutcome{Decision: decision, Snapshot: snapshot}, nil
+	}, nil
+}
+
+const mainBatchInstructions = `Process the complete inputs array in one turn using the same persistent main history. Apply the action and authority rules independently to each input. Return exactly one JSON object with only a "decisions" array. Include exactly one entry for every input, with only "input_id" (copied exactly from that input's id) and "decision" (the action object). Do not merge or omit inputs, invent IDs, or treat one input as authority for another. Only attach to tasks in the offered list; newly created tasks have no available ID in this batch. Clarify if attribution requires an unavailable task. Propose at most one control for each exact run target in a batch. Example: {"decisions":[{"input_id":"input-1","decision":{"action":"ignore"}}]}. Do not call tools.`
+
+type mainBatchModelInput struct {
+	Inputs []MainInput `json:"inputs"`
+	Tasks  []TaskInfo  `json:"tasks"`
+	Runs   []RunTarget `json:"runs"`
+}
+
+// PiMainBatchRouter processes all inputs with one inference call against a
+// single persistent main snapshot. The full context budget and execution
+// authority isolation are identical to PiMainRouter's. Output IDs must exactly
+// match the offered input set; malformed results never return a snapshot.
+func PiMainBatchRouter(def agent.AgentDefinition, maxContextBytes int) (MainBatchRouter, error) {
+	infer, err := newPiMainInference(def, mainInstructions+"\n\n"+mainBatchInstructions, maxContextBytes)
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context, job MainBatchJob) (MainBatchOutcome, error) {
+		ids := make(map[string]bool, len(job.Inputs))
+		if len(job.Inputs) == 0 || len(job.Inputs) > 64 {
+			return MainBatchOutcome{}, errors.New("pi main router: invalid batch size")
+		}
+		for _, input := range job.Inputs {
+			if !validIdentity(input.ID) || ids[input.ID] {
+				return MainBatchOutcome{}, errors.New("pi main router: invalid batch input identity")
+			}
+			ids[input.ID] = true
+		}
+		raw, snapshot, err := infer(ctx, MainJob{SessionID: job.SessionID, ProviderSessionID: job.ProviderSessionID, Snapshot: job.Snapshot}, mainBatchModelInput{Inputs: job.Inputs, Tasks: job.Tasks, Runs: job.Runs})
+		if err != nil {
+			return MainBatchOutcome{}, err
+		}
+		decisions, err := parseMainBatchDecisions(raw, job.Inputs)
+		if err != nil {
+			return MainBatchOutcome{}, err
+		}
+		return MainBatchOutcome{Decisions: decisions, Snapshot: snapshot}, nil
+	}, nil
+}
+
+type mainInference func(context.Context, MainJob, any) (string, agent.AgentSnapshot, error)
+
+func newPiMainInference(def agent.AgentDefinition, instructions string, maxContextBytes int) (mainInference, error) {
 	if maxContextBytes < 1024 || maxContextBytes > maxSnapshotBytes {
 		return nil, errors.New("pi main router: context budget must be 1 KiB–8 MiB")
 	}
-	prompt := strings.TrimSpace(def.SystemPrompt + "\n\n" + mainInstructions)
+	prompt := strings.TrimSpace(def.SystemPrompt + "\n\n" + instructions)
 	hostModel := def.DefaultModel.Clone()
 	runner, err := agent.NewRunner(agent.AgentDefinition{
 		Name: "main", SystemPrompt: prompt,
@@ -40,21 +100,21 @@ func PiMainRouter(def agent.AgentDefinition, maxContextBytes int) (MainRouter, e
 	if err != nil {
 		return nil, err
 	}
-	return func(ctx context.Context, job MainJob) (MainOutcome, error) {
+	return func(ctx context.Context, job MainJob, payload any) (string, agent.AgentSnapshot, error) {
 		if ctx == nil || !validIdentity(job.SessionID) || !validIdentity(job.ProviderSessionID) || !belongsTo(job.Snapshot, job.SessionID) {
-			return MainOutcome{}, errors.New("pi main router: invalid context or session identity")
+			return "", agent.AgentSnapshot{}, errors.New("pi main router: invalid context or session identity")
 		}
 		if len(job.Snapshot.PendingToolCalls) != 0 || job.Snapshot.PendingToolControl != nil {
-			return MainOutcome{}, errors.New("pi main router: snapshot contains pending tool execution")
+			return "", agent.AgentSnapshot{}, errors.New("pi main router: snapshot contains pending tool execution")
 		}
-		input, err := json.Marshal(mainModelInput{Input: job.Input, Tasks: job.Tasks, Runs: job.Runs})
+		input, err := json.Marshal(payload)
 		if err != nil {
-			return MainOutcome{}, err
+			return "", agent.AgentSnapshot{}, err
 		}
 		message := agent.NewUserTextMessage(string(input))
 		contextMessages := append(slices.Clone(job.Snapshot.Messages), message)
 		if err := checkMainContextBudget(prompt, contextMessages, maxContextBytes); err != nil {
-			return MainOutcome{}, err
+			return "", agent.AgentSnapshot{}, err
 		}
 		initial := job.Snapshot
 		initial.SessionID = job.ProviderSessionID
@@ -72,17 +132,13 @@ func PiMainRouter(def agent.AgentDefinition, maxContextBytes int) (MainRouter, e
 		stream := runner.Run(ctx, initial, []agent.Message{message})
 		run, err := collectPiRun(ctx, stream, nil, nil)
 		if err != nil {
-			return MainOutcome{}, err
+			return "", agent.AgentSnapshot{}, err
 		}
 		if run.assistant == nil || run.assistant.StopReason != agent.StopReasonStop || len(run.assistant.ToolCalls) != 0 || run.toolErrors || !run.acceptedInput {
-			return MainOutcome{}, errors.New("pi main router: model did not finish a decision")
-		}
-		decision, err := parseMainDecision(messageText(*run.assistant))
-		if err != nil {
-			return MainOutcome{}, err
+			return "", agent.AgentSnapshot{}, errors.New("pi main router: model did not finish a decision")
 		}
 		if run.snapshot.SessionID != job.ProviderSessionID {
-			return MainOutcome{}, errors.New("pi main router: result belongs to another provider session")
+			return "", agent.AgentSnapshot{}, errors.New("pi main router: result belongs to another provider session")
 		}
 		run.snapshot.SessionID = job.SessionID
 		persisted := run.snapshot.Model
@@ -94,7 +150,7 @@ func PiMainRouter(def agent.AgentDefinition, maxContextBytes int) (MainRouter, e
 		for i := range run.snapshot.Messages {
 			run.snapshot.Messages[i].ErrorMessage = ""
 		}
-		return MainOutcome{Decision: decision, Snapshot: run.snapshot}, nil
+		return messageText(*run.assistant), run.snapshot, nil
 	}, nil
 }
 
@@ -211,4 +267,75 @@ func parseMainTarget(d *json.Decoder) (RunTarget, error) {
 		return RunTarget{}, invalid
 	}
 	return RunTarget{TaskID: fields["task_id"], Source: fields["source"], EventID: fields["event_id"]}, nil
+}
+
+// Token decoding preserves duplicate keys and rejects case aliases at every
+// envelope level. Nested action objects use the existing strict action parser.
+func parseMainBatchDecisions(raw string, inputs []MainInput) ([]MainInputDecision, error) {
+	invalid := errors.New("pi main router: invalid batch decision JSON")
+	d := json.NewDecoder(strings.NewReader(raw))
+	if token, err := d.Token(); err != nil || token != json.Delim('{') {
+		return nil, invalid
+	}
+	if token, err := d.Token(); err != nil || token != "decisions" {
+		return nil, invalid
+	}
+	if token, err := d.Token(); err != nil || token != json.Delim('[') {
+		return nil, invalid
+	}
+	offered := make(map[string]bool, len(inputs))
+	for _, input := range inputs {
+		offered[input.ID] = true
+	}
+	decisions := make([]MainInputDecision, 0, len(inputs))
+	for d.More() {
+		if len(decisions) >= len(inputs) {
+			return nil, invalid
+		}
+		if token, err := d.Token(); err != nil || token != json.Delim('{') {
+			return nil, invalid
+		}
+		seen := make(map[string]bool, 2)
+		var entry MainInputDecision
+		for d.More() {
+			token, err := d.Token()
+			key, ok := token.(string)
+			if err != nil || !ok || seen[key] || (key != "input_id" && key != "decision") {
+				return nil, invalid
+			}
+			seen[key] = true
+			if key == "input_id" {
+				token, err := d.Token()
+				id, ok := token.(string)
+				if err != nil || !ok || !validIdentity(id) || !offered[id] {
+					return nil, invalid
+				}
+				entry.InputID = id
+				delete(offered, id)
+			} else {
+				var rawDecision json.RawMessage
+				if err := d.Decode(&rawDecision); err != nil {
+					return nil, invalid
+				}
+				entry.Decision, err = parseMainDecision(string(rawDecision))
+				if err != nil {
+					return nil, invalid
+				}
+			}
+		}
+		if token, err := d.Token(); err != nil || token != json.Delim('}') || len(seen) != 2 {
+			return nil, invalid
+		}
+		decisions = append(decisions, entry)
+	}
+	if token, err := d.Token(); err != nil || token != json.Delim(']') || len(decisions) != len(inputs) {
+		return nil, invalid
+	}
+	if token, err := d.Token(); err != nil || token != json.Delim('}') {
+		return nil, invalid
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return nil, invalid
+	}
+	return decisions, nil
 }

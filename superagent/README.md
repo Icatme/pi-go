@@ -268,3 +268,19 @@ owns the state file. Capacity and restart time grow with journal history.
 Production IM/GitHub adapters, remote execution devices, many-to-many
 subscriptions, log compaction and an independent progress watchdog are future
 extensions.
+
+## Bounded main batches and admission gates
+
+`OpenMainBatch` and `PiMainBatchRouter` process accumulated inbox inputs in one
+read-only inference, with explicit input IDs, item/JSON-byte bounds and atomic
+all-or-nothing decision groups. Idle input starts immediately. Failed groups
+produce durable per-input failures, with no automatic retry or partial actions.
+
+Hosts can call `Admit` with an authenticated envelope and versioned exact
+source/principal/group rules. Noise and unassociated signals are audited without
+model calls; task and Thread associations retain their existing permissions and
+frozen delivery semantics. Privileged Submit APIs remain outside this opt-in gate.
+
+See [M3a contract and migration](../docs/superagent-m3a.md) and the executable
+`ExampleOpenMainBatch`. Historical retrieval, large-history performance and live
+model throughput remain separate work.
