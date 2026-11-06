@@ -98,7 +98,34 @@ func (s *logState) entriesClone() []Entry {
 }
 
 func (s *logState) logClone() []LogItem {
-	return mustCloneJSON(s.log)
+	// Keep one JSON round trip for general conversation logs: cloning each
+	// message separately adds decoder/encoder overhead. Custom-only logs need
+	// only detached raw bytes and lane pointers, already normalized by apply.
+	for _, item := range s.log {
+		if item.Entry != nil && item.Entry.Type != EntryTypeCustom {
+			return mustCloneJSON(s.log)
+		}
+	}
+	if s.log == nil {
+		return nil
+	}
+	cloned := make([]LogItem, len(s.log))
+	for i, item := range s.log {
+		cloned[i] = item
+		if item.Entry != nil {
+			// apply validated the custom-only payload before retaining it.
+			entry := *item.Entry
+			custom := *entry.Custom
+			custom.Payload = cloneRawMessage(custom.Payload)
+			entry.Custom = &custom
+			cloned[i].Entry = &entry
+		}
+		if item.Lane != nil {
+			lane := *item.Lane
+			cloned[i].Lane = &lane
+		}
+	}
+	return cloned
 }
 
 func (s *logState) newLaneItem(lane, leafID string, create bool) (LogItem, error) {

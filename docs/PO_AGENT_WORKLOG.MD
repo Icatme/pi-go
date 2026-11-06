@@ -3590,3 +3590,33 @@
   Measurement suggests examining detached-copy reserialization before introducing
   a new format. No log truncation, new backend, real database/provider/device,
   user computer, additional paid execution, CI dispatch, merge or deployment.
+
+## 2026-11-06 - M6e detached custom journal copies
+
+- Replaced whole-log JSON reserialization only for already validated
+  custom/lane logs in `agent/session`. Entry/Custom/Lane pointers and raw bytes
+  remain detached. Any ordinary message/compaction keeps the original
+  whole-log JSON clone; append/replay validation, persistence, locks, IDs and
+  wire format are unchanged. No database implementation or module change.
+- Differential tests compare every read with the former JSON implementation,
+  mutate populated exported fields, and reopen strict JSONL. Both backends
+  cover mixed, custom-only, lane-only and custom-to-message transitions,
+  including raw JSON, nil/empty values, large numbers and nested tool metadata.
+- Compared exact base `101baeaf` with final code, five one-operation samples
+  per growth case, with no concurrent validation workload. At 1,000 growing
+  inputs median Log is 2,706.459 -> 38.325 ms and restore is 5,731.682 ->
+  2,821.949 ms. Log cumulative allocation falls from 1,432,865,968 to
+  181,371,936 B/op. Opening validation and disk growth remain unchanged;
+  timestamp-varying fixtures, shared-host noise and allocation-versus-memory
+  limits are stated in [M6e](superagent-m6e.md), alongside all raw samples.
+- Same-state original/final benchmarks cover custom, message and mixed logs.
+  A prototype with per-entry JSON fallback regressed ordinary-message costs;
+  final code instead preserves the original whole-log fallback. No generic
+  message performance improvement is claimed.
+- Final root tests/vet, affected race (`agent/session`, `superagent/...`,
+  `cmd/pi-superagent`), examples tests/vet, focused regression, both benchmark
+  sets, formatting and whitespace checks pass. Independent source/coverage
+  and measurement review found no blocker. Full-root race, Windows/macOS and
+  real-host validation were not run. No live provider/database service, user
+  computer, Codex task, extra paid service, CI dispatch, merge, release or
+  deployment.
