@@ -1,7 +1,9 @@
 package device
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -123,6 +125,34 @@ func TestInvalidObservationsCannotClaimExit(t *testing.T) {
 		}
 	}
 }
+
+func TestClientRejectsActiveOrTerminalStateWithoutDeviceEvidence(t *testing.T) {
+	var reply response
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		body, err := json.Marshal(reply)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body))}, err
+	})
+	c, err := NewClient(ClientOptions{URL: "https://device.invalid", Transport: transport, Binding: Binding{Domain: "domain", Device: "device", Workspace: "workspace", PolicyRevision: "v1"}, Tools: []string{"write"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"unknown", "running", "exited"} {
+		root := background.Receipt{Token: 1, Domain: "agent", CallID: "call", ToolName: "write", Committed: true, Completed: state == "exited"}
+		for _, accepted := range []bool{false, true} {
+			for _, receipts := range [][]background.Receipt{nil, {root}} {
+				reply = response{Version: protocolVersion, Scope: c.Scope(), ID: "op", Accepted: accepted, Observation: &background.Observation{ID: "op", State: state, Receipts: receipts}}
+				_, err := c.Inspect(t.Context(), "op")
+				// A lost Start acknowledgement may leave committed evidence
+				// on an unknown operation before the device records acceptance.
+				valid := accepted && len(receipts) == 1 || !accepted && state == "unknown"
+				if (err == nil) != valid {
+					t.Errorf("state=%s accepted=%t receipts=%d: err=%v", state, accepted, len(receipts), err)
+				}
+			}
+		}
+	}
+}
+
 func TestRegistryWriteFailurePreventsDispatchAndPoisons(t *testing.T) {
 	b := &fakeBackend{}
 	d, c, _, _ := fixture(t, "a", b)
