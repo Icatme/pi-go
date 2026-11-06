@@ -134,7 +134,7 @@ func TestMainBatchReplayEveryCommitBoundary(t *testing.T) {
 	}
 }
 
-func TestMainBatchFailedJournalCannotCarryActions(t *testing.T) {
+func TestMainFailedJournalCannotCarryActions(t *testing.T) {
 	a, err := openState(t.Context(), filepath.Join(t.TempDir(), "state.jsonl"), true)
 	if err != nil {
 		t.Fatal(err)
@@ -151,11 +151,16 @@ func TestMainBatchFailedJournalCannotCarryActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := a.main.inbox[0].input.ID
-	tr := transition{State: "main_batch_failed", Text: "failure", Main: &mainTransition{Batch: []mainTransition{{InputID: id, Decision: MainDecision{Action: "new"}, Assignment: &transition{State: "queued", Index: 0, Task: "task-1", ProviderSessionID: "provider-task"}}}}}
-	if err := a.validateMainBatch(tr); err == nil {
-		t.Fatal("failed batch accepted hidden delegation")
-	}
-	if len(a.tasks) != 0 || a.main.cursor != 0 || len(a.reports) != 0 {
-		t.Fatal("failed validation mutated reducer")
+	delegation := mainTransition{InputID: id, Decision: MainDecision{Action: "new"}, Assignment: &transition{State: "queued", Index: 0, Task: "task-1", ProviderSessionID: "provider-task"}}
+	for _, tr := range []transition{
+		{State: "main_failed", Text: "failure", Main: &delegation},
+		{State: "main_batch_failed", Text: "failure", Main: &mainTransition{Batch: []mainTransition{delegation}}},
+	} {
+		if err := a.apply(tr, true); err == nil {
+			t.Fatalf("%s replay accepted hidden delegation", tr.State)
+		}
+		if len(a.tasks) != 0 || a.main.cursor != 0 || len(a.reports) != 0 {
+			t.Fatal("failed validation mutated reducer")
+		}
 	}
 }

@@ -48,7 +48,7 @@ func TestConservationRejectsObservedFaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fault := range []string{"drop", "misroute", "duplicate_effect", "missing_receipt", "wrong_value", "false_duplicate", "reply", "history", "metrics", "mode", "repetition", "reopen", "script_calls", "main_inputs"} {
+	for _, fault := range []string{"drop", "misroute", "duplicate_effect", "empty_effect", "empty_reply", "missing_receipt", "wrong_value", "false_duplicate", "reply", "history", "metrics", "mode", "repetition", "reopen", "script_calls", "main_inputs"} {
 		t.Run(fault, func(t *testing.T) {
 			raw, _ := json.Marshal(suite.Runs[0])
 			var run Result
@@ -60,6 +60,10 @@ func TestConservationRejectsObservedFaults(t *testing.T) {
 				run.Deliveries[0].WorkID = "wrong"
 			case "duplicate_effect":
 				run.Effects = append(run.Effects, run.Effects[0])
+			case "empty_effect":
+				run.Effects[0] = Effect{}
+			case "empty_reply":
+				run.Replies[0] = Effect{}
 			case "missing_receipt":
 				run.Deliveries[0].Receipts = 0
 			case "wrong_value":
