@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icatme/pi-go/agent"
 	"github.com/Icatme/pi-go/agent/background"
 	"github.com/Icatme/pi-go/agent/session"
 )
@@ -39,6 +40,48 @@ func (b scriptedBackground) Stop(c context.Context, id string) error {
 		return b.stop(c, id)
 	}
 	return nil
+}
+
+func TestBackgroundHostRefreshFinishingAfterClose(t *testing.T) {
+	probe, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	entered, release := make(chan struct{}), make(chan struct{})
+	b := scriptedBackground{inspect: func(ctx context.Context, id string) (background.Observation, error) {
+		if ctx == probe {
+			close(entered)
+			<-release
+			return background.Observation{ID: id, State: "exited"}, nil
+		}
+		return background.Observation{ID: id, State: "running"}, nil
+	}}
+	worker := func(ctx context.Context, j Job) (Outcome, error) {
+		if _, err := j.Background.Start(ctx, BackgroundStart{Tool: "slow", CallID: "launch", Arguments: json.RawMessage(`{}`)}); err != nil {
+			return Outcome{}, err
+		}
+		return mainWorker(ctx, j)
+	}
+	a, err := OpenMainBackground(t.Context(), filepath.Join(t.TempDir(), "refresh.jsonl"), 1, bgMain, worker, backgroundOptions(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	submit(t, a, Trigger{ID: "work", Source: "im", Thread: "chat", Kind: "request"})
+	waitIdle(t, a)
+	op := a.BackgroundOperations()[0]
+	done := make(chan error, 1)
+	go func() { done <- a.RefreshBackground(probe, op.ID) }()
+	receive(t, entered)
+	err = a.Close()
+	close(release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := receive(t, done); !errors.Is(err, context.Canceled) {
+		t.Fatalf("late refresh did not observe coordinator cancellation: %v", err)
+	}
+	if a.BackgroundOperations()[0].Exited || a.fatal != nil {
+		t.Fatal("late host observation modified closed coordinator")
+	}
 }
 
 func TestBackgroundReservationBeforeDispatchAndStopBeforeAcknowledgment(t *testing.T) {
@@ -163,6 +206,40 @@ func TestBackgroundAuthorizationQuotaAndStaleCapabilities(t *testing.T) {
 	}
 	if len(a.BackgroundOperations()) != 1 || b.calls != 1 {
 		t.Fatal("denial or quota crossed dispatch")
+	}
+}
+
+func TestBackgroundInvalidUnicodeCannotReserveQuota(t *testing.T) {
+	backend, err := background.NewLocal(t.Context(), "workspace-A", agent.RunToolCallOptions{Tools: []agent.ToolDefinition{{
+		Name: "slow", Execute: func(context.Context, agent.ToolExecutionContext) (agent.ToolResult, error) {
+			t.Error("invalid launch executed")
+			return agent.ToolResult{}, nil
+		},
+	}}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := backgroundOptions(backend)
+	opts.Tools[0].Authorize = func(context.Context, BackgroundAuthorization) error {
+		t.Error("invalid launch reached authorization")
+		return nil
+	}
+	work := func(ctx context.Context, j Job) (Outcome, error) {
+		_, err := j.Background.Start(ctx, BackgroundStart{Tool: "slow", CallID: "bad", Arguments: json.RawMessage("{\"v\":\"\\ud800\"}")})
+		if err == nil {
+			t.Error("invalid Unicode launch accepted")
+		}
+		return mainWorker(ctx, j)
+	}
+	a, err := OpenMainBackground(t.Context(), filepath.Join(t.TempDir(), "unicode.jsonl"), 1, bgMain, work, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	submit(t, a, Trigger{ID: "work", Source: "im", Thread: "chat", Kind: "request"})
+	waitIdle(t, a)
+	if got := a.BackgroundOperations(); len(got) != 0 {
+		t.Fatalf("invalid launch reserved quota: %+v", got)
 	}
 }
 
