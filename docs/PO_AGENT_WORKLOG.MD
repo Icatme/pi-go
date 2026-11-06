@@ -3146,3 +3146,29 @@
   remain unverified; keep the PR draft. See [M6b](superagent-m6b.md) and its package
   README. No local user machine, credentials, service, Codex/extra paid task,
   manual CI, merge or deployment; remote Linux Go 1.26.10 only.
+
+## 2026-11-05 - SuperAgent durable local helper development slice
+
+- M4c builds on #179 HEAD ec9bbe6b / exact tree c60213e4. The isolated local
+  checkout used an equivalent-tree commit; publication is parented to the exact
+  remote HEAD, with the final tested tree compared before branch creation.
+- Added optional agent/background/helper: explicit fixed binary/tool registration,
+  immutable operation/request/original epoch, durable admission/claim/stop/receipt,
+  independent Linux helper processes, and query-only recovery. Existing Local,
+  coordinator and device APIs remain unchanged; no dependencies added.
+- Test-first missing API failure preceded implementation. Isolated self-written
+  subprocesses prove coordinator death without relaunch, helper death remaining
+  unknown, duplicate-claim prevention, stop and cancellation-ignoring late commit,
+  old-epoch revocation and native coordinator review/completion integration.
+- Independent review led to durable stop redelivery, fail-closed corrupt stops,
+  terminal-before-stop-notification ordering, tombstone/quota and replay checks,
+  escaped receipt size bounds and a bounded native admission handshake. Direct
+  forged-record regression cases reject impossible admissions and transitions.
+- Only durably observed facts are preserved: Local does not expose synchronous
+  call receipts until return, so death before then remains unknown with quota.
+  No PID/exit-code/no-effect inference, replay, rollback or detached-body guarantee.
+- Full checks, repeated helper race, exact tree and independent review results are
+  recorded in the draft PR. See [M4c](superagent-m4c.md). No production service,
+  real device, user computer, credentials, live model, Codex/extra paid execution,
+  manual CI, merge or deployment. Linux process-crash evidence is not host reboot,
+  power-loss, adversarial filesystem or Windows/macOS acceptance.
