@@ -3406,3 +3406,13 @@
   The new #189 report-reference slice was reviewed against this storage
   boundary and passed focused race tests. Earlier recorded PostgreSQL runs
   describe the superseded candidate.
+
+## 2026-11-06 - Prepare v0.20.0 source release
+
+- Updated the library version and examples module reference to v0.20.0, and
+  added release notes for SuperAgent and the host-owned storage boundary.
+- Release scope is an annotated source tag only, as requested. No platform
+  archives or downloadable binary assets are included.
+- Previously started Windows root/examples race tests and vet, Linux root
+  tests/vet, and Linux helper/device/SQLite race checks completed successfully.
+  No further test runs are required for this metadata-only release change.
