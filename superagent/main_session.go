@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -59,17 +58,18 @@ type MainOutcome struct {
 // accompanies generated text so partial failure, committed effects and review
 // requirements cannot be replaced by a model's description of success.
 type Reply struct {
-	ID           string  `json:"id"`
-	DecisionID   string  `json:"decision_id"`
-	InputID      string  `json:"input_id"`
-	DelegationID string  `json:"delegation_id,omitempty"`
-	Source       string  `json:"source"`
-	Thread       string  `json:"thread"`
-	EventID      string  `json:"event_id"`
-	TaskID       string  `json:"task_id,omitempty"`
-	Text         string  `json:"text"`
-	Status       string  `json:"status"` // pending, needs_review, acknowledged
-	Report       *Report `json:"report,omitempty"`
+	ID           string         `json:"id"`
+	DecisionID   string         `json:"decision_id"`
+	InputID      string         `json:"input_id"`
+	DelegationID string         `json:"delegation_id,omitempty"`
+	Source       string         `json:"source"`
+	Thread       string         `json:"thread"`
+	EventID      string         `json:"event_id"`
+	TaskID       string         `json:"task_id,omitempty"`
+	Text         string         `json:"text"`
+	Status       string         `json:"status"` // pending, needs_review, acknowledged
+	Report       *Report        `json:"report,omitempty"`
+	Attempts     []ReplyAttempt `json:"attempts,omitempty"`
 }
 
 type mainItem struct {
@@ -97,15 +97,17 @@ type MainFailure struct {
 }
 
 type mainTransition struct {
-	SessionID         string          `json:"session_id,omitempty"`
-	ProviderSessionID string          `json:"provider_session_id,omitempty"`
-	InputID           string          `json:"input_id,omitempty"`
-	DecisionID        string          `json:"decision_id,omitempty"`
-	Decision          MainDecision    `json:"decision,omitempty"`
-	Snapshot          json.RawMessage `json:"snapshot,omitempty"`
-	Assignment        *transition     `json:"assignment,omitempty"`
-	ReplyID           string          `json:"reply_id,omitempty"`
-	ControlIDs        []string        `json:"control_ids,omitempty"`
+	SessionID         string               `json:"session_id,omitempty"`
+	ProviderSessionID string               `json:"provider_session_id,omitempty"`
+	InputID           string               `json:"input_id,omitempty"`
+	DecisionID        string               `json:"decision_id,omitempty"`
+	Decision          MainDecision         `json:"decision,omitempty"`
+	Snapshot          json.RawMessage      `json:"snapshot,omitempty"`
+	Assignment        *transition          `json:"assignment,omitempty"`
+	ReplyID           string               `json:"reply_id,omitempty"`
+	ControlIDs        []string             `json:"control_ids,omitempty"`
+	Delivery          *ReplyDelivery       `json:"delivery,omitempty"`
+	DeliveryResult    *ReplyDeliveryResult `json:"delivery_result,omitempty"`
 }
 
 // OpenMain opens the persistent main session for this journal's single host
@@ -288,16 +290,8 @@ func (a *SuperAgent) validateMain(tr transition) error {
 	if strings.HasPrefix(tr.State, "control_") {
 		return a.validateMainControl(tr)
 	}
-	if tr.State == "reply_started" || tr.State == "reply_acknowledged" {
-		for _, reply := range a.main.replies {
-			if reply.ID == m.ReplyID {
-				if tr.State == "reply_started" && reply.Status != "pending" {
-					return errors.New("reply is not pending")
-				}
-				return nil
-			}
-		}
-		return errors.New("unknown reply")
+	if strings.HasPrefix(tr.State, "reply_") {
+		return a.validateReply(tr)
 	}
 	if a.main.cursor >= len(a.main.inbox) || m.InputID != a.main.inbox[a.main.cursor].input.ID {
 		return errors.New("main decision references a different inbox item")
@@ -372,6 +366,10 @@ func (a *SuperAgent) applyMain(tr transition, replay bool) error {
 		return err
 	}
 	m := tr.Main
+	if strings.HasPrefix(tr.State, "reply_") {
+		a.applyReply(tr)
+		return nil
+	}
 	if strings.HasPrefix(tr.State, "control_") {
 		for _, id := range m.ControlIDs {
 			a.mainControl(id).Status = strings.TrimPrefix(tr.State, "control_")
@@ -390,16 +388,6 @@ func (a *SuperAgent) applyMain(tr transition, replay bool) error {
 			}
 		}
 		return nil
-	case "reply_started", "reply_acknowledged":
-		for i := range a.main.replies {
-			if a.main.replies[i].ID == m.ReplyID {
-				a.main.replies[i].Status = "acknowledged"
-				if tr.State == "reply_started" {
-					a.main.replies[i].Status = "needs_review"
-				}
-				return nil
-			}
-		}
 	}
 	item := a.main.inbox[a.main.cursor]
 	if item.input.Kind == "user" {
@@ -473,38 +461,7 @@ func (a *SuperAgent) Replies() []Reply {
 	out := slices.Clone(a.main.replies)
 	for i := range out {
 		out[i].Report = copyReport(out[i].Report)
+		out[i].Attempts = slices.Clone(out[i].Attempts)
 	}
 	return out
-}
-
-// BeginReplyDelivery must be called before an external send. Until the host
-// confirms delivery, the reply is needs_review, including after restart.
-// Never automatically resend it after an uncertain external outcome.
-func (a *SuperAgent) BeginReplyDelivery(id string) error { return a.recordReply(id, "reply_started") }
-
-// AcknowledgeReply records host confirmation. It is idempotent and never enters
-// the main inbox. In-memory consumers can acknowledge directly after reading.
-func (a *SuperAgent) AcknowledgeReply(id string) error {
-	return a.recordReply(id, "reply_acknowledged")
-}
-
-func (a *SuperAgent) recordReply(id, state string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.fatal != nil {
-		return a.fatal
-	}
-	if err := a.ctx.Err(); err != nil {
-		return err
-	}
-	for _, reply := range a.main.replies {
-		if reply.ID == id && state == "reply_acknowledged" && reply.Status == "acknowledged" {
-			return nil
-		}
-	}
-	tr := transition{State: state, Main: &mainTransition{ReplyID: id}}
-	if err := a.validateMain(tr); err != nil {
-		return fmt.Errorf("superagent: %w", err)
-	}
-	return a.commit(tr)
 }

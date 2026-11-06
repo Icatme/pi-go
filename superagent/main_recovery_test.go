@@ -37,10 +37,10 @@ func TestMainReplayEveryCommitBoundary(t *testing.T) {
 	submit(t, a, event)
 	waitIdle(t, a)
 	reply := a.Replies()[0]
-	if err := a.BeginReplyDelivery(reply.ID); err != nil {
+	if _, err := a.BeginReplyDelivery(reply.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.AcknowledgeReply(reply.ID); err != nil {
+	if err := a.ObserveReply(reply.Source, reply.Thread, a.Replies()[0].Attempts[0].Delivery, "external-message"); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.Close(); err != nil {
@@ -94,10 +94,10 @@ func TestMainReplayEveryCommitBoundary(t *testing.T) {
 				t.Fatalf("lost or duplicated association: %+v", got)
 			}
 			wantStatus := "pending"
-			if tr.State == "reply_started" {
+			if tr.State == "reply_claimed" {
 				wantStatus = "needs_review"
 			}
-			if tr.State == "reply_acknowledged" {
+			if tr.State == "reply_resolved" {
 				wantStatus = "acknowledged"
 			}
 			if got[0].Status != wantStatus {
@@ -237,10 +237,10 @@ func TestMainReportFactsAndReadIsolation(t *testing.T) {
 	if !a.Replies()[0].Report.Receipts[0].Committed || a.Replies()[0].Report.Text != "partially failed" {
 		t.Fatal("reply read aliases state")
 	}
-	if err := a.BeginReplyDelivery(reply.ID); err != nil {
+	if _, err := a.BeginReplyDelivery(reply.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.BeginReplyDelivery(reply.ID); err == nil {
+	if _, err := a.BeginReplyDelivery(reply.ID); err == nil {
 		t.Fatal("uncertain send was allowed twice")
 	}
 	if err := a.AcknowledgeReply("invented"); err == nil {

@@ -2,6 +2,9 @@
 
 > Follow-on: [M1b](superagent-m1b.md) adds structured steering/cancellation
 > and clarification decisions. The remainder records the original M1a scope.
+> [M1c](superagent-m1c.md) supersedes the preliminary external-send API below:
+> BeginReplyDelivery now returns an exact attempt handle, and external sends
+> are resolved with that handle rather than AcknowledgeReply.
 
 This slice adds the Go-host loop `Submit → main decision → Worker → main reply`
 on the existing scheduler. It is not the complete M1/M2 implementation. In
