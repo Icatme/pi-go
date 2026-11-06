@@ -2,8 +2,11 @@ package superagent
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -48,32 +51,29 @@ type HistoryPage struct {
 
 type historyKey struct{ kind, id string }
 type historyNode struct {
-	data  string
-	links []HistoryLink
-}
-type historyCursor struct {
-	View string     `json:"view"`
-	Ref  HistoryRef `json:"ref"`
-	Text int        `json:"text"`
-	Link int        `json:"link"`
+	data    string
+	links   []HistoryLink
+	version [sha256.Size]byte
 }
 
 // MainHistory is a read-only, immutable view owned by one main callback. It
-// expires when the callback returns, or the coordinator context is canceled.
+// expires when the callback returns, or coordinator/journal ownership is canceled.
 // Each view permits at most 64 attempted reads and 256 KiB of response JSON.
-// References survive restart; cursors are specific to this invocation/view.
-// Records exceeding the invocation budget fail explicitly; this API does not
-// provide cross-invocation continuation or promise complete unbounded recall.
-// The host must use a separate journal for each authorization domain.
+// A returned cursor can continue in a later callback of the same coordinator,
+// only while the referenced public data and ordered links are unchanged. Cursors
+// are authenticated, not authorization grants. Restart invalidates them; stable
+// references can be read again from the beginning. This does not schedule another
+// callback or compact model context. Use a separate journal per authorization domain.
 type MainHistory struct {
-	mu     sync.Mutex
-	ctx    context.Context
-	domain string
-	view   string
-	nodes  map[historyKey]*historyNode
-	closed bool
-	calls  int
-	bytes  int
+	mu       sync.Mutex
+	ctx      context.Context
+	lifetime context.Context
+	domain   string
+	key      [sha256.Size]byte
+	nodes    map[historyKey]*historyNode
+	closed   bool
+	calls    int
+	bytes    int
 }
 
 var errHistoryUnavailable = errors.New("superagent: history reference or view is unavailable")
@@ -83,6 +83,7 @@ func (h *MainHistory) close() {
 		h.mu.Lock()
 		h.closed = true
 		h.nodes = nil
+		h.key = [sha256.Size]byte{}
 		h.mu.Unlock()
 	}
 }
@@ -98,7 +99,7 @@ func (h *MainHistory) Read(ctx context.Context, req HistoryRequest) (HistoryPage
 	if err := ctx.Err(); err != nil {
 		return HistoryPage{}, err
 	}
-	if h.closed || h.ctx == nil || h.ctx.Err() != nil {
+	if h.closed || h.ctx == nil || h.ctx.Err() != nil || (h.lifetime != nil && h.lifetime.Err() != nil) || h.key == ([sha256.Size]byte{}) {
 		return HistoryPage{}, errHistoryUnavailable
 	}
 	h.calls++
@@ -116,21 +117,15 @@ func (h *MainHistory) Read(ctx context.Context, req HistoryRequest) (HistoryPage
 	if node == nil {
 		return HistoryPage{}, errHistoryUnavailable
 	}
-	c := historyCursor{View: h.view, Ref: req.Ref}
+	text, link := 0, 0
 	if req.Cursor != "" {
-		if len(req.Cursor) > 2048 {
-			return HistoryPage{}, errHistoryUnavailable
-		}
-		raw, err := base64.RawURLEncoding.DecodeString(req.Cursor)
-		if err != nil || json.Unmarshal(raw, &c) != nil || c.View != h.view || c.Ref != req.Ref || c.Text < 0 || c.Text > len(node.data) || c.Link < 0 || c.Link > len(node.links) || (c.Text < len(node.data) && !utf8.RuneStart(node.data[c.Text])) {
-			return HistoryPage{}, errHistoryUnavailable
-		}
-		canonical, _ := json.Marshal(c)
-		if base64.RawURLEncoding.EncodeToString(canonical) != req.Cursor {
+		var ok bool
+		text, link, ok = h.decodeCursor(req.Cursor, req.Ref, node)
+		if !ok {
 			return HistoryPage{}, errHistoryUnavailable
 		}
 	}
-	startText, startLink := c.Text, c.Link
+	startText, startLink := text, link
 	page := HistoryPage{Ref: req.Ref}
 	budget := min(req.MaxBytes, (256<<10)-h.bytes)
 	// Reserve the exact continuation envelope while fitting data. Search on
@@ -138,8 +133,7 @@ func (h *MainHistory) Read(ctx context.Context, req HistoryRequest) (HistoryPage
 	fit := func(textEnd, linkEnd int) (HistoryPage, int) {
 		p := HistoryPage{Ref: req.Ref, Data: node.data[startText:textEnd], Links: node.links[startLink:linkEnd]}
 		if textEnd < len(node.data) || linkEnd < len(node.links) {
-			raw, _ := json.Marshal(historyCursor{View: h.view, Ref: req.Ref, Text: textEnd, Link: linkEnd})
-			p.Next = base64.RawURLEncoding.EncodeToString(raw)
+			p.Next = h.encodeCursor(req.Ref, node, textEnd, linkEnd)
 		}
 		raw, _ := json.Marshal(p)
 		return p, len(raw)
@@ -181,25 +175,25 @@ func (h *MainHistory) Read(ctx context.Context, req HistoryRequest) (HistoryPage
 			hi = mid - 1
 		}
 	}
-	c.Text = end
-	page, _ = fit(c.Text, c.Link)
-	if c.Text == len(node.data) {
+	text = end
+	page, _ = fit(text, link)
+	if text == len(node.data) {
 		if len(node.links)-startLink <= req.MaxItems {
-			if candidate, size := fit(c.Text, len(node.links)); size <= budget {
-				c.Link, page = len(node.links), candidate
+			if candidate, size := fit(text, len(node.links)); size <= budget {
+				link, page = len(node.links), candidate
 			}
 		}
-		for c.Link < len(node.links) && c.Link-startLink < req.MaxItems {
-			candidate, size := fit(c.Text, c.Link+1)
+		for link < len(node.links) && link-startLink < req.MaxItems {
+			candidate, size := fit(text, link+1)
 			if size > budget {
 				break
 			}
-			c.Link++
+			link++
 			page = candidate
 		}
 	}
 	encoded, _ := json.Marshal(page)
-	if len(encoded) > budget || (page.Next != "" && c.Text == startText && c.Link == startLink) {
+	if len(encoded) > budget || (page.Next != "" && text == startText && link == startLink) {
 		return HistoryPage{}, errors.New("superagent: history page budget cannot make progress")
 	}
 	page.Links = slices.Clone(page.Links)
@@ -207,10 +201,67 @@ func (h *MainHistory) Read(ctx context.Context, req HistoryRequest) (HistoryPage
 	return page, nil
 }
 
+// The compact fixed-size token preserves useful space in a 512-byte page.
+// Its HMAC covers the format version, exact node digest, both offsets and the
+// entire requested reference. No secret is persisted or exposed to a model.
+const historyCursorPayloadBytes = 1 + sha256.Size + 8 + 8
+const historyCursorBytes = historyCursorPayloadBytes + sha256.Size
+
+func (h *MainHistory) cursorMAC(payload []byte, ref HistoryRef) []byte {
+	mac := hmac.New(sha256.New, h.key[:])
+	mac.Write(payload)
+	raw, _ := json.Marshal(ref)
+	mac.Write(raw) // The preceding binary payload has a fixed unambiguous length.
+	return mac.Sum(nil)
+}
+
+func (h *MainHistory) encodeCursor(ref HistoryRef, node *historyNode, text, link int) string {
+	var raw [historyCursorBytes]byte
+	raw[0] = 1
+	copy(raw[1:1+sha256.Size], node.version[:])
+	binary.BigEndian.PutUint64(raw[33:41], uint64(text))
+	binary.BigEndian.PutUint64(raw[41:49], uint64(link))
+	copy(raw[historyCursorPayloadBytes:], h.cursorMAC(raw[:historyCursorPayloadBytes], ref))
+	return base64.RawURLEncoding.EncodeToString(raw[:])
+}
+
+func (h *MainHistory) decodeCursor(token string, ref HistoryRef, node *historyNode) (int, int, bool) {
+	if len(token) != base64.RawURLEncoding.EncodedLen(historyCursorBytes) {
+		return 0, 0, false
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(token)
+	if err != nil || len(raw) != historyCursorBytes || raw[0] != 1 ||
+		!hmac.Equal(raw[historyCursorPayloadBytes:], h.cursorMAC(raw[:historyCursorPayloadBytes], ref)) ||
+		!hmac.Equal(raw[1:1+sha256.Size], node.version[:]) {
+		return 0, 0, false
+	}
+	text, link := binary.BigEndian.Uint64(raw[33:41]), binary.BigEndian.Uint64(raw[41:49])
+	// Check before converting to int, including on 32-bit targets.
+	if text > uint64(len(node.data)) || link > uint64(len(node.links)) ||
+		(text < uint64(len(node.data)) && !utf8.RuneStart(node.data[int(text)])) {
+		return 0, 0, false
+	}
+	return int(text), int(link), true
+}
+
+func (n *historyNode) seal() {
+	// Hash once per immutable node revision, after all copy-on-write links have
+	// been added. Length framing avoids ambiguous data/link concatenation.
+	digest := sha256.New()
+	var size [8]byte
+	binary.BigEndian.PutUint64(size[:], uint64(len(n.data)))
+	digest.Write(size[:])
+	digest.Write([]byte(n.data))
+	links, _ := json.Marshal(n.links)
+	digest.Write(links)
+	copy(n.version[:], digest.Sum(nil))
+}
+
 // The catalog is an in-memory index rebuilt from existing durable records.
 // Nodes are copy-on-write: active readers keep a consistent old view while
 // new reports arrive. Large public content is serialized once, not every turn.
 type historyCatalog struct {
+	key      [sha256.Size]byte
 	nodes    map[historyKey]*historyNode
 	edges    map[historyEdge]bool
 	threads  map[[2]string]string
@@ -227,6 +278,7 @@ type historyEdge struct {
 func (a *SuperAgent) newMainHistory() *MainHistory {
 	if a.history == nil {
 		a.history = &historyCatalog{nodes: map[historyKey]*historyNode{}, edges: map[historyEdge]bool{}, threads: map[[2]string]string{}, assigned: map[int]string{}}
+		rand.Read(a.history.key[:])
 	}
 	c := a.history
 	writable := map[historyKey]bool{}
@@ -236,9 +288,10 @@ func (a *SuperAgent) newMainHistory() *MainHistory {
 		key := historyKey{kind, id}
 		n := &historyNode{data: string(raw)}
 		if old := c.nodes[key]; old != nil {
-			n.links = old.links
+			n.links = slices.Clone(old.links)
 		}
 		c.nodes[key] = n
+		writable[key] = true
 	}
 	link := func(from, to HistoryRef, relation, summary string) {
 		key := historyKey{from.Kind, from.ID}
@@ -307,7 +360,14 @@ func (a *SuperAgent) newMainHistory() *MainHistory {
 		}
 	}
 	c.reports = len(a.reports)
-	return &MainHistory{ctx: a.ctx, domain: a.main.id, view: rand.Text(), nodes: maps.Clone(c.nodes)}
+	for key := range writable {
+		c.nodes[key].seal()
+	}
+	var lifetime context.Context
+	if journal, ok := a.store.(LeasedJournal); ok {
+		lifetime = journal.Context()
+	}
+	return &MainHistory{ctx: a.ctx, lifetime: lifetime, domain: a.main.id, key: c.key, nodes: maps.Clone(c.nodes)}
 }
 
 func (a *SuperAgent) addHistoryRefs(input *MainInput) {

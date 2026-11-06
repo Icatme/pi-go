@@ -3,7 +3,7 @@ package superagent
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,7 +68,10 @@ func historyTestView(data string, links int) (*MainHistory, HistoryRef) {
 	for i := 0; i < links; i++ {
 		node.links = append(node.links, HistoryLink{Relation: "trigger", Ref: HistoryRef{Domain: ref.Domain, Kind: "trigger", ID: fmt.Sprint(i)}})
 	}
-	return &MainHistory{ctx: context.Background(), domain: ref.Domain, view: "view-a", nodes: map[historyKey]*historyNode{{ref.Kind, ref.ID}: node}}, ref
+	node.seal()
+	h := &MainHistory{ctx: context.Background(), domain: ref.Domain, nodes: map[historyKey]*historyNode{{ref.Kind, ref.ID}: node}}
+	rand.Read(h.key[:])
+	return h, ref
 }
 
 func TestMainHistoryUTF8EscapedReconstruction(t *testing.T) {
@@ -95,11 +98,6 @@ func TestMainHistoryUTF8EscapedReconstruction(t *testing.T) {
 
 func TestMainHistoryRejectsInvalidAndForeignRequests(t *testing.T) {
 	h, ref := historyTestView(`{"text":"汉字"}`, 2)
-	cursor := func(c historyCursor) string {
-		raw, _ := json.Marshal(c)
-		return base64.RawURLEncoding.EncodeToString(raw)
-	}
-	base := historyCursor{View: h.view, Ref: ref}
 	requests := []HistoryRequest{
 		{Ref: ref, MaxBytes: 511, MaxItems: 1}, {Ref: ref, MaxBytes: 16385, MaxItems: 1},
 		{Ref: ref, MaxBytes: 512, MaxItems: 0}, {Ref: ref, MaxBytes: 512, MaxItems: 33},
@@ -107,10 +105,10 @@ func TestMainHistoryRejectsInvalidAndForeignRequests(t *testing.T) {
 		{Ref: HistoryRef{Domain: ref.Domain, Kind: "snapshot", ID: ref.ID}, MaxBytes: 512, MaxItems: 1},
 		{Ref: ref, MaxBytes: 512, MaxItems: 1, Cursor: "%%%"},
 	}
-	for _, change := range []func(*historyCursor){func(c *historyCursor) { c.Text = -1 }, func(c *historyCursor) { c.Text = 99999 }, func(c *historyCursor) { c.Text = 10 }, func(c *historyCursor) { c.Link = -1 }, func(c *historyCursor) { c.Link = 3 }, func(c *historyCursor) { c.View = "other" }, func(c *historyCursor) { c.Ref.Domain = "domain-b" }, func(c *historyCursor) { c.Ref.Kind = "task" }} {
-		c := base
-		change(&c)
-		requests = append(requests, HistoryRequest{Ref: ref, MaxBytes: 512, MaxItems: 1, Cursor: cursor(c)})
+	node := h.nodes[historyKey{ref.Kind, ref.ID}]
+	// Even correctly signed but invalid offsets are rejected defensively.
+	for _, offsets := range [][2]int{{-1, 0}, {99999, 0}, {10, 0}, {0, -1}, {0, 3}} {
+		requests = append(requests, HistoryRequest{Ref: ref, MaxBytes: 512, MaxItems: 1, Cursor: h.encodeCursor(ref, node, offsets[0], offsets[1])})
 	}
 	for i, req := range requests {
 		if _, err := h.Read(t.Context(), req); err == nil {
@@ -211,16 +209,15 @@ func TestMainHistoryEscapingExpansionFailsExplicitlyAtBudget(t *testing.T) {
 	t.Fatal("expanded content did not explicitly fail its byte budget")
 }
 
-func TestMainHistoryCursorExpiresAcrossViewsAndZeroValue(t *testing.T) {
+func TestMainHistoryCursorExpiresAcrossOwnersAndZeroValue(t *testing.T) {
 	h, ref := historyTestView(strings.Repeat("汉", 2000), 0)
 	p, err := h.Read(t.Context(), HistoryRequest{Ref: ref, MaxBytes: 512, MaxItems: 1})
 	if err != nil || p.Next == "" {
 		t.Fatalf("continuation: %v", err)
 	}
 	next, _ := historyTestView(strings.Repeat("汉", 2000), 0)
-	next.view = "next-inference"
 	if _, err := next.Read(t.Context(), HistoryRequest{Ref: ref, Cursor: p.Next, MaxBytes: 512, MaxItems: 1}); err == nil {
-		t.Fatal("old cursor survived inference boundary")
+		t.Fatal("old cursor survived owner boundary")
 	}
 	var zero MainHistory
 	if _, err := zero.Read(t.Context(), HistoryRequest{Ref: ref, MaxBytes: 512, MaxItems: 1}); err == nil {
@@ -232,15 +229,24 @@ func TestMainHistoryFinalPageDropsUnfittableContinuation(t *testing.T) {
 	for _, links := range []int{0, 1} {
 		t.Run(fmt.Sprint(links), func(t *testing.T) {
 			h, ref := historyTestView(`{"text":"final"}`, links)
-			h.view = strings.Repeat("v", 400)
-			// The complete object fits, but even an empty continued page does not.
+			// A synthetic long reference makes the complete object fit while an
+			// empty continued page cannot fit. This exercises envelope sizing directly,
+			// not production reference construction. The token is still authenticated.
 			node := h.nodes[historyKey{ref.Kind, ref.ID}]
-			full, _ := json.Marshal(HistoryPage{Ref: ref, Data: node.data, Links: node.links})
-			c, _ := json.Marshal(historyCursor{View: h.view, Ref: ref})
-			partial, _ := json.Marshal(HistoryPage{Ref: ref, Next: base64.RawURLEncoding.EncodeToString(c)})
-			if len(full) > 512 || len(partial) <= 512 {
+			found := false
+			for length := 1; length < 512; length++ {
+				ref.Domain = strings.Repeat("v", length)
+				full, _ := json.Marshal(HistoryPage{Ref: ref, Data: node.data, Links: node.links})
+				partial, _ := json.Marshal(HistoryPage{Ref: ref, Next: h.encodeCursor(ref, node, 0, 0)})
+				if len(full) <= 512 && len(partial) > 512 {
+					found = true
+					break
+				}
+			}
+			if !found {
 				t.Fatal("invalid final-envelope fixture")
 			}
+			h.domain = ref.Domain
 			p, err := h.Read(t.Context(), HistoryRequest{Ref: ref, MaxBytes: 512, MaxItems: 1})
 			if err != nil || p.Next != "" || p.Data != node.data || len(p.Links) != links {
 				t.Fatalf("complete 512-byte page rejected: %+v %v", p, err)
