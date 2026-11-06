@@ -104,8 +104,6 @@ $env:GOWORK = 'off'
 $env:PIGO_LIVE_TEST = '0'
 $env:PI_GO_AGENT_LIVE_TEST = '0'
 $env:PI_GO_AGENT_EXAMPLE_LIVE = '0'
-$env:PIGO_POSTGRES_TEST_DSN = ''
-$env:PIGO_POSTGRES_TEST_DISPOSABLE = ''
 go test -mod=readonly -count=5 -run '^TestMixedRuntime' -v ./internal/runtimeeval
 go test -mod=readonly -race -count=3 -run '^TestMixedRuntime' ./internal/runtimeeval
 go test -mod=readonly -count=1 ./...
@@ -119,7 +117,7 @@ Pop-Location
 ```
 
 The crash helper skips unless invoked by its parent test; the two parent crash
-subtests actually run it. PostgreSQL remains gated/skipped. On the existing
+subtests actually run it. On the original validation environment, the existing
 remote Linux/amd64 host PowerShell is unavailable, so Bash equivalents are used
 with cached Go 1.26.10. Windows/PowerShell are not validated here.
 
