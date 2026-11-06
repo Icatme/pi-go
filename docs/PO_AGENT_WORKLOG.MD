@@ -3468,3 +3468,22 @@
   disabled and module resolution was readonly. Manual CI was not dispatched.
 - PR merge is authorized by the user. The reviewed head will guard the merge,
   with resulting tree and ancestry verification before moving to PR #191.
+
+## 2026-11-06 - Review and integrate PR #191 CLI main session
+
+- PR #190 was merged first and its resulting tree and ancestry were verified.
+  Updated #191 with the new master, resolving only the appended worklog
+  conflict and retaining both records. Reviewed routing, exact controls,
+  reply acknowledgement, output staging/replay and legacy migration against
+  the existing coordinator contracts; no blocking runtime defect was found.
+- Windows Go 1.26.4: root and examples full tests and vet passed. Focused
+  CLI/SuperAgent tests and race tests passed. Changed Go files pass gofmt
+  after checkout line-ending normalization; git diff --check is clean.
+- Compiled and ran the Windows CLI offline: two tasks, five reports, four
+  stable replay replies, no transport attempts, and idempotent acknowledgement
+  persisted across restart. Temporary executable and journal were removed.
+- Opening a legacy journal remains a one-way main-session upgrade. No new
+  dependencies or compatibility wrappers were introduced. No live provider,
+  external channel, manual CI or release was run; this review did not rerun
+  full-root race testing. Merge uses the tested head as its safety guard,
+  followed by resulting tree/ancestry and local master synchronization checks.
