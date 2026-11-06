@@ -127,8 +127,6 @@ $env:GOWORK = 'off'
 $env:PIGO_LIVE_TEST = '0'
 $env:PI_GO_AGENT_LIVE_TEST = '0'
 $env:PI_GO_AGENT_EXAMPLE_LIVE = '0'
-$env:PIGO_POSTGRES_TEST_DSN = ''
-$env:PIGO_POSTGRES_TEST_DISPOSABLE = ''
 go run -mod=readonly ./cmd/pi-superagent-runtime-load > runtime-load.json
 go test -mod=readonly -count=1 ./internal/runtimeeval
 go test -mod=readonly -race -count=3 -timeout=20m ./internal/runtimeeval

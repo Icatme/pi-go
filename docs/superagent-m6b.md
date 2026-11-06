@@ -1,5 +1,11 @@
 # M6b：可选单主 PostgreSQL 日志切片
 
+历史记录。2026-11-06 的存储边界已取代本切片在根库中的实现。
+根库提供公开的 `Journal`、`LeasedJournal` 与同主机 SQLite，PostgreSQL 由宿主自行实现，
+通过 `OpenMainJournal` 接入。下文保留当时的实现与验证范围，所述包、驱动依赖
+和测试入口已经移除。当前契约见 [SuperAgent 接入说明](../superagent/README.md)
+和 [`LeasedJournal`](../superagent/journal.go)。
+
 2026-11-05。基于 #178 HEAD `6292543b231b3ee8287e7de2598ff33f8bafa3ab`，
 基线 tree `3fd1dd4058b1cd362b1972e591527062d6ab1a21`。仍是未合并开发切片。
 
@@ -16,8 +22,8 @@
 
 日志使用原始 `bytea`，JSONL 只读导入保留 header/LogItem 字节及现有回执/审核屏障。
 迁移只允许不存在的域，事务失败不留下部分导入；源写者须在整个切换期间保持停机。
-原文件不修复、不删除。详细协议、宿主权限及限制见
-[sharedpostgres README](../superagent/sharedpostgres/README.md)。
+原文件不修复、不删除。当时的协议、宿主权限及限制保留在
+[M6b 原始 PR](https://github.com/Icatme/pi-go/pull/179) 中。
 
 ## 验证边界
 
@@ -44,7 +50,8 @@ draft。单主数据库故障转移、独立进程暂停/死亡、TCP 分区、�
 Windows/macOS/PowerShell 验证。不使用本机、Codex/额外计费、真实模型/平台操作、
 手动 CI、合并或部署。精确受测树、测试命令、独审和远端提交记录在本切片 PR。
 
-验证命令（禁用所有 live 标志，模块缓存就绪后使用 `GOPROXY=off`）：
+以下验证命令仅适用于该历史 PR 的代码与依赖。
+当时禁用所有 live 标志，并在模块缓存就绪后使用 `GOPROXY=off`。
 
 ```sh
 go test -mod=readonly -count=1 ./...
