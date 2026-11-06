@@ -183,7 +183,7 @@ func open(dir string, opts Options, create bool) (*Backend, error) {
 }
 
 func (b *Backend) validRequest(r background.Request) bool {
-	if !validID(r.ID) || r.Scope != b.opts.Scope || !validID(r.Call.ID) || b.commands[r.Call.Name].Tool == "" || len(r.Call.Arguments) > 64<<10 || len(r.Call.ParsedArgs) != 0 || r.Call.Namespace != "" || r.Call.OriginalID != "" || r.Call.ThoughtSignature != "" {
+	if !validID(r.ID) || r.Scope != b.opts.Scope || !validID(r.Call.ID) || b.commands[r.Call.Name].Tool == "" || len(r.Call.Arguments) > 64<<10 || r.Call.ParsedArgs != nil || r.Call.Namespace != "" || r.Call.OriginalID != "" || r.Call.ThoughtSignature != "" {
 		return false
 	}
 	var args map[string]json.RawMessage
@@ -287,7 +287,14 @@ func (b *Backend) Start(ctx context.Context, r background.Request) error {
 	if !b.validRequest(r) {
 		return ErrInvalid
 	}
-	r = clone(r)
+	// ToolCall.UnmarshalJSON checks raw Unicode before strings can be repaired.
+	// Reject a failed round trip before presenting any request to the authorizer.
+	raw, err := json.Marshal(r)
+	var frozen background.Request
+	if err != nil || json.Unmarshal(raw, &frozen) != nil {
+		return ErrInvalid
+	}
+	r = frozen
 	epoch, err := b.authorize(ctx, Authorization{Action: "start", ID: r.ID, Request: &r})
 	if err != nil {
 		return err
