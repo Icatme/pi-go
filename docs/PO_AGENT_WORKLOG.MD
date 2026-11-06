@@ -3106,6 +3106,26 @@
   Codex/extra paid execution, manual CI, merge or deployment. Linux amd64 Go
   1.26.10 only; PowerShell/Windows/macOS execution is not claimed.
 
+## 2026-11-05 - Correct GitHub edited-comment actor binding
+
+- Full-stack review reproduced a rejected legitimate edit on draft #175's tree:
+  authenticated editor 7 editing author 8's comment failed the original
+  sender-equals-author check. GitHub documents [editing others' comments](https://docs.github.com/en/communities/moderating-comments-and-conversations/managing-disruptive-comments#editing-a-comment)
+  and identifies the initiating actor as [sender](https://docs.github.com/en/webhooks/webhook-events-and-payloads#the-sender-property).
+- Only supported edited issue/review comments may have distinct author and
+  sender. Principal stays bound to authenticated sender; author must independently
+  be a canonical positive uint64. Creation/submission equality is unchanged.
+- Red regressions preceded the fix. Tests cover both comment types, editor allow/
+  deny policy, host intent, spoofed sender/target/object, malformed author, durable
+  replay and edited own-message echoes without cross-type ID collisions.
+- Independent read-only review and channel tests found no blockers. Linux amd64
+  Go 1.26.10 readonly full tests/vet/race, focused GitHub race x20 and separate
+  examples tests/vet passed using cached modules with live-test flags disabled.
+- The parallel history-admission visibility security fix is not included;
+  composition still requires verification. No dependency/journal format change,
+  live GitHub/provider/device, user computer, credentials, Codex/extra paid
+  execution, manual CI, merge or deployment. PowerShell/Windows/macOS untested.
+
 
 ## 2026-11-05 - SuperAgent optional PostgreSQL journal development slice
 
