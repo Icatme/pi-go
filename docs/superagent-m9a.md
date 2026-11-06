@@ -165,6 +165,12 @@ in-flight recovery evidence. In particular:
 `TestMainBatchBlockedInferenceDoesNotBlockExactAbort` and
 `TestMainReplayEveryCommitBoundary`. These are not new experiment measurements.
 
+## Later development slice
+
+[M9b](superagent-m9b.md) adds actual Pi/SuperAgent entrypoint execution and two
+synchronous single-Pi host-tool arms for a smaller serial protocol fixture. It
+does not replace this simulation or fill the full scheduling/performance baseline.
+
 ## Remaining release gates
 
 The two single-Pi baselines, actual Pi integration of the common experiment,
