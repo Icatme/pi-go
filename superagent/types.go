@@ -43,6 +43,10 @@ type RunTarget struct {
 
 type Job struct {
 	TaskID string
+	// DeliveryID identifies this admission's target within the journal. It is
+	// stable across replay, distinct from the task and external event, and not
+	// an authorization token. Standalone Worker calls may leave it empty.
+	DeliveryID string `json:"delivery_id"`
 	// ProviderSessionID is the stable wire identity, recorded when a task is
 	// created. Standalone workers default to TaskID when this field is empty.
 	ProviderSessionID string
@@ -98,13 +102,19 @@ type TaskStatus struct {
 	Pending int    `json:"pending"`
 	// ActiveSource and ActiveEventID identify the controllable invocation.
 	// A finalizing worker has returned and is publishing its outcome.
-	ActiveSource  string `json:"active_source,omitempty"`
-	ActiveEventID string `json:"active_event_id,omitempty"`
-	ReviewSource  string `json:"review_source,omitempty"`
-	ReviewEventID string `json:"review_event_id,omitempty"`
+	ActiveSource     string `json:"active_source,omitempty"`
+	ActiveEventID    string `json:"active_event_id,omitempty"`
+	ActiveDeliveryID string `json:"active_delivery_id,omitempty"`
+	ReviewSource     string `json:"review_source,omitempty"`
+	ReviewEventID    string `json:"review_event_id,omitempty"`
+	ReviewDeliveryID string `json:"review_delivery_id,omitempty"`
 }
 
 type Report struct {
+	// DeliveryID is the opaque, stable identity of one terminal outcome in
+	// this journal, including unassigned/ignored events. Deduplicate reports
+	// by (host journal identity, DeliveryID), never Source/EventID alone.
+	DeliveryID  string        `json:"delivery_id"`
 	Source      string        `json:"source"`
 	Thread      string        `json:"thread"`
 	EventID     string        `json:"event_id"`

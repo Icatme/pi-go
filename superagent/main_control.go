@@ -233,6 +233,6 @@ func (a *SuperAgent) enqueueControlResult(c *MainControl) {
 	}
 	i := a.accepted[[2]string{c.Source, c.EventID}]
 	e := a.events[i]
-	input := MainInput{ID: a.nextMainInputID(), Kind: "control_result", Trigger: e.trigger, TaskID: c.Target.TaskID, Control: copyControl(c)}
+	input := MainInput{ID: a.nextMainInputID(), DeliveryID: deliveryID(i), Kind: "control_result", Trigger: e.trigger, TaskID: c.Target.TaskID, Control: copyControl(c)}
 	a.main.inbox = append(a.main.inbox, mainItem{input: input, event: i})
 }

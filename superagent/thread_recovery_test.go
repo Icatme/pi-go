@@ -352,6 +352,12 @@ func TestThreadReplayEveryFanoutCommitBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitIdle(t, b)
+	identityByTask := map[string]string{}
+	for _, report := range b.ReportsSince(3) {
+		if report.EventID == event.ID {
+			identityByTask[report.TaskID] = report.DeliveryID
+		}
+	}
 	if err := b.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -428,6 +434,9 @@ func TestThreadReplayEveryFanoutCommitBoundary(t *testing.T) {
 			reports := map[string]Report{}
 			for _, r := range c.Status().Reports {
 				if r.EventID == event.ID {
+					if r.DeliveryID == "" || r.DeliveryID != identityByTask[r.TaskID] {
+						t.Fatal("crash boundary changed delivery identity", r)
+					}
 					if _, exists := reports[r.TaskID]; exists {
 						t.Fatal("duplicate report")
 					}

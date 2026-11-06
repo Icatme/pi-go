@@ -51,7 +51,8 @@ func command(ctx context.Context, args []string, in io.Reader, out, diagnostics 
 	opts.SetOutput(diagnostics)
 	opts.Usage = func() {
 		fmt.Fprintln(diagnostics, usage)
-		fmt.Fprintln(diagnostics, "REPORT replays each outcome and its tool receipts as recorded. IDLE.tasks shows current review requirements after the input ends.")
+		fmt.Fprintln(diagnostics, "REPORT replays each outcome and its tool receipts with a stable journal-local delivery_id. Deduplicate by journal namespace and delivery_id, not source/event_id.")
+		fmt.Fprintln(diagnostics, "IDLE.tasks shows current review requirements after the input ends. This CLI retains legacy Open routing.")
 		if !demo {
 			fmt.Fprintln(diagnostics, controlHelp)
 		}
@@ -102,7 +103,8 @@ func command(ctx context.Context, args []string, in io.Reader, out, diagnostics 
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
 	// Replay persisted reports on each open. Consumers deduplicate REPORT by
-	// (source, event_id), including an outcome committed just before a crash.
+	// (host journal namespace, delivery_id), including outcomes committed just
+	// before a crash. Source/event identity is for ingress deduplication only.
 	session := &outputSession{s: s, out: json.NewEncoder(out)}
 	if demo {
 		return session.demo(ctx)
@@ -177,13 +179,14 @@ func (s *outputSession) submit(event superagent.Trigger) error {
 }
 
 func (s *outputSession) flush() error {
-	return writeReports(s.out, s.takeReports())
-}
-
-func (s *outputSession) takeReports() []superagent.Report {
 	reports := s.s.ReportsSince(s.cursor)
+	if err := writeReports(s.out, reports); err != nil {
+		// A partial write may have emitted some reports. Retry the batch with
+		// its original IDs rather than skip an unacknowledged outcome.
+		return err
+	}
 	s.cursor += len(reports)
-	return reports
+	return nil
 }
 
 func writeReports(out frameEncoder, reports []superagent.Report) error {
@@ -276,11 +279,17 @@ func (s *outputSession) dispatch(ctx context.Context, in io.Reader, frames *fram
 	controls := newControls(ctx, s)
 	defer controls.close()
 	flush := func() error {
-		reports := s.takeReports()
+		reports := s.s.ReportsSince(s.cursor)
 		if len(reports) == 0 {
 			return nil
 		}
-		return frames.Encode(reports)
+		if err := frames.Encode(reports); err != nil {
+			return err
+		}
+		// This process-local cursor acknowledges staging, not delivery to the
+		// external consumer. Restart replays the journal from count zero.
+		s.cursor += len(reports)
+		return nil
 	}
 	var idleDone bool
 	for {
