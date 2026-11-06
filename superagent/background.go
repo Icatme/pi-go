@@ -13,6 +13,7 @@ import (
 
 	"github.com/Icatme/pi-go/agent"
 	"github.com/Icatme/pi-go/agent/background"
+	"github.com/Icatme/pi-go/internal/jsontext"
 )
 
 const backgroundSource = "superagent.background"
@@ -226,6 +227,11 @@ func authorizeBackground(ctx context.Context, t BackgroundTool, r BackgroundStar
 func (c *BackgroundControl) Start(ctx context.Context, r BackgroundStart) (BackgroundOperation, error) {
 	if c == nil || c.a == nil || ctx == nil || !validBackgroundStart(r) {
 		return BackgroundOperation{}, errors.New("background: invalid launch")
+	}
+	// Reject lossy arguments before authorization or reservation. Replay still
+	// retains the facts of prior dispatches, including uncertain operations.
+	if err := jsontext.ValidateUnicode(r.Arguments); err != nil {
+		return BackgroundOperation{}, fmt.Errorf("background: invalid launch arguments: %w", err)
 	}
 	r.Arguments = bytes.Clone(r.Arguments)
 	a := c.a
@@ -442,11 +448,11 @@ func (a *SuperAgent) RefreshBackground(ctx context.Context, id string) error {
 	if err == nil {
 		observation, err = callBackgroundInspect(ctx, b, id)
 	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if err := errors.Join(ctx.Err(), a.fatal, a.ctx.Err()); err != nil {
+		return err
+	}
 	o, _ = a.backgroundOperation(id)
 	if o.Exited {
 		return nil
