@@ -1,0 +1,132 @@
+# Presentation whitespace normalized; numeric samples unchanged.
+# M6f fixed-input decoded/individual-line samples, Go1.26.10 Linux/amd64.
+# Command: go test -mod=readonly ./agent/session -run ^$ -bench ^BenchmarkValidatedReplay$ -benchtime=100ms -count=5 -benchmem
+# GOMAXPROCS not explicitly set; observed suffix -9.
+# Superseded /batch/ samples removed: the test-only original batch allocation order was corrected.
+# Final batch samples are retained separately. Original overall PASS/time includes that initial batch run.
+goos: linux
+goarch: amd64
+pkg: github.com/Icatme/pi-go/agent/session
+cpu: AMD EPYC 9V74 80-Core Processor
+BenchmarkValidatedReplay/custom/100/decoded/original-9                40           3285240 ns/op             82457 log-B         1191245 B/op       5547 allocs/op
+BenchmarkValidatedReplay/custom/100/decoded/original-9                39           3764966 ns/op             82457 log-B         1191375 B/op       5546 allocs/op
+BenchmarkValidatedReplay/custom/100/decoded/original-9                44           3524618 ns/op             82457 log-B         1191030 B/op       5546 allocs/op
+BenchmarkValidatedReplay/custom/100/decoded/original-9                38           3250667 ns/op             82457 log-B         1190864 B/op       5545 allocs/op
+BenchmarkValidatedReplay/custom/100/decoded/original-9                38           3042352 ns/op             82457 log-B         1190832 B/op       5545 allocs/op
+BenchmarkValidatedReplay/custom/100/decoded/optimized-9               63           2055638 ns/op             82457 log-B          639978 B/op       2944 allocs/op
+BenchmarkValidatedReplay/custom/100/decoded/optimized-9               75           1868253 ns/op             82457 log-B          640014 B/op       2944 allocs/op
+BenchmarkValidatedReplay/custom/100/decoded/optimized-9               58           1749214 ns/op             82457 log-B          639947 B/op       2944 allocs/op
+BenchmarkValidatedReplay/custom/100/decoded/optimized-9               70           1710549 ns/op             82457 log-B          639799 B/op       2943 allocs/op
+BenchmarkValidatedReplay/custom/100/decoded/optimized-9               64           1727779 ns/op             82457 log-B          640029 B/op       2944 allocs/op
+BenchmarkValidatedReplay/custom/100/lines/original-9                  27           4861632 ns/op             82457 log-B         1601487 B/op       9148 allocs/op
+BenchmarkValidatedReplay/custom/100/lines/original-9                  21           4907267 ns/op             82457 log-B         1601530 B/op       9148 allocs/op
+BenchmarkValidatedReplay/custom/100/lines/original-9                  28           4648052 ns/op             82457 log-B         1601738 B/op       9149 allocs/op
+BenchmarkValidatedReplay/custom/100/lines/original-9                  21           5245060 ns/op             82457 log-B         1601249 B/op       9146 allocs/op
+BenchmarkValidatedReplay/custom/100/lines/original-9                  26           4793379 ns/op             82457 log-B         1601556 B/op       9148 allocs/op
+BenchmarkValidatedReplay/custom/100/lines/optimized-9                 38           3633807 ns/op             82457 log-B         1050451 B/op       6546 allocs/op
+BenchmarkValidatedReplay/custom/100/lines/optimized-9                 36           3603047 ns/op             82457 log-B         1050609 B/op       6547 allocs/op
+BenchmarkValidatedReplay/custom/100/lines/optimized-9                 37           3177604 ns/op             82457 log-B         1050334 B/op       6546 allocs/op
+BenchmarkValidatedReplay/custom/100/lines/optimized-9                 38           3507548 ns/op             82457 log-B         1050377 B/op       6546 allocs/op
+BenchmarkValidatedReplay/custom/100/lines/optimized-9                 32           3803094 ns/op             82457 log-B         1050107 B/op       6545 allocs/op
+BenchmarkValidatedReplay/custom/1000/decoded/original-9                4          32294782 ns/op            826759 log-B        12023738 B/op      55094 allocs/op
+BenchmarkValidatedReplay/custom/1000/decoded/original-9                4          32619851 ns/op            826759 log-B        12025018 B/op      55102 allocs/op
+BenchmarkValidatedReplay/custom/1000/decoded/original-9                4          36756608 ns/op            826759 log-B        12025276 B/op      55102 allocs/op
+BenchmarkValidatedReplay/custom/1000/decoded/original-9                4          31714624 ns/op            826759 log-B        12024836 B/op      55099 allocs/op
+BenchmarkValidatedReplay/custom/1000/decoded/original-9                4          31839758 ns/op            826759 log-B        12026642 B/op      55108 allocs/op
+BenchmarkValidatedReplay/custom/1000/decoded/optimized-9               6          18867844 ns/op            826759 log-B         6517377 B/op      29089 allocs/op
+BenchmarkValidatedReplay/custom/1000/decoded/optimized-9               6          18444479 ns/op            826759 log-B         6516022 B/op      29079 allocs/op
+BenchmarkValidatedReplay/custom/1000/decoded/optimized-9               6          17122298 ns/op            826759 log-B         6517825 B/op      29089 allocs/op
+BenchmarkValidatedReplay/custom/1000/decoded/optimized-9               6          17872284 ns/op            826759 log-B         6517609 B/op      29089 allocs/op
+BenchmarkValidatedReplay/custom/1000/decoded/optimized-9               6          19577376 ns/op            826759 log-B         6517112 B/op      29087 allocs/op
+BenchmarkValidatedReplay/custom/1000/lines/original-9                  3          48277716 ns/op            826759 log-B        16123344 B/op      91105 allocs/op
+BenchmarkValidatedReplay/custom/1000/lines/original-9                  3          48947977 ns/op            826759 log-B        16123333 B/op      91105 allocs/op
+BenchmarkValidatedReplay/custom/1000/lines/original-9                  3          48153016 ns/op            826759 log-B        16124250 B/op      91109 allocs/op
+BenchmarkValidatedReplay/custom/1000/lines/original-9                  3          49704319 ns/op            826759 log-B        16125925 B/op      91121 allocs/op
+BenchmarkValidatedReplay/custom/1000/lines/original-9                  2          55027688 ns/op            826759 log-B        16122648 B/op      91100 allocs/op
+BenchmarkValidatedReplay/custom/1000/lines/optimized-9                 3          35480182 ns/op            826759 log-B        10618936 B/op      65112 allocs/op
+BenchmarkValidatedReplay/custom/1000/lines/optimized-9                 3          33469636 ns/op            826759 log-B        10615834 B/op      65093 allocs/op
+BenchmarkValidatedReplay/custom/1000/lines/optimized-9                 3          39525459 ns/op            826759 log-B        10616338 B/op      65097 allocs/op
+BenchmarkValidatedReplay/custom/1000/lines/optimized-9                 3          36647151 ns/op            826759 log-B        10617032 B/op      65103 allocs/op
+BenchmarkValidatedReplay/custom/1000/lines/optimized-9                 3          35050525 ns/op            826759 log-B        10616962 B/op      65103 allocs/op
+BenchmarkValidatedReplay/message/100/decoded/original-9               49           3420830 ns/op             87657 log-B         1476513 B/op      10256 allocs/op
+BenchmarkValidatedReplay/message/100/decoded/original-9               48           3830111 ns/op             87657 log-B         1476028 B/op      10255 allocs/op
+BenchmarkValidatedReplay/message/100/decoded/original-9               44           3593464 ns/op             87657 log-B         1475240 B/op      10253 allocs/op
+BenchmarkValidatedReplay/message/100/decoded/original-9               44           3264076 ns/op             87657 log-B         1475477 B/op      10254 allocs/op
+BenchmarkValidatedReplay/message/100/decoded/original-9               43           3293375 ns/op             87657 log-B         1474452 B/op      10251 allocs/op
+BenchmarkValidatedReplay/message/100/decoded/optimized-9              96           1847274 ns/op             87657 log-B          778598 B/op       5247 allocs/op
+BenchmarkValidatedReplay/message/100/decoded/optimized-9              90           1680081 ns/op             87657 log-B          778807 B/op       5247 allocs/op
+BenchmarkValidatedReplay/message/100/decoded/optimized-9              82           1634867 ns/op             87657 log-B          778744 B/op       5247 allocs/op
+BenchmarkValidatedReplay/message/100/decoded/optimized-9              82           1660925 ns/op             87657 log-B          778772 B/op       5247 allocs/op
+BenchmarkValidatedReplay/message/100/decoded/optimized-9             100           2012704 ns/op             87657 log-B          778731 B/op       5247 allocs/op
+BenchmarkValidatedReplay/message/100/lines/original-9                 27           4850401 ns/op             87657 log-B         2002436 B/op      15455 allocs/op
+BenchmarkValidatedReplay/message/100/lines/original-9                 25           5574419 ns/op             87657 log-B         2002537 B/op      15456 allocs/op
+BenchmarkValidatedReplay/message/100/lines/original-9                 21           5123487 ns/op             87657 log-B         2003779 B/op      15458 allocs/op
+BenchmarkValidatedReplay/message/100/lines/original-9                 25           4900203 ns/op             87657 log-B         2004157 B/op      15460 allocs/op
+BenchmarkValidatedReplay/message/100/lines/original-9                 25           6148046 ns/op             87657 log-B         2003612 B/op      15458 allocs/op
+BenchmarkValidatedReplay/message/100/lines/optimized-9                42           4142668 ns/op             87657 log-B         1306901 B/op      10452 allocs/op
+BenchmarkValidatedReplay/message/100/lines/optimized-9                40           3410114 ns/op             87657 log-B         1306583 B/op      10452 allocs/op
+BenchmarkValidatedReplay/message/100/lines/optimized-9                30           3686837 ns/op             87657 log-B         1307310 B/op      10454 allocs/op
+BenchmarkValidatedReplay/message/100/lines/optimized-9                31           3496958 ns/op             87657 log-B         1306329 B/op      10451 allocs/op
+BenchmarkValidatedReplay/message/100/lines/optimized-9                43           3681398 ns/op             87657 log-B         1306753 B/op      10452 allocs/op
+BenchmarkValidatedReplay/message/1000/decoded/original-9               3          34024611 ns/op            878759 log-B        14828557 B/op     102097 allocs/op
+BenchmarkValidatedReplay/message/1000/decoded/original-9               4          28901140 ns/op            878759 log-B        14830110 B/op     102100 allocs/op
+BenchmarkValidatedReplay/message/1000/decoded/original-9               4          34284145 ns/op            878759 log-B        14829286 B/op     102098 allocs/op
+BenchmarkValidatedReplay/message/1000/decoded/original-9               4          31032821 ns/op            878759 log-B        14830892 B/op     102102 allocs/op
+BenchmarkValidatedReplay/message/1000/decoded/original-9               4          31757362 ns/op            878759 log-B        14828522 B/op     102097 allocs/op
+BenchmarkValidatedReplay/message/1000/decoded/optimized-9              7          15310957 ns/op            878759 log-B         7886265 B/op      52083 allocs/op
+BenchmarkValidatedReplay/message/1000/decoded/optimized-9              7          16248933 ns/op            878759 log-B         7886110 B/op      52082 allocs/op
+BenchmarkValidatedReplay/message/1000/decoded/optimized-9              7          15953913 ns/op            878759 log-B         7888177 B/op      52088 allocs/op
+BenchmarkValidatedReplay/message/1000/decoded/optimized-9              7          15280319 ns/op            878759 log-B         7888157 B/op      52088 allocs/op
+BenchmarkValidatedReplay/message/1000/decoded/optimized-9              8          15545828 ns/op            878759 log-B         7888876 B/op      52090 allocs/op
+BenchmarkValidatedReplay/message/1000/lines/original-9                 3          53689450 ns/op            878759 log-B        20088578 B/op     154103 allocs/op
+BenchmarkValidatedReplay/message/1000/lines/original-9                 2          53524604 ns/op            878759 log-B        20090668 B/op     154109 allocs/op
+BenchmarkValidatedReplay/message/1000/lines/original-9                 3          49824253 ns/op            878759 log-B        20089650 B/op     154106 allocs/op
+BenchmarkValidatedReplay/message/1000/lines/original-9                 3          56441404 ns/op            878759 log-B        20089645 B/op     154106 allocs/op
+BenchmarkValidatedReplay/message/1000/lines/original-9                 2          50096722 ns/op            878759 log-B        20092540 B/op     154115 allocs/op
+BenchmarkValidatedReplay/message/1000/lines/optimized-9                3          37596013 ns/op            878759 log-B        13148506 B/op     104097 allocs/op
+BenchmarkValidatedReplay/message/1000/lines/optimized-9                3          36114099 ns/op            878759 log-B        13146234 B/op     104091 allocs/op
+BenchmarkValidatedReplay/message/1000/lines/optimized-9                3          39170843 ns/op            878759 log-B        13146234 B/op     104091 allocs/op
+BenchmarkValidatedReplay/message/1000/lines/optimized-9                3          34083500 ns/op            878759 log-B        13147365 B/op     104094 allocs/op
+BenchmarkValidatedReplay/message/1000/lines/optimized-9                3          36243017 ns/op            878759 log-B        13149789 B/op     104101 allocs/op
+BenchmarkValidatedReplay/mixed/100/decoded/original-9                 39           3626082 ns/op             85057 log-B         1332861 B/op       7901 allocs/op
+BenchmarkValidatedReplay/mixed/100/decoded/original-9                 28           3971021 ns/op             85057 log-B         1333601 B/op       7904 allocs/op
+BenchmarkValidatedReplay/mixed/100/decoded/original-9                 44           3603445 ns/op             85057 log-B         1333209 B/op       7902 allocs/op
+BenchmarkValidatedReplay/mixed/100/decoded/original-9                 44           3996011 ns/op             85057 log-B         1332956 B/op       7902 allocs/op
+BenchmarkValidatedReplay/mixed/100/decoded/original-9                 34           5061781 ns/op             85057 log-B         1333200 B/op       7903 allocs/op
+BenchmarkValidatedReplay/mixed/100/decoded/optimized-9                64           1989101 ns/op             85057 log-B          708858 B/op       4095 allocs/op
+BenchmarkValidatedReplay/mixed/100/decoded/optimized-9                63           2063594 ns/op             85057 log-B          709130 B/op       4096 allocs/op
+BenchmarkValidatedReplay/mixed/100/decoded/optimized-9                61           1949222 ns/op             85057 log-B          709470 B/op       4098 allocs/op
+BenchmarkValidatedReplay/mixed/100/decoded/optimized-9                85           1835125 ns/op             85057 log-B          709382 B/op       4098 allocs/op
+BenchmarkValidatedReplay/mixed/100/decoded/optimized-9                61           1890429 ns/op             85057 log-B          709105 B/op       4096 allocs/op
+BenchmarkValidatedReplay/mixed/100/lines/original-9                   28           4876138 ns/op             85057 log-B         1802035 B/op      12305 allocs/op
+BenchmarkValidatedReplay/mixed/100/lines/original-9                   24           5597377 ns/op             85057 log-B         1801372 B/op      12302 allocs/op
+BenchmarkValidatedReplay/mixed/100/lines/original-9                   20           7222126 ns/op             85057 log-B         1803088 B/op      12309 allocs/op
+BenchmarkValidatedReplay/mixed/100/lines/original-9                   21           5622323 ns/op             85057 log-B         1803093 B/op      12309 allocs/op
+BenchmarkValidatedReplay/mixed/100/lines/original-9                   28           5008153 ns/op             85057 log-B         1801670 B/op      12303 allocs/op
+BenchmarkValidatedReplay/mixed/100/lines/optimized-9                  36           4319396 ns/op             85057 log-B         1177864 B/op       8499 allocs/op
+BenchmarkValidatedReplay/mixed/100/lines/optimized-9                  37           4238048 ns/op             85057 log-B         1178706 B/op       8502 allocs/op
+BenchmarkValidatedReplay/mixed/100/lines/optimized-9                  28           4279438 ns/op             85057 log-B         1178436 B/op       8501 allocs/op
+BenchmarkValidatedReplay/mixed/100/lines/optimized-9                  38           3808681 ns/op             85057 log-B         1178829 B/op       8503 allocs/op
+BenchmarkValidatedReplay/mixed/100/lines/optimized-9                  28           3718040 ns/op             85057 log-B         1178154 B/op       8499 allocs/op
+BenchmarkValidatedReplay/mixed/1000/decoded/original-9                 4          30329312 ns/op            852759 log-B        13427998 B/op      78614 allocs/op
+BenchmarkValidatedReplay/mixed/1000/decoded/original-9                 4          28951573 ns/op            852759 log-B        13425746 B/op      78603 allocs/op
+BenchmarkValidatedReplay/mixed/1000/decoded/original-9                 4          30434939 ns/op            852759 log-B        13427808 B/op      78609 allocs/op
+BenchmarkValidatedReplay/mixed/1000/decoded/original-9                 4          34324474 ns/op            852759 log-B        13429838 B/op      78619 allocs/op
+BenchmarkValidatedReplay/mixed/1000/decoded/original-9                 4          30688792 ns/op            852759 log-B        13427840 B/op      78607 allocs/op
+BenchmarkValidatedReplay/mixed/1000/decoded/optimized-9                7          16458061 ns/op            852759 log-B         7202608 B/op      40591 allocs/op
+BenchmarkValidatedReplay/mixed/1000/decoded/optimized-9                7          18788453 ns/op            852759 log-B         7201185 B/op      40583 allocs/op
+BenchmarkValidatedReplay/mixed/1000/decoded/optimized-9                6          17604414 ns/op            852759 log-B         7200608 B/op      40582 allocs/op
+BenchmarkValidatedReplay/mixed/1000/decoded/optimized-9                6          16988080 ns/op            852759 log-B         7203030 B/op      40591 allocs/op
+BenchmarkValidatedReplay/mixed/1000/decoded/optimized-9                6          18546283 ns/op            852759 log-B         7201138 B/op      40586 allocs/op
+BenchmarkValidatedReplay/mixed/1000/lines/original-9                   2          59870530 ns/op            852759 log-B        18108112 B/op     122616 allocs/op
+BenchmarkValidatedReplay/mixed/1000/lines/original-9                   2          56175535 ns/op            852759 log-B        18106660 B/op     122612 allocs/op
+BenchmarkValidatedReplay/mixed/1000/lines/original-9                   2          53949142 ns/op            852759 log-B        18105612 B/op     122612 allocs/op
+BenchmarkValidatedReplay/mixed/1000/lines/original-9                   2          50101162 ns/op            852759 log-B        18115540 B/op     122641 allocs/op
+BenchmarkValidatedReplay/mixed/1000/lines/original-9                   2          50333582 ns/op            852759 log-B        18108412 B/op     122615 allocs/op
+BenchmarkValidatedReplay/mixed/1000/lines/optimized-9                  3          38623126 ns/op            852759 log-B        11881773 B/op      84599 allocs/op
+BenchmarkValidatedReplay/mixed/1000/lines/optimized-9                  2          56777012 ns/op            852759 log-B        11886560 B/op      84621 allocs/op
+BenchmarkValidatedReplay/mixed/1000/lines/optimized-9                  3          39711667 ns/op            852759 log-B        11885720 B/op      84611 allocs/op
+BenchmarkValidatedReplay/mixed/1000/lines/optimized-9                  2          53536124 ns/op            852759 log-B        11885708 B/op      84616 allocs/op
+BenchmarkValidatedReplay/mixed/1000/lines/optimized-9                  3          37972041 ns/op            852759 log-B        11884600 B/op      84608 allocs/op
+PASS
+ok      github.com/Icatme/pi-go/agent/session   35.134s

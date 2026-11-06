@@ -3699,3 +3699,38 @@
   distributions, model costs and final M9/release gates remain open. Scope,
   evidence and reproducible commands: [M9e](superagent-m9e.md). No user computer,
   extra paid execution, live service, CI dispatch, merge, release or deployment.
+
+## 2026-11-06 - M6f validated replay normalization
+
+- Rechecked unchanged v0.22.0 master and drafts #192–#196. Independently assessed
+  preserve-all-identities checkpoints: latest snapshots omit admission-index,
+  reply-attempt, history and execution-barrier state; mutable sidecar checksums
+  do not prove state derives from the log. Current Journal/JSONL still load
+  complete history. Deferred a larger new recovery/cache API and any retention
+  policy rather than claiming bounded disk or weakening strict replay.
+- Implemented only the measured narrow cost: apply validates structure then
+  retains one full-item UseNumber JSON normalization, removing a previously
+  discarded normalized Entry copy. Prewrite/full batch preflight, strict disk
+  decoding, sync/poison behavior, ownership isolation and returned copies remain
+  unchanged. No API, format, sequence, Journal, database or dependency change.
+- Differential tests retain the original algorithm for prepared/decoded rich
+  custom/message/compaction/lane records, mutation isolation, 22 rejection cases
+  including decode-time ToolCall errors, invalid-batch atomicity and changing
+  custom marshalers at public append/transaction/read/reopen boundaries.
+- Exact same-file strict opening, three baseline and three optimized fresh
+  processes: 177,525,225 bytes/2,002 records, identical original and decoded
+  Header/Log digests. Median 8.130 -> 5.780 s; cumulative allocation
+  3,257,910,080 -> 2,176,020,224 bytes. This is warm-cache opening, not full
+  coordinator recovery, bounded storage or peak RAM. Raw samples/helpers and
+  a paired reproduction recipe are retained; the large fixture is not committed.
+- Five-sample same-input microbenchmarks cover decoded, strict per-line and
+  atomic-batch paths for custom/message/mixed at 100/1,000 entries. Corrected test-only
+  original batch returned-slice allocation ordering before rerunning every
+  batch case; superseded batch rows are excluded and final rows retained.
+- Root readonly tests/vet, affected session/SuperAgent/CLI race, separate
+  examples tests/vet, formatting and whitespace checks pass. Independent
+  source/test/oracle review found no blocker. No full-root race, Windows/macOS
+  or real-host acceptance is claimed. See [M6f](superagent-m6f.md).
+- No user computer, extra paid execution, live provider/platform/database
+  service, CI dispatch, merge, release or deployment. Original journals remain
+  complete and old readers retain their existing wire compatibility.
