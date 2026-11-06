@@ -84,7 +84,7 @@ type SuperAgent struct {
 	closeOnce         sync.Once
 	ctx               context.Context
 	cancel            context.CancelFunc
-	store             journalStore
+	store             Journal
 	stopJournalWatch  func() bool
 	route             Router
 	mainRoute         MainRouter
