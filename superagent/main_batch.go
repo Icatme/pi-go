@@ -23,6 +23,7 @@ type MainBatchJob struct {
 	Snapshot          agent.AgentSnapshot
 	Tasks             []TaskInfo
 	Runs              []RunTarget
+	History           *MainHistory `json:"-"`
 }
 
 type MainInputDecision struct {
@@ -55,6 +56,7 @@ func OpenMainBatch(ctx context.Context, path string, parallel int, options MainB
 func (a *SuperAgent) hasMainRouter() bool { return a.mainRoute != nil || a.mainBatchRoute != nil }
 
 func copyMainInput(input MainInput) MainInput {
+	input.HistoryRefs = slices.Clone(input.HistoryRefs)
 	input.Report = copyReport(input.Report)
 	input.Control = copyControl(input.Control)
 	input.Handback = copyHandback(input.Handback)
@@ -66,14 +68,18 @@ func (a *SuperAgent) dispatchMainBatch() bool {
 		return false
 	}
 	job := MainBatchJob{SessionID: a.main.id, ProviderSessionID: a.main.providerID}
+	job.History = a.newMainHistory()
 	for _, item := range a.main.inbox[a.main.cursor:] {
 		if len(job.Inputs) == a.mainBatchOptions.MaxItems {
 			break
 		}
-		candidate := append(job.Inputs, copyMainInput(item.input))
+		input := copyMainInput(item.input)
+		a.addHistoryRefs(&input)
+		candidate := append(job.Inputs, input)
 		encoded, err := json.Marshal(candidate)
 		if err != nil || len(encoded) > a.mainBatchOptions.MaxInputBytes {
 			if len(job.Inputs) == 0 {
+				job.History.close()
 				a.failMainBatch([]string{item.input.ID}, errors.New("main input exceeds batch input budget"), "Main input exceeds the configured batch input budget.")
 				return true
 			}
@@ -83,6 +89,7 @@ func (a *SuperAgent) dispatchMainBatch() bool {
 	}
 	if len(a.main.snapshot) != 0 {
 		if err := decodeSnapshot(a.main.snapshot, &job.Snapshot); err != nil {
+			job.History.close()
 			a.failMainBatch(batchInputIDs(job.Inputs), err, "Main snapshot could not be read.")
 			return true
 		}
@@ -131,6 +138,7 @@ func (a *SuperAgent) runMainBatch(job MainBatchJob) {
 		runs[run] = true
 	}
 	out, err := callMainBatch(a.ctx, a.mainBatchRoute, job)
+	job.History.close()
 	decisions := make(map[string]MainDecision, len(out.Decisions))
 	if err == nil {
 		if len(out.Decisions) != len(inputIDs) {
