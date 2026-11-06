@@ -176,10 +176,14 @@ type host struct {
 	workerToolCalls   int
 	subtaskToolCalls  int
 	beforeEffect      func(context.Context, Effect) error
+	toolLifecycle     func() func()
 }
 
 func (h *host) worker() (superagent.Worker, error) {
 	tool := agent.ToolDefinition{Name: "record", Parameters: schema(`{"type":"object","properties":{"source":{"type":"string"},"event_id":{"type":"string"},"work_id":{"type":"string"},"value":{"type":"string"}},"required":["source","event_id","work_id","value"],"additionalProperties":false}`), Execute: func(ctx context.Context, tc agent.ToolExecutionContext) (agent.ToolResult, error) {
+		if h.toolLifecycle != nil {
+			defer h.toolLifecycle()()
+		}
 		var e Effect
 		if err := json.Unmarshal(tc.ToolCall.Arguments, &e); err != nil {
 			return agent.ToolResult{}, err
