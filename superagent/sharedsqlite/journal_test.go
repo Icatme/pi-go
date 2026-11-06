@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -17,7 +18,11 @@ func transition(id string) session.NewEntry {
 	return session.NewEntry{ID: id, Type: session.EntryTypeCustom, Custom: &session.CustomData{CustomType: "superagent.transition", Payload: []byte(`{"event":"test"}`)}}
 }
 func TestPersistenceDetachedAndLease(t *testing.T) {
-	p := filepath.Join(privateDir(t), "journal ?#.sqlite")
+	name := "journal +%?#.sqlite"
+	if runtime.GOOS == "windows" {
+		name = "journal +%#.sqlite" // A literal question mark is not a valid filename on Windows.
+	}
+	p := filepath.Join(privateDir(t), name)
 	j, err := Open(context.Background(), p, Options{Domain: "team", Owner: "one", LeaseTTL: time.Second})
 	if err != nil {
 		t.Fatal(err)
@@ -165,6 +170,13 @@ func TestRejectSchemaAndUnsafePaths(t *testing.T) {
 	for _, p := range []string{"", ":memory:", "file:state.db?mode=memory"} {
 		if _, err := Open(ctx, p, Options{Domain: "d", Owner: "o"}); err == nil {
 			t.Fatalf("accepted %q", p)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		for _, p := range []string{`\\localhost\share\state.db`, `\\?\C:\state.db`, `\\.\C:\state.db`} {
+			if _, err := connect(ctx, p); err == nil || !strings.Contains(err.Error(), "UNC and device paths") {
+				t.Fatalf("expected explicit namespace rejection for %q: %v", p, err)
+			}
 		}
 	}
 	for _, change := range []string{"PRAGMA user_version=2", "CREATE TABLE unexpected(x)", "CREATE VIEW unexpected AS SELECT 1"} {
