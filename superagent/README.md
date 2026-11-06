@@ -14,10 +14,11 @@ The opt-in [local helper backend](../agent/background/helper/README.md) adds
 durable background identities and host-registered Linux helper processes.
 Recovery observes the original operation without relaunch; unknown execution
 retains review and quota. It is not a sandbox or real-device acceptance.
-The optional [PostgreSQL adapter](sharedpostgres/README.md) uses a host-owned
-`database/sql` connection and the same coordinator interface. Its client protocol
-has offline coverage, but real PostgreSQL/host/network fault validation has not
-run; M6b remains a draft development slice, not production acceptance.
+The bundled leased journal uses [SQLite on one host](sharedsqlite/README.md)
+with a local filesystem. Hosts that need PostgreSQL or another shared backend
+implement the public `Journal` and `LeasedJournal` contracts and pass an already
+claimed journal to `OpenMainJournal` with `MainJournalOptions`. The host owns its driver,
+schema, connection lifecycle, lease renewal and backend validation.
 For opt-in read-only Watchdog inspection, independent clock/session and durable
 recheck evidence, see [M8a](../docs/superagent-m8a.md) and
 `ExampleSuperAgent_CheckWatchdog`. For a separately host-authorized, durable
@@ -61,6 +62,25 @@ The returned boolean distinguishes a new admission from a duplicate. Use
 for all admitted events. Call `s.Close()` in the service shutdown path.
 The [runnable Go example](example_test.go) submits an event and reads its
 report using the offline model.
+
+The public `Journal` interface consists of `Header() session.Header`,
+`Log() []session.LogItem`,
+`AppendEntry(string, session.NewEntry) (session.Entry, error)` and `Close() error`.
+It stores a coherent, ordered main-lane log using the public `agent/session` types.
+`LeasedJournal` embeds `Journal` and adds `Context() context.Context`.
+Each append on a leased journal must atomically verify the current
+unexpired ownership epoch and expected log head together with its durable write.
+`Header`, `Log` and `AppendEntry` return detached values. Losing ownership or an
+uncertain commit must cancel `Context` and stop further writes. `Close` releases
+only that owner's epoch. Expired epochs cannot renew. The lease covers the whole authorization
+domain, with parallel Workers inside its owner. See the authoritative
+[Journal and LeasedJournal contracts](journal.go).
+
+Set exactly one of `MainJournalOptions.Router` and `BatchRouter`, supply `Worker`
+and `Parallel`, and explicitly configure `Background` when required. After
+argument validation, `OpenMainJournal` owns the journal, including replay failure.
+Its `Close` waits for callbacks before closing the journal. Host implementations
+must retain the existing interrupted-work and uncertain-delivery review barriers.
 
 ## Consuming reports without losing fanout outcomes
 
