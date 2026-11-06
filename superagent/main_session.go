@@ -139,6 +139,13 @@ func OpenMain(ctx context.Context, path string, parallel int, route MainRouter, 
 }
 
 func openMain(ctx context.Context, path string, parallel int, route MainRouter, batch MainBatchRouter, options MainBatchOptions, work Worker) (*SuperAgent, error) {
+	return openMainConfigured(ctx, path, parallel, route, batch, options, work, nil)
+}
+
+func openMainConfigured(ctx context.Context, path string, parallel int, route MainRouter, batch MainBatchRouter, options MainBatchOptions, work Worker, backgroundOptions *BackgroundOptions) (*SuperAgent, error) {
+	if err := validateBackgroundOptions(backgroundOptions); err != nil {
+		return nil, err
+	}
 	if ctx == nil || path == "" || parallel < 1 || parallel > 64 || (route == nil && batch == nil) || work == nil {
 		return nil, errors.New("superagent: require a context, path, 1–64 workers, main router and worker")
 	}
@@ -166,8 +173,12 @@ func openMain(ctx context.Context, path string, parallel int, route MainRouter, 
 			return nil, errors.Join(err, a.Close())
 		}
 	}
+	if err := a.configureBackground(backgroundOptions); err != nil {
+		return nil, errors.Join(err, a.Close())
+	}
 	a.parallel, a.mainRoute, a.work = parallel, route, work
 	a.mainBatchRoute, a.mainBatchOptions = batch, options
+	a.startBackgroundWatchers()
 	a.wg.Add(1)
 	go a.schedule()
 	return a, nil
@@ -200,6 +211,12 @@ func copyReport(report *Report) *Report {
 	}
 	copy := *report
 	copy.Receipts = slices.Clone(report.Receipts)
+	if report.Background != nil {
+		c := *report.Background
+		c.Output = nil
+		c.Receipts = slices.Clone(c.Receipts)
+		copy.Background = &c
+	}
 	return &copy
 }
 

@@ -30,7 +30,7 @@ func deliveryID(index int) string { return "delivery-" + strconv.Itoa(index+1) }
 func cloneReports(reports []Report) []Report {
 	out := slices.Clone(reports)
 	for i := range out {
-		out[i].Receipts = slices.Clone(out[i].Receipts)
+		out[i] = *copyReport(&out[i])
 	}
 	return out
 }

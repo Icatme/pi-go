@@ -42,7 +42,9 @@ type RunTarget struct {
 }
 
 type Job struct {
-	TaskID string
+	Background           *BackgroundControl    `json:"-"`
+	BackgroundCompletion *BackgroundCompletion `json:"-"`
+	TaskID               string
 	// DeliveryID identifies this admission's target within the journal. It is
 	// stable across replay, distinct from the task and external event, and not
 	// an authorization token. Standalone Worker calls may leave it empty.
@@ -96,10 +98,11 @@ type View struct {
 }
 
 type TaskStatus struct {
-	ID      string `json:"id"`
-	Status  string `json:"status"`
-	Summary string `json:"summary"`
-	Pending int    `json:"pending"`
+	BackgroundReview []string `json:"background_review,omitempty"`
+	ID               string   `json:"id"`
+	Status           string   `json:"status"`
+	Summary          string   `json:"summary"`
+	Pending          int      `json:"pending"`
 	// ActiveSource and ActiveEventID identify the controllable invocation.
 	// A finalizing worker has returned and is publishing its outcome.
 	ActiveSource     string `json:"active_source,omitempty"`
@@ -111,6 +114,8 @@ type TaskStatus struct {
 }
 
 type Report struct {
+	// Background contains authoritative operation facts, never private output.
+	Background *BackgroundCompletion `json:"background,omitempty"`
 	// DeliveryID is the opaque, stable identity of one terminal outcome in
 	// this journal, including unassigned/ignored events. Deduplicate reports
 	// by (host journal identity, DeliveryID), never Source/EventID alone.
