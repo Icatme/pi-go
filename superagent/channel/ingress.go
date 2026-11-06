@@ -43,7 +43,9 @@ type Identity struct {
 // message_id, text. GitHub supports issue_comment created/edited on PRs,
 // pull_request_review submitted, and pull_request_review_comment created/edited.
 // GitHub Thread is the canonical repositoryID/pull/number string; Organization
-// and Principal are canonical decimal owner account (User or Organization) and sender IDs.
+// and Principal are canonical decimal owner account (User or Organization) and
+// sender IDs. For edited comments, sender is the editor, not necessarily the
+// original author in comment.user; only sender is bound to Principal.
 // Authentication, authorization policy and replay handling remain host/Admit work.
 func Normalize(protocol Protocol, source string, identity Identity, body []byte) (superagent.AdmissionEnvelope, error) {
 	var zero superagent.AdmissionEnvelope
@@ -161,8 +163,15 @@ func ingressGitHubText(root map[string]any, id Identity) (string, error) {
 		return "", errors.New("GitHub message identity mismatch")
 	}
 	if org == "" || actor == "" || repository == "" || number == "" ||
-		org != id.Organization || actor != id.Principal || repository+"/pull/"+number != id.Thread || ingressDecimalID(ingressObject(content, "user")["id"]) != actor {
+		org != id.Organization || actor != id.Principal || repository+"/pull/"+number != id.Thread {
 		return "", errors.New("GitHub identity does not match host")
+	}
+	// A maintainer may edit another user's comment. Validate the original
+	// author independently; authorization always applies to the authenticated
+	// sender above. Creation and review submission still require that author.
+	author := ingressDecimalID(ingressObject(content, "user")["id"])
+	if author == "" || (action != "edited" && author != actor) {
+		return "", errors.New("invalid GitHub content author")
 	}
 	if organization, exists := root["organization"]; exists {
 		o, ok := organization.(map[string]any)

@@ -37,10 +37,15 @@ GitHub uses a bounded webhook JSON subset and a host-authenticated `EventType`:
 
 Identity.Organization is repository.owner.id (personal or organization account),
 Principal is sender.id, Thread is `repository.id/pull/number`, and MessageID is
-the raw comment/review ID. Sender must match the content's user.id; an edit by a
-different actor is outside this slice. EventID is the stable authenticated
-webhook delivery ID, not the message ID. Numeric IDs remain exact through uint64;
-body must be a string, so null-body review events are not generalized.
+the raw comment/review ID. For `edited` comments, sender is the current editor,
+while comment.user.id identifies the original author and may differ. The author
+must still be a valid positive decimal ID, but does not grant the editor any
+authority. Created comments and submitted reviews require sender and author to
+match. The host must authenticate and authorize the editor, target PR, intent
+and any task/thread association; the payload cannot confer those permissions.
+EventID is the stable authenticated webhook delivery ID, not the message ID.
+Numeric IDs remain exact through uint64; body must be a string, so null-body
+review events are not generalized.
 GitHub's extra payload fields are tolerated but cannot change authority.
 
 The normalized envelope persists the platform object kind plus ID, e.g.
