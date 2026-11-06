@@ -12,6 +12,14 @@ import (
 
 type frameEncoder interface{ Encode(any) error }
 
+// One staged observation batch. Cursors acknowledge staging or a completed
+// direct write, never external transport delivery or durable consumption.
+type outputBatch struct {
+	reports  []superagent.Report
+	replies  []superagent.Reply
+	failures []superagent.MainFailure
+}
+
 // Only the dispatcher appends. If the stdout goroutine falls behind, spool
 // replies in order without blocking controls or growing an in-memory queue.
 // Ownership of each sealed file passes to the writer through ready.
@@ -57,6 +65,28 @@ func (q *frameQueue) finish() {
 }
 
 func writeFrame(out frameEncoder, frame any) error {
+	if batch, ok := frame.(outputBatch); ok {
+		if err := writeReports(out, batch.reports); err != nil {
+			return err
+		}
+		for _, reply := range batch.replies {
+			if err := out.Encode(struct {
+				Type string `json:"type"`
+				superagent.Reply
+			}{"REPLY", reply}); err != nil {
+				return err
+			}
+		}
+		for _, failure := range batch.failures {
+			if err := out.Encode(struct {
+				Type string `json:"type"`
+				superagent.MainFailure
+			}{"MAIN_ERROR", failure}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if reports, ok := frame.([]superagent.Report); ok {
 		return writeReports(out, reports)
 	}

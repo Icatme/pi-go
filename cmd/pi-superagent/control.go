@@ -14,14 +14,15 @@ import (
 )
 
 const controlHelp = `While run is reading stdin, send {"op":"status"} for task IDs and active source/event IDs.
-Use subscribe or unsubscribe with task_id for live progress. Use steer or abort with task_id, source and event_id from the active run; steer also takes text.
+Use subscribe or unsubscribe with task_id for lossy local progress; these never change durable Thread routing subscriptions. Use steer or abort with task_id, source and event_id from the active run; steer also takes text.
+Use ack_reply with reply_id only after directly consuming a REPLY. It is idempotent, not an external-platform delivery receipt, and cannot resolve an external send attempt.
 Control frames may include request_id (up to 256 UTF-8 bytes). Responses carry input_line for correlation. STEER_QUEUED is followed by STEER_DELIVERED or STEER_NOT_DELIVERED when the receipt settles.`
 
 const maxWaitingSteers = 128
 
 type controlCommand struct {
-	op, requestID, task, source, event, text string
-	line                                     int
+	op, requestID, task, source, event, text, replyID string
+	line                                              int
 }
 
 // An object with an op is a control frame. Other input retains the trigger
@@ -62,15 +63,18 @@ func parseControl(raw []byte, line int) (*controlCommand, error) {
 		return c, errors.New("request_id exceeds 256 UTF-8 bytes")
 	}
 	c.requestID = values["request_id"]
-	for _, name := range []string{"task_id", "source", "event_id"} {
+	for _, name := range []string{"task_id", "source", "event_id", "reply_id"} {
 		if len(values[name]) > 256 {
 			return c, fmt.Errorf("control field %q exceeds 256 UTF-8 bytes", name)
 		}
 	}
 	c.op, c.task, c.source, c.event, c.text = values["op"], values["task_id"], values["source"], values["event_id"], values["text"]
+	c.replyID = values["reply_id"]
 	var required []string
 	switch c.op {
 	case "status":
+	case "ack_reply":
+		required = []string{"reply_id"}
 	case "subscribe", "unsubscribe":
 		required = []string{"task_id"}
 	case "abort":
@@ -125,13 +129,14 @@ type controlResponse struct {
 	TaskID    string                   `json:"task_id,omitempty"`
 	Source    string                   `json:"source,omitempty"`
 	EventID   string                   `json:"event_id,omitempty"`
+	ReplyID   string                   `json:"reply_id,omitempty"`
 	Error     string                   `json:"error,omitempty"`
 	Tasks     *[]superagent.TaskStatus `json:"tasks,omitempty"`
 	Progress  *superagent.Progress     `json:"progress,omitempty"`
 }
 
 func (c controlCommand) response(kind string) controlResponse {
-	return controlResponse{Type: kind, Op: c.op, InputLine: c.line, RequestID: c.requestID, TaskID: c.task, Source: c.source, EventID: c.event}
+	return controlResponse{Type: kind, Op: c.op, InputLine: c.line, RequestID: c.requestID, TaskID: c.task, Source: c.source, EventID: c.event, ReplyID: c.replyID}
 }
 
 func (c controlCommand) progress(p superagent.Progress) controlResponse {
@@ -199,6 +204,11 @@ func (c *controls) apply(cmd controlCommand, parseErr error) error {
 	}
 	target := superagent.RunTarget{TaskID: cmd.task, Source: cmd.source, EventID: cmd.event}
 	switch cmd.op {
+	case "ack_reply":
+		if err := c.session.s.AcknowledgeReply(cmd.replyID); err != nil {
+			return reject(err)
+		}
+		return c.session.out.Encode(cmd.response("REPLY_ACKNOWLEDGED"))
 	case "status":
 		tasks := c.session.s.Status().Tasks
 		if tasks == nil {
