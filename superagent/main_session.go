@@ -156,6 +156,11 @@ func openMainConfigured(ctx context.Context, path string, parallel int, route Ma
 	if err != nil {
 		return nil, err
 	}
+	return startMain(a, parallel, route, batch, options, work, backgroundOptions)
+}
+
+func startMain(a *SuperAgent, parallel int, route MainRouter, batch MainBatchRouter, options MainBatchOptions, work Worker, backgroundOptions *BackgroundOptions) (*SuperAgent, error) {
+	var err error
 	if err := a.recoverInterrupted(); err != nil {
 		return nil, errors.Join(err, a.Close())
 	}

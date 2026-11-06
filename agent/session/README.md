@@ -21,6 +21,11 @@ Opening a writable file locks its actual handle before loading or repairing it.
 Unix uses `flock`; Windows uses a reserved byte-range lock beyond EOF. All
 supported library write paths honor that lock, including path aliases and
 separate repository objects. Read-only header inspection remains available.
+`ReadJSONLSnapshot` takes that same lock, validates without repairing, and
+returns a detached header and flattened ordered log (including batch records).
+It releases the lock before returning; migration callers must keep old writers
+quiesced through cutover.
+
 `Close` and process exit release the lock. These are cooperative local-file
 locks, not distributed database transactions.
 

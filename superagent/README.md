@@ -8,6 +8,8 @@ For exact reply delivery attempts, verification, safe retries and echo filtering
 see [M1c](../docs/superagent-m1c.md) and `ExampleSuperAgent_BeginReplyDelivery`.
 For same-chat independent work, explicit task updates, and persisted correction
 evidence, see [M2a](../docs/superagent-m2a.md) and `ExampleSuperAgent_SubmitTask`.
+For optional same-host SQLite leases, fencing and JSONL import, see
+[M6a](../docs/superagent-m6a.md) and `ExampleOpenMainJournal`.
 The existing `Open` examples below retain the stateless Router contract.
 
 SuperAgent is an opt-in coordinator in the pi-go module. An incoming conversation

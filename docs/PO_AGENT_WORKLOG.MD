@@ -2973,3 +2973,20 @@
   computer, extra billed task, merge or deployment was used.
 - Exact inputs, verification scope and limitations are recorded in
   [the integration report](superagent-m2a-snapshot-integration.md).
+
+## 2026-11-05 - SuperAgent shared-state lease slice
+
+- Based on M5a draft #169, added optional same-host SQLite domain leases and
+  fenced coordinator append. Existing JSONL APIs and the single coordinator
+  scheduler remain unchanged. Driver selection and remaining M6 scope are in
+  [M6a](superagent-m6a.md); this is not multi-host or production validation.
+- Read-only locked JSONL snapshots reject torn tails without repair. Atomic
+  import retains legacy single/batch records, task/provider/delivery identities,
+  subscriptions, private snapshots, reply attempts and external-effect review.
+- Offline full tests, vet, full race, storage and integration race repeated 20 times,
+  external examples tests/vet passed on Linux amd64 Go 1.26.10. Real subprocess
+  contention, kill/recovery and SIGSTOP/takeover/SIGCONT fence old writers.
+  Independent review's URI space-escaping finding was fixed and re-reviewed.
+- No live provider/platform, production DB, user-local task, manual CI, merge or
+  deployment. Shared files require a trusted private local directory. External
+  effects still need exact-operation evidence; lease fencing cannot undo them.
