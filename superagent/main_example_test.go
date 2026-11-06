@@ -50,3 +50,49 @@ func ExampleOpenMain() {
 	}
 	// Output: 27 completed pending
 }
+
+func ExampleSuperAgent_MainControls() {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "superagent-controls-*")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(dir)
+	started := make(chan struct{})
+	router := func(_ context.Context, job superagent.MainJob) (superagent.MainOutcome, error) {
+		decision := superagent.MainDecision{Action: "new"}
+		if job.Input.Kind == "worker_result" {
+			decision.Action = "ignore"
+		} else if job.Input.Trigger.ID == "stop" {
+			// Select a full offered identity, never only a reusable task ID.
+			target := job.Runs[0]
+			decision = superagent.MainDecision{Action: "cancel", Target: &target}
+		}
+		return superagent.MainOutcome{Decision: decision, Snapshot: job.Snapshot}, nil
+	}
+	worker := func(ctx context.Context, job superagent.Job) (superagent.Outcome, error) {
+		close(started)
+		<-ctx.Done()
+		return superagent.Outcome{Snapshot: agent.AgentSnapshot{SessionID: job.TaskID}}, ctx.Err()
+	}
+	a, err := superagent.OpenMain(ctx, filepath.Join(dir, "main.jsonl"), 1, router, worker)
+	if err != nil {
+		panic(err)
+	}
+	defer a.Close()
+	if _, err := a.Submit(superagent.Trigger{ID: "start", Source: "im", Thread: "work", Kind: "request", Text: "Analyze logs"}); err != nil {
+		panic(err)
+	}
+	<-started
+	// M1 retains legacy known-thread routing. This unbound control conversation
+	// reaches main; same-chat topic/control classification is the M2 follow-on.
+	if _, err := a.Submit(superagent.Trigger{ID: "stop", Source: "im", Thread: "operator", Kind: "request", Text: "Stop analyzing logs"}); err != nil {
+		panic(err)
+	}
+	if err := a.WaitIdle(ctx); err != nil {
+		panic(err)
+	}
+	action := a.MainControls()[0]
+	fmt.Println(action.EventID, action.Status, a.Status().Tasks[0].Status)
+	// Output: stop cancel_requested needs_review
+}

@@ -36,15 +36,18 @@ type MainJob struct {
 	Input             MainInput
 	Snapshot          agent.AgentSnapshot
 	Tasks             []TaskInfo
+	// Runs lists only the currently controllable invocations offered this turn.
+	Runs []RunTarget
 }
 
-// MainDecision deliberately implements only the first M1 slice. A result
+// MainDecision selects one coordinator action. A result
 // event can be replied to or ignored, never used to start new business work.
 // Reply destinations come from the input, not from model-generated fields.
 type MainDecision struct {
-	Action string `json:"action"` // new, attach, reply, or ignore
-	TaskID string `json:"task_id,omitempty"`
-	Text   string `json:"text,omitempty"`
+	Action string     `json:"action"` // new, attach, steer, cancel, reply, clarify, ignore
+	TaskID string     `json:"task_id,omitempty"`
+	Text   string     `json:"text,omitempty"`
+	Target *RunTarget `json:"target,omitempty"`
 }
 
 type MainOutcome struct {
@@ -81,6 +84,7 @@ type mainState struct {
 	cursor         int
 	running        bool
 	replies        []Reply
+	controls       []MainControl
 	failures       []MainFailure
 	causes         map[string]error
 }
@@ -101,6 +105,7 @@ type mainTransition struct {
 	Snapshot          json.RawMessage `json:"snapshot,omitempty"`
 	Assignment        *transition     `json:"assignment,omitempty"`
 	ReplyID           string          `json:"reply_id,omitempty"`
+	ControlIDs        []string        `json:"control_ids,omitempty"`
 }
 
 // OpenMain opens the persistent main session for this journal's single host
@@ -127,6 +132,9 @@ func OpenMain(ctx context.Context, path string, parallel int, route MainRouter, 
 		if err != nil {
 			return nil, errors.Join(err, a.Close())
 		}
+	}
+	if err := a.recoverMainControls(); err != nil {
+		return nil, errors.Join(err, a.Close())
 	}
 	a.parallel, a.mainRoute, a.work = parallel, route, work
 	a.wg.Add(1)
@@ -173,6 +181,12 @@ func (a *SuperAgent) dispatchMain() bool {
 	for _, id := range a.taskIDs[max(0, len(a.taskIDs)-maxCandidates):] {
 		job.Tasks = append(job.Tasks, TaskInfo{ID: id, Summary: a.tasks[id].summary})
 	}
+	// Active controls are bounded by the worker limit, not the history window.
+	for _, id := range a.taskIDs {
+		if r := a.tasks[id].active; r != nil && !r.returned && !r.aborted {
+			job.Runs = append(job.Runs, r.target)
+		}
+	}
 	a.main.running = true
 	a.wg.Add(1)
 	go a.runMain(job)
@@ -195,7 +209,15 @@ func (a *SuperAgent) runMain(job MainJob) {
 	for _, task := range job.Tasks {
 		ids[task.ID] = true
 	}
+	runs := make(map[RunTarget]bool, len(job.Runs))
+	for _, target := range job.Runs {
+		runs[target] = true
+	}
 	out, err := callMain(a.ctx, a.mainRoute, job)
+	if out.Decision.Target != nil {
+		target := *out.Decision.Target
+		out.Decision.Target = &target
+	}
 	var snapshot json.RawMessage
 	if err == nil {
 		snapshot, err = encodeSnapshot(out.Snapshot, job.SessionID)
@@ -214,13 +236,20 @@ func (a *SuperAgent) runMain(job MainJob) {
 	if err == nil && out.Decision.Action == "attach" && !ids[out.Decision.TaskID] {
 		err = errors.New("main router selected a task not offered to this turn")
 	}
+	if err == nil && (out.Decision.Action == "steer" || out.Decision.Action == "cancel") {
+		if out.Decision.Target == nil || !runs[*out.Decision.Target] {
+			err = errors.New("main router selected an invocation not offered to this turn")
+		} else if r, targetErr := a.activeLocked(*out.Decision.Target); targetErr != nil || r.aborted {
+			err = errors.New("main router selected an invocation no longer controllable")
+		}
+	}
 	if err == nil {
 		switch out.Decision.Action {
 		case "new":
 			m.Assignment = &transition{State: "queued", Index: a.main.inbox[a.main.cursor].event, Task: a.nextTaskID(), ProviderSessionID: rand.Text()}
 		case "attach":
 			m.Assignment = &transition{State: "queued", Index: a.main.inbox[a.main.cursor].event, Task: out.Decision.TaskID}
-		case "reply":
+		case "reply", "clarify":
 			m.ReplyID = "reply-" + job.Input.ID
 		}
 		err = a.validateMain(transition{State: "main_decided", Main: m})
@@ -255,6 +284,9 @@ func (a *SuperAgent) validateMain(tr transition) error {
 	}
 	if a.main.id == "" {
 		return errors.New("main session is not active")
+	}
+	if strings.HasPrefix(tr.State, "control_") {
+		return a.validateMainControl(tr)
 	}
 	if tr.State == "reply_started" || tr.State == "reply_acknowledged" {
 		for _, reply := range a.main.replies {
@@ -291,6 +323,9 @@ func (a *SuperAgent) validateMain(tr transition) error {
 		return errors.New("invalid main snapshot")
 	}
 	d := m.Decision
+	if d.Action != "steer" && d.Action != "cancel" && d.Target != nil {
+		return errors.New("unexpected main control target")
+	}
 	if item.input.Kind == "worker_result" && d.Action != "reply" && d.Action != "ignore" {
 		return errors.New("worker result cannot authorize new work")
 	}
@@ -310,7 +345,11 @@ func (a *SuperAgent) validateMain(tr transition) error {
 		} else if a.tasks[d.TaskID] == nil || assignment.Task != d.TaskID || assignment.ProviderSessionID != "" {
 			return errors.New("invalid main attachment")
 		}
-	case "reply":
+	case "steer", "cancel":
+		if err := a.validateControlDecision(item.input, m); err != nil {
+			return err
+		}
+	case "reply", "clarify":
 		if d.TaskID != "" || strings.TrimSpace(d.Text) == "" || !utf8.ValidString(d.Text) || len(d.Text) > maxReportBytes || m.Assignment != nil || m.ReplyID != "reply-"+m.InputID {
 			return errors.New("invalid main reply")
 		}
@@ -333,6 +372,12 @@ func (a *SuperAgent) applyMain(tr transition, replay bool) error {
 		return err
 	}
 	m := tr.Main
+	if strings.HasPrefix(tr.State, "control_") {
+		for _, id := range m.ControlIDs {
+			a.mainControl(id).Status = strings.TrimPrefix(tr.State, "control_")
+		}
+		return nil
+	}
 	switch tr.State {
 	case "main_opened":
 		a.main.id, a.main.providerID = m.SessionID, m.ProviderSessionID
@@ -378,7 +423,10 @@ func (a *SuperAgent) applyMain(tr transition, replay bool) error {
 		a.main.failures = append(a.main.failures, MainFailure{InputID: m.InputID, Text: tr.Text})
 	} else {
 		a.main.snapshot = slices.Clone(m.Snapshot)
-		if m.Decision.Action == "reply" {
+		if m.Decision.Action == "steer" || m.Decision.Action == "cancel" {
+			a.main.controls = append(a.main.controls, MainControl{ID: "control-" + m.InputID, DecisionID: m.DecisionID, InputID: m.InputID, Source: item.input.Trigger.Source, Thread: item.input.Trigger.Thread, EventID: item.input.Trigger.ID, Action: m.Decision.Action, Target: *m.Decision.Target, Text: m.Decision.Text, Status: "pending"})
+		}
+		if m.Decision.Action == "reply" || m.Decision.Action == "clarify" {
 			reply := Reply{ID: m.ReplyID, DecisionID: m.DecisionID, InputID: m.InputID, DelegationID: item.input.DelegationID, Source: item.input.Trigger.Source, Thread: item.input.Trigger.Thread, EventID: item.input.Trigger.ID, Text: m.Decision.Text, Status: "pending", Report: copyReport(item.input.Report)}
 			if reply.Report != nil {
 				reply.TaskID = reply.Report.TaskID
