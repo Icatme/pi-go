@@ -203,15 +203,26 @@ func TestReopenRejectsChangedGrantAndCorruptRegistry(t *testing.T) {
 
 func TestRequestBoundaryAndDetachedAuthorization(t *testing.T) {
 	b, _ := fixture(t)
-	for _, mutate := range []func(*background.Request){func(r *background.Request) { r.Scope = "wrong" }, func(r *background.Request) { r.Call.Name = "/bin/sh" }, func(r *background.Request) { r.Call.Arguments = json.RawMessage(`[]`) }, func(r *background.Request) { r.Call.ParsedArgs = map[string]any{"command": "x"} }} {
+	b.opts.Authorize = func(context.Context, Authorization) (uint64, error) {
+		t.Error("invalid request reached host authorization")
+		return 0, ErrDenied
+	}
+	for name, mutate := range map[string]func(*background.Request){
+		"wrong scope":         func(r *background.Request) { r.Scope = "wrong" },
+		"unregistered tool":   func(r *background.Request) { r.Call.Name = "/bin/sh" },
+		"non-object":          func(r *background.Request) { r.Call.Arguments = json.RawMessage(`[]`) },
+		"invalid Unicode":     func(r *background.Request) { r.Call.Arguments = json.RawMessage(`{"name":"\ud800"}`) },
+		"parsed arguments":    func(r *background.Request) { r.Call.ParsedArgs = map[string]any{"command": "x"} },
+		"empty parsed object": func(r *background.Request) { r.Call.ParsedArgs = map[string]any{} },
+	} {
 		r := request("one")
 		mutate(&r)
 		if e := b.Start(t.Context(), r); !errors.Is(e, ErrInvalid) {
-			t.Fatalf("invalid request admitted: %v", e)
+			t.Errorf("%s: got %v, want ErrInvalid", name, e)
 		}
 	}
-	if len(b.ops) != 0 {
-		t.Fatal("invalid input reserved quota")
+	if b.seq != 0 || b.failed {
+		t.Fatal("invalid input changed the registry")
 	}
 	b.opts.Authorize = func(_ context.Context, a Authorization) (uint64, error) {
 		if a.Request != nil {
