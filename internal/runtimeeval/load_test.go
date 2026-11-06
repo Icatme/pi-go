@@ -43,7 +43,7 @@ func TestLoadScorerRejectsFaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fault := range []string{"drop", "duplicate", "misroute", "receipt", "receipt_id", "receipt_domain", "receipt_commit", "reply", "history", "batch", "input", "peak", "clock", "metric", "cost", "reopen"} {
+	for _, fault := range []string{"drop", "duplicate", "misroute", "receipt", "receipt_id", "receipt_domain", "receipt_commit", "reply", "history", "batch", "input", "peak", "clock", "empty_effect", "empty_release", "metric", "cost", "reopen"} {
 		t.Run(fault, func(t *testing.T) {
 			raw, _ := json.Marshal(suite.Runs[1])
 			var r LoadResult
@@ -94,6 +94,10 @@ func TestLoadScorerRejectsFaults(t *testing.T) {
 				r.PeakTools = 5
 			case "clock":
 				r.ToolReleases[0].ReleaseMS++
+			case "empty_effect":
+				r.Effects[0] = Effect{}
+			case "empty_release":
+				r.ToolReleases[0].Effect = Effect{}
 			case "metric":
 				r.Metrics.WorkerInvocations++
 			case "cost":
