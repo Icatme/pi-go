@@ -72,6 +72,9 @@ func connect(ctx context.Context, path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	if strings.HasPrefix(filepath.VolumeName(abs), `\\`) {
+		return nil, errors.New("sharedsqlite: Windows UNC and device paths are unsupported")
+	}
 	parent, err := os.Stat(filepath.Dir(abs))
 	if err != nil {
 		return nil, err
@@ -96,11 +99,9 @@ func connect(ctx context.Context, path string) (*sql.DB, error) {
 	if !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0) {
 		return nil, errors.New("sharedsqlite: database must be a private regular file (0600)")
 	}
-	p := filepath.ToSlash(abs)
-	if runtime.GOOS == "windows" && !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-	u := url.URL{Scheme: "file", Path: p}
+	// The Go VFS opens the decoded path directly. Preserve drive-qualified
+	// Windows paths as C:/... because /C:/... is not a Windows file path.
+	u := url.URL{Path: filepath.ToSlash(abs)}
 	q := url.Values{}
 	q.Set("mode", "rwc")
 	q.Set("modeof", abs)
@@ -108,8 +109,8 @@ func connect(ctx context.Context, path string) (*sql.DB, error) {
 	q.Add("_pragma", "foreign_keys(1)")
 	q.Add("_pragma", "synchronous(FULL)")
 	// SQLite URI parameters use percent escaping, not HTML form plus escaping.
-	u.RawQuery = strings.ReplaceAll(q.Encode(), "+", "%20")
-	db, err := sql.Open("sqlite3", u.String())
+	dsn := "file:" + u.EscapedPath() + "?" + strings.ReplaceAll(q.Encode(), "+", "%20")
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, err
 	}
