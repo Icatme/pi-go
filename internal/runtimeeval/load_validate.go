@@ -98,7 +98,8 @@ func ValidateLoad(events []Event, r LoadResult) error {
 	seenEffects := map[string]bool{}
 	for _, e := range r.Effects {
 		k := e.Source + "/" + e.EventID
-		if seenEffects[k] || effects[k] != e {
+		want, ok := effects[k]
+		if !ok || seenEffects[k] || want != e {
 			return fmt.Errorf("incorrect actual effect %s", k)
 		}
 		seenEffects[k] = true
@@ -165,7 +166,8 @@ func ValidateLoad(events []Event, r LoadResult) error {
 	released, ticks := map[string]bool{}, map[int]int{}
 	for _, release := range r.ToolReleases {
 		k := release.Effect.Source + "/" + release.Effect.EventID
-		if released[k] || effects[k] != release.Effect || release.StartMS < 0 || release.ReleaseMS != release.StartMS+loadServiceMS || release.ReleaseMS%loadServiceMS != 0 || release.StartMS/50 != phases[k] {
+		want, ok := effects[k]
+		if !ok || released[k] || want != release.Effect || release.StartMS < 0 || release.ReleaseMS != release.StartMS+loadServiceMS || release.ReleaseMS%loadServiceMS != 0 || release.StartMS/50 != phases[k] {
 			return fmt.Errorf("virtual tool release %s", k)
 		}
 		released[k] = true

@@ -35,3 +35,5 @@ actually tested here. No network filesystems, multi-host use, alternative VFS or
 `sqlite3_dotlk` builds. Unix database files are private 0600 and require a private
 parent directory; Windows needs equivalent host-managed ACLs. External effects
 remain subject to the coordinator's existing review and reconciliation barriers.
+On Windows use a drive-qualified path on a local disk. UNC and device namespace
+paths are rejected before accessing the filesystem.
