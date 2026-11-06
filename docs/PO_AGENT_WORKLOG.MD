@@ -3561,3 +3561,32 @@
   database service, user computer, Codex task, extra paid service, CI dispatch,
   source tag, merge or deployment was used. Windows/macOS execution and full-root
   race testing were not performed for this slice. See [M3d](superagent-m3d.md).
+
+## 2026-11-06 - M6d journal growth and replay baseline
+
+- Added a test-only synthetic custom-Router fixture and JSONL open, detached
+  Log-copy and coordinator-restore benchmarks. Fixed 4 KiB message snapshots
+  and growing 256-byte-text-per-input snapshots each cover 100/1,000 inputs;
+  generation is excluded from timing. No runtime/API, journal format, dependency
+  or SQLite adapter changed.
+- Completed all 12 benchmark cases with one operation and three repetitions per
+  case. At 1,000 inputs the fixed fixture stores 5,099,606 bytes; the growing
+  fixture stores 177,530,750 bytes. Growing-fixture median open/Log/restore times
+  are approximately 7.75/3.16/5.63 seconds, with restore including Log copying.
+  Full run including setup took 133.752 seconds. These are shared-host diagnostic
+  samples, not isolated before/after performance, cold-disk or peak-memory claims.
+  Raw samples and measurement limits are preserved in [M6d](superagent-m6d.md).
+- The identity regression passes: exact serialized header/log, main/Provider
+  and Worker state, report/reply identities, actual HistoryRef, duplicate/conflict
+  behavior, private-data exclusion and no restore callbacks or journal mutation.
+  Final `go test -mod=readonly -race -count=1 ./superagent` and
+  `go vet -mod=readonly ./superagent` pass, as do gofmt and whitespace checks.
+  Independent measurement/code review found no blocking issue. Prior M3d full
+  root/examples validation remains the unchanged runtime baseline; this slice
+  does not claim another full-root or multi-platform test run.
+- Documented why deleting/renumbering old transitions violates the current
+  Journal and public-reference contracts. Future checkpoints require an explicit
+  bootstrap/version/atomic-tail contract preserving authority and unknown effects.
+  Measurement suggests examining detached-copy reserialization before introducing
+  a new format. No log truncation, new backend, real database/provider/device,
+  user computer, additional paid execution, CI dispatch, merge or deployment.
