@@ -54,6 +54,12 @@ explicit task IDs also return errors; denied inputs do not reveal task existence
 and Thread recipient selection occur under the same lock, eliminating a check/
 submit race. Later subscribe/unsubscribe changes affect only later ingress.
 
+The [history admission fix](superagent-history-admission.md) enforces the same
+boundary on indirect `history_read` access: rejected inputs, noise, their reports
+and links stay outside the public catalog. Host audit APIs retain their records.
+See that note before upgrading a journal that may already contain leaked model
+history; rebuilding an index does not sanitize an existing model snapshot.
+
 The source/event dedup key is unchanged. A repeated full envelope returns the
 original receipt, even if the policy/version or current subscriptions changed.
 A changed principal, group, intent, content or association conflicts with that

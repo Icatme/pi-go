@@ -3080,3 +3080,28 @@
 - No live model/service/device, user computer, Codex/extra paid execution, manual
   CI, merge or deployment. Linux-only verification and independent review results
   are recorded in the PR; no PowerShell or Windows execution is claimed.
+
+
+## 2026-11-05 - SuperAgent public history admission security correction
+
+- Based on draft #175 exact remote HEAD cc3bb8ef / tree bcef2e95. The public
+  probe and tests-first single/batch regressions reproduced denied/noise text
+  leaking through thread links, trigger JSON and ignored report backlinks.
+- One immutable root-admission predicate now protects all history nodes, task
+  associations, reports and offered refs. It preserves accepted/model-ignored
+  input, authorized fanout, privileged non-noise history and host audit records.
+- Regression coverage includes all ignored reasons, direct reference guesses,
+  native Pi tools and saved snapshots, paginated graph traversal, cache/cursors,
+  duplicate policy changes, reopen and pre-gate journal upgrade. See
+  [history admission boundary](superagent-history-admission.md).
+- Existing leaked model snapshots/derived content cannot be undone by filtering
+  the index. The upgrade note requires trusted-host review of potentially
+  contaminated sessions rather than claiming restart sanitizes them.
+- Full readonly tests/vet, serialized full race (-p=1), examples tests/vet and
+  focused race x20 passed. Independent security review found no blocker and
+  passed focused race x3. Initial parallel race and one repeated stream-test
+  run hit the unchanged pkg/pigo two-second deadline; base stream x20 and the
+  final full race passed. No provider code/test changes hide this sensitivity.
+- No journal schema/dependency change, live service/model/device, user machine,
+  Codex/extra paid execution, manual CI, merge or deployment. Linux amd64 Go
+  1.26.10 only; PowerShell/Windows/macOS execution is not claimed.

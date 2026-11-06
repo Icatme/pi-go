@@ -35,7 +35,11 @@ within one coordinator lifetime. Reader expiry and per-callback budgets remain.
 delivery report reference for Worker results. A reference is the durable main
 session domain, object kind and local ID. Trigger references identify one original
 admission even on fanout; each delivery has a distinct report reference. Thread
-identity includes Source and Thread, and refers to its first admitted event.
+identity includes Source and Thread, and refers to its first history-visible
+event. [The admission fix](superagent-history-admission.md) excludes gate-rejected
+inputs and noise from triggers, reports and all related links. Host audit records
+are not public model history; upgraded references rooted in rejected inputs are
+no longer available.
 
 `History.Read` exposes a UTF-8 chunk of public JSON plus ordered links. Follow
 trigger → Thread or task, task → original/review triggers and reports, and report
