@@ -3283,3 +3283,24 @@
   draft PR. No final M9/release acceptance, real services, user computer,
   extra paid execution, CI dispatch, merge or deployment.
   See [M9c boundaries and reproduction](superagent-m9c.md).
+
+## 2026-11-06 - M9d bounded mixed-runtime recovery acceptance
+
+- Test-first follow-up to draft #187's exact tree, using actual unbatched/batched
+  Pi main adapters and PiWorker. A separate 35-submission/23-identity/8-task
+  fixture retains 30 terminal delivery records, including two-target fanout.
+- A settles despite a blocked main model and B tool. Cancellation preserves A's
+  late fsynced write and native committed receipt. Six independent requests
+  complete while B remains running; the correction appears only in B's history.
+- An isolated child exits without Close after A's committed-write/model failure
+  and B's committed-write/pre-terminal boundary. Recovery preserves known facts,
+  leaves B's unpersisted receipt unknown, blocks old follow-ups, and resumes only
+  fresh instructions after fixture-host reconciliation. Exact before/after effect
+  evidence and completed reopen reject repeats; corrupted evidence is rejected.
+- Independent review tightened actual multi-input batch and exact reconciliation
+  checks. Final full offline checks and exact-tree publication are recorded in
+  the draft PR. No production API/dependency/schema/CI changes or live services.
+  This is bounded protocol acceptance, not continuous-rate performance, full
+  M9/four-strategy/release acceptance, or model token/cost evidence. No user
+  computer, extra paid execution, CI dispatch, merge or deployment.
+  See [M9d boundaries and reproduction](superagent-m9d.md).

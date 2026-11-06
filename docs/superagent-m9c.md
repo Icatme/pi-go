@@ -165,3 +165,8 @@ prompt-policy comparisons, real inference/tool-service timing, first-reply and
 completion distributions, throughput, tokens/cost, historical baseline and the
 full M1–M8 production stack remain outside this slice. Completed-journal replay
 is not crash recovery. The new draft does not close final M9 or release gates.
+
+Follow-up [M9d](superagent-m9d.md) adds a separate bounded, completion-paced
+35-submission protocol fixture for exact cancellation/fanout, correction,
+post-write failure and one abrupt process-exit boundary. It does not change this
+300-delivery fixture into a continuous benchmark or complete the missing M9 gates.
