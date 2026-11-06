@@ -3455,3 +3455,16 @@
 - No real provider/channel, user-machine access, Codex execution, additional
   billed service, manual CI dispatch, merge or deployment. Migration and
   consumer details: [CLI main-session contract](superagent-cli-main.md).
+
+## 2026-11-06 - Review PR #190 stale-call request accounting
+
+- Reviewed the fixture and dispatch guard: receiving middleware counts tool
+  discovery and invocation before handlers, while asynchronous cancellation
+  notifications no longer invalidate the already-stale invocation assertion.
+  Classified rejection, zero attempts, zero remote dispatch and zero writes
+  remain checked. No runtime repair or dependency change was needed.
+- Windows Go 1.26.4: the focused regression passed 100 repetitions; the full
+  agent/toolset package passed race testing and vet. Live-service flags were
+  disabled and module resolution was readonly. Manual CI was not dispatched.
+- PR merge is authorized by the user. The reviewed head will guard the merge,
+  with resulting tree and ancestry verification before moving to PR #191.

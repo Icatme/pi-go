@@ -167,6 +167,18 @@ func TestKnownDirectoryChangeDuringApprovalBlocksDispatch(t *testing.T) {
 
 func TestFrozenCatalogGuardAtHandoffWithoutPermissionCallback(t *testing.T) {
 	f := newFixture(t, managed.Direct, mixedRules())
+	var lists, calls atomic.Int32
+	f.server.AddReceivingMiddleware(func(next sdk.MethodHandler) sdk.MethodHandler {
+		return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
+			switch method {
+			case "tools/list":
+				lists.Add(1)
+			case "tools/call":
+				calls.Add(1)
+			}
+			return next(ctx, method, req)
+		}
+	})
 	ts, err := New(f.manager, f.sandbox, Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -198,15 +210,20 @@ func TestFrozenCatalogGuardAtHandoffWithoutPermissionCallback(t *testing.T) {
 		t.Fatalf("fixture did not reach a guarded handoff: checks=%d result=%+v err=%v", checks.Load(), result, err)
 	}
 	assertCatalogRejected(t, err, *result.Execution, f.writes.Load())
-	before := f.requests.Load()
+	if calls.Load() != 0 {
+		t.Fatal("guarded handoff sent tools/call")
+	}
+	// The first denied handoff can send notifications/cancelled asynchronously.
+	// Count tool traffic, not unrelated transport cleanup from that invocation.
+	before := lists.Load()
 	_, err = selected.Execute(t.Context(), agent.ToolExecutionContext{Args: map[string]any{"id": "abc"}})
 	var failure *agent.ToolExecutionError
 	if !errors.As(err, &failure) {
 		t.Fatalf("direct invocation accepted an already stale catalog: %v", err)
 	}
 	assertCatalogRejected(t, err, failure.Execution, f.writes.Load())
-	if f.requests.Load() != before {
-		t.Fatal("already stale direct invocation performed MCP I/O")
+	if lists.Load() != before || calls.Load() != 0 {
+		t.Fatalf("already stale direct invocation performed MCP tool I/O: lists before=%d after=%d calls=%d", before, lists.Load(), calls.Load())
 	}
 }
 
