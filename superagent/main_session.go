@@ -242,8 +242,9 @@ func (a *SuperAgent) runMain(job MainJob) {
 		out.Decision.Target = &target
 	}
 	var snapshot json.RawMessage
+	var validated *validatedSnapshot
 	if err == nil {
-		snapshot, err = encodeSnapshot(out.Snapshot, job.SessionID)
+		snapshot, validated, err = encodeSnapshot(out.Snapshot, job.SessionID)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -256,6 +257,7 @@ func (a *SuperAgent) runMain(job MainJob) {
 		return
 	}
 	m := &mainTransition{InputID: job.Input.ID, DecisionID: "main-decision-" + job.Input.ID, Decision: out.Decision, Snapshot: snapshot}
+	tr := transition{State: "main_decided", Main: m, validatedSnapshot: validated}
 	if err == nil && out.Decision.Action == "attach" && !ids[out.Decision.TaskID] {
 		err = errors.New("main router selected a task not offered to this turn")
 	}
@@ -275,7 +277,7 @@ func (a *SuperAgent) runMain(job MainJob) {
 		case "reply", "clarify":
 			m.ReplyID = "reply-" + job.Input.ID
 		}
-		err = a.validateMain(transition{State: "main_decided", Main: m})
+		err = a.validateMain(tr)
 	}
 	if err != nil {
 		i := a.main.inbox[a.main.cursor].event
@@ -289,7 +291,7 @@ func (a *SuperAgent) runMain(job MainJob) {
 		a.commit(transition{State: "main_failed", Text: "Main router failed or returned an invalid decision.", Main: &mainTransition{InputID: job.Input.ID}})
 		return
 	}
-	a.commit(transition{State: "main_decided", Main: m})
+	a.commit(tr)
 }
 
 // validateMain is side-effect free and runs before the append as well as on
@@ -339,8 +341,7 @@ func (a *SuperAgent) validateMain(tr transition) error {
 	if tr.State != "main_decided" || m.DecisionID != "main-decision-"+m.InputID {
 		return errors.New("invalid main decision identity")
 	}
-	var snapshot agent.AgentSnapshot
-	if len(m.Snapshot) == 0 || len(m.Snapshot) > maxSnapshotBytes || m.Snapshot[0] != '{' || decodeSnapshot(m.Snapshot, &snapshot) != nil || !belongsTo(snapshot, a.main.id) {
+	if _, err := validateSnapshot(m.Snapshot, a.main.id, tr.validatedSnapshot); err != nil {
 		return errors.New("invalid main snapshot")
 	}
 	d := m.Decision

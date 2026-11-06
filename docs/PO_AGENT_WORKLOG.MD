@@ -2958,3 +2958,18 @@
   and a durable host reply. Unsolicited discovery of new business work and
   speculative execution are deferred. Recovery of authorized work and
   independent Watchdog supervision remain in scope.
+
+## 2026-11-05 - Same-chat and snapshot optimization integration
+
+- Combined draft #160 at `4670b5f` and all three #161 commits ending at
+  `420209a` on an isolated branch targeting #160. Original branches and their
+  #159 shared base remain unchanged and unmerged.
+- Terminal correction evidence reads the same validated decoded snapshot;
+  replay still checks saved bytes, and main/task/control authority boundaries
+  remain intact. Added before-replay and read-only evidence assertions.
+- Remote Go 1.26.10 offline tests/vet, full race, examples, repeated snapshot
+  and correction recovery tests, two-task acceptance and original benchmarks
+  passed. Independent review found no blocker. No CI, live provider, local
+  computer, extra billed task, merge or deployment was used.
+- Exact inputs, verification scope and limitations are recorded in
+  [the integration report](superagent-m2a-snapshot-integration.md).
