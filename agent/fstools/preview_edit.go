@@ -44,20 +44,9 @@ func PreviewEditDefinition(root *os.Root, options PreviewEditOptions) (agent.Too
 		Parameters:       map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "maxLength": 4096}, "old_text": map[string]any{"type": "string", "minLength": 1, "maxLength": options.MaxBytes}, "new_text": map[string]any{"type": "string", "description": "Replacement text; may be empty, must differ from old_text.", "maxLength": options.MaxBytes}}, "required": []string{"path", "old_text", "new_text"}, "additionalProperties": false},
 		OutputSchema:     map[string]any{"type": "object", "properties": map[string]any{"preview_only": map[string]any{"type": "boolean"}, "original_sha256": map[string]any{"type": "string"}, "candidate_sha256": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}, "match_line": map[string]any{"type": "integer"}}, "required": []string{"preview_only", "original_sha256", "candidate_sha256", "content", "match_line"}, "additionalProperties": false},
 		MaxArgumentBytes: maxArgs,
-		ParseArguments: func(call agent.ToolCall) (any, error) {
-			raw := call.Arguments
-			if call.ParsedArgs != nil {
-				if err := jsontext.ValidateStrings(call.ParsedArgs); err != nil {
-					return nil, invalid(err)
-				}
-				var err error
-				raw, err = json.Marshal(call.ParsedArgs)
-				if err != nil {
-					return nil, invalid(err)
-				}
-			}
+		ParseArguments: parseCallArguments(func(raw []byte) (previewArguments, error) {
 			return parsePreview(raw, options.MaxBytes, maxArgs)
-		},
+		}),
 		Execute: func(ctx context.Context, in agent.ToolExecutionContext) (agent.ToolResult, error) {
 			if err := jsontext.ValidateStrings(in.Args); err != nil {
 				return agent.ToolResult{}, invalid(err)

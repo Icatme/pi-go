@@ -46,20 +46,7 @@ func ReadDefinition(root *os.Root, options ReadOptions) (agent.ToolDefinition, e
 		Parameters:       map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "maxLength": 4096}}, "required": []string{"path"}, "additionalProperties": false},
 		OutputSchema:     map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}, "required": []string{"text"}, "additionalProperties": false},
 		MaxArgumentBytes: 32 << 10,
-		ParseArguments: func(call agent.ToolCall) (any, error) {
-			raw := call.Arguments
-			if call.ParsedArgs != nil {
-				if err := jsontext.ValidateStrings(call.ParsedArgs); err != nil {
-					return nil, invalid(err)
-				}
-				var err error
-				raw, err = json.Marshal(call.ParsedArgs)
-				if err != nil {
-					return nil, invalid(err)
-				}
-			}
-			return parse(raw)
-		},
+		ParseArguments:   parseCallArguments(parse),
 		Execute: func(ctx context.Context, execution agent.ToolExecutionContext) (agent.ToolResult, error) {
 			if err := jsontext.ValidateStrings(execution.Args); err != nil {
 				return agent.ToolResult{}, invalid(err)

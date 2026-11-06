@@ -1,6 +1,7 @@
 package pigo
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -121,11 +122,12 @@ func TestGoogleThinkingStream(t *testing.T) {
 }
 
 func TestGoogleToolCallStream(t *testing.T) {
+	const raw = `{"location": "discard-first", "location":"NYC"}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
 		chunks := []string{
-			`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"NYC"}}}]}}]}`,
+			`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":` + raw + `}},{"functionCall":{"name":"get_weather"}}]}}]}`,
 			`{"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}]}`,
 		}
 		for _, chunk := range chunks {
@@ -154,12 +156,18 @@ func TestGoogleToolCallStream(t *testing.T) {
 		}},
 	}, ProviderStreamOptions{APIKey: "placeholder-api-key"})
 
+	ended := make(map[string]string)
+	for event := range stream.Events() {
+		if event.Type == AssistantMessageEventToolCallEnd {
+			ended[event.ToolCall.ID] = event.ToolCall.RawArguments
+		}
+	}
 	result := stream.Result()
 	if result.StopReason != StopReasonToolUse {
 		t.Errorf("expected stop reason toolUse, got %q", result.StopReason)
 	}
-	if len(result.Content) != 1 {
-		t.Fatalf("expected 1 content block, got %d", len(result.Content))
+	if len(result.Content) != 2 {
+		t.Fatalf("expected 2 content blocks, got %d", len(result.Content))
 	}
 	call, ok := result.Content[0].(ToolCall)
 	if !ok || call.Name != "get_weather" {
@@ -167,6 +175,14 @@ func TestGoogleToolCallStream(t *testing.T) {
 	}
 	if call.Arguments["location"] != "NYC" {
 		t.Errorf("expected location NYC, got %+v", call.Arguments)
+	}
+	missing := result.Content[1].(ToolCall)
+	if len(ended) != 2 || ended[call.ID] != raw || call.RawArguments != raw || ended[missing.ID] != "" || missing.RawArguments != "" || missing.Arguments != nil {
+		t.Fatalf("incorrect completed-call evidence: events=%q calls=%+v", ended, result.Content)
+	}
+	replay, err := json.Marshal(convertGoogleAssistantContent(model, result))
+	if err != nil || strings.Contains(string(replay), "discard-first") || !strings.Contains(string(replay), `"args":{"location":"NYC"}`) || !strings.Contains(string(replay), `"args":null`) {
+		t.Errorf("unexpected request replay: %s, %v", replay, err)
 	}
 }
 

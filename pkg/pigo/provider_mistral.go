@@ -608,6 +608,7 @@ func finalizeMistralChatResponse(model Model, response *AssistantMessage, stream
 	}
 	for _, toolState := range state.ToolCalls {
 		toolCall := mistralToolCallFromState(toolState)
+		toolCall.RawArguments = toolState.Arguments
 		response.Content[toolState.Index] = toolCall
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallEnd, ContentIndex: toolState.Index, ToolCall: toolCall, Partial: cloneAssistantMessage(*response)})
 	}

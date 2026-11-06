@@ -25,10 +25,27 @@ func TestFilesystemToolsRejectAmbiguousArguments(t *testing.T) {
 		{"edit", `{"path":"file","old_text":"x","New_Text":""}`},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
-			out := agent.RunToolCall(t.Context(), agent.ToolCall{ID: "call", Name: tc.tool, Arguments: json.RawMessage(tc.raw)}, agent.RunToolCallOptions{Tools: tools})
-			if out.Failure == nil || out.Failure.Code != agent.ToolFailureArgumentInvalid || out.Execution.Local != agent.ToolLocalNotStarted {
-				t.Fatalf("%s: failure=%+v execution=%+v", tc.raw, out.Failure, out.Execution)
+			raw := json.RawMessage(tc.raw)
+			var parsed map[string]any
+			if err := json.Unmarshal(raw, &parsed); err != nil {
+				t.Fatal(err)
+			}
+			for _, args := range []map[string]any{nil, parsed} {
+				out := agent.RunToolCall(t.Context(), agent.ToolCall{ID: "call", Name: tc.tool, Arguments: raw, ParsedArgs: args}, agent.RunToolCallOptions{Tools: tools})
+				if out.Failure == nil || out.Failure.Code != agent.ToolFailureArgumentInvalid || out.Execution.Local != agent.ToolLocalNotStarted {
+					t.Fatalf("%s (has parsed map=%t): failure=%+v execution=%+v", raw, args != nil, out.Failure, out.Execution)
+				}
 			}
 		})
+	}
+}
+
+func TestFilesystemToolAcceptsAuthoredPath(t *testing.T) {
+	_, _, tool := fixture(t, Options{})
+	for _, raw := range []json.RawMessage{nil, json.RawMessage(`{"path":"original"}`)} {
+		args, err := tool.ParseArguments(agent.ToolCall{Arguments: raw, ParsedArgs: map[string]any{"path": "edited"}})
+		if err != nil || args != (arguments{Path: "edited"}) {
+			t.Fatalf("authored path with raw %s: args=%+v err=%v", raw, args, err)
+		}
 	}
 }

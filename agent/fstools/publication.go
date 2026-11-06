@@ -25,11 +25,8 @@ func publicationFailure(operation string, committed, attempted bool, message str
 		code = agent.ToolFailureCanceled
 	} else if errors.Is(cause, context.DeadlineExceeded) {
 		code = agent.ToolFailureDeadline
-	} else {
-		var typed *agent.ToolExecutionError
-		if errors.As(cause, &typed) && typed.Code == agent.ToolFailurePolicyDenied {
-			code = agent.ToolFailurePolicyDenied
-		}
+	} else if typed, _ := errors.AsType[*agent.ToolExecutionError](cause); typed != nil && typed.Code == agent.ToolFailurePolicyDenied {
+		code = agent.ToolFailurePolicyDenied
 	}
 	return &agent.ToolExecutionError{Code: code, Reason: reason, Message: message, Err: cause, Execution: agent.ToolExecutionInfo{Remote: agent.ToolRemoteNotApplicable}}
 }
@@ -48,7 +45,10 @@ func publicationResult(operation string, synced bool) agent.ToolResult {
 func publishFile(ctx context.Context, in agent.ToolExecutionContext, pending pendingCreation, data []byte, operation string) (result agent.ToolResult, err error) {
 	committed, attempted, synced := false, false, false
 	defer func() {
-		if p := recover(); p != nil {
+		p := recover()
+		// Release the owned staging name before inspecting host-supplied errors.
+		closeErr := pending.Close()
+		if p != nil {
 			cause, ok := p.(error)
 			if !ok {
 				cause = fmt.Errorf("publication panic: %v", p)
@@ -59,7 +59,6 @@ func publishFile(ctx context.Context, in agent.ToolExecutionContext, pending pen
 			}
 			err = publicationFailure(operation, committed, attempted, message, cause)
 		}
-		closeErr := pending.Close()
 		if closeErr != nil {
 			if err == nil {
 				message := "fstools: publication cleanup failed; inspect destination before retrying"

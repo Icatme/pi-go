@@ -38,9 +38,29 @@ type googleInlineData struct {
 }
 
 type googleFunctionCall struct {
-	ID   string         `json:"id,omitempty"`
-	Name string         `json:"name"`
-	Args map[string]any `json:"args"`
+	ID           string         `json:"id,omitempty"`
+	Name         string         `json:"name"`
+	Args         map[string]any `json:"args"`
+	rawArguments string         // Inbound evidence only; replay always encodes Args.
+}
+
+func (call *googleFunctionCall) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		ID   string          `json:"id"`
+		Name string          `json:"name"`
+		Args json.RawMessage `json:"args"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	var args map[string]any
+	if len(wire.Args) != 0 {
+		if err := json.Unmarshal(wire.Args, &args); err != nil {
+			return err
+		}
+	}
+	*call = googleFunctionCall{ID: wire.ID, Name: wire.Name, Args: args, rawArguments: string(wire.Args)}
+	return nil
 }
 
 type googleFunctionResponse struct {
@@ -516,9 +536,10 @@ func processGoogleStreamEvent(data string, model Model, response *AssistantMessa
 				finishGoogleCurrentBlock(response, stream, state)
 			}
 			toolCall := ToolCall{
-				ID:        googleToolCallID(part.FunctionCall.ID, part.FunctionCall.Name, state),
-				Name:      part.FunctionCall.Name,
-				Arguments: cloneMap(part.FunctionCall.Args),
+				ID:           googleToolCallID(part.FunctionCall.ID, part.FunctionCall.Name, state),
+				Name:         part.FunctionCall.Name,
+				Arguments:    cloneMap(part.FunctionCall.Args),
+				RawArguments: part.FunctionCall.rawArguments,
 			}
 			contentIndex := len(response.Content)
 			response.Content = append(response.Content, toolCall)

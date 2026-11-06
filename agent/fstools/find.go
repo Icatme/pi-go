@@ -56,20 +56,7 @@ func FindDefinition(root *os.Root, options FindOptions) (agent.ToolDefinition, e
 			"visited": map[string]any{"type": "integer"}, "truncated": map[string]any{"type": "boolean"}, "limits": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": findLimits()}},
 		}, "required": []string{"entries", "visited", "truncated", "limits"}, "additionalProperties": false},
 		MaxArgumentBytes: 32 << 10,
-		ParseArguments: func(call agent.ToolCall) (any, error) {
-			raw := call.Arguments
-			if call.ParsedArgs != nil {
-				if err := jsontext.ValidateStrings(call.ParsedArgs); err != nil {
-					return nil, invalid(err)
-				}
-				var err error
-				raw, err = json.Marshal(call.ParsedArgs)
-				if err != nil {
-					return nil, invalid(err)
-				}
-			}
-			return parseFind(raw)
-		},
+		ParseArguments:   parseCallArguments(parseFind),
 		Execute: func(ctx context.Context, execution agent.ToolExecutionContext) (agent.ToolResult, error) {
 			if err := jsontext.ValidateStrings(execution.Args); err != nil {
 				return agent.ToolResult{}, invalid(err)

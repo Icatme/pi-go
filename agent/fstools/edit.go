@@ -36,20 +36,7 @@ func EditDefinition(root *os.Root, options EditOptions) (agent.ToolDefinition, e
 		Parameters:       map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "maxLength": 4096}, "old_text": map[string]any{"type": "string", "minLength": 1, "maxLength": options.MaxBytes}, "new_text": map[string]any{"type": "string", "description": "May be empty; must differ from old_text.", "maxLength": options.MaxBytes}}, "required": []string{"path", "old_text", "new_text"}, "additionalProperties": false},
 		OutputSchema:     map[string]any{"type": "object", "properties": map[string]any{"published": map[string]any{"type": "boolean"}, "durability": map[string]any{"type": "string", "enum": []string{"synced", "unknown"}}}, "required": []string{"published", "durability"}, "additionalProperties": false},
 		MaxArgumentBytes: maxArgs,
-		ParseArguments: func(call agent.ToolCall) (any, error) {
-			raw := call.Arguments
-			if call.ParsedArgs != nil {
-				if err := jsontext.ValidateStrings(call.ParsedArgs); err != nil {
-					return nil, invalid(err)
-				}
-				var err error
-				raw, err = json.Marshal(call.ParsedArgs)
-				if err != nil {
-					return nil, invalid(err)
-				}
-			}
-			return parseArgs(raw)
-		},
+		ParseArguments:   parseCallArguments(parseArgs),
 		Execute: func(ctx context.Context, in agent.ToolExecutionContext) (agent.ToolResult, error) {
 			if err := executionreceipt.RequireCapture(ctx); err != nil {
 				return agent.ToolResult{}, failure(agent.ToolFailurePolicyDenied, "fstools: receipt-aware execution is required before writes", err)

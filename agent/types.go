@@ -319,6 +319,9 @@ type ModelRef struct {
 	Metadata       map[string]any `json:"metadata,omitempty"`
 }
 
+// Clone copies the model reference and its configuration like a Runner snapshot.
+func (r ModelRef) Clone() ModelRef { return cloneModelRef(r) }
+
 // AgentSnapshot is the serializable runtime state for a session.
 type AgentSnapshot struct {
 	// RequestedThinkingLevel is the saved preference; ThinkingLevel is derived from it and the effective model.

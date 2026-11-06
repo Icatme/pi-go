@@ -38,20 +38,7 @@ func CreateFileDefinition(root *os.Root, options CreateOptions) (agent.ToolDefin
 		Parameters:       map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "maxLength": 4096}, "content": map[string]any{"type": "string", "maxLength": options.MaxBytes}}, "required": []string{"path", "content"}, "additionalProperties": false},
 		OutputSchema:     map[string]any{"type": "object", "properties": map[string]any{"created": map[string]any{"type": "boolean"}, "durability": map[string]any{"type": "string", "enum": []string{"synced", "unknown"}}}, "required": []string{"created", "durability"}, "additionalProperties": false},
 		MaxArgumentBytes: maxArgs,
-		ParseArguments: func(call agent.ToolCall) (any, error) {
-			raw := call.Arguments
-			if call.ParsedArgs != nil {
-				if err := jsontext.ValidateStrings(call.ParsedArgs); err != nil {
-					return nil, invalid(err)
-				}
-				var err error
-				raw, err = json.Marshal(call.ParsedArgs)
-				if err != nil {
-					return nil, invalid(err)
-				}
-			}
-			return parseArgs(raw)
-		},
+		ParseArguments:   parseCallArguments(parseArgs),
 		Execute: func(ctx context.Context, in agent.ToolExecutionContext) (agent.ToolResult, error) {
 			if err := executionreceipt.RequireCapture(ctx); err != nil {
 				return agent.ToolResult{}, failure(agent.ToolFailurePolicyDenied, "fstools: receipt-aware execution is required before writes", err)

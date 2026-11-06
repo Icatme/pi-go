@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/Icatme/pi-go/pkg/pigo"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/Icatme/pi-go/pkg/pigo"
 )
 
 func authoredArgumentFixture() (pigo.ToolCall, ToolCall) {
@@ -84,6 +85,38 @@ func TestProviderAuthoredArgumentsDoNotPersistDiscardedProviderRaw(t *testing.T)
 		t.Fatal("discarded raw changed public execution/persistence data")
 	}
 }
+
+func TestProviderAmbiguousCallRejectsWholeBatch(t *testing.T) {
+	original, _ := authoredArgumentFixture()
+	bad := pigo.ToolCall{ID: "ambiguous", Name: "write",
+		Arguments:    map[string]any{"items": []any{map[string]any{"path": "second"}}},
+		RawArguments: `{"items":[{"path":"private-first","\u0070ath":"second"}]}`}
+	message := pigo.AssistantMessage{StopReason: pigo.StopReasonToolUse, Content: []pigo.ContentBlock{original, bad}}
+	event := convertPigoAssistantEvent(pigo.AssistantMessageEvent{Type: pigo.AssistantMessageEventDone, Reason: message.StopReason, Message: message})
+	if event.Type != AssistantEventError || event.Reason != StopReasonError {
+		t.Fatalf("terminal event = %s (%s)", event.Type, event.Reason)
+	}
+	for _, final := range []Message{event.Message, convertPigoAssistantMessage(message)} {
+		if final.StopReason != StopReasonError || len(final.ToolCalls) != 0 || !strings.Contains(final.ErrorMessage, "duplicate") {
+			t.Fatalf("ambiguous batch still executable or reason missing: %+v", final)
+		}
+		encoded, err := json.Marshal(final)
+		if err != nil || strings.Contains(string(encoded), "private-first") {
+			t.Fatalf("discarded value reached history or marshal failed: %v", err)
+		}
+	}
+}
+
+func TestTruncatedProviderCallKeepsLengthReason(t *testing.T) {
+	partial := pigo.ToolCall{ID: "partial", Name: "write", RawArguments: `{"path":`}
+	result := convertPigoAssistantMessage(pigo.AssistantMessage{
+		StopReason: pigo.StopReasonLength, Content: []pigo.ContentBlock{partial},
+	})
+	if result.StopReason != StopReasonLength || result.ErrorMessage != "" || len(result.ToolCalls) != 1 {
+		t.Fatalf("incomplete call lost its truncation status: %+v", result)
+	}
+}
+
 func TestProviderAuthoredArgumentsNeverBypassExecutionPolicy(t *testing.T) {
 	for _, mode := range []string{"cancel", "permission", "gate"} {
 		_, call := authoredArgumentFixture()

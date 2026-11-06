@@ -2857,6 +2857,392 @@
   agent/session, including Linux publication regressions, and vet for the
   agent and codemode package trees.
 
+## 2026-11-05 - Local SuperAgent prototype in the pi-go module
+
+- Added `superagent.SuperAgent` and `cmd/pi-superagent` to this repository. The
+  coordinator uses Pi's existing Runner for routing and per-task worker runs,
+  and session JSONL storage for event admission, subscriptions and snapshots.
+- Verified separate task histories, cross-source follow-up, admission deduplication,
+  report replay and continued stdin service while workers run. Abruptly terminating
+  a worker process leaves an interrupted event on reopen. No automatic replay of
+  an already-started call is attempted.
+- Windows Go 1.26.4 root tests and vet passed with live-model flags off. WSL
+  Linux Go 1.26.2 race passed for the new package and command. Built and ran
+  the Windows CLI offline. Production messaging connectors, external watchdog
+  and remote execution are outside this local prototype.
+
+## 2026-11-05 - SuperAgent tool outcomes and recovery review
+
+- PiWorker uses the receipt-aware Runner and waits for admitted executors to
+  exit, including late Codemode children. Reports distinguish a completed model
+  run, a length-limited answer and a run that ended after tool errors. PiRouter
+  rejects partial/failed decisions and honors the provider stream veto hook.
+- A started worker with an uncertain result fences its task. Previously admitted
+  follow-ups are blocked, including late attachments. Trusted reconciliation
+  names the exact cause event and records a note; only fresh instructions can
+  resume work. Offline reconciliation does not dispatch queued events.
+- Reports retain host-reported local commits independently of tool success.
+  Raw callback errors are available to the current host through FailureCause.
+  CLI returns the journal error if its terminal write fails with stdin open.
+- Verified real Linux create_file publication followed by a rejected result,
+  persistent receipts, blocked follow-up after a process kill following an
+  external write, and Windows byte-lock failure during the final append.
+  Windows offline root tests and vet passed. Linux race passed for superagent
+  and its CLI. Rebuilt the local Windows EXE and ran the offline demo.
+
+## 2026-11-05 - Live SuperAgent task control
+
+- Added run-targeted steering and cooperative cancellation, and live task
+  subscriptions. Targets use task ID and the source event identity so an old
+  command cannot steer or abort a later invocation. PiWorker polls steering
+  through its native receipt-aware Runner hooks; queued controls settle as
+  delivered or undelivered. Progress carries bounded, task-scoped phase updates.
+- The local JSONL CLI supports status, steer, abort, subscribe and unsubscribe
+  on the running process. A control error is reported for that frame. Steering
+  responses correlate admission and delivery. EOF drains outstanding receipt
+  responses before the final state is printed.
+- Verified native one-at-a-time and all steering delivery, ordinary queued
+  follow-ups, other-task isolation, late local commits after abort, review
+  fences, stale targeting, slow readers, unsubscribe and full-duplex CLI I/O.
+  Windows offline root-module tests and vet passed. WSL Linux race passed for
+  superagent and cmd/pi-superagent. Built the Windows EXE and exercised the
+  local demo and interactive control protocol without provider calls.
+
+## 2026-11-05 - SuperAgent review fixes and Agent parity
+
+- Reproduced the duplicate-path write using a local Responses server, the
+  native receipt-aware Runner and Linux `atomic_replace`. The Agent now
+  rejects an executable model batch with ambiguous wire arguments before
+  dispatch. Google and Mistral also retain the original argument object for
+  this check. All eight filesystem tools validate direct raw and parsed inputs.
+  The regression checks both file contents and zero receipts, plus a successful
+  one-path replacement.
+- PiWorker counts top-level completions against the model's requested calls.
+  Nested success and failure cases cover both `Terminate` and `FinishTurn`,
+  including parent-linked commit receipts and the resulting review status.
+- Failed and aborted Pi runs retain their accepted task transcript and
+  delivered steering. The journal stores the failure status and receipts
+  alongside that snapshot. Regression tests cover reopening the journal,
+  operator reconciliation, a fresh follow-up, and progress callback failure.
+- Windows offline root-module tests and vet passed. Linux race tests passed for
+  agent, agent/fstools, internal/jsontext, pkg/pigo, superagent and cmd/pi-superagent.
+  Rebuilt the local Windows EXE and ran its offline demo through IDLE.
+
+## 2026-11-05 - Embedded SuperAgent controls and remaining review fixes
+
+- The CLI dispatches input independently of stdout. Its ordered frame queue
+  spills to OS temporary files during backpressure. A real tool regression
+  blocks stdout with 300 status requests, aborts before file publication,
+  and lets another task complete before output resumes. Broken-output cleanup,
+  initial subscription progress at EOF and steering receipt delivery after a
+  terminal journal write failure have separate coverage.
+- Direct Go calls also cancel the worker with an unread progress subscription.
+  Completed workers expose a finalizing phase until their report is committed.
+  Canceling a subscription immediately frees its slot. Added an executable Go
+  package example and made service embedding the first documented entry point.
+- New tasks persist independent provider session IDs. Old journals retain
+  their original provider affinity. PiWorker restores the selected model with
+  current host configuration and routes JSON-shaped steering as ordinary text.
+  Linux filesystem publication now releases staging before classifying a host
+  permission panic, including a typed-nil error.
+- Windows offline root-module tests and vet passed. Linux race tests passed
+  for agent, agent/fstools, superagent and cmd/pi-superagent. The offline CLI
+  demo reached IDLE. Changes are local.
+
+## 2026-11-05 - SuperAgent library development plan
+
+- Added [the staged development plan](superagent-development-plan.md) and
+  linked it from the package README. It maps PDF sections 2–7 to nine
+  milestones with dependencies, implementation boundaries and acceptance tests.
+- The first executable slice connects a Worker report to the resident Router
+  and a durable host reply. Unsolicited discovery of new business work and
+  speculative execution are deferred. Recovery of authorized work and
+  independent Watchdog supervision remain in scope.
+
+## 2026-11-05 - Same-chat and snapshot optimization integration
+
+- Combined draft #160 at `4670b5f` and all three #161 commits ending at
+  `420209a` on an isolated branch targeting #160. Original branches and their
+  #159 shared base remain unchanged and unmerged.
+- Terminal correction evidence reads the same validated decoded snapshot;
+  replay still checks saved bytes, and main/task/control authority boundaries
+  remain intact. Added before-replay and read-only evidence assertions.
+- Remote Go 1.26.10 offline tests/vet, full race, examples, repeated snapshot
+  and correction recovery tests, two-task acceptance and original benchmarks
+  passed. Independent review found no blocker. No CI, live provider, local
+  computer, extra billed task, merge or deployment was used.
+- Exact inputs, verification scope and limitations are recorded in
+  [the integration report](superagent-m2a-snapshot-integration.md).
+
+## 2026-11-05 - SuperAgent shared-state lease slice
+
+- Based on M5a draft #169, added optional same-host SQLite domain leases and
+  fenced coordinator append. Existing JSONL APIs and the single coordinator
+  scheduler remain unchanged. Driver selection and remaining M6 scope are in
+  [M6a](superagent-m6a.md); this is not multi-host or production validation.
+- Read-only locked JSONL snapshots reject torn tails without repair. Atomic
+  import retains legacy single/batch records, task/provider/delivery identities,
+  subscriptions, private snapshots, reply attempts and external-effect review.
+- Offline full tests, vet, full race, storage and integration race repeated 20 times,
+  external examples tests/vet passed on Linux amd64 Go 1.26.10. Real subprocess
+  contention, kill/recovery and SIGSTOP/takeover/SIGCONT fence old writers.
+  Independent review's URI space-escaping finding was fixed and re-reviewed.
+- No live provider/platform, production DB, user-local task, manual CI, merge or
+  deployment. Shared files require a trusted private local directory. External
+  effects still need exact-operation evidence; lease fencing cannot undo them.
+
+
+## 2026-11-05 - SuperAgent fixed-device protocol slice
+
+- Based on draft #170's exact tree, added optional host-authenticated fixed-device
+  backend protocol with durable request identity, acknowledgments, query/stop,
+  monotonic epoch fences and non-replaying restart. See [M7a](superagent-m7a.md).
+- Two independent subprocess devices cover request/response loss and process
+  death after effect before acknowledgment. Native Pi/M4/M6 integration covers
+  new Worker input while waiting, coordinator replacement, review/quota retention
+  and one original-call completion. Device credential canaries stay off the wire
+  and out of model, snapshots, coordinator log, replies and device registry.
+- Independent review fixes preserve receipt fingerprints across regressions,
+  reject impossible replay transitions and persist restart uncertainty correctly.
+- Explicit Create is provisioning only; Open never recreates missing state. No
+  real devices, user computer, model/provider, new access credentials, extra paid
+  execution, manual CI, merge or deployment. This is not fleet scheduling,
+  device-global durable quota, a persistent runner or power-loss validation.
+- Final Linux amd64 Go 1.26.10 root readonly tests, vet, full race, device race
+  x20 and separate examples tests/vet passed. Optional full module inventory
+  could not complete with GOPROXY=off because some indirect-module metadata is
+  uncached; no dependency versions changed and no manual CI was requested.
+
+
+## 2026-11-05 - SuperAgent read-only Watchdog slice
+
+- Based on unmerged draft #171's exact tree, added independent diagnostic
+  session/model memory and injected clock, with a persistent bounded patrol
+  cursor and atomic evidence/recheck records on the existing fenced writer.
+  See [M8a](superagent-m8a.md). No retry/cancel/send/new-task actions are exposed.
+- Normal slow work, queue waiting, live tools, explicitly observed device
+  disconnection, suspected model loops and review barriers remain distinct.
+  Uncertain external effects keep review; stale results are historical only.
+- Failing tests preceded implementation. Independent review corrected goal
+  provenance, reconciled-ready handling, numeric model-memory fidelity, settled
+  task classification and strict replay memory/source validation.
+- Fake-clock, controllable-model, restart/cursor, append failure and actual
+  sharedsqlite epoch-takeover fixtures are included. No provider/real device,
+  user computer, extra paid execution, manual CI, merge or deployment was used.
+- This is the read-only M8a slice, not an authorized repair executor, independent
+  out-of-process control plane, automatic notification or full M8 completion.
+- Final Linux amd64 Go 1.26.10 readonly tests, vet, full race, Watchdog race
+  x20 and separate examples tests/vet passed. Optional full module inventory
+  remains blocked by uncached indirect metadata with GOPROXY=off; dependencies
+  are unchanged. Final independent rereview found no remaining blocker.
+
+
+## 2026-11-05 - SuperAgent offline evaluation baseline slice
+
+- M9a is stacked on unmerged draft #172's exact tree. Added a deterministic
+  300-delivery/20-request experiment with separate expected routing and observed
+  ledgers, simulated timing/budgets, five repetitions and a checked-in compact
+  baseline covering full-result SHA-256. See [M9a](superagent-m9a.md).
+- Two structural scheduling surrogates are implemented; two single-Pi prompt
+  baselines and the pre-M1 historical baseline explicitly remain missing.
+  Real model calls are zero and tokens are null, not estimated usage.
+- Fixed-service Router load sweep covers 1/5/10/20/40 events per virtual minute,
+  maximum batches 1/8 and five repeats. The synthetic bypass fixture reduces
+  scripted calls but shows no completion latency improvement.
+- Actual runtime tests separately cover 300 valid Submit attempts, input/report/
+  reply identity, failure isolation, worker results, journal reopen deduplication
+  and legacy Open compatibility. These are not wall-time model benchmarks.
+- Independent review identified zero-stop event scheduling and correctness
+  scoring gaps; both have regression coverage. No production runtime or journal
+  format, dependency, provider configuration or default behavior changed.
+- No user computer, live service/model/device, credentials, extra paid execution,
+  manual CI, merge or deployment was used. This is not final M9 acceptance.
+- Linux amd64 Go 1.26.10 readonly full tests/vet/race, focused evaluation race
+  x5, separate examples tests/vet and deterministic CLI baseline checks passed.
+  Final independent review found no remaining blocker. PowerShell was not
+  available on this cloud verification host; no Windows validation is claimed.
+
+
+## 2026-11-05 - SuperAgent batch/background composition acceptance
+
+- Inspected draft #173 exact HEAD/tree before implementing the M4a deferred
+  batch-main item. M6a already exposes BatchRouter plus Background through
+  OpenMainJournal. Direct integration tests passed without a production change;
+  no reproduced runtime defect or new constructor is claimed. See [M4b](superagent-m4b.md).
+- Added public combined-constructor coverage for ordered mixed backlog and
+  reversed decisions, original Worker/provider/delivery identity, private output,
+  stop plus late commit, authorization/quota/stale capability and unknown barriers.
+- Native Pi protocol acceptance now runs in single and batch main modes. Real
+  same-host SQLite takeover covers held inference, stale-owner fencing, exact-ID
+  backend recovery, no Start replay and terminal reopen deduplication.
+- Corrected the outdated plan and M4a limitation; durable remote execution still
+  remains out of scope. Production code, journal format and dependencies unchanged.
+- No live model/service/device, user computer, Codex/extra paid execution, manual
+  CI, merge or deployment. Linux-only verification and independent review results
+  are recorded in the PR; no PowerShell or Windows execution is claimed.
+
+
+## 2026-11-05 - SuperAgent public history admission security correction
+
+- Based on draft #175 exact remote HEAD cc3bb8ef / tree bcef2e95. The public
+  probe and tests-first single/batch regressions reproduced denied/noise text
+  leaking through thread links, trigger JSON and ignored report backlinks.
+- One immutable root-admission predicate now protects all history nodes, task
+  associations, reports and offered refs. It preserves accepted/model-ignored
+  input, authorized fanout, privileged non-noise history and host audit records.
+- Regression coverage includes all ignored reasons, direct reference guesses,
+  native Pi tools and saved snapshots, paginated graph traversal, cache/cursors,
+  duplicate policy changes, reopen and pre-gate journal upgrade. See
+  [history admission boundary](superagent-history-admission.md).
+- Existing leaked model snapshots/derived content cannot be undone by filtering
+  the index. The upgrade note requires trusted-host review of potentially
+  contaminated sessions rather than claiming restart sanitizes them.
+- Full readonly tests/vet, serialized full race (-p=1), examples tests/vet and
+  focused race x20 passed. Independent security review found no blocker and
+  passed focused race x3. Initial parallel race and one repeated stream-test
+  run hit the unchanged pkg/pigo two-second deadline; base stream x20 and the
+  final full race passed. No provider code/test changes hide this sensitivity.
+- No journal schema/dependency change, live service/model/device, user machine,
+  Codex/extra paid execution, manual CI, merge or deployment. Linux amd64 Go
+  1.26.10 only; PowerShell/Windows/macOS execution is not claimed.
+
+## 2026-11-05 - Correct GitHub edited-comment actor binding
+
+- Full-stack review reproduced a rejected legitimate edit on draft #175's tree:
+  authenticated editor 7 editing author 8's comment failed the original
+  sender-equals-author check. GitHub documents [editing others' comments](https://docs.github.com/en/communities/moderating-comments-and-conversations/managing-disruptive-comments#editing-a-comment)
+  and identifies the initiating actor as [sender](https://docs.github.com/en/webhooks/webhook-events-and-payloads#the-sender-property).
+- Only supported edited issue/review comments may have distinct author and
+  sender. Principal stays bound to authenticated sender; author must independently
+  be a canonical positive uint64. Creation/submission equality is unchanged.
+- Red regressions preceded the fix. Tests cover both comment types, editor allow/
+  deny policy, host intent, spoofed sender/target/object, malformed author, durable
+  replay and edited own-message echoes without cross-type ID collisions.
+- Independent read-only review and channel tests found no blockers. Linux amd64
+  Go 1.26.10 readonly full tests/vet/race, focused GitHub race x20 and separate
+  examples tests/vet passed using cached modules with live-test flags disabled.
+- The parallel history-admission visibility security fix is not included;
+  composition still requires verification. No dependency/journal format change,
+  live GitHub/provider/device, user computer, credentials, Codex/extra paid
+  execution, manual CI, merge or deployment. PowerShell/Windows/macOS untested.
+
+
+## 2026-11-05 - SuperAgent optional PostgreSQL journal development slice
+
+- Built M6b on #178 exact HEAD 6292543b / tree 3fd1dd4. New optional
+  sharedpostgres implements the existing LeasedJournal without changing the
+  scheduler, JSONL or SQLite APIs. The host supplies database/sql, TLS/credentials
+  and one-time schema migration; the library opens no DSN or server.
+- Post-lock clock_timestamp and final original-grant checks fence owner/epoch/seq
+  in one transaction. An independent monotonic deadline cancels ownership despite
+  blocked I/O. Unknown or late COMMIT receipts never update cache or retry work.
+- bytea imports preserve raw header/LogItem bytes, including legacy batches,
+  without repairing or writing the quiesced source. Only absent domains import.
+- Offline test-first scripts cover lease timing, rollback, uncertainty, corruption,
+  fencing, caller-owned DB and migration. Eight live PG tests are explicitly
+  double-gated and were NOT run: no PostgreSQL service was available. Independent
+  read-only review found no blocker and passed offline race x5 and vet.
+- Real PostgreSQL, independent processes/hosts, TCP partitions and database restart
+  remain unverified; keep the PR draft. See [M6b](superagent-m6b.md) and its package
+  README. No local user machine, credentials, service, Codex/extra paid task,
+  manual CI, merge or deployment; remote Linux Go 1.26.10 only.
+
+## 2026-11-05 - SuperAgent durable local helper development slice
+
+- M4c builds on #179 HEAD ec9bbe6b / exact tree c60213e4. The isolated local
+  checkout used an equivalent-tree commit; publication is parented to the exact
+  remote HEAD, with the final tested tree compared before branch creation.
+- Added optional agent/background/helper: explicit fixed binary/tool registration,
+  immutable operation/request/original epoch, durable admission/claim/stop/receipt,
+  independent Linux helper processes, and query-only recovery. Existing Local,
+  coordinator and device APIs remain unchanged; no dependencies added.
+- Test-first missing API failure preceded implementation. Isolated self-written
+  subprocesses prove coordinator death without relaunch, helper death remaining
+  unknown, duplicate-claim prevention, stop and cancellation-ignoring late commit,
+  old-epoch revocation and native coordinator review/completion integration.
+- Independent review led to durable stop redelivery, fail-closed corrupt stops,
+  terminal-before-stop-notification ordering, tombstone/quota and replay checks,
+  escaped receipt size bounds and a bounded native admission handshake. Direct
+  forged-record regression cases reject impossible admissions and transitions.
+- Only durably observed facts are preserved: Local does not expose synchronous
+  call receipts until return, so death before then remains unknown with quota.
+  No PID/exit-code/no-effect inference, replay, rollback or detached-body guarantee.
+- Full checks, repeated helper race, exact tree and independent review results are
+  recorded in the draft PR. See [M4c](superagent-m4c.md). No production service,
+  real device, user computer, credentials, live model, Codex/extra paid execution,
+  manual CI, merge or deployment. Linux process-crash evidence is not host reboot,
+  power-loss, adversarial filesystem or Windows/macOS acceptance.
+
+## 2026-11-05 - SuperAgent GitHub HTTP protocol development slice
+
+- M5b builds on #180 HEAD d4b50e45 / exact tree 3fe26ff3. The isolated remote
+  checkout uses an equivalent-tree commit; publication uses the exact remote
+  parent and compares the final tested tree before branch creation.
+- Optional GitHubWebhook validates bounded raw-body HMAC, unambiguous supported
+  events, exact repo/PR targets and independent host actor/intent authority.
+  GitHub headers are unsigned: the durable event ID is a raw-body digest, and
+  duplicates surface ErrGitHubReplay plus current evidence/original admission.
+  Identical signed bodies cannot prove independent event identity or freshness;
+  host audit and independent verification remain required. No automatic send.
+- Optional GitHubTransport posts only through host client/endpoint/destinations,
+  refuses redirects, validates exact 201 comment receipts, respects the later
+  rate hint and never creates a token, retries POST or scans to prove absence.
+  Unknown outcomes remain fenced across restart; no platform idempotency claim.
+- Test-first missing-API failure, real httptest HTTP regressions and independent
+  read-only review cover forged/raw-byte/header replays, cross-repo isolation,
+  editing actor, grant drift, approved send/echo and lost-ack recovery. Review
+  fixed dual-hint early retry and changed-grant replay receipt contracts.
+- Full offline validation and exact final-tree evidence are in the draft PR.
+  See [M5b](superagent-m5b.md). No real GitHub/GHES, existing credentials, user
+  computer, live model, Codex/extra paid execution, manual CI, merge or deployment.
+
+
+## 2026-11-05 - SuperAgent durable device chain integration slice
+
+- M7b builds on draft #181 HEAD 998760a7 / exact tree 385244ee. It composes
+  existing M6a sharedsqlite, M7a HTTP device and M4c helper implementations;
+  production code, journal formats, module files and dependencies are unchanged.
+- External-package fixtures run only our own endpoint/native test executables
+  over loopback. Real endpoint process death leaves the helper alive; both
+  registries reopen without dispatch, and recovery observes the original ID.
+- Per-owner transports retain their original epoch. Explicit M6 Close/reopen
+  takeover rejects all old commands before a replacement device command; native
+  pre-effect permission remains bound to the original manifest epoch.
+- Lost Start/Stop acknowledgments, faults before/after helper calls, native
+  process failure, stop-before-start tombstones and late commits retain the
+  existing unknown/review/quota barriers. Direct M7 inspection is read-only;
+  the existing M4 replay watcher redelivers its persisted same-ID stop intent.
+- Private result canary is produced in helper snapshots but absent from device
+  HTTP/registry, coordinator state, Worker inputs, reports and replies. No raw
+  result transport, credential-in-arguments guarantee or external exactly-once
+  claim is added. Fixtures cover process crashes, not host reboot/power loss.
+- Verification commands, exact final-tree evidence and independent review are
+  recorded in the draft PR; see [M7b](superagent-m7b.md). No real device/model,
+  production service, user computer, Codex/extra paid execution, CI trigger,
+  merge or deployment. Real cross-host/TLS/production authority remain untested.
+
+
+## 2026-11-05 - SuperAgent host-authorized Watchdog refresh slice
+
+- M8b builds on draft #182 HEAD f13027d0 / exact tree d1a10893. Check/RunWatchdog
+  remain read-only; a separate explicit host authorizer binds one current finding,
+  task revision, original run/delivery and background operation to one Inspect.
+- Durable reservation precedes the original backend's exact-ID read. Duplicate
+  calls/restart return the same record without repeating Inspect; pending never
+  auto-resumes. Atomic result + background facts preserve unknown/review/quota
+  barriers and the existing task's single private completion on proven exit.
+- New task input, newer finding, changed facts or old runtime invalidate unused
+  decisions. Replay compares durable task facts and reconstructed running delivery,
+  not process-local counters. SQLite takeover fences late authorization/results.
+- Test-first API failure, offline boundary/replay/privacy/concurrency tests and
+  external example cover the slice. Independent review identified incomplete
+  replay freshness checks; fixed and re-reviewed with direct replay counterexamples
+  plus legitimate active-Worker and terminal close/reopen coverage.
+- Exact frozen-tree validation and publication evidence are in the draft PR; see
+  [M8b](superagent-m8b.md). No Start/Stop/retry/Steer/new task or general repair API,
+  real device/model/platform, user computer, Codex/extra paid execution, manual CI,
+  merge or deployment. Existing background watchers retain their own contract.
+
 ## 2026-11-05 - GPT-6.1 Terra on the OpenAI Responses API
 
 - Registered `openai/gpt-6.1-terra` with text and image input, a 1,050,000-token

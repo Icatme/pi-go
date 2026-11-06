@@ -17,6 +17,11 @@ shell and Python are not supplied.
 
 Use each argument name exactly as spelled in the tool schema and only once per
 JSON object. The tools reject unknown or repeated names before filesystem access.
+The built-in Agent provider bridge rejects a whole model turn if a tool's
+original argument object contains duplicate names. Custom model adapters that
+decode JSON into a map must check for duplicates before discarding the wire
+object. For a direct call supplying both `Arguments` and `ParsedArgs`, the
+filesystem tool validates both and executes the authored `ParsedArgs`.
 
 ```go
 // trustedWorkspace comes from application configuration, never model input.

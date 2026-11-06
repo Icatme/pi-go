@@ -256,6 +256,7 @@ func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string
 		return nil, nil, directorySnapshot{}, err
 	}
 	scope := configuration.Scope()
+	scopeVersion := scopeRevision(scope)
 	values := make([]entry, 0, len(t.options.Native)+3)
 	frozen := directorySnapshot{scope: scope, configuration: configuration, catalogs: make(map[*managed.Connection]managed.Catalog)}
 	namespaces := append([]codemode.Namespace(nil), t.options.Code.Namespaces...)
@@ -270,7 +271,7 @@ func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string
 	}
 	for _, resource := range resources {
 		if namespace == "" || namespace == "mcp_resources" {
-			resource.Revision = scopeRevision(scope)
+			resource.Revision = scopeVersion
 			values = append(values, entry{binding: codemodetool.Native(resource, "mcp_resources"), exposure: managed.Direct})
 		}
 	}
@@ -320,8 +321,9 @@ func (t *Toolset) directory(ctx context.Context, indirect bool, namespace string
 			Server: catalog.Server, Scope: catalog.Scope, Generation: catalog.Generation,
 			Revision: catalog.Revision, SourceDigest: catalog.SourceDigest,
 		}
+		catalogVersion := fmt.Sprintf("%s/%d/%d", scopeVersion, catalog.Generation, catalog.Revision)
 		for _, definition := range definitions {
-			definition.Revision = fmt.Sprintf("%s/%d/%d", scopeRevision(scope), catalog.Generation, catalog.Revision)
+			definition.Revision = catalogVersion
 			definition = guardCatalog(definition, connection, catalog)
 			values = append(values, entry{binding: codemodetool.MCP(definition, server.Name), exposure: server.ToolExposure(definition.Name)})
 		}

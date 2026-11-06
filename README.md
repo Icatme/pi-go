@@ -117,6 +117,7 @@ Primary providers are `openai-codex`, `opencode-go`, `kimi-coding`, `commandcode
 | --- | --- |
 | [`pkg/pigo`](pkg/pigo) | Model metadata, provider protocols, completions, streams, and message replay |
 | [`agent`](agent/README.md) | Single-agent loops, tool execution, steering, follow-ups, and snapshots |
+| [`superagent`](superagent/README.md#embed-in-a-go-service) | Embed concurrent Pi worker sessions with task routing, steering, cancellation and progress subscriptions |
 | [`agent/session`](agent/session/README.md) | Persistent conversation branches, replay, and compaction |
 | [`mcp`](mcp/README.md) | Managed HTTP/stdio MCP connections, catalogs, and explicit OAuth |
 | [`agent/toolset`](agent/toolset/README.md) | Dynamic tool exposure, discovery, and trusted session restoration |
