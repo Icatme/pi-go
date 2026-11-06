@@ -3620,3 +3620,39 @@
   real-host validation were not run. No live provider/database service, user
   computer, Codex task, extra paid service, CI dispatch, merge, release or
   deployment.
+
+## 2026-11-06 - M8c intervention follow-up evidence
+
+- Extended eligible Check/RunWatchdog ticks with one-shot observation of due,
+  completed interventions. Selection retains original operation/run/delivery
+  bindings, is independent of the normal task cursor and emits at most the
+  configured BatchSize. It reads committed coordinator facts under the final
+  commit lock; no extra backend Inspect/Probe, model call, control, business
+  input, reply or external notification is introduced. Pending reservations
+  stay unresolved and are not resumed.
+- Added detached WatchdogFollowupsSince pagination, durable sequence IDs,
+  source labels and conservative review/operation classifications. Public
+  task facts exclude activeRun and process counters; host consumers retain
+  their per-journal cursor and separately authorized delivery responsibilities.
+  Batch size bounds output, not total historical scan work or storage.
+- New watchdog_checked_followups records commit ordinary inspection/cursor/
+  memory and follow-up evidence atomically, including empty follow-up batches.
+  Wall-clock deadlines remain separate from custom diagnostic and lease clocks.
+  Old check records can upgrade; older readers reject the new state, and a
+  later downgrade to the old check state is rejected. No session format,
+  database schema, backend interface or dependency change was made.
+- Tests cover due/pending/order boundaries, normal five-task cursor independence,
+  callback-time new input, exit facts, immutable request identity, private-data
+  canaries, 40-record pagination, active Worker prefix replay, restart dedup,
+  cancellation and failed/unknown commits. Full JSONL forgeries preserve valid
+  outer storage chains and fail coordinator replay. Actual temporary SQLite
+  owner replacement fences the old check, then records one new-owner follow-up.
+  A runnable external Go example demonstrates evidence consumption without send.
+- Root readonly tests/vet, affected race (superagent/..., agent/session,
+  cmd/pi-superagent), separate examples tests/vet and focused repeated race
+  pass. After final test additions, root tests/vet and SuperAgent race pass
+  again. Formatting/diff and independent source/test/document review pass.
+  No full-root race, Windows/macOS, real backend/platform or cross-host
+  acceptance is claimed. Details and downgrade boundary: [M8c](superagent-m8c.md).
+- PostgreSQL remains host-owned. No user computer, Codex task, extra paid
+  execution, live model/database service, CI dispatch, merge, release or deploy.

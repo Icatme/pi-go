@@ -325,7 +325,7 @@ func TestWatchdogReplayRejectsInvalidChecks(t *testing.T) {
 			if err := json.Unmarshal(line.Entry.Custom.Payload, &tr); err != nil {
 				t.Fatal(err)
 			}
-			if tr.State != "watchdog_checked" {
+			if tr.State != "watchdog_checked_followups" {
 				t.Fatal("fixture last record is not a check")
 			}
 			mutate(&tr)
