@@ -33,6 +33,20 @@ snapshot. With `OpenMain`, normal chat messages always reach main; only explicit
 event from a subscribed thread goes directly to that task.
 Programs that use a single agent can continue to import `github.com/Icatme/pi-go/agent`.
 
+`PiTaskAssessor(def, maxContextBytes)` optionally classifies one input as `new`,
+`attach`, `clarify` or `status`, together with `light`, `conversation` or `task`
+workload. The host supplies bounded `TaskCandidate` values and owns `CanAttach`,
+context selection, authorization, persistence and execution. `TaskAssessmentInput.Validate`
+can check the envelope before constructing a model. Assessment uses one isolated
+`decide_task` inference with `TaskAssessmentInstructions`; it inherits only the
+configured model and static reasoning/transport settings, never business prompts,
+tools, history, resolvers or hooks. The byte budget includes policy, input and tool
+declaration; excess context fails without truncation. `ErrInvalidTaskAssessment`
+identifies input/protocol errors, while provider and cancellation errors remain
+distinct. It neither modifies a journal nor replaces the existing MainRouter,
+task attachment, history or worker-report APIs. Give each assessment its own
+`SessionID` when provider request identities also serve business invocations.
+
 The [development plan](../docs/superagent-development-plan.md) tracks the
 resident Router, Worker handoffs, asynchronous tools, and recovery milestones.
 

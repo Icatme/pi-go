@@ -3501,3 +3501,20 @@
 - Publication scope is the release commit on master and an annotated source
   tag, pushed together with remote target verification. No GitHub Release,
   binary assets, manual CI or deployment is included.
+
+
+## 2026-11-06 - Extract reusable SuperAgent task assessment from JZBeacon
+
+- Added PiTaskAssessor, TaskAssessmentInput, TaskCandidate, TaskAssessment and typed workload hints under superagent. One isolated model request selects new, attach, clarify or status using host-offered opaque task IDs and CanAttach eligibility. Strict parsing rejects unknown/duplicate fields, invalid workloads and unavailable tasks; context bounds include the policy, input and tool declaration. No journal, admission, business execution or model-role selection is performed by this API.
+- Kept the existing MainRouter, history, task attachment, progress subscription and worker-report APIs as their respective owners. The new assessor copies only static model/reasoning/transport configuration; business prompts, history, tools, resolvers and execution hooks are not inherited. Hosts retain context selection, authorization, persistence and status rendering.
+- Moved the generic protocol/cancellation regression coverage out of JZBeacon. Cancellation closes once and waits for cleanup; provider, stream-event, Wait and Close errors retain their causes and always return a zero decision. A terminal event or model ErrorMessage cannot be overridden by a later valid tool call. Added external-package usage coverage and documented the host boundary.
+- Validation passed: full superagent race suite, final assessment-specific race regressions after stream-error fixes, go vet ./superagent, formatting and diff checks. Cross-repository validation via a temporary Go workspace passed JZBeacon operatoragent/airelay/services race tests, integration-package vet and the full JZBeacon module build; final understanding/gateway race tests also passed after the last error-boundary change. No paid model or live service calls were used.
+- Source changes remain local on codex/superagent-task-assessment. No dependency, package version, committed replace directive, commit, push, tag, CI dispatch or production change. JZBeacon still pins published pi-go v0.21.0; publishing this API and updating that pin are required before a standalone consumer build can use it.
+
+
+## 2026-11-06 - Review and release SuperAgent assessment as v0.22.0
+
+- Independently reviewed the SDK API/protocol/stream lifecycle and the JZBeacon adapter boundary. Found and reproduced one remaining error-classification defect: assistant error/aborted stop reasons with an empty error message were treated as invalid decision input. The assessor now reports model failure before protocol validation, retaining existing event/Wait/cancellation causes; both SDK and host regressions cover this boundary without fallback or retry.
+- Updated the package version and examples module reference to v0.22.0 and added source-release notes. This additive SuperAgent API requires no new third-party dependency and leaves existing coordinators, history, worker progress and report APIs intact. Existing examples retain their pre-existing local module replacement; no replacement was added for the downstream JZBeacon consumer.
+- Validation passed on Windows with GOWORK=off and live tests disabled: scripts/test.ps1 (all root and examples packages), full superagent race suite, root go vet -mod=readonly ./... and examples go vet -mod=readonly ./.... The focused terminal-error regression reproduced the defect before the fix, then passed with assessment/public-API/example race coverage. Formatting and diff checks passed. Host failure-boundary regression also passed against the local SDK before publication.
+- The user authorized commit and source-tag publication. Release delivery targets the default master branch and annotated v0.22.0 tag together, followed by remote identity and published Go module verification. No GitHub binary release, manual CI, live provider call or production deployment is included.
