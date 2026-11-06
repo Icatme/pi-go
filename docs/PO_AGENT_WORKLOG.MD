@@ -3303,3 +3303,62 @@
   draft PR. No final M9/release acceptance, real services, user computer,
   extra paid execution, CI dispatch, merge or deployment.
   See [M9c boundaries and reproduction](superagent-m9c.md).
+
+## 2026-11-06 - M9d bounded mixed-runtime recovery acceptance
+
+- Test-first follow-up to draft #187's exact tree, using actual unbatched/batched
+  Pi main adapters and PiWorker. A separate 35-submission/23-identity/8-task
+  fixture retains 30 terminal delivery records, including two-target fanout.
+- A settles despite a blocked main model and B tool. Cancellation preserves A's
+  late fsynced write and native committed receipt. Six independent requests
+  complete while B remains running; the correction appears only in B's history.
+- An isolated child exits without Close after A's committed-write/model failure
+  and B's committed-write/pre-terminal boundary. Recovery preserves known facts,
+  leaves B's unpersisted receipt unknown, blocks old follow-ups, and resumes only
+  fresh instructions after fixture-host reconciliation. Exact before/after effect
+  evidence and completed reopen reject repeats; corrupted evidence is rejected.
+- Independent review tightened actual multi-input batch and exact reconciliation
+  checks. Final full offline checks and exact-tree publication are recorded in
+  the draft PR. No production API/dependency/schema/CI changes or live services.
+  This is bounded protocol acceptance, not continuous-rate performance, full
+  M9/four-strategy/release acceptance, or model token/cost evidence. No user
+  computer, extra paid execution, CI dispatch, merge or deployment.
+  See [M9d boundaries and reproduction](superagent-m9d.md).
+
+## 2026-11-06 - SuperAgent PR merge review
+
+- Reviewed #157–#161 and #163–#188 in dependency order. Joined the original
+  #161 and #176 histories at their adapted implementations in #163 and #178.
+  Preserved the separate edited-comment actor worklog entry from #176.
+- Rejected hidden actions during failed main-input replay and fenced late
+  background inspections after coordinator shutdown. The coordinator and durable
+  helper now reject invalid arguments before authorization or quota reservation.
+- Fixed drive-qualified SQLite filenames on Windows and blocked network/device
+  paths. The device client now checks acceptance and native receipt evidence
+  before trusting an active or terminal state.
+- Repaired the late-commit PostgreSQL fixture to supply a native agent receipt.
+  All eight journal and five coordinator cases passed on isolated PostgreSQL
+  17.9 and 18.3 instances, both normally and under the Go race detector. These
+  runs used one primary at a time and independent client pools.
+- Added corrupt-evidence regressions for serial, concurrent, and crash
+  evaluation. An empty effect, an extra reply to ignored input, or a reply
+  tied to a different decision can no longer pass the corresponding scorer.
+- The 256-event durable backlog exceeded the five-second small-fixture guard
+  under concurrent test load on Windows. Its drain now has a separate
+  one-minute deadline and still checks every terminal event and worker.
+- Windows tests covered SQLite process contention and recovery. Linux helper
+  and device process suites ran in WSL2. Provider calls, physical devices,
+  cross-host failover, deployment, and release publication were outside scope.
+- Final Windows Go 1.26.4 root tests and vet passed. Race coverage passed for
+  every root package across the full invocation and a final SuperAgent-package
+  rerun after fixing the backlog deadline. The earlier full invocation failed
+  that deadline and is retained as a failed attempt. The separate examples
+  module passed tests, race, vet, and module-graph resolution.
+- Dependency activity was checked before merging. pgx v5.11.0 is actively
+  maintained and confined to database tests. Its indirect pgservicefile and
+  pgpassfile parsers last changed in 2024 and 2023, respectively. They remain
+  pinned because the maintained driver uses them, while these tests use
+  explicit isolated DSNs. Their low maintenance activity remains a risk.
+- All merges use the reviewed head as a guard and compare the resulting Git
+  tree with the tested candidate. Commit IDs are used only for merge safety
+  and ancestry checks.
