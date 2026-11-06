@@ -19,6 +19,8 @@ func mainFixture(_ context.Context, job MainJob) (MainOutcome, error) {
 	decision := MainDecision{Action: "new"}
 	if job.Input.Kind == "worker_result" {
 		decision = MainDecision{Action: "reply", Text: job.Input.Report.Status + ": " + job.Input.Report.Text}
+	} else if job.Input.Kind == "task_input" || job.Input.Kind == "control_result" {
+		decision = MainDecision{Action: "ignore"}
 	}
 	return MainOutcome{Decision: decision, Snapshot: job.Snapshot}, nil
 }
@@ -68,7 +70,7 @@ func TestMainReplayEveryCommitBoundary(t *testing.T) {
 		if err := json.Unmarshal(entry.Entry.Custom.Payload, &tr); err != nil {
 			t.Fatal(err)
 		}
-		if tr.State == "main_opened" {
+		if tr.State == "main_opened" || tr.State == "main_chat_opened" {
 			continue
 		}
 		t.Run(tr.State+"-"+entry.Entry.ID, func(t *testing.T) {
@@ -365,7 +367,9 @@ func TestMainBlockedDeliveryStillReplies(t *testing.T) {
 	}
 	submit(t, a, Trigger{ID: "first", Source: "im", Thread: "chat", Kind: "request"})
 	waitIdle(t, a)
-	submit(t, a, Trigger{ID: "blocked", Source: "im", Thread: "chat", Kind: "request"})
+	if accepted, err := a.SubmitTask(Trigger{ID: "blocked", Source: "im", Thread: "chat", Kind: "request"}, "task-1"); !accepted || err != nil {
+		t.Fatalf("task input: %v %v", accepted, err)
+	}
 	waitIdle(t, a)
 	if replies := a.Replies(); len(replies) != 2 || replies[1].Report.Status != "blocked" || replies[1].EventID != "blocked" || runs.Load() != 1 {
 		t.Fatalf("blocked feedback missing: %+v", replies)
@@ -385,7 +389,7 @@ func TestMainBlockedDeliveryStillReplies(t *testing.T) {
 	if err := b.Reconcile("task-1", "im", "first", "Inspected the effect"); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := b.Submit(Trigger{ID: "blocked", Source: "im", Thread: "chat", Kind: "request"}); ok || err != nil {
+	if ok, err := b.SubmitTask(Trigger{ID: "blocked", Source: "im", Thread: "chat", Kind: "request"}, "task-1"); ok || err != nil {
 		t.Fatal("reconciled old input was re-admitted")
 	}
 	waitIdle(t, b)
@@ -410,7 +414,7 @@ func TestMainInputAdmittedBeforeReconcileRemainsBlocked(t *testing.T) {
 	// this delivery was admitted before reconciliation, not a fresh instruction.
 	a.mu.Lock()
 	stale := Trigger{ID: "stale", Source: "im", Thread: "chat", Kind: "request"}
-	err = a.commit(transition{State: "received", Index: len(a.events), Trigger: &stale})
+	err = a.commit(transition{State: "received", Index: len(a.events), Trigger: &stale, Task: "task-1"})
 	if err == nil {
 		err = a.commit(transition{State: "reconciled", Index: 0, Task: "task-1", Text: "Verified the original effect"})
 	}

@@ -46,7 +46,9 @@ func TestBlockedMainDoesNotBlockAdmissionKnownWorkerOrControl(t *testing.T) {
 	waitIdle(t, a)
 	submit(t, a, Trigger{ID: "slow", Source: "im", Thread: "slow", Kind: "request"})
 	receive(t, blocked)
-	submit(t, a, Trigger{ID: "follow", Source: "im", Thread: "known", Kind: "signal"})
+	if accepted, err := a.SubmitTask(Trigger{ID: "follow", Source: "im", Thread: "known", Kind: "signal"}, a.Status().Tasks[0].ID); !accepted || err != nil {
+		t.Fatalf("task input: %v %v", accepted, err)
+	}
 	job := receive(t, started)
 	target := RunTarget{TaskID: job.TaskID, Source: job.Trigger.Source, EventID: job.Trigger.ID}
 	receipt, err := a.Steer(target, "stop before next write")

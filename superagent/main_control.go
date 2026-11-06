@@ -5,13 +5,16 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Icatme/pi-go/agent"
 )
 
 // MainControl is a durable action selected by the main session for one exact
 // invocation. queued is not delivered. delivered means dequeued at a Worker
 // input boundary, not executed by its model or tools. cancel_requested is not
 // completion: inspect the Worker's Report and receipts for actual effects.
-// An interrupted delivery becomes needs_review on restart and is never replayed.
+// Missing accepted-input evidence becomes needs_review and is never replayed.
+// Older untagged deliveries retain the conservative interrupted-run behavior.
 type MainControl struct {
 	ID         string    `json:"id"`
 	DecisionID string    `json:"decision_id"`
@@ -23,6 +26,10 @@ type MainControl struct {
 	Target     RunTarget `json:"target"`
 	Text       string    `json:"text,omitempty"`
 	Status     string    `json:"status"` // pending, queued, delivered, cancel_requested, not_delivered, needs_review
+	// InputAccepted is positive evidence in the target invocation's saved
+	// user-message history, not evidence that the model obeyed the correction.
+	InputAccepted bool `json:"input_accepted,omitempty"`
+	evidence      bool // activated by main_chat_opened; never inferred for old records
 }
 
 // MainControls returns detached durable control history, including pending,
@@ -33,11 +40,17 @@ func (a *SuperAgent) MainControls() []MainControl {
 	return slices.Clone(a.main.controls)
 }
 
+func copyControl(c *MainControl) *MainControl {
+	if c == nil {
+		return nil
+	}
+	copy := *c
+	return &copy
+}
+
 func (a *SuperAgent) mainControl(id string) *MainControl {
-	for i := range a.main.controls {
-		if a.main.controls[i].ID == id {
-			return &a.main.controls[i]
-		}
+	if i, ok := a.main.controlIndex[id]; ok {
+		return &a.main.controls[i]
 	}
 	return nil
 }
@@ -99,7 +112,7 @@ func (a *SuperAgent) validateMainControl(tr transition) error {
 				return errors.New("invalid control drop")
 			}
 		case "control_needs_review":
-			if c.Status != "delivered" || e == nil || e.state != "interrupted" {
+			if c.Status != "delivered" || c.InputAccepted || e == nil || e.state != "interrupted" {
 				return errors.New("invalid uncertain control")
 			}
 		default:
@@ -149,7 +162,7 @@ func (a *SuperAgent) recoverMainControls() error {
 		case "pending", "queued":
 			status = "not_delivered"
 		case "delivered":
-			if e := a.controlEvent(c.Target); e != nil && e.state == "interrupted" {
+			if e := a.controlEvent(c.Target); !c.InputAccepted && e != nil && e.state == "interrupted" {
 				status = "needs_review"
 			}
 		}
@@ -160,4 +173,66 @@ func (a *SuperAgent) recoverMainControls() error {
 		}
 	}
 	return nil
+}
+
+const controlMetadata = "superagent.control"
+
+// All fields are strings so the marker survives snapshot JSON round trips.
+// Only host-created user messages carry this envelope; matching text alone
+// (including text that looks like an envelope) is never acceptance evidence.
+func controlMessage(c MainControl) agent.Message {
+	m := agent.NewUserTextMessage(c.Text)
+	m.Metadata = map[string]any{
+		controlMetadata:                 c.ID,
+		"superagent.control_source":     c.Source,
+		"superagent.control_event":      c.EventID,
+		"superagent.control_task":       c.Target.TaskID,
+		"superagent.control_run_source": c.Target.Source,
+		"superagent.control_run_event":  c.Target.EventID,
+	}
+	return m
+}
+
+// Called only when the target Worker's terminal snapshot is already decoded.
+// Scan that snapshot once, not on every admission, poll or later task run.
+// The terminal record atomically preserves this derived evidence on replay.
+func (a *SuperAgent) recordControlInputs(index int, snapshot agent.AgentSnapshot) {
+	waiting := make(map[string]*MainControl)
+	for _, id := range a.events[index].controls {
+		c := a.mainControl(id)
+		if c.evidence && c.Action == "steer" && c.Status == "delivered" {
+			waiting[c.ID] = c
+		}
+	}
+	if len(waiting) == 0 {
+		return
+	}
+	for _, m := range snapshot.Messages {
+		id, _ := m.Metadata[controlMetadata].(string)
+		c := waiting[id]
+		if c == nil || m.Role != agent.RoleUser || messageText(m) != c.Text || snapshot.SessionID != c.Target.TaskID {
+			continue
+		}
+		if m.Metadata["superagent.control_source"] == c.Source && m.Metadata["superagent.control_event"] == c.EventID &&
+			m.Metadata["superagent.control_task"] == c.Target.TaskID && m.Metadata["superagent.control_run_source"] == c.Target.Source &&
+			m.Metadata["superagent.control_run_event"] == c.Target.EventID {
+			c.InputAccepted = true
+		}
+	}
+	for _, id := range a.events[index].controls {
+		if c := waiting[id]; c != nil && !c.InputAccepted {
+			c.Status = "needs_review"
+			a.enqueueControlResult(c)
+		}
+	}
+}
+
+func (a *SuperAgent) enqueueControlResult(c *MainControl) {
+	if !c.evidence || (c.Status != "not_delivered" && c.Status != "needs_review") {
+		return
+	}
+	i := a.accepted[[2]string{c.Source, c.EventID}]
+	e := a.events[i]
+	input := MainInput{ID: a.nextMainInputID(), Kind: "control_result", Trigger: e.trigger, TaskID: c.Target.TaskID, Control: copyControl(c)}
+	a.main.inbox = append(a.main.inbox, mainItem{input: input, event: i})
 }

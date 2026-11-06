@@ -16,7 +16,7 @@ import (
 
 func controlRouter(_ context.Context, job MainJob) (MainOutcome, error) {
 	d := MainDecision{Action: "new"}
-	if job.Input.Kind == "worker_result" {
+	if job.Input.Kind != "user" {
 		d.Action = "ignore"
 	} else if strings.HasPrefix(job.Input.Trigger.ID, "control") {
 		if len(job.Runs) == 0 {
@@ -204,7 +204,7 @@ func waitMainFailure(t *testing.T, a *SuperAgent) {
 
 // Construct exact durable boundaries without starting callbacks. Replay is
 // then exercised through the public OpenMain API with a real scheduler.
-func controlJournal(t *testing.T, action string) (*SuperAgent, string) {
+func controlJournal(t *testing.T, action string, chat ...bool) (*SuperAgent, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "source.jsonl")
 	a, err := openState(t.Context(), path, true)
@@ -219,10 +219,13 @@ func controlJournal(t *testing.T, action string) (*SuperAgent, string) {
 		}
 	}
 	commit(transition{State: "main_opened", Main: &mainTransition{SessionID: "main-test", ProviderSessionID: "provider-test"}})
+	if len(chat) > 0 && chat[0] {
+		commit(transition{State: "main_chat_opened", Main: &mainTransition{}})
+	}
 	start := Trigger{ID: "start", Source: "im", Thread: "work", Kind: "request"}
 	commit(transition{State: "received", Index: 0, Trigger: &start})
 	input := a.main.inbox[0].input.ID
-	commit(transition{State: "main_decided", Main: &mainTransition{InputID: input, DecisionID: "main-decision-" + input, Decision: MainDecision{Action: "new"}, Snapshot: json.RawMessage(`{"sessionId":"main-test"}`), Assignment: &transition{Index: 0, State: "queued", Task: "task-1", ProviderSessionID: "worker-provider"}}})
+	commit(transition{State: "main_decided", Main: &mainTransition{InputID: input, DecisionID: "main-decision-" + input, Decision: MainDecision{Action: "new"}, Snapshot: json.RawMessage(`{"session_id":"main-test"}`), Assignment: &transition{Index: 0, State: "queued", Task: "task-1", ProviderSessionID: "worker-provider"}}})
 	commit(transition{State: "running", Index: 0})
 	control := Trigger{ID: "control", Source: "im", Thread: "control", Kind: "request", Text: action}
 	commit(transition{State: "received", Index: 1, Trigger: &control})
@@ -231,7 +234,7 @@ func controlJournal(t *testing.T, action string) (*SuperAgent, string) {
 	if action == "steer" {
 		d.Text = "correct"
 	}
-	commit(transition{State: "main_decided", Main: &mainTransition{InputID: input, DecisionID: "main-decision-" + input, Decision: d, Snapshot: json.RawMessage(`{"sessionId":"main-test"}`)}})
+	commit(transition{State: "main_decided", Main: &mainTransition{InputID: input, DecisionID: "main-decision-" + input, Decision: d, Snapshot: json.RawMessage(`{"session_id":"main-test"}`)}})
 	return a, path
 }
 
@@ -317,7 +320,9 @@ func TestMainControlReplayEveryActionBoundary(t *testing.T) {
 						t.Fatal(err)
 					}
 					// Same task's next invocation must not receive an old control.
-					submit(t, b, Trigger{ID: "next", Source: "im", Thread: "work", Kind: "request"})
+					if accepted, err := b.SubmitTask(Trigger{ID: "next", Source: "im", Thread: "work", Kind: "request"}, "task-1"); !accepted || err != nil {
+						t.Fatalf("task input: %v %v", accepted, err)
+					}
 					waitIdle(t, b)
 				})
 			}

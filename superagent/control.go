@@ -195,7 +195,11 @@ func (a *SuperAgent) takeSteering(ctx context.Context, r *activeRun, mode agent.
 	}
 	messages := make([]agent.Message, 0, n)
 	for _, s := range r.queue[:n] {
-		messages = append(messages, agent.NewUserTextMessage(s.text))
+		message := agent.NewUserTextMessage(s.text)
+		if c := a.mainControl(s.controlID); c != nil && c.evidence {
+			message = controlMessage(*c)
+		}
+		messages = append(messages, message)
 		s.receipt.delivered = true
 		close(s.receipt.done)
 		a.publishLocked(r.target, "steer_delivered")

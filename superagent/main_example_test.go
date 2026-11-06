@@ -84,9 +84,9 @@ func ExampleSuperAgent_MainControls() {
 		panic(err)
 	}
 	<-started
-	// M1 retains legacy known-thread routing. This unbound control conversation
-	// reaches main; same-chat topic/control classification is the M2 follow-on.
-	if _, err := a.Submit(superagent.Trigger{ID: "stop", Source: "im", Thread: "operator", Kind: "request", Text: "Stop analyzing logs"}); err != nil {
+	// An ordinary message in the same chat still reaches main. Only the exact
+	// invocation selected by its validated decision is cancelled.
+	if _, err := a.Submit(superagent.Trigger{ID: "stop", Source: "im", Thread: "work", Kind: "request", Text: "Stop analyzing logs"}); err != nil {
 		panic(err)
 	}
 	if err := a.WaitIdle(ctx); err != nil {
@@ -141,4 +141,51 @@ func ExampleSuperAgent_BeginReplyDelivery() {
 	}
 	fmt.Println(message.Text, a.Replies()[0].Status, accepted)
 	// Output: Which build? acknowledged false
+}
+
+func ExampleSuperAgent_SubmitTask() {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "superagent-task-input-*")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(dir)
+	def := agent.AgentDefinition{Model: superagent.OfflineModel()}
+	router, err := superagent.PiMainRouter(def, 64<<10)
+	if err != nil {
+		panic(err)
+	}
+	worker, err := superagent.PiWorker(def)
+	if err != nil {
+		panic(err)
+	}
+	a, err := superagent.OpenMain(ctx, filepath.Join(dir, "main.jsonl"), 2, router, worker)
+	if err != nil {
+		panic(err)
+	}
+	defer a.Close()
+	if _, err := a.Submit(superagent.Trigger{ID: "request", Source: "im", Thread: "chat", Kind: "request", Text: "Check the build"}); err != nil {
+		panic(err)
+	}
+	// These are example barriers; a live host submits and consumes outbox items
+	// independently. It retains the association from the original task result.
+	if err := a.WaitIdle(ctx); err != nil {
+		panic(err)
+	}
+	taskID := a.Replies()[0].TaskID
+	// The host has authenticated this PR update and resolved its authorized task.
+	update := superagent.Trigger{ID: "review-1", Source: "github", Thread: "pr-27", Kind: "signal", Text: "The build has a new review"}
+	accepted, err := a.SubmitTask(update, taskID)
+	if err != nil {
+		panic(err)
+	}
+	if err := a.WaitIdle(ctx); err != nil {
+		panic(err)
+	}
+	duplicate, err := a.SubmitTask(update, taskID)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(accepted, duplicate, len(a.Status().Tasks), a.Replies()[1].Thread)
+	// Output: true false 1 pr-27
 }
