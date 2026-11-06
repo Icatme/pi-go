@@ -23,9 +23,11 @@ const (
 
 // Identity consists exclusively of independently authenticated/authorized host
 // facts, never unchecked payload claims or model inferences. EventID is the
-// stable callback identity (GitHub delivery ID, not comment/review ID). EventType
-// is the authenticated GitHub event header. TaskID and ToThread are host-approved
-// routing associations; Normalize never derives routing from text or links.
+// stable host-verified event identity, not the comment/review ID. EventType must
+// be independently validated against the GitHub payload. GitHub HMAC alone does
+// not authenticate either delivery or event headers. The HTTP wrapper uses a
+// body digest as EventID and preserves unsigned headers separately. TaskID and
+// ToThread are host-approved routing associations; Normalize never derives routing from text or links.
 // MessageID is the authenticated platform comment/review ID for GitHub (required).
 // For IM it may be omitted, otherwise it must equal EventID.
 type Identity struct {
