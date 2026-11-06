@@ -65,7 +65,8 @@ func Validate(events []Event, r Result) error {
 		observed := map[string]bool{}
 		for _, e := range set.values {
 			k := e.Source + "/" + e.EventID
-			if observed[k] || expectedEffects[k] != e {
+			want, ok := expectedEffects[k]
+			if !ok || observed[k] || want != e {
 				return fmt.Errorf("incorrect %s for %s", set.name, k)
 			}
 			observed[k] = true

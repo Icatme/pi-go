@@ -497,7 +497,7 @@ func (b *coordinatorBackground) Inspect(_ context.Context, id string) (backgroun
 		if b.exited {
 			o.State = "exited"
 			o.Output = json.RawMessage(`{"content":[{"type":"text","text":"private fixture output"}]}`)
-			o.Receipts = []background.Receipt{{Token: 1, Domain: "host", CallID: b.request.Call.ID, ToolName: b.request.Call.Name, Committed: true, Completed: true}}
+			o.Receipts = []background.Receipt{{Token: 1, Domain: "agent", CallID: b.request.Call.ID, ToolName: b.request.Call.Name, Committed: true, Completed: true}}
 		}
 	}
 	return o, nil
