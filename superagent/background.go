@@ -457,8 +457,17 @@ func (a *SuperAgent) RefreshBackground(ctx context.Context, id string) error {
 	if o.Exited {
 		return nil
 	}
+	next := observedBackground(o, observation, err)
+	if reflect.DeepEqual(next, o) {
+		return nil
+	}
+	return a.commit(transition{State: "background_observed", Background: &backgroundTransition{Operation: next}})
+}
+
+// Share the same conservative evidence merge with explicit Watchdog refreshes.
+func observedBackground(o BackgroundOperation, observation background.Observation, inspectErr error) BackgroundOperation {
 	next := cloneBackground(o)
-	if err != nil || !validBackgroundObservation(observation, id) || !backgroundFactsAdvance(o, observation) {
+	if inspectErr != nil || !validBackgroundObservation(observation, o.ID) || !backgroundFactsAdvance(o, observation) {
 		next.Status = "needs_review"
 		next.NeedsReview = true
 	} else {
@@ -487,11 +496,9 @@ func (a *SuperAgent) RefreshBackground(ctx context.Context, id string) error {
 			next.NeedsReview = next.StopRequested || next.Failed
 		}
 	}
-	if reflect.DeepEqual(next, o) {
-		return nil
-	}
-	return a.commit(transition{State: "background_observed", Background: &backgroundTransition{Operation: next}})
+	return next
 }
+
 func validBackgroundObservation(o background.Observation, id string) bool {
 	if o.ID != id || (o.State != "running" && o.State != "exited" && o.State != "unknown") || len(o.Output) > 64<<10 || (len(o.Output) > 0 && !json.Valid(o.Output)) || len(o.Receipts) > 256 {
 		return false

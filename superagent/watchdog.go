@@ -136,13 +136,14 @@ type WatchdogCheck struct {
 	ModelStatus string            `json:"model_status"` // disabled, completed, failed
 }
 type WatchdogStatus struct {
-	SessionID         string          `json:"session_id"`
-	ProviderSessionID string          `json:"provider_session_id"`
-	Policy            WatchdogPolicy  `json:"policy"`
-	Cursor            int             `json:"cursor"`
-	NextCheckAt       int64           `json:"next_check_at"`
-	Running           bool            `json:"running"`
-	Checks            []WatchdogCheck `json:"checks"`
+	SessionID         string                 `json:"session_id"`
+	ProviderSessionID string                 `json:"provider_session_id"`
+	Policy            WatchdogPolicy         `json:"policy"`
+	Cursor            int                    `json:"cursor"`
+	NextCheckAt       int64                  `json:"next_check_at"`
+	Running           bool                   `json:"running"`
+	Checks            []WatchdogCheck        `json:"checks"`
+	Interventions     []WatchdogIntervention `json:"interventions,omitempty"`
 }
 type watchdogState struct {
 	WatchdogStatus
@@ -150,11 +151,13 @@ type watchdogState struct {
 	latest   map[string]WatchdogFinding
 }
 type watchdogTransition struct {
-	SessionID         string          `json:"session_id,omitempty"`
-	ProviderSessionID string          `json:"provider_session_id,omitempty"`
-	Policy            WatchdogPolicy  `json:"policy,omitempty"`
-	Check             *WatchdogCheck  `json:"check,omitempty"`
-	Snapshot          json.RawMessage `json:"snapshot,omitempty"`
+	SessionID         string                `json:"session_id,omitempty"`
+	ProviderSessionID string                `json:"provider_session_id,omitempty"`
+	Policy            WatchdogPolicy        `json:"policy,omitempty"`
+	Check             *WatchdogCheck        `json:"check,omitempty"`
+	Snapshot          json.RawMessage       `json:"snapshot,omitempty"`
+	Intervention      *WatchdogIntervention `json:"intervention,omitempty"`
+	Operation         *BackgroundOperation  `json:"operation,omitempty"`
 }
 
 func validWatchdogPolicy(p WatchdogPolicy) bool {
@@ -492,6 +495,12 @@ func (a *SuperAgent) validateWatchdog(tr transition) error {
 	if w == nil || tr.Index != 0 || tr.Trigger != nil || tr.Task != "" || tr.ProviderSessionID != "" || tr.Text != "" || len(tr.Snapshot) > 0 || len(tr.Receipts) > 0 || tr.NeedsReview || tr.Background != nil || tr.Main != nil || tr.Admission != nil || tr.Thread != nil {
 		return errors.New("watchdog: mixed transition")
 	}
+	if tr.State == "watchdog_refresh_reserved" || tr.State == "watchdog_refresh_finished" {
+		return a.validateWatchdogRefresh(tr)
+	}
+	if w.Intervention != nil || w.Operation != nil {
+		return errors.New("watchdog: unexpected intervention")
+	}
 	switch tr.State {
 	case "watchdog_opened":
 		if a.watchdog.SessionID != "" || !validIdentity(w.SessionID) || !validIdentity(w.ProviderSessionID) || w.SessionID == w.ProviderSessionID || w.SessionID == a.main.id || w.ProviderSessionID == a.main.providerID || !validWatchdogPolicy(w.Policy) || w.Check != nil || len(w.Snapshot) > 0 {
@@ -627,6 +636,9 @@ func (a *SuperAgent) applyWatchdog(tr transition) error {
 		return fmt.Errorf("invalid watchdog record: %w", err)
 	}
 	w := tr.Watchdog
+	if w.Intervention != nil {
+		return a.applyWatchdogRefresh(tr)
+	}
 	if tr.State == "watchdog_opened" {
 		a.watchdog.WatchdogStatus = WatchdogStatus{SessionID: w.SessionID, ProviderSessionID: w.ProviderSessionID, Policy: w.Policy}
 		a.watchdog.latest = map[string]WatchdogFinding{}

@@ -20,7 +20,9 @@ has offline coverage, but real PostgreSQL/host/network fault validation has not
 run; M6b remains a draft development slice, not production acceptance.
 For opt-in read-only Watchdog inspection, independent clock/session and durable
 recheck evidence, see [M8a](../docs/superagent-m8a.md) and
-`ExampleSuperAgent_CheckWatchdog`. No automatic recovery actions are exposed.
+`ExampleSuperAgent_CheckWatchdog`. For a separately host-authorized, durable
+exact-operation Inspect, see [M8b](../docs/superagent-m8b.md) and
+`ExampleSuperAgent_RefreshWatchdog`. No automatic recovery actions are exposed.
 The existing `Open` examples below retain the stateless Router contract.
 
 SuperAgent is an opt-in coordinator in the pi-go module. An incoming conversation
