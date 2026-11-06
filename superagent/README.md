@@ -10,6 +10,9 @@ For same-chat independent work, explicit task updates, and persisted correction
 evidence, see [M2a](../docs/superagent-m2a.md) and `ExampleSuperAgent_SubmitTask`.
 For optional same-host SQLite leases, fencing and JSONL import, see
 [M6a](../docs/superagent-m6a.md) and `ExampleOpenMainJournal`.
+For opt-in read-only Watchdog inspection, independent clock/session and durable
+recheck evidence, see [M8a](../docs/superagent-m8a.md) and
+`ExampleSuperAgent_CheckWatchdog`. No automatic recovery actions are exposed.
 The existing `Open` examples below retain the stateless Router contract.
 
 SuperAgent is an opt-in coordinator in the pi-go module. An incoming conversation

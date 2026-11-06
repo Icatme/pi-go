@@ -23,6 +23,7 @@ const maxSnapshotBytes = 8 << 20
 const maxReportBytes = 64 << 10
 
 type transition struct {
+	Watchdog          *watchdogTransition   `json:"watchdog,omitempty"`
 	Background        *backgroundTransition `json:"background,omitempty"`
 	Admission         *AdmissionRecord      `json:"admission,omitempty"`
 	validatedSnapshot *validatedSnapshot    // process-local content proof; never serialized
@@ -75,6 +76,8 @@ type task struct {
 // SuperAgent owns one exclusive journal writer. Call Close to cancel callbacks,
 // wait for them to return, and release journal ownership.
 type SuperAgent struct {
+	watchdog          watchdogState
+	watchdogRuntime   string
 	progress          progressHub
 	mu                sync.Mutex
 	wg                sync.WaitGroup
@@ -256,6 +259,11 @@ func (a *SuperAgent) submit(t Trigger, taskID string, threadEntry bool) (bool, e
 }
 
 func (a *SuperAgent) commit(tr transition) error {
+	if tr.Watchdog != nil || strings.HasPrefix(tr.State, "watchdog_") {
+		if err := a.validateWatchdog(tr); err != nil {
+			return err
+		}
+	}
 	if a.fatal != nil {
 		return a.fatal
 	}
@@ -293,7 +301,7 @@ func (a *SuperAgent) commit(tr transition) error {
 		a.sequence++
 		// Replaying the journal does not emit live progress. Register active
 		// control before publishing the running transition in dispatch.
-		if a.work != nil && tr.State != "running" && tr.Main == nil && tr.Thread == nil && tr.Background == nil {
+		if a.work != nil && tr.State != "running" && tr.Main == nil && tr.Thread == nil && tr.Background == nil && tr.Watchdog == nil {
 			e := a.events[tr.Index]
 			if e.task != "" {
 				a.publishLocked(RunTarget{TaskID: e.task, Source: e.trigger.Source, EventID: e.trigger.ID}, tr.State)
@@ -306,6 +314,9 @@ func (a *SuperAgent) commit(tr transition) error {
 }
 
 func (a *SuperAgent) apply(tr transition, replay bool) error {
+	if tr.Watchdog != nil || strings.HasPrefix(tr.State, "watchdog_") {
+		return a.applyWatchdog(tr)
+	}
 	if tr.Background != nil || strings.HasPrefix(tr.State, "background_") {
 		return a.applyBackground(tr)
 	}

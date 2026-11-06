@@ -12,12 +12,13 @@ import (
 // A mailbox belongs to exactly one event's worker invocation. Its fields
 // (other than the goroutine-safe context) are protected by SuperAgent.mu.
 type activeRun struct {
-	target   RunTarget
-	ctx      context.Context
-	cancel   context.CancelFunc
-	returned bool
-	aborted  bool
-	queue    []steering
+	watchdogTurns, watchdogToolsStarted, watchdogToolsCompleted uint64
+	target                                                      RunTarget
+	ctx                                                         context.Context
+	cancel                                                      context.CancelFunc
+	returned                                                    bool
+	aborted                                                     bool
+	queue                                                       []steering
 }
 
 func (r *activeRun) phase() string {
@@ -218,6 +219,16 @@ func (a *SuperAgent) notifyWorkerProgress(r *activeRun, kind string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !r.returned && !r.aborted && r.ctx.Err() == nil && a.tasks[r.target.TaskID].active == r {
+		switch kind {
+		case "turn_end":
+			r.watchdogTurns++
+		case "tool_start":
+			r.watchdogToolsStarted++
+		case "tool_end":
+			if r.watchdogToolsCompleted < r.watchdogToolsStarted {
+				r.watchdogToolsCompleted++
+			}
+		}
 		a.publishLocked(r.target, kind)
 	}
 }
