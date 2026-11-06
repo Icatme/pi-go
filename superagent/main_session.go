@@ -53,10 +53,13 @@ type MainJob struct {
 // event can be replied to or ignored, never used to start new business work.
 // Reply destinations come from the input, not from model-generated fields.
 type MainDecision struct {
-	Action string     `json:"action"` // new, attach, steer, cancel, reply, clarify, ignore
-	TaskID string     `json:"task_id,omitempty"`
-	Text   string     `json:"text,omitempty"`
-	Target *RunTarget `json:"target,omitempty"`
+	// ReportRefs selects at most 16 distinct public reports from this callback
+	// view for reply/clarify. References grant no execution or delivery authority.
+	ReportRefs []HistoryRef `json:"report_refs,omitempty"`
+	Action     string       `json:"action"` // new, attach, steer, cancel, reply, clarify, ignore
+	TaskID     string       `json:"task_id,omitempty"`
+	Text       string       `json:"text,omitempty"`
+	Target     *RunTarget   `json:"target,omitempty"`
 }
 
 type MainOutcome struct {
@@ -69,7 +72,10 @@ type MainOutcome struct {
 // requirements cannot be replaced by a model's description of success.
 // Control similarly preserves correction facts for control_result replies.
 type Reply struct {
-	ID string `json:"id"`
+	// Reports contains explicitly cited facts in requested order. Report below
+	// remains the triggering result for existing single-report consumers.
+	Reports []ReportCitation `json:"reports,omitempty"`
+	ID      string           `json:"id"`
 	// DeliveryID correlates the input delivery. ID remains the distinct
 	// outbound reply identity used by the send/acknowledgment protocol.
 	DeliveryID   string         `json:"delivery_id"`
@@ -283,6 +289,10 @@ func (a *SuperAgent) runMain(job MainJob) {
 		runs[target] = true
 	}
 	out, err := callMain(a.ctx, a.mainRoute, job)
+	out.Decision.ReportRefs = slices.Clone(out.Decision.ReportRefs)
+	if err == nil {
+		err = job.History.validateReportReferences(out.Decision.ReportRefs)
+	}
 	job.History.close()
 	if out.Decision.Target != nil {
 		target := *out.Decision.Target
@@ -383,7 +393,7 @@ func (a *SuperAgent) validateMain(tr transition) error {
 		if !validNote(tr.Text) {
 			return errors.New("invalid main failure")
 		}
-		if m.Decision != (MainDecision{}) || m.DecisionID != "" || m.Assignment != nil || m.ReplyID != "" || len(m.Snapshot) != 0 {
+		if !emptyMainDecision(m.Decision) || m.DecisionID != "" || m.Assignment != nil || m.ReplyID != "" || len(m.Snapshot) != 0 {
 			return errors.New("failed main input cannot contain a decision, assignment, reply or snapshot")
 		}
 		return nil
@@ -395,6 +405,12 @@ func (a *SuperAgent) validateMain(tr transition) error {
 		return errors.New("invalid main snapshot")
 	}
 	d := m.Decision
+	if d.ReportRefs != nil && d.Action != "reply" && d.Action != "clarify" {
+		return errors.New("report references require a reply or clarification")
+	}
+	if _, err := a.resolveReportReferences(d.ReportRefs); err != nil {
+		return err
+	}
 	if d.Action != "steer" && d.Action != "cancel" && d.Target != nil {
 		return errors.New("unexpected main control target")
 	}
@@ -524,6 +540,8 @@ func (a *SuperAgent) reduceMain(tr transition, replay, deferSnapshot bool) error
 		}
 		if m.Decision.Action == "reply" || m.Decision.Action == "clarify" {
 			reply := Reply{ID: m.ReplyID, DeliveryID: item.input.DeliveryID, DecisionID: m.DecisionID, InputID: m.InputID, DelegationID: item.input.DelegationID, Source: item.input.Trigger.Source, Thread: item.input.Trigger.Thread, EventID: item.input.Trigger.ID, Text: m.Decision.Text, Status: "pending", Report: copyReport(item.input.Report), Control: copyControl(item.input.Control), Handback: copyHandback(item.input.Handback)}
+			// Prior validation has resolved these exact immutable public reports.
+			reply.Reports, _ = a.resolveReportReferences(m.Decision.ReportRefs)
 			reply.TaskID = item.input.TaskID
 			if reply.Report != nil {
 				reply.TaskID = reply.Report.TaskID
@@ -570,6 +588,7 @@ func (a *SuperAgent) Replies() []Reply {
 	out := slices.Clone(a.main.replies)
 	for i := range out {
 		out[i].Report = copyReport(out[i].Report)
+		out[i].Reports = copyReportCitations(out[i].Reports)
 		out[i].Control = copyControl(out[i].Control)
 		out[i].Handback = copyHandback(out[i].Handback)
 		out[i].Attempts = slices.Clone(out[i].Attempts)

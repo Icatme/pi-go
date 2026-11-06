@@ -138,7 +138,6 @@ func (a *SuperAgent) runMainBatch(job MainBatchJob) {
 		runs[run] = true
 	}
 	out, err := callMainBatch(a.ctx, a.mainBatchRoute, job)
-	job.History.close()
 	decisions := make(map[string]MainDecision, len(out.Decisions))
 	if err == nil {
 		if len(out.Decisions) != len(inputIDs) {
@@ -150,6 +149,11 @@ func (a *SuperAgent) runMainBatch(job MainBatchJob) {
 				break
 			}
 			d := entry.Decision
+			d.ReportRefs = slices.Clone(d.ReportRefs)
+			if refErr := job.History.validateReportReferences(d.ReportRefs); refErr != nil {
+				err = refErr
+				break
+			}
 			if d.Target != nil {
 				target := *d.Target
 				d.Target = &target
@@ -157,6 +161,7 @@ func (a *SuperAgent) runMainBatch(job MainBatchJob) {
 			decisions[entry.InputID] = d
 		}
 	}
+	job.History.close()
 	var snapshot json.RawMessage
 	var validated *validatedSnapshot
 	if err == nil {
@@ -260,7 +265,7 @@ func (a *SuperAgent) validateMainBatch(tr transition) error {
 		return errors.New("invalid main batch state")
 	}
 	m := tr.Main
-	if m.InputID != "" || m.DecisionID != "" || m.SessionID != "" || m.ProviderSessionID != "" || m.Assignment != nil || m.ReplyID != "" || m.Delivery != nil || m.DeliveryResult != nil || len(m.ControlIDs) != 0 || m.Decision != (MainDecision{}) {
+	if m.InputID != "" || m.DecisionID != "" || m.SessionID != "" || m.ProviderSessionID != "" || m.Assignment != nil || m.ReplyID != "" || m.Delivery != nil || m.DeliveryResult != nil || len(m.ControlIDs) != 0 || !emptyMainDecision(m.Decision) {
 		return errors.New("unexpected main batch envelope fields")
 	}
 	if tr.State == "main_batch_failed" && len(m.Snapshot) != 0 {
@@ -271,7 +276,7 @@ func (a *SuperAgent) validateMainBatch(tr transition) error {
 		if child.SessionID != "" || child.ProviderSessionID != "" || child.Delivery != nil || child.DeliveryResult != nil || len(child.ControlIDs) != 0 {
 			return errors.New("unexpected main batch item fields")
 		}
-		if tr.State == "main_batch_failed" && (child.Decision != (MainDecision{}) || child.DecisionID != "" || child.Assignment != nil || child.ReplyID != "") {
+		if tr.State == "main_batch_failed" && (!emptyMainDecision(child.Decision) || child.DecisionID != "" || child.Assignment != nil || child.ReplyID != "") {
 			return errors.New("failed batch cannot contain actions")
 		}
 		if child.Decision.Action == "attach" && a.tasks[child.Decision.TaskID] == nil {
