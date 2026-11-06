@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"slices"
 	"strings"
 
 	"github.com/Icatme/pi-go/agent"
@@ -23,9 +22,10 @@ type mainModelInput struct {
 // snapshot. maxContextBytes bounds serialized messages, prompt and system
 // instructions before any model call (1 KiB–8 MiB). It fails explicitly rather
 // than silently dropping causal or authorization history when the budget fills.
+// An optional compactor replaces only an old prefix when the budget fills.
 // No execution hooks, tool resolvers, request hooks or tools are inherited.
-func PiMainRouter(def agent.AgentDefinition, maxContextBytes int) (MainRouter, error) {
-	infer, err := newPiMainInference(def, mainInstructions, maxContextBytes)
+func PiMainRouter(def agent.AgentDefinition, maxContextBytes int, compactor ...MainContextCompactor) (MainRouter, error) {
+	infer, err := newPiMainInference(def, mainInstructions, maxContextBytes, compactor...)
 	if err != nil {
 		return nil, err
 	}
@@ -54,8 +54,9 @@ type mainBatchModelInput struct {
 // single persistent main snapshot. The full context budget and execution
 // authority isolation are identical to PiMainRouter's. Output IDs must exactly
 // match the offered input set; malformed results never return a snapshot.
-func PiMainBatchRouter(def agent.AgentDefinition, maxContextBytes int) (MainBatchRouter, error) {
-	infer, err := newPiMainInference(def, mainInstructions+"\n\n"+mainBatchInstructions, maxContextBytes)
+// The optional compactor has the same contract as PiMainRouter.
+func PiMainBatchRouter(def agent.AgentDefinition, maxContextBytes int, compactor ...MainContextCompactor) (MainBatchRouter, error) {
+	infer, err := newPiMainInference(def, mainInstructions+"\n\n"+mainBatchInstructions, maxContextBytes, compactor...)
 	if err != nil {
 		return nil, err
 	}
@@ -84,19 +85,39 @@ func PiMainBatchRouter(def agent.AgentDefinition, maxContextBytes int) (MainBatc
 
 type mainInference func(context.Context, MainJob, any) (string, agent.AgentSnapshot, error)
 
-func newPiMainInference(def agent.AgentDefinition, instructions string, maxContextBytes int) (mainInference, error) {
+func newPiMainInference(def agent.AgentDefinition, instructions string, maxContextBytes int, compactors ...MainContextCompactor) (mainInference, error) {
 	if maxContextBytes < 1024 || maxContextBytes > maxSnapshotBytes {
 		return nil, errors.New("pi main router: context budget must be 1 KiB–8 MiB")
 	}
+	compact, err := mainCompactor(compactors)
+	if err != nil {
+		return nil, err
+	}
 	prompt := strings.TrimSpace(def.SystemPrompt + "\n\n" + instructions)
 	hostModel := def.DefaultModel.Clone()
-	runner, err := agent.NewRunner(agent.AgentDefinition{
+	config := agent.AgentDefinition{
 		Name: "main", SystemPrompt: prompt,
 		Model: def.Model, DefaultModel: def.DefaultModel, ModelResolver: def.ModelResolver,
 		ThinkingLevel: def.ThinkingLevel, ThinkingLevelResolver: def.ThinkingLevelResolver,
 		ThinkingBudgets: def.ThinkingBudgets, Transport: def.Transport, MaxRetryDelayMs: def.MaxRetryDelayMs,
 		OnProviderStreamEvent: def.OnProviderStreamEvent, MaxTurns: 1,
-	})
+	}
+	owned := config
+	owned.Model = nil
+	owned.ModelResolver = func(ctx context.Context, _ agent.ModelRef, snapshot agent.AgentSnapshot) (agent.StreamModel, error) {
+		model, _, err := config.ResolveModel(ctx, snapshot)
+		if err != nil {
+			return nil, err
+		}
+		return agent.StreamFunc(func(ctx context.Context, req agent.ModelRequest) (agent.AssistantStream, error) {
+			req.SystemPrompt = prompt
+			if err := checkMainContextBudget(prompt, req.Messages, maxContextBytes); err != nil {
+				return nil, err
+			}
+			return model.Stream(ctx, req)
+		}), nil
+	}
+	runner, err := agent.NewRunner(owned)
 	if err != nil {
 		return nil, err
 	}
@@ -112,11 +133,13 @@ func newPiMainInference(def agent.AgentDefinition, instructions string, maxConte
 			return "", agent.AgentSnapshot{}, err
 		}
 		message := agent.NewUserTextMessage(string(input))
-		contextMessages := append(slices.Clone(job.Snapshot.Messages), message)
-		if err := checkMainContextBudget(prompt, contextMessages, maxContextBytes); err != nil {
+		initial := job.Snapshot
+		initial.Messages, err = prepareMainContext(ctx, initial.Messages, message, compact, func(messages []agent.Message) error {
+			return checkMainContextBudget(prompt, mainBudgetMessages(prompt, messages, nil), maxContextBytes)
+		})
+		if err != nil {
 			return "", agent.AgentSnapshot{}, err
 		}
-		initial := job.Snapshot
 		initial.SessionID = job.ProviderSessionID
 		initial.SystemPrompt = prompt
 		selected := agent.ModelRef{Provider: initial.Model.Provider, Model: initial.Model.Model}
@@ -163,7 +186,7 @@ func checkMainContextBudget(prompt string, messages []agent.Message, budget int)
 		return err
 	}
 	if len(serialized) > budget {
-		return errors.New("pi main router: context budget exceeded")
+		return errMainContextBudget
 	}
 	return nil
 }

@@ -3518,3 +3518,46 @@
 - Updated the package version and examples module reference to v0.22.0 and added source-release notes. This additive SuperAgent API requires no new third-party dependency and leaves existing coordinators, history, worker progress and report APIs intact. Existing examples retain their pre-existing local module replacement; no replacement was added for the downstream JZBeacon consumer.
 - Validation passed on Windows with GOWORK=off and live tests disabled: scripts/test.ps1 (all root and examples packages), full superagent race suite, root go vet -mod=readonly ./... and examples go vet -mod=readonly ./.... The focused terminal-error regression reproduced the defect before the fix, then passed with assessment/public-API/example race coverage. Formatting and diff checks passed. Host failure-boundary regression also passed against the local SDK before publication.
 - The user authorized commit and source-tag publication. Release delivery targets the default master branch and annotated v0.22.0 tag together, followed by remote identity and published Go module verification. No GitHub binary release, manual CI, live provider call or production deployment is included.
+
+## 2026-11-06 - M3d main-context compaction and roadmap reconciliation
+
+- Rechecked released master `406e0ed` / v0.22.0, merged development PRs and the
+  JZBeacon v0.22.0 pin before choosing new work. Updated the development plan and
+  stale README status: main routing, fanout, channel/device protocols and
+  Watchdog inspection already exist. Remaining work is separated into bounded
+  model context, identity-preserving storage, supervision, evaluation and real
+  host acceptance. PostgreSQL remains host-owned; JZBeacon was not changed.
+- Added an optional host `MainContextCompactor` to all four Pi main adapters.
+  It replaces only a completed prior prefix with explicitly untrusted summary
+  context and retains a complete recent turn. The callback gets detached prior
+  messages, not current inputs, offers or session settings. Invalid cuts,
+  unmatched tools, incomplete decisions, errors, panic and cancellation fail
+  closed; successful compaction persists only with the ordinary valid decision.
+- Fixed preflight undercount of runner-inserted system/tool declarations and
+  added the actual request boundary guard to the plain adapters. Full JSON
+  escaping and native history schemas remain counted. Tightly configured old
+  budgets may now reject previously undercounted requests; documented this and
+  the variadic constructor function-value compatibility detail in M3d.
+- Regression coverage exercises all four adapters, retained native tool pairs,
+  real history recall, callback mutation/large-number isolation, overflow during
+  recall, repeated compaction, single/batch durable replies, original report
+  references, review barriers, unresolved delivery attempts, duplicate ingress,
+  reopen without repeated work and failed-decision snapshot preservation.
+- Passed on remote Linux amd64, Go 1.26.10, readonly module files, live-provider
+  and live-example flags disabled:
+  - `go test -mod=readonly -count=1 ./...`
+  - `go vet -mod=readonly ./...`
+  - `go test -mod=readonly -race -count=1 ./superagent/... ./agent/session ./cmd/pi-superagent`
+  - Separate examples module readonly tests and vet.
+  - Gofmt and `git diff --check`.
+- Independent source review and focused tests found no blocking defect; its
+  budget-compatibility wording correction was incorporated. Initial broad runs
+  encountered missing cached versions and temporary-filesystem exhaustion;
+  existing declared modules were fetched from the standard Go proxy and build
+  scratch/cache moved to the remote workspace, after which all listed final
+  checks passed. No module versions changed.
+- This does not compact the journal, prove summary fidelity, automatically
+  configure JZBeacon or supply a billed summarizer. No live model, real platform,
+  database service, user computer, Codex task, extra paid service, CI dispatch,
+  source tag, merge or deployment was used. Windows/macOS execution and full-root
+  race testing were not performed for this slice. See [M3d](superagent-m3d.md).
