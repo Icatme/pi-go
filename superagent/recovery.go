@@ -32,7 +32,7 @@ func openState(ctx context.Context, path string, create bool) (*SuperAgent, erro
 	return restoreState(ctx, store)
 }
 
-func restoreState(ctx context.Context, store journalStore) (*SuperAgent, error) {
+func restoreState(ctx context.Context, store Journal) (*SuperAgent, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	a := &SuperAgent{watchdogRuntime: rand.Text(), ctx: ctx, cancel: cancel, store: store, changed: make(chan struct{}), accepted: make(map[[2]string]int), tasks: make(map[string]*task), subscriptions: make(map[[2]string]string), threadSubscriptions: make(map[[2]string][]string)}
 	if err := a.restore(); err != nil {

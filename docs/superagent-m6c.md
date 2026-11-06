@@ -1,5 +1,11 @@
 # M6c：PostgreSQL 协调器门控验收
 
+历史验收记录。2026-11-06 的存储边界已改为根库提供公开的 `Journal`、`LeasedJournal`
+与同主机 SQLite，PostgreSQL 由宿主自行实现和验收。本切片的 PostgreSQL
+测试入口已从根库移除。下文的门控、命令与结果属于原始切片，源码保留在
+[M6c 原始 PR](https://github.com/Icatme/pi-go/pull/186)。宿主接入已有接口的方法见
+[SuperAgent 接入说明](../superagent/README.md) 与 [`LeasedJournal`](../superagent/journal.go)。
+
 基于 draft #185 HEAD `1b04bc6f20984d9f1fbde93eea490f7334e81978`，
 基线 tree `887728b266b265e17f3e52673f918d1255deb02e`。仅新增测试及说明，
 不改运行时代码、依赖、日志格式、生产 schema 或 CI 配置。
@@ -44,9 +50,10 @@ PG/用户目录默认凭据，不连接已有业务数据库，不创建账号�
 不能据全仓离线测试通过声称协调器 PostgreSQL 验收通过。即使未来在专用服务
 运行成功，也只证明本地进程内回调配合单主 PostgreSQL 的这些合同。
 
-## 复现
+## 历史复现命令
 
-先确认缓存与 Go 版本，离线检查时显式关闭所有 live 标志及数据库门控：
+以下命令针对该历史 PR 的代码与依赖。当时先确认缓存与 Go 版本，
+离线检查时显式关闭所有 live 标志及数据库门控。
 
 ```powershell
 $env:GOPROXY = 'off'
@@ -68,7 +75,8 @@ go vet -mod=readonly ./...
 Pop-Location
 ```
 
-未来操作者另获明确的专用数据库使用授权并自行配置双门控后，可运行：
+当时为已授权的专用数据库配置双门控后，门控测试的运行方式如下。
+宿主当前的 PostgreSQL 实现应自行提供相应测试。
 
 ```powershell
 go test -mod=readonly -count=1 -timeout=5m -v ./superagent/sharedpostgres -run '^TestPostgresCoordinator'
