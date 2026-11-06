@@ -1,6 +1,12 @@
 package superagent
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
+
+// ErrReplyRateLimited means a verified non-delivery cannot be retried yet.
+var ErrReplyRateLimited = errors.New("superagent: reply retry deadline has not elapsed")
 
 // ReplyDelivery identifies one claimed external send. ReplyID is the stable
 // transport idempotency key across retries; Attempt fences late callbacks.
@@ -18,6 +24,10 @@ type ReplyDeliveryResult struct {
 	Status    string `json:"status"` // delivered, not_delivered, unknown
 	MessageID string `json:"message_id,omitempty"`
 	Note      string `json:"note,omitempty"`
+	// Cursor is an opaque platform receipt cursor, not a global ordering claim.
+	Cursor string `json:"cursor,omitempty"`
+	// RetryAt is a Unix millisecond deadline, only for verified not_delivered.
+	RetryAt int64 `json:"retry_at,omitempty"`
 }
 
 // ReplyAttempt retains the facts of each send independently of its reply.
@@ -27,6 +37,8 @@ type ReplyAttempt struct {
 	Status    string        `json:"status"` // started, unknown, delivered, not_delivered
 	MessageID string        `json:"message_id,omitempty"`
 	Note      string        `json:"note,omitempty"`
+	Cursor    string        `json:"cursor,omitempty"`
+	RetryAt   int64         `json:"retry_at,omitempty"`
 }
 
 func (a *SuperAgent) reply(id string) *Reply {
@@ -59,6 +71,19 @@ func (a *SuperAgent) BeginReplyDelivery(id string) (ReplyDelivery, error) {
 	if r == nil {
 		return ReplyDelivery{}, errors.New("superagent: unknown reply")
 	}
+	// Conservatively throttle this entire source/account namespace. Existing
+	// in-flight sends cannot be recalled; new claims survive restart safely.
+	now := time.Now().UnixMilli()
+	for _, other := range a.main.replies {
+		if other.Source != r.Source {
+			continue
+		}
+		for _, attempt := range other.Attempts {
+			if attempt.RetryAt > now {
+				return ReplyDelivery{}, ErrReplyRateLimited
+			}
+		}
+	}
 	delivery := ReplyDelivery{ReplyID: id, Attempt: uint64(len(r.Attempts)) + 1}
 	if err := a.commit(transition{State: "reply_claimed", Main: &mainTransition{ReplyID: id, Delivery: &delivery}}); err != nil {
 		return ReplyDelivery{}, err
@@ -81,12 +106,16 @@ func (a *SuperAgent) resolveReplyDelivery(delivery ReplyDelivery, result ReplyDe
 	if err := a.replyReady(); err != nil {
 		return err
 	}
-	tr := transition{State: "reply_resolved", Main: &mainTransition{ReplyID: delivery.ReplyID, Delivery: &delivery, DeliveryResult: &result}}
+	state := "reply_resolved"
+	if result.Cursor != "" || result.RetryAt != 0 {
+		state = "reply_channel_resolved"
+	}
+	tr := transition{State: state, Main: &mainTransition{ReplyID: delivery.ReplyID, Delivery: &delivery, DeliveryResult: &result}}
 	if err := a.validateMain(tr); err != nil {
 		return err
 	}
 	previous := a.reply(delivery.ReplyID).Attempts[delivery.Attempt-1]
-	if previous.Status == result.Status && previous.MessageID == result.MessageID && (previous.Note == result.Note || result.Status != "unknown") {
+	if previous.Status == result.Status && previous.MessageID == result.MessageID && previous.RetryAt == result.RetryAt && (result.Cursor == "" || previous.Cursor == result.Cursor) && (previous.Note == result.Note || result.Status != "unknown") {
 		return nil
 	}
 	return a.commit(tr)
@@ -149,13 +178,19 @@ func (a *SuperAgent) validateReply(tr transition) error {
 		if r.Status != "pending" || m.Delivery == nil || m.Delivery.ReplyID != r.ID || m.Delivery.Attempt != uint64(len(r.Attempts))+1 || m.DeliveryResult != nil {
 			return errors.New("superagent: reply is not pending or claim identity is invalid")
 		}
-	case "reply_resolved":
+	case "reply_resolved", "reply_channel_resolved":
 		if m.Delivery == nil || m.Delivery.ReplyID != r.ID || m.Delivery.Attempt == 0 || m.Delivery.Attempt > uint64(len(r.Attempts)) || m.DeliveryResult == nil {
 			return errors.New("superagent: unknown reply delivery")
 		}
 		result := *m.DeliveryResult
+		if (tr.State == "reply_channel_resolved") != (result.Cursor != "" || result.RetryAt != 0) {
+			return errors.New("platform receipt facts require channel journal transition")
+		}
 		if result.Note != "" && !validNote(result.Note) {
 			return errors.New("superagent: invalid delivery note")
+		}
+		if (result.Cursor != "" && (!validNote(result.Cursor) || result.Status != "delivered")) || result.RetryAt < 0 || result.RetryAt > 253402300799999 || (result.RetryAt != 0 && result.Status != "not_delivered") {
+			return errors.New("superagent: invalid delivery cursor or retry deadline")
 		}
 		switch result.Status {
 		case "delivered":
@@ -172,8 +207,17 @@ func (a *SuperAgent) validateReply(tr transition) error {
 					}
 				}
 			}
-			if index, exists := a.accepted[[2]string{r.Source, result.MessageID}]; exists && a.events[index].trigger.Thread == r.Thread {
-				return errors.New("superagent: platform message was already admitted as business input")
+			for _, event := range a.events {
+				if event.trigger.Source != r.Source || event.trigger.Thread != r.Thread {
+					continue
+				}
+				messageID := event.trigger.ID
+				if event.admissionRecord != nil {
+					messageID = admissionMessageID(event.admissionRecord.Envelope)
+				}
+				if messageID == result.MessageID {
+					return errors.New("superagent: platform message was already admitted as business input")
+				}
 			}
 		case "not_delivered":
 			if !validNote(result.Note) || result.MessageID != "" {
@@ -188,7 +232,7 @@ func (a *SuperAgent) validateReply(tr transition) error {
 		}
 		previous := r.Attempts[m.Delivery.Attempt-1]
 		if previous.Status == "delivered" || previous.Status == "not_delivered" {
-			if previous.Status != result.Status || previous.MessageID != result.MessageID {
+			if previous.Status != result.Status || previous.MessageID != result.MessageID || previous.RetryAt != result.RetryAt || (previous.Cursor != "" && result.Cursor != "" && previous.Cursor != result.Cursor) {
 				return errors.New("superagent: conflicting terminal delivery result")
 			}
 		} else if m.Delivery.Attempt != uint64(len(r.Attempts)) || r.Status != "needs_review" {
@@ -215,13 +259,18 @@ func (a *SuperAgent) applyReply(tr transition) {
 		if len(r.Attempts) > 0 {
 			r.Attempts[len(r.Attempts)-1].Status = "delivered"
 		}
-	case "reply_resolved":
+	case "reply_resolved", "reply_channel_resolved":
 		previous := &r.Attempts[m.Delivery.Attempt-1]
-		// Duplicate historical facts must not change a newer attempt or note.
+		// Identical terminal evidence may fill a missing cursor, never replace it
+		// or change a newer attempt, retry deadline, or note.
 		if previous.Status == "delivered" || previous.Status == "not_delivered" {
+			if previous.Cursor == "" {
+				previous.Cursor = m.DeliveryResult.Cursor
+			}
 			return
 		}
 		previous.Status, previous.MessageID, previous.Note = m.DeliveryResult.Status, m.DeliveryResult.MessageID, m.DeliveryResult.Note
+		previous.Cursor, previous.RetryAt = m.DeliveryResult.Cursor, m.DeliveryResult.RetryAt
 		switch previous.Status {
 		case "delivered":
 			r.Status = "acknowledged"

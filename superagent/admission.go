@@ -27,12 +27,16 @@ type AdmissionPolicy struct {
 // the host has established a user request; never infer it from model output.
 // TaskID and ToThread are mutually exclusive trusted routing associations.
 type AdmissionEnvelope struct {
-	Trigger         Trigger `json:"trigger"`
-	Principal       string  `json:"principal"`
-	Group           string  `json:"group,omitempty"`
-	ExplicitRequest bool    `json:"explicit_request,omitempty"`
-	TaskID          string  `json:"task_id,omitempty"`
-	ToThread        bool    `json:"to_thread,omitempty"`
+	Trigger Trigger `json:"trigger"`
+	// MessageID is the authenticated platform object identity, distinct from a
+	// webhook delivery ID. Empty legacy records use Trigger.ID. Platform object
+	// kinds must be namespaced when their numeric ID spaces may overlap.
+	MessageID       string `json:"message_id,omitempty"`
+	Principal       string `json:"principal"`
+	Group           string `json:"group,omitempty"`
+	ExplicitRequest bool   `json:"explicit_request,omitempty"`
+	TaskID          string `json:"task_id,omitempty"`
+	ToThread        bool   `json:"to_thread,omitempty"`
 }
 
 type AdmissionRecord struct {
@@ -56,7 +60,7 @@ func validAdmissionEnvelope(e AdmissionEnvelope) error {
 	if err := validTrigger(e.Trigger); err != nil {
 		return err
 	}
-	if !validIdentity(e.Principal) || (e.Group != "" && !validIdentity(e.Group)) || (e.TaskID != "" && !validIdentity(e.TaskID)) || (e.TaskID != "" && e.ToThread) {
+	if (e.MessageID != "" && !validIdentity(e.MessageID)) || !validIdentity(e.Principal) || (e.Group != "" && !validIdentity(e.Group)) || (e.TaskID != "" && !validIdentity(e.TaskID)) || (e.TaskID != "" && e.ToThread) {
 		return errors.New("invalid authenticated admission identity or routing association")
 	}
 	if e.ExplicitRequest && e.Trigger.Kind != "request" {
@@ -98,13 +102,15 @@ func (a *SuperAgent) Admit(policy AdmissionPolicy, e AdmissionEnvelope) (Admissi
 	}
 	if i, ok := a.accepted[[2]string{e.Trigger.Source, e.Trigger.ID}]; ok {
 		record := a.events[i].admissionRecord
-		if record == nil || record.Envelope != e {
+		if record == nil || !sameAdmissionEnvelope(record.Envelope, e) {
 			return AdmissionReceipt{}, errors.New("event ID already exists with different admission contents")
 		}
 		return a.admissionReceipt(i, true), nil
 	}
 	// Echo identity remains authoritative and never creates a new admission.
-	if a.isReplyEcho(e.Trigger) {
+	echo := e.Trigger
+	echo.ID = admissionMessageID(e)
+	if a.isReplyEcho(echo) {
 		return AdmissionReceipt{Duplicate: true}, nil
 	}
 	record := AdmissionRecord{Envelope: e, PolicyVersion: policy.Version, Decision: "ignored", Reason: "policy_denied"}
@@ -127,10 +133,28 @@ func (a *SuperAgent) Admit(policy AdmissionPolicy, e AdmissionEnvelope) (Admissi
 		}
 	}
 	index := len(a.events)
-	if err := a.commit(transition{State: "admission_received", Index: index, Admission: &record}); err != nil {
+	state := "admission_received"
+	if e.MessageID != "" {
+		state = "channel_admission_received"
+	}
+	if err := a.commit(transition{State: state, Index: index, Admission: &record}); err != nil {
 		return AdmissionReceipt{}, err
 	}
 	return a.admissionReceipt(index, false), nil
+}
+
+// Omitted legacy identity is equivalent to explicitly naming Trigger.ID.
+// Never infer a different webhook/platform association for an old record.
+func sameAdmissionEnvelope(a, b AdmissionEnvelope) bool {
+	a.MessageID, b.MessageID = admissionMessageID(a), admissionMessageID(b)
+	return a == b
+}
+
+func admissionMessageID(e AdmissionEnvelope) string {
+	if e.MessageID != "" {
+		return e.MessageID
+	}
+	return e.Trigger.ID
 }
 
 func (a *SuperAgent) admissionReceipt(index int, duplicate bool) AdmissionReceipt {
@@ -161,11 +185,14 @@ func (a *SuperAgent) Admissions() []AdmissionRecord {
 
 func (a *SuperAgent) validateAdmission(tr transition) error {
 	r := tr.Admission
-	if tr.State != "admission_received" || r == nil || !a.main.chatRouting || tr.Index != len(a.events) || tr.Main != nil || tr.Thread != nil {
+	if (tr.State != "admission_received" && tr.State != "channel_admission_received") || r == nil || !a.main.chatRouting || tr.Index != len(a.events) || tr.Main != nil || tr.Thread != nil {
 		return errors.New("invalid admission transition")
 	}
 	if err := validAdmissionEnvelope(r.Envelope); err != nil {
 		return err
+	}
+	if (tr.State == "channel_admission_received") != (r.Envelope.MessageID != "") {
+		return errors.New("admission platform identity requires channel journal transition")
 	}
 	if !validIdentity(r.PolicyVersion) {
 		return errors.New("invalid admission policy version")

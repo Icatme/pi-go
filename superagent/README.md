@@ -323,3 +323,10 @@ and committed effects are separate facts. Raw output stays private, while
 See [M4a contract and limitations](../docs/superagent-m4a.md) and
 `ExampleOpenMainBackground`. Close and WaitIdle do not mean independent
 background tools have stopped; the host owns their lifetime.
+
+## Optional channel boundary
+
+`superagent/channel` adds host-authenticated IM/GitHub ingress and approved-reply
+delivery contracts with offline protocol simulators, durable platform identities,
+receipt cursors and source-level rate gates. It contains no live service client.
+See [the channel contract](channel/README.md) and [M5a scope](../docs/superagent-m5a.md).
