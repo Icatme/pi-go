@@ -338,12 +338,12 @@ a fresh instruction after confirmation. Old deliveries stay deduplicated and
 blocked commands are never replayed by reconciliation. A crash between an
 external effect and the terminal journal write can leave no surviving receipt.
 
-This implementation covers the Router/Worker, thread subscription, asynchronous
-ingress, and local persistence parts of the Super-agent design. One process
-owns the state file. Capacity and restart time grow with journal history.
-Production IM/GitHub adapters, remote execution devices, many-to-many
-subscriptions, log compaction and an independent progress watchdog are future
-extensions.
+The coordinator implements persistent main routing, many-to-many subscriptions,
+background tools, optional GitHub HTTP/device protocols and a read-only Watchdog
+with separately host-authorized operation inspection. JSONL has one writer;
+shared SQLite has one leased owner on a local host. Capacity and restart time
+still grow with journal history. Journal compaction, automatic device scheduling,
+general Watchdog repair and real platform/device acceptance remain separate work.
 
 ## Bounded main batches and admission gates
 
@@ -368,7 +368,9 @@ Main callbacks receive `MainJob.History` (or `MainBatchJob.History`) and stable
 including tasks outside the 128 recent candidates. Each read and continuation
 checks the durable journal domain and bounded JSON/page budget. The view is
 immutable for the callback and expires when it returns. References survive
-replay; cursors do not survive their view.
+replay; authenticated cursors can continue in later callbacks of the same
+coordinator while the exact public record is unchanged. They do not survive
+coordinator restart.
 
 `PiMainHistoryRouter` and `PiMainBatchHistoryRouter` optionally expose only the
 native `history_read` tool with isolated execution authority, bounded turns,
@@ -376,9 +378,31 @@ marked input excerpts and a context check before every model request. Existing
 Pi main routers remain tool-free. Recall never expands attachment/control offers.
 Private Worker transcripts and raw tool outputs remain inaccessible.
 
-See [M3b contract and limits](../docs/superagent-m3b.md). Cross-inference spill
-continuation, safe long-context compaction, explicit tool-result publication and
-production-scale history performance are still later M3 work.
+See [M3b](../docs/superagent-m3b.md) and the [M3c continuation contract](../docs/superagent-m3c.md).
+Cross-restart continuation, explicit tool-result publication and production-scale
+history performance remain later M3 work. Model-context compaction is separate
+from public history or journal compaction; see [M3d](../docs/superagent-m3d.md).
+
+## Optional main-context compaction
+
+All four Pi main-router constructors accept one optional `MainContextCompactor`.
+Without it, context overflow still fails explicitly. On an oversized upcoming
+request, the host callback receives detached prior messages and returns
+`MainContextCompaction{Summary: summary, KeepFrom: index}`. The replacement must
+retain a complete recent turn and cannot split native tool calls from results.
+It runs at most once before the current input, never between history tool turns.
+
+The summary is marked as untrusted historical context. Current input, task/run
+offers, model configuration, tools and session identities cannot be rewritten.
+The full encoded request remains bounded after compaction. Errors, cancellation,
+invalid cuts and oversized replacements fail rather than dropping more history.
+Only a valid main decision persists the compacted snapshot atomically with its
+actions. Original journal events, reports, reply attempts and history references
+remain intact, including after restart.
+
+The host supplies and authorizes its summarizer; the library makes no extra model
+or service call. This does not verify summary accuracy or compact the journal.
+See [M3d usage and compatibility](../docs/superagent-m3d.md).
 
 ## Controlled background tools (M4a–M4b)
 

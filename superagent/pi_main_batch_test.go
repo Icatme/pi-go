@@ -106,12 +106,12 @@ func TestPiMainBatchFullContextBudget(t *testing.T) {
 	encoded, _ := json.Marshal(struct {
 		SystemPrompt string          `json:"system_prompt"`
 		Messages     []agent.Message `json:"messages"`
-	}{prompt, messages})
+	}{prompt, mainBudgetMessages(prompt, messages, nil)})
 	// The router creates a timestamped message; allow for RFC3339 fractional precision.
-	if err := checkMainContextBudget(prompt, messages, len(encoded)-1); err == nil {
+	if err := checkMainContextBudget(prompt, mainBudgetMessages(prompt, messages, nil), len(encoded)-1); err == nil {
 		t.Fatal("exact serialized budget not enforced")
 	}
-	if err := checkMainContextBudget(prompt, messages, len(encoded)); err != nil {
+	if err := checkMainContextBudget(prompt, mainBudgetMessages(prompt, messages, nil), len(encoded)); err != nil {
 		t.Fatal(err)
 	}
 	for _, delta := range []int{-32, 32} {

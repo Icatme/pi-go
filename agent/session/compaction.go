@@ -272,6 +272,13 @@ func completeTurnStarts(messages []agent.Message) ([]int, error) {
 	return starts, nil
 }
 
+// ValidateCompactionCut checks a nonempty old prefix and retained suffix meet at
+// a complete user-turn boundary, without splitting tool calls from results.
+// It validates tool pairing throughout both parts and does not modify them.
+func ValidateCompactionCut(prefix, tail []agent.Message) error {
+	return validateCompactionCut(prefix, tail)
+}
+
 func validateCompactionCut(prefix, tail []agent.Message) error {
 	combined := make([]agent.Message, 0, len(prefix)+len(tail))
 	combined = append(combined, cloneMessages(prefix)...)

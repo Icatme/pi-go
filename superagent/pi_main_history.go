@@ -20,9 +20,10 @@ const mainHistoryInstructions = `You may call only history_read to recall public
 // record may exhaust these limits; authentic cursors can continue in a later
 // callback only if the coordinator and exact public object revision remain valid.
 // This does not schedule callbacks or remove earlier tool results from snapshots.
-// Existing snapshots are never truncated to fit the per-request context cap.
-func PiMainHistoryRouter(def agent.AgentDefinition, maxContextBytes int) (MainRouter, error) {
-	infer, err := newPiMainHistoryInference(def, false, maxContextBytes)
+// Without an optional compactor, snapshots are never truncated to fit the cap.
+// Compaction runs only before the current input, never during history recall.
+func PiMainHistoryRouter(def agent.AgentDefinition, maxContextBytes int, compactor ...MainContextCompactor) (MainRouter, error) {
+	infer, err := newPiMainHistoryInference(def, false, maxContextBytes, compactor...)
 	if err != nil {
 		return nil, err
 	}
@@ -41,8 +42,9 @@ func PiMainHistoryRouter(def agent.AgentDefinition, maxContextBytes int) (MainRo
 
 // PiMainBatchHistoryRouter applies the same history and context boundaries to
 // a batch. Recall does not add input identities, task offers or control targets.
-func PiMainBatchHistoryRouter(def agent.AgentDefinition, maxContextBytes int) (MainBatchRouter, error) {
-	infer, err := newPiMainHistoryInference(def, true, maxContextBytes)
+// The optional compactor has the same contract as PiMainHistoryRouter.
+func PiMainBatchHistoryRouter(def agent.AgentDefinition, maxContextBytes int, compactor ...MainContextCompactor) (MainBatchRouter, error) {
+	infer, err := newPiMainHistoryInference(def, true, maxContextBytes, compactor...)
 	if err != nil {
 		return nil, err
 	}
@@ -92,9 +94,13 @@ func historyModelInput(input MainInput) MainInput {
 	return input
 }
 
-func newPiMainHistoryInference(def agent.AgentDefinition, batch bool, budget int) (mainInference, error) {
+func newPiMainHistoryInference(def agent.AgentDefinition, batch bool, budget int, compactors ...MainContextCompactor) (mainInference, error) {
 	if budget < 1024 || budget > maxSnapshotBytes {
 		return nil, errors.New("pi main history: context budget must be 1 KiB–8 MiB")
+	}
+	compact, err := mainCompactor(compactors)
+	if err != nil {
+		return nil, err
 	}
 	instructions := strings.Replace(mainInstructions, " and do not call tools", "", 1)
 	if batch {
@@ -153,7 +159,14 @@ func newPiMainHistoryInference(def agent.AgentDefinition, batch bool, budget int
 		if err != nil {
 			return fail(err)
 		}
+		message := agent.NewUserTextMessage(string(input))
 		initial := job.Snapshot
+		initial.Messages, err = prepareMainContext(ctx, initial.Messages, message, compact, func(messages []agent.Message) error {
+			return checkMainHistoryContextBudget(prompt, mainBudgetMessages(prompt, messages, owned.Tools), owned.Tools, budget)
+		})
+		if err != nil {
+			return fail(err)
+		}
 		initial.SessionID, initial.SystemPrompt = job.ProviderSessionID, prompt
 		selected := agent.ModelRef{Provider: initial.Model.Provider, Model: initial.Model.Model}
 		initial.Model = selected
@@ -165,7 +178,7 @@ func newPiMainHistoryInference(def agent.AgentDefinition, batch bool, budget int
 				initial.Model.Metadata = hostModel.Metadata
 			}
 		}
-		run, err := collectPiRun(ctx, runner.Run(ctx, initial, []agent.Message{agent.NewUserTextMessage(string(input))}), nil, nil)
+		run, err := collectPiRun(ctx, runner.Run(ctx, initial, []agent.Message{message}), nil, nil)
 		if err != nil {
 			return fail(err)
 		}
@@ -195,7 +208,7 @@ func checkMainHistoryContextBudget(prompt string, messages []agent.Message, tool
 		return err
 	}
 	if len(raw) > budget {
-		return errors.New("pi main history: context budget exceeded")
+		return errMainContextBudget
 	}
 	return nil
 }
