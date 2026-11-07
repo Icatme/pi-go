@@ -28,8 +28,9 @@ For bounded, one-shot follow-up evidence on completed interventions, see
 [M8c](../docs/superagent-m8c.md) and
 `ExampleSuperAgent_WatchdogFollowupsSince`. The existing patrol observes committed
 coordinator facts without another backend call or external notification. Hosts
-own the consumption cursor and any separately authorized delivery. New patrol
-records require this version or newer; older readers fail closed.
+own the consumption cursor and any separately authorized delivery. Checks retain
+the old reader contract until the first follow-up evidence is committed. After
+that upgrade, including subsequent empty checks, older readers fail closed.
 The existing `Open` examples below retain the stateless Router contract.
 
 SuperAgent is an opt-in coordinator in the pi-go module. An incoming conversation

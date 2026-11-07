@@ -306,8 +306,17 @@ func (a *SuperAgent) CheckWatchdog(ctx context.Context, options WatchdogOptions)
 		check.Findings = append(check.Findings, f)
 	}
 	wallNow := time.Now().UnixMilli()
-	batch := &watchdogFollowupBatch{ObservedAt: wallNow, Followups: a.watchdogFollowupsDue(wallNow)}
-	err = a.commit(transition{State: "watchdog_checked_followups", Watchdog: &watchdogTransition{Check: &check, Snapshot: snapshot, Followups: batch}})
+	followups := a.watchdogFollowupsDue(wallNow)
+	state := "watchdog_checked"
+	w := &watchdogTransition{Check: &check, Snapshot: snapshot}
+	// Preserve the old reader's check contract until there is new evidence to
+	// protect. Once upgraded, keep the new state even for empty batches so an
+	// older writer cannot silently resume and omit future follow-ups.
+	if a.watchdog.followupVersion || len(followups) > 0 {
+		state = "watchdog_checked_followups"
+		w.Followups = &watchdogFollowupBatch{ObservedAt: wallNow, Followups: followups}
+	}
+	err = a.commit(transition{State: state, Watchdog: w})
 	if err != nil {
 		return empty, err
 	}
