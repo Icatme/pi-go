@@ -147,17 +147,20 @@ type WatchdogStatus struct {
 }
 type watchdogState struct {
 	WatchdogStatus
-	snapshot json.RawMessage
-	latest   map[string]WatchdogFinding
+	followups       []WatchdogFollowup
+	followupVersion bool
+	snapshot        json.RawMessage
+	latest          map[string]WatchdogFinding
 }
 type watchdogTransition struct {
-	SessionID         string                `json:"session_id,omitempty"`
-	ProviderSessionID string                `json:"provider_session_id,omitempty"`
-	Policy            WatchdogPolicy        `json:"policy,omitempty"`
-	Check             *WatchdogCheck        `json:"check,omitempty"`
-	Snapshot          json.RawMessage       `json:"snapshot,omitempty"`
-	Intervention      *WatchdogIntervention `json:"intervention,omitempty"`
-	Operation         *BackgroundOperation  `json:"operation,omitempty"`
+	Followups         *watchdogFollowupBatch `json:"followups,omitempty"`
+	SessionID         string                 `json:"session_id,omitempty"`
+	ProviderSessionID string                 `json:"provider_session_id,omitempty"`
+	Policy            WatchdogPolicy         `json:"policy,omitempty"`
+	Check             *WatchdogCheck         `json:"check,omitempty"`
+	Snapshot          json.RawMessage        `json:"snapshot,omitempty"`
+	Intervention      *WatchdogIntervention  `json:"intervention,omitempty"`
+	Operation         *BackgroundOperation   `json:"operation,omitempty"`
 }
 
 func validWatchdogPolicy(p WatchdogPolicy) bool {
@@ -302,7 +305,18 @@ func (a *SuperAgent) CheckWatchdog(ctx context.Context, options WatchdogOptions)
 		applyWatchdogHypothesis(&f)
 		check.Findings = append(check.Findings, f)
 	}
-	err = a.commit(transition{State: "watchdog_checked", Watchdog: &watchdogTransition{Check: &check, Snapshot: snapshot}})
+	wallNow := time.Now().UnixMilli()
+	followups := a.watchdogFollowupsDue(wallNow)
+	state := "watchdog_checked"
+	w := &watchdogTransition{Check: &check, Snapshot: snapshot}
+	// Preserve the old reader's check contract until there is new evidence to
+	// protect. Once upgraded, keep the new state even for empty batches so an
+	// older writer cannot silently resume and omit future follow-ups.
+	if a.watchdog.followupVersion || len(followups) > 0 {
+		state = "watchdog_checked_followups"
+		w.Followups = &watchdogFollowupBatch{ObservedAt: wallNow, Followups: followups}
+	}
+	err = a.commit(transition{State: state, Watchdog: w})
 	if err != nil {
 		return empty, err
 	}
@@ -495,6 +509,9 @@ func (a *SuperAgent) validateWatchdog(tr transition) error {
 	if w == nil || tr.Index != 0 || tr.Trigger != nil || tr.Task != "" || tr.ProviderSessionID != "" || tr.Text != "" || len(tr.Snapshot) > 0 || len(tr.Receipts) > 0 || tr.NeedsReview || tr.Background != nil || tr.Main != nil || tr.Admission != nil || tr.Thread != nil {
 		return errors.New("watchdog: mixed transition")
 	}
+	if err := a.validateWatchdogFollowups(tr); err != nil {
+		return err
+	}
 	if tr.State == "watchdog_refresh_reserved" || tr.State == "watchdog_refresh_finished" {
 		return a.validateWatchdogRefresh(tr)
 	}
@@ -506,7 +523,7 @@ func (a *SuperAgent) validateWatchdog(tr transition) error {
 		if a.watchdog.SessionID != "" || !validIdentity(w.SessionID) || !validIdentity(w.ProviderSessionID) || w.SessionID == w.ProviderSessionID || w.SessionID == a.main.id || w.ProviderSessionID == a.main.providerID || !validWatchdogPolicy(w.Policy) || w.Check != nil || len(w.Snapshot) > 0 {
 			return errors.New("watchdog: invalid session admission")
 		}
-	case "watchdog_checked":
+	case "watchdog_checked", "watchdog_checked_followups":
 		c := w.Check
 		p := a.watchdog.Policy
 		if a.watchdog.SessionID == "" || w.SessionID != "" || w.ProviderSessionID != "" || w.Policy != (WatchdogPolicy{}) || c == nil || c.ID != a.watchdog.SessionID+"/"+strconv.Itoa(len(a.watchdog.Checks)+1) || c.TaskCount < a.watchdog.Cursor || c.TaskCount > len(a.taskIDs) || c.ObservedAt < 0 || c.ObservedAt > 1<<62 || c.ObservedAt < a.watchdog.NextCheckAt || c.NextCheckAt != c.ObservedAt+p.Interval.Milliseconds() {
@@ -643,6 +660,10 @@ func (a *SuperAgent) applyWatchdog(tr transition) error {
 		a.watchdog.WatchdogStatus = WatchdogStatus{SessionID: w.SessionID, ProviderSessionID: w.ProviderSessionID, Policy: w.Policy}
 		a.watchdog.latest = map[string]WatchdogFinding{}
 		return nil
+	}
+	if w.Followups != nil {
+		a.watchdog.followupVersion = true
+		a.watchdog.followups = append(a.watchdog.followups, w.Followups.Followups...)
 	}
 	c := cloneWatchdog(*w.Check)
 	a.watchdog.Checks = append(a.watchdog.Checks, c)

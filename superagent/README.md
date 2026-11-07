@@ -24,6 +24,13 @@ recheck evidence, see [M8a](../docs/superagent-m8a.md) and
 `ExampleSuperAgent_CheckWatchdog`. For a separately host-authorized, durable
 exact-operation Inspect, see [M8b](../docs/superagent-m8b.md) and
 `ExampleSuperAgent_RefreshWatchdog`. No automatic recovery actions are exposed.
+For bounded, one-shot follow-up evidence on completed interventions, see
+[M8c](../docs/superagent-m8c.md) and
+`ExampleSuperAgent_WatchdogFollowupsSince`. The existing patrol observes committed
+coordinator facts without another backend call or external notification. Hosts
+own the consumption cursor and any separately authorized delivery. Checks retain
+the old reader contract until the first follow-up evidence is committed. After
+that upgrade, including subsequent empty checks, older readers fail closed.
 The existing `Open` examples below retain the stateless Router contract.
 
 SuperAgent is an opt-in coordinator in the pi-go module. An incoming conversation
