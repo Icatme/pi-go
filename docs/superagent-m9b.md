@@ -137,3 +137,8 @@ on this host, so execution uses Bash; no Windows/PowerShell validation is claime
 No real provider/platform, user computer, extra billed execution, CI dispatch,
 merge or deployment is included. Exact final-tree checks are recorded in the
 Draft PR rather than implying remote CI ran.
+
+Follow-up [M9e](superagent-m9e.md) adds explicitly asynchronous single-Pi
+host arms to a four-entrypoint conservation comparison using M9c's phased
+300-delivery fixture. It does not change this slice's baseline, establish
+continuous-load performance, or close final M9 acceptance.

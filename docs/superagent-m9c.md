@@ -168,3 +168,8 @@ Follow-up [M9d](superagent-m9d.md) adds a separate bounded, completion-paced
 35-submission protocol fixture for exact cancellation/fanout, correction,
 post-write failure and one abrupt process-exit boundary. It does not change this
 300-delivery fixture into a continuous benchmark or complete the missing M9 gates.
+
+Follow-up [M9e](superagent-m9e.md) adds explicitly asynchronous single-Pi
+host arms to a four-entrypoint conservation comparison using M9c's phased
+300-delivery fixture. It does not change this slice's baseline, establish
+continuous-load performance, or close final M9 acceptance.

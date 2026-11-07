@@ -14,10 +14,11 @@ type script struct {
 	mu              sync.Mutex
 	n, bytes, limit int
 	mainInputs      map[string]int
+	roleCalls       map[string]int
 }
 
 func newScript(bytes, limit int) *script {
-	return &script{bytes: bytes, limit: limit, mainInputs: map[string]int{}}
+	return &script{bytes: bytes, limit: limit, mainInputs: map[string]int{}, roleCalls: map[string]int{}}
 }
 func (s *script) calls() int { s.mu.Lock(); defer s.mu.Unlock(); return s.n }
 func (s *script) model(role string) agent.StreamModel {
@@ -40,6 +41,7 @@ func (s *script) model(role string) agent.StreamModel {
 			return nil, errors.New("script call budget exceeded")
 		}
 		s.n++
+		s.roleCalls[role]++
 		s.mu.Unlock()
 		if len(req.Messages) == 0 {
 			return nil, errors.New("script requires input")

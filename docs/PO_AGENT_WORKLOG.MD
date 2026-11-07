@@ -3656,3 +3656,46 @@
   acceptance is claimed. Details and downgrade boundary: [M8c](superagent-m8c.md).
 - PostgreSQL remains host-owned. No user computer, Codex task, extra paid
   execution, live model/database service, CI dispatch, merge, release or deploy.
+
+## 2026-11-06 - M9e asynchronous four-arm conservation
+
+- Rechecked master v0.22.0 and open drafts; no duplicate four-arm async slice.
+  Added an internal harness/CLI on #195 with exact M9c 300-delivery phased
+  fixture, four worker slots, unbatched subscribed/router-only SuperAgent,
+  and two explicitly versioned asynchronous single-Pi host arms. No production
+  runtime, API, dependency, database, provider or CI changes.
+- Single Pi retains one main Runner and admits background PiWorker jobs;
+  worker results later return through actual main result turns. Attachments
+  resolve from observed summaries, not expected-work labels. Admission
+  acknowledgments and native subtask receipts stay separate from effective
+  final outputs. In-memory host state is not durable coordinator parity.
+- Runs use identical offered sequences, not equal ingress timing. They have
+  no forced four-body waves, fabricated service durations or performance
+  ranking. A separate held-body test proves 20 async jobs can be admitted
+  while four native tools remain blocked. Whole-run cancellation joins even
+  uncooperative bodies. Worker and full tool-body peaks obey the hard cap.
+- All four arms passed five repetitions: each conserves 300 deliveries,
+  280 identities, 20 task histories, 60 worker invocations/record receipts/
+  effects and 60 effective outputs. Actual main/worker script calls are
+  120/120 for SuperAgent and 180/120 for async single Pi. Tokens, monetary
+  cost and latency remain null; live calls are zero. These are protocol
+  accounting differences, not prompt quality or cost savings.
+- Retained the complete 6,901,844-byte JSON evidence as a 263,126-byte gzip
+  artifact, with a round-trip check, SHA-256 hashes, per-run summary and source
+  hashes. No failed or missing repetition is concealed by aggregate counts.
+- Independent review fixed concurrency instrumentation, nil-safe failed reopen,
+  an initially vacuous correlation test and result metadata checks. Running
+  the tightened scorer exposed a wrong assumption that SuperAgent populates
+  outer worker-result TaskID; its actual contract uses the nested report.
+  The scorer now validates each arm's real contract and rejects foreign IDs.
+  Failed development runs emitted no successful suite; all final repetitions
+  were rerun on the corrected evaluator. Production behavior was not changed.
+- Full root readonly tests/vet and separate examples tests/vet pass, as do
+  invalid-repeat CLI failure/zero-output checks and formatting/diff checks.
+  Full affected-package race (internal/runtimeeval and the new CLI) passes;
+  independent source and artifact audit found no blocker. No full-root race,
+  Windows/macOS or real-host acceptance is claimed.
+- The original mixed-arrival/cancellation workload, real service-time/arrival
+  distributions, model costs and final M9/release gates remain open. Scope,
+  evidence and reproducible commands: [M9e](superagent-m9e.md). No user computer,
+  extra paid execution, live service, CI dispatch, merge, release or deployment.
