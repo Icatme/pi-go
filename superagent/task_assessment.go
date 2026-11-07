@@ -15,18 +15,21 @@ const (
 	WorkloadTask         Workload = "task"
 )
 
-// TaskCandidate is a host-selected context boundary. CanAttach is determined
-// by the host; Status is descriptive and never grants attachment permission.
+// TaskCandidate is a host-selected context boundary. CanAttach and CanSteer
+// are determined by the host; Status is descriptive and never grants either
+// permission. Hosts must revalidate the exact execution before admitting a steer.
 type TaskCandidate struct {
 	ID           string `json:"id"`
 	Question     string `json:"question"`
 	RootQuestion string `json:"root_question,omitempty"`
 	Status       string `json:"status"`
 	CanAttach    bool   `json:"can_attach"`
+	CanSteer     bool   `json:"can_steer,omitempty"`
 }
 
-// TaskAssessment selects new, attach, clarify or status. Only attach and status
-// carry a TaskID, copied exactly from the offered candidates.
+// TaskAssessment selects new, attach, steer, clarify or status. Attach, steer
+// and status carry a TaskID, copied exactly from the offered candidates. Steer
+// selects a host-offered active execution; it does not itself deliver a directive.
 type TaskAssessment struct {
 	Action   string   `json:"action"`
 	TaskID   string   `json:"task_id"`
