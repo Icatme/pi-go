@@ -3734,3 +3734,25 @@
 - No user computer, extra paid execution, live provider/platform/database
   service, CI dispatch, merge, release or deployment. Original journals remain
   complete and old readers retain their existing wire compatibility.
+
+## 2026-11-07 - Publish v0.23.0 source release
+
+- Rechecked remote master at `6ddba1e`, including merged #192-197, and confirmed
+  that v0.23.0 was unused. Updated only the package version, examples module
+  reference and release documentation. Root dependencies and runtime code are
+  unchanged by the release commit.
+- Release notes cover optional host-owned main-context compaction, read-only
+  Watchdog intervention follow-ups, detached journal reads and validated replay
+  normalization. They explicitly state the variadic constructor type change,
+  corrected full-request budget accounting and the one-way old-reader boundary
+  after the first committed follow-up evidence. No bounded journal claim is made.
+- Reused the merged slices' recorded offline tests/vet/affected race evidence.
+  Release-specific checks passed on the user-authorized Windows host with
+  Go 1.26.4, GOWORK=off and GOPROXY=off: readonly module graphs for root and
+  examples; root pkg/pigo and cmd/pi-superagent compilation; examples/mcp-managed
+  compilation; matching version references and diff hygiene. These are metadata
+  and compile checks, not a repeated application, race or live-provider suite.
+- The publication operation is an atomic push of master and the annotated
+  v0.23.0 source tag, followed by remote target and published module verification.
+  No GitHub binary Release, manual CI, paid service, database or production
+  deployment is included. Downstream JZBeacon dependency updates remain separate.
