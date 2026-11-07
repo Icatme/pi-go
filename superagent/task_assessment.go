@@ -15,21 +15,24 @@ const (
 	WorkloadTask         Workload = "task"
 )
 
-// TaskCandidate is a host-selected context boundary. CanAttach and CanSteer
-// are determined by the host; Status is descriptive and never grants either
-// permission. Hosts must revalidate the exact execution before admitting a steer.
+// TaskCandidate is a host-selected context boundary. Its capabilities are
+// determined by the host; Status and question text never grant permission.
+// Hosts revalidate the exact target and current authority before acting.
 type TaskCandidate struct {
-	ID           string `json:"id"`
-	Question     string `json:"question"`
-	RootQuestion string `json:"root_question,omitempty"`
-	Status       string `json:"status"`
-	CanAttach    bool   `json:"can_attach"`
-	CanSteer     bool   `json:"can_steer,omitempty"`
+	ID            string `json:"id"`
+	Question      string `json:"question"`
+	RootQuestion  string `json:"root_question,omitempty"`
+	Status        string `json:"status"`
+	CanAttach     bool   `json:"can_attach"`
+	CanSteer      bool   `json:"can_steer,omitempty"`
+	CanReadResult bool   `json:"can_read_result,omitempty"`
+	CanStop       bool   `json:"can_stop,omitempty"`
 }
 
-// TaskAssessment selects new, attach, steer, clarify or status. Attach, steer
-// and status carry a TaskID, copied exactly from the offered candidates. Steer
-// selects a host-offered active execution; it does not itself deliver a directive.
+// TaskAssessment selects new, attach, steer, clarify, status, result, list or
+// stop. Attach, steer, status, result and stop carry one exact offered TaskID.
+// Result, list and stop are optional host capabilities and use light workload.
+// Classification does not execute work, deliver results or cancel a task.
 type TaskAssessment struct {
 	Action   string   `json:"action"`
 	TaskID   string   `json:"task_id"`
@@ -37,9 +40,10 @@ type TaskAssessment struct {
 }
 
 type TaskAssessmentInput struct {
-	SessionID  string          `json:"-"`
-	Input      string          `json:"input"`
-	Candidates []TaskCandidate `json:"candidates"`
+	SessionID    string          `json:"-"`
+	Input        string          `json:"input"`
+	Candidates   []TaskCandidate `json:"candidates"`
+	CanListTasks bool            `json:"can_list_tasks,omitempty"`
 }
 
 // Validate checks the host envelope before a model is constructed. The assessor
