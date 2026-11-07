@@ -3756,3 +3756,25 @@
   v0.23.0 source tag, followed by remote target and published module verification.
   No GitHub binary Release, manual CI, paid service, database or production
   deployment is included. Downstream JZBeacon dependency updates remain separate.
+
+## 2026-11-07 - Host-selected task corrections in PiTaskAssessor
+
+- Baseline: v0.23.0 (`0ebe5120553e124212e5b57f24d2c364144b91e3`). Added
+  optional `TaskCandidate.CanSteer` and the `steer` assessment action. The tool
+  advertises the action only when a frozen host-offered candidate permits it;
+  unknown IDs and candidates without that capability fail closed. Existing
+  callers retain their candidate JSON shape and action set.
+- The isolated policy distinguishes current-task corrections from new work,
+  completed-result follow-ups, status requests and ambiguous references. It
+  returns one offered ID and never rewrites the instruction. The host still
+  owns the exact execution snapshot, current-authority revalidation and durable
+  delivery; classification itself changes no task or coordinator state.
+- Local Go 1.26.10 checks passed: `go test ./superagent -run TestPiTaskAssessor
+  -count=1`, `go test ./superagent -count=1`, focused TaskAssessor race tests,
+  formatting and `git diff --check`. Regression cases cover absent capability,
+  multiple tasks, invented IDs, descriptive-text spoofing, caller mutation during
+  inference, private protocol fields and legacy JSON omission.
+- This is local SDK implementation and synthetic offline validation. Natural
+  language model accuracy, downstream host integration and live delivery remain
+  separate acceptance work. No push, merge, release, CI dispatch or live service
+  call was performed by this change.
