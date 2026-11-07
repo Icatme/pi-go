@@ -1,0 +1,66 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Icatme/pi-go/superagent
+cpu: AMD EPYC 9V74 80-Core Processor
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/OpenJSONL-9         	       1	  27353844 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 9995096 B/op	   19692 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/OpenJSONL-9         	       1	  27405888 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 9990944 B/op	   19662 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/OpenJSONL-9         	       1	  25383233 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 9991016 B/op	   19667 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/OpenJSONL-9         	       1	  26115426 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 9983176 B/op	   19641 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/OpenJSONL-9         	       1	  27124427 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 9996064 B/op	   19673 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/Log-9               	       1	   9131210 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 3949640 B/op	    1856 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/Log-9               	       1	  12486155 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 3949416 B/op	    1850 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/Log-9               	       1	   8137735 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 3949432 B/op	    1850 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/Log-9               	       1	  10087989 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 3949432 B/op	    1850 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/Log-9               	       1	  10346890 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 3949608 B/op	    1855 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/Restore-9           	       1	  16691578 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 7345584 B/op	    8229 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/Restore-9           	       1	  29720557 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 7345792 B/op	    8234 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/Restore-9           	       1	  18903607 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 7345760 B/op	    8234 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/Restore-9           	       1	  15719911 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 7345568 B/op	    8229 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=100/Restore-9           	       1	  19279799 ns/op	       202.0 entries	    509289 journal-B	      5093 journal-B/input	 7345744 B/op	    8234 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/OpenJSONL-9        	       1	 289370133 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	99865840 B/op	  194911 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/OpenJSONL-9        	       1	 279957224 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	99821720 B/op	  194762 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/OpenJSONL-9        	       1	 269885342 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	99822128 B/op	  194807 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/OpenJSONL-9        	       1	 270905239 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	99819520 B/op	  194766 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/OpenJSONL-9        	       1	 264801454 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	99818552 B/op	  194784 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/Log-9              	       1	  84097647 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	43133784 B/op	   18065 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/Log-9              	       1	  87769856 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	43134880 B/op	   18062 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/Log-9              	       1	  75108021 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	43133608 B/op	   18060 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/Log-9              	       1	  94480842 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	43133784 B/op	   18065 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/Log-9              	       1	  90449696 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	43133584 B/op	   18060 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/Restore-9          	       1	 148717559 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	77502576 B/op	   83865 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/Restore-9          	       1	 190175325 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	77504072 B/op	   83872 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/Restore-9          	       1	 187628468 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	77504232 B/op	   83877 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/Restore-9          	       1	 153681342 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	77502576 B/op	   83865 allocs/op
+BenchmarkJournalGrowth/fixed4KiB/inputs=1000/Restore-9          	       1	 171939886 ns/op	      2002 entries	   5099590 journal-B	      5100 journal-B/input	77502880 B/op	   83871 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/OpenJSONL-9       	       1	 100920191 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	35444840 B/op	   20757 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/OpenJSONL-9       	       1	  96648965 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	35213472 B/op	   20656 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/OpenJSONL-9       	       1	  95757814 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	35340296 B/op	   20681 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/OpenJSONL-9       	       1	  97712034 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	35167024 B/op	   20655 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/OpenJSONL-9       	       1	 111200792 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	35335344 B/op	   20678 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/Log-9             	       1	  35166809 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	15151400 B/op	    1855 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/Log-9             	       1	  34247391 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	15151208 B/op	    1850 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/Log-9             	       1	  30146600 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	15151400 B/op	    1855 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/Log-9             	       1	  34540979 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	15152496 B/op	    1852 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/Log-9             	       1	  32733351 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	15151400 B/op	    1855 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/Restore-9         	       1	  62939360 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	29499560 B/op	   28744 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/Restore-9         	       1	  74175638 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	30463424 B/op	   28723 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/Restore-9         	       1	  77437211 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	30463192 B/op	   28718 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/Restore-9         	       1	  70751633 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	30463408 B/op	   28723 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=100/Restore-9         	       1	  72583144 ns/op	       202.0 entries	   1872275 journal-B	     18723 journal-B/input	30463400 B/op	   28723 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/OpenJSONL-9      	       1	8087335677 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	3262738768 B/op	  255698 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/OpenJSONL-9      	       1	8111606631 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	3260084096 B/op	  255755 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/OpenJSONL-9      	       1	7698433692 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	3260558280 B/op	  255572 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/OpenJSONL-9      	       1	7772379512 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	3256985408 B/op	  255480 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/OpenJSONL-9      	       1	7820780790 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	3258143096 B/op	  255529 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/Log-9            	       1	2535622933 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	1432867168 B/op	   18070 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/Log-9            	       1	2644066422 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	1441942416 B/op	   18064 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/Log-9            	       1	2706459348 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	1432865872 B/op	   18068 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/Log-9            	       1	3255703674 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	1432865968 B/op	   18066 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/Log-9            	       1	2726733926 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	1432865872 B/op	   18068 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/Restore-9        	       1	7290592084 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	3231151752 B/op	 2095287 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/Restore-9        	       1	5731681943 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	2887184600 B/op	 2095279 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/Restore-9        	       1	5569599135 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	2887186200 B/op	 2095287 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/Restore-9        	       1	5461980328 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	2896261592 B/op	 2095286 allocs/op
+BenchmarkJournalGrowth/growing256B/inputs=1000/Restore-9        	       1	5865131498 ns/op	      2002 entries	 177526964 journal-B	    177527 journal-B/input	2887184776 B/op	 2095284 allocs/op
+PASS
+ok  	github.com/Icatme/pi-go/superagent	195.548s

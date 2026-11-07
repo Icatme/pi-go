@@ -1,0 +1,66 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Icatme/pi-go/agent/session
+cpu: AMD EPYC 9V74 80-Core Processor
+BenchmarkStoredLogCopy/custom/100/original-9         	     100	   1306737 ns/op	  574067 B/op	     936 allocs/op
+BenchmarkStoredLogCopy/custom/100/original-9         	      86	   1332816 ns/op	  573466 B/op	     936 allocs/op
+BenchmarkStoredLogCopy/custom/100/original-9         	      98	   1385522 ns/op	  593451 B/op	     937 allocs/op
+BenchmarkStoredLogCopy/custom/100/original-9         	      94	   1235064 ns/op	  590087 B/op	     937 allocs/op
+BenchmarkStoredLogCopy/custom/100/original-9         	      88	   1382729 ns/op	  590550 B/op	     937 allocs/op
+BenchmarkStoredLogCopy/custom/100/optimized-9        	    4118	     39201 ns/op	   84098 B/op	     301 allocs/op
+BenchmarkStoredLogCopy/custom/100/optimized-9        	    3991	     30250 ns/op	   84098 B/op	     301 allocs/op
+BenchmarkStoredLogCopy/custom/100/optimized-9        	    4054	     29456 ns/op	   84097 B/op	     301 allocs/op
+BenchmarkStoredLogCopy/custom/100/optimized-9        	    3717	     31006 ns/op	   84097 B/op	     301 allocs/op
+BenchmarkStoredLogCopy/custom/100/optimized-9        	    4002	     32372 ns/op	   84097 B/op	     301 allocs/op
+BenchmarkStoredLogCopy/custom/1000/original-9        	       8	  13433048 ns/op	 6804182 B/op	    9067 allocs/op
+BenchmarkStoredLogCopy/custom/1000/original-9        	       9	  12251295 ns/op	 6803775 B/op	    9065 allocs/op
+BenchmarkStoredLogCopy/custom/1000/original-9        	       9	  12591253 ns/op	 6803801 B/op	    9066 allocs/op
+BenchmarkStoredLogCopy/custom/1000/original-9        	       9	  13435218 ns/op	 6337894 B/op	    9060 allocs/op
+BenchmarkStoredLogCopy/custom/1000/original-9        	       8	  12840937 ns/op	 6279713 B/op	    9060 allocs/op
+BenchmarkStoredLogCopy/custom/1000/optimized-9       	     332	    335140 ns/op	  840967 B/op	    3001 allocs/op
+BenchmarkStoredLogCopy/custom/1000/optimized-9       	     321	    684221 ns/op	  840967 B/op	    3001 allocs/op
+BenchmarkStoredLogCopy/custom/1000/optimized-9       	     244	    438330 ns/op	  840965 B/op	    3001 allocs/op
+BenchmarkStoredLogCopy/custom/1000/optimized-9       	     333	    402901 ns/op	  840964 B/op	    3001 allocs/op
+BenchmarkStoredLogCopy/custom/1000/optimized-9       	     297	    376721 ns/op	  840966 B/op	    3001 allocs/op
+BenchmarkStoredLogCopy/message/100/original-9        	      81	   1537109 ns/op	  721228 B/op	    3238 allocs/op
+BenchmarkStoredLogCopy/message/100/original-9        	      88	   1442409 ns/op	  728991 B/op	    3239 allocs/op
+BenchmarkStoredLogCopy/message/100/original-9        	     100	   1361320 ns/op	  738678 B/op	    3240 allocs/op
+BenchmarkStoredLogCopy/message/100/original-9        	     100	   1406461 ns/op	  734728 B/op	    3240 allocs/op
+BenchmarkStoredLogCopy/message/100/original-9        	      94	   1383668 ns/op	  732043 B/op	    3239 allocs/op
+BenchmarkStoredLogCopy/message/100/optimized-9       	      90	   1543482 ns/op	  732324 B/op	    3240 allocs/op
+BenchmarkStoredLogCopy/message/100/optimized-9       	     100	   1364526 ns/op	  736756 B/op	    3240 allocs/op
+BenchmarkStoredLogCopy/message/100/optimized-9       	     100	   1382046 ns/op	  736719 B/op	    3240 allocs/op
+BenchmarkStoredLogCopy/message/100/optimized-9       	      98	   1327184 ns/op	  735868 B/op	    3240 allocs/op
+BenchmarkStoredLogCopy/message/100/optimized-9       	     100	   1341865 ns/op	  730731 B/op	    3239 allocs/op
+BenchmarkStoredLogCopy/message/1000/original-9       	       8	  15992815 ns/op	 7370430 B/op	   32053 allocs/op
+BenchmarkStoredLogCopy/message/1000/original-9       	       8	  12536451 ns/op	 8551433 B/op	   32065 allocs/op
+BenchmarkStoredLogCopy/message/1000/original-9       	       8	  13390012 ns/op	 8157520 B/op	   32060 allocs/op
+BenchmarkStoredLogCopy/message/1000/original-9       	       8	  14502545 ns/op	 8551395 B/op	   32064 allocs/op
+BenchmarkStoredLogCopy/message/1000/original-9       	       9	  14199400 ns/op	 8288674 B/op	   32061 allocs/op
+BenchmarkStoredLogCopy/message/1000/optimized-9      	       9	  14481091 ns/op	 8288940 B/op	   32061 allocs/op
+BenchmarkStoredLogCopy/message/1000/optimized-9      	       9	  14529473 ns/op	 8289259 B/op	   32062 allocs/op
+BenchmarkStoredLogCopy/message/1000/optimized-9      	       8	  13993477 ns/op	 8157488 B/op	   32060 allocs/op
+BenchmarkStoredLogCopy/message/1000/optimized-9      	       8	  16106683 ns/op	 6976327 B/op	   32049 allocs/op
+BenchmarkStoredLogCopy/message/1000/optimized-9      	       8	  14034071 ns/op	 8551744 B/op	   32065 allocs/op
+BenchmarkStoredLogCopy/mixed/100/original-9          	     100	   1314412 ns/op	  666323 B/op	    2088 allocs/op
+BenchmarkStoredLogCopy/mixed/100/original-9          	      88	   1602067 ns/op	  668265 B/op	    2088 allocs/op
+BenchmarkStoredLogCopy/mixed/100/original-9          	     100	   1343674 ns/op	  658438 B/op	    2087 allocs/op
+BenchmarkStoredLogCopy/mixed/100/original-9          	      98	   1461109 ns/op	  664837 B/op	    2088 allocs/op
+BenchmarkStoredLogCopy/mixed/100/original-9          	      85	   1340188 ns/op	  667280 B/op	    2088 allocs/op
+BenchmarkStoredLogCopy/mixed/100/optimized-9         	      93	   1293672 ns/op	  665017 B/op	    2088 allocs/op
+BenchmarkStoredLogCopy/mixed/100/optimized-9         	      73	   1387513 ns/op	  658909 B/op	    2088 allocs/op
+BenchmarkStoredLogCopy/mixed/100/optimized-9         	     100	   1314326 ns/op	  661093 B/op	    2088 allocs/op
+BenchmarkStoredLogCopy/mixed/100/optimized-9         	      79	   1343746 ns/op	  671760 B/op	    2089 allocs/op
+BenchmarkStoredLogCopy/mixed/100/optimized-9         	     100	   1251602 ns/op	  663695 B/op	    2088 allocs/op
+BenchmarkStoredLogCopy/mixed/1000/original-9         	       8	  13244551 ns/op	 7555315 B/op	   20569 allocs/op
+BenchmarkStoredLogCopy/mixed/1000/original-9         	       8	  14117474 ns/op	 7555624 B/op	   20570 allocs/op
+BenchmarkStoredLogCopy/mixed/1000/original-9         	       8	  13175401 ns/op	 6768793 B/op	   20561 allocs/op
+BenchmarkStoredLogCopy/mixed/1000/original-9         	       8	  15188687 ns/op	 6768448 B/op	   20560 allocs/op
+BenchmarkStoredLogCopy/mixed/1000/original-9         	       8	  13821636 ns/op	 7030699 B/op	   20562 allocs/op
+BenchmarkStoredLogCopy/mixed/1000/optimized-9        	       8	  13655426 ns/op	 6768284 B/op	   20560 allocs/op
+BenchmarkStoredLogCopy/mixed/1000/optimized-9        	       9	  14227950 ns/op	 6622672 B/op	   20558 allocs/op
+BenchmarkStoredLogCopy/mixed/1000/optimized-9        	       8	  16613174 ns/op	 7555301 B/op	   20568 allocs/op
+BenchmarkStoredLogCopy/mixed/1000/optimized-9        	       9	  13636945 ns/op	 6855671 B/op	   20560 allocs/op
+BenchmarkStoredLogCopy/mixed/1000/optimized-9        	       8	  13647462 ns/op	 6505963 B/op	   20557 allocs/op
+PASS
+ok  	github.com/Icatme/pi-go/agent/session	9.383s
