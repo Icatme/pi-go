@@ -1,0 +1,234 @@
+# Presentation whitespace normalized; numeric samples unchanged.
+# M6f exact-file strict opening measurement. Machine paths replaced with labeled placeholders; numeric results and source unchanged.
+# Large generated fixture/binaries are not committed. For a new comparison regenerate one fixture once and use that SAME file for both binaries.
+
+=== toolchain.txt ===
+go version go1.26.10 linux/amd64
+linux
+amd64
+v1
+
+
+
+
+=== current-head.txt ===
+dbba812e4da1af3e23d427781a05c12f8dc53dd5
+
+
+=== current-storage.diff ===
+diff --git a/agent/session/storage.go b/agent/session/storage.go
+index 6cb11b2..0c113bd 100644
+--- a/agent/session/storage.go
++++ b/agent/session/storage.go
+@@ -176,6 +176,18 @@ func (s *logState) newEntryItem(lane string, input NewEntry) (LogItem, error) {
+ }
+
+ func (s *logState) validateItem(item LogItem) error {
++       if err := s.validateItemStructure(item); err != nil {
++               return err
++       }
++       if item.Entry != nil {
++               if _, err := cloneValidated(*item.Entry); err != nil {
++                       return sessionError(ErrorInvalidEntry, "entry payload is not valid JSON", err)
++               }
++       }
++       return nil
++}
++
++func (s *logState) validateItemStructure(item LogItem) error {
+        if item.Seq == 0 || item.Seq != s.nextSequence() {
+                return sessionError(ErrorCorruptLog, fmt.Sprintf("expected seq %d, got %d", s.nextSequence(), item.Seq), nil)
+        }
+@@ -188,7 +200,7 @@ func (s *logState) validateItem(item LogItem) error {
+                if item.Entry == nil || item.Lane != nil {
+                        return sessionError(ErrorCorruptLog, "entry log item has mismatched payload", nil)
+                }
+-               return s.validateEntry(*item.Entry, item.Seq)
++               return s.validateEntryStructure(*item.Entry, item.Seq)
+        case LogItemLane:
+                if item.Lane == nil || item.Entry != nil {
+                        return sessionError(ErrorCorruptLog, "lane log item has mismatched payload", nil)
+@@ -199,7 +211,7 @@ func (s *logState) validateItem(item LogItem) error {
+        }
+ }
+
+-func (s *logState) validateEntry(entry Entry, seq uint64) error {
++func (s *logState) validateEntryStructure(entry Entry, seq uint64) error {
+        if entry.Seq != seq {
+                return sessionError(ErrorCorruptLog, "entry seq does not match log seq", nil)
+        }
+@@ -225,9 +237,6 @@ func (s *logState) validateEntry(entry Entry, seq uint64) error {
+        if err := validateStoredEntryPayload(entry.Type, entry.Message, entry.Compaction, entry.Custom); err != nil {
+                return err
+        }
+-       if _, err := cloneValidated(entry); err != nil {
+-               return sessionError(ErrorInvalidEntry, "entry payload is not valid JSON", err)
+-       }
+        return nil
+ }
+
+@@ -290,10 +299,20 @@ func (s *logState) validateLanePointer(pointer LanePointer, seq uint64) error {
+ }
+
+ func (s *logState) apply(item LogItem) error {
+-       if err := s.validateItem(item); err != nil {
++       if err := s.validateItemStructure(item); err != nil {
+                return err
+        }
+-       cloned := mustCloneJSON(item)
++       // Retain the JSON validation result instead of normalizing the entry and
++       // discarding it before cloning the whole item again. Public append paths
++       // already freeze caller marshalers; replay supplies strictly decoded JSON.
++       // Keep the full-item round trip for legacy string and payload normalization.
++       cloned, err := cloneValidated(item)
++       if err != nil {
++               if item.Entry != nil {
++                       return sessionError(ErrorInvalidEntry, "entry payload is not valid JSON", err)
++               }
++               return sessionError(ErrorCorruptLog, "lane payload is not valid JSON", err)
++       }
+        switch cloned.Kind {
+        case LogItemEntry:
+                entry := *cloned.Entry
+
+
+=== runtime-binary-hashes.txt ===
+22a11582f5df1cba68cb3652f01f21e602c6672b8c896e0dc3cd8db9c3817f07  agent/session/storage.go
+b9dd4faa603bce5091a4523ae720346d974e51ed75bbf7cf458eb2924808b3d3  <MEASUREMENT_DIR>/open-baseline
+f94dc872815e0e1feb677a8bd9c4000f9655e7fca736424fbe97160eac30bdb1  <MEASUREMENT_DIR>/open-current
+
+
+=== fixture-before.sha256 ===
+4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b  <MEASUREMENT_DIR>/growing1000.jsonl
+
+
+=== baseline-1.json ===
+{"decoded_sha256":"4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b","elapsed_ns":8361523244,"first_seq":1,"fixture_bytes":177525225,"fixture_sha256":"4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b","go_version":"go1.26.10","gomaxprocs":9,"header":{"kind":"session","version":2,"id":"superagent","created_at":1793987563344},"last_seq":2002,"mallocs":256508,"records":2002,"total_alloc_bytes":3257910080}
+
+
+=== baseline-2.json ===
+{"decoded_sha256":"4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b","elapsed_ns":8129746189,"first_seq":1,"fixture_bytes":177525225,"fixture_sha256":"4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b","go_version":"go1.26.10","gomaxprocs":9,"header":{"kind":"session","version":2,"id":"superagent","created_at":1793987563344},"last_seq":2002,"mallocs":256328,"records":2002,"total_alloc_bytes":3254033328}
+
+
+=== baseline-3.json ===
+{"decoded_sha256":"4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b","elapsed_ns":8022530526,"first_seq":1,"fixture_bytes":177525225,"fixture_sha256":"4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b","go_version":"go1.26.10","gomaxprocs":9,"header":{"kind":"session","version":2,"id":"superagent","created_at":1793987563344},"last_seq":2002,"mallocs":256488,"records":2002,"total_alloc_bytes":3260338328}
+
+
+=== current-1.json ===
+{"decoded_sha256":"4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b","elapsed_ns":5715464925,"first_seq":1,"fixture_bytes":177525225,"fixture_sha256":"4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b","go_version":"go1.26.10","gomaxprocs":9,"header":{"kind":"session","version":2,"id":"superagent","created_at":1793987563344},"last_seq":2002,"mallocs":198510,"records":2002,"total_alloc_bytes":2177892928}
+
+
+=== current-2.json ===
+{"decoded_sha256":"4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b","elapsed_ns":6144493322,"first_seq":1,"fixture_bytes":177525225,"fixture_sha256":"4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b","go_version":"go1.26.10","gomaxprocs":9,"header":{"kind":"session","version":2,"id":"superagent","created_at":1793987563344},"last_seq":2002,"mallocs":198488,"records":2002,"total_alloc_bytes":2176020224}
+
+
+=== current-3.json ===
+{"decoded_sha256":"4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b","elapsed_ns":5780353277,"first_seq":1,"fixture_bytes":177525225,"fixture_sha256":"4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b","go_version":"go1.26.10","gomaxprocs":9,"header":{"kind":"session","version":2,"id":"superagent","created_at":1793987563344},"last_seq":2002,"mallocs":198457,"records":2002,"total_alloc_bytes":2174526480}
+
+
+=== fixture-after.sha256 ===
+4f7d825c267b85ff640634bd082e880ec74244d3acbe6dd8090d54dd89b0e46b  <MEASUREMENT_DIR>/growing1000.jsonl
+
+
+=== summary.json ===
+{
+  "baseline": {
+    "elapsed_ns": 8129746189,
+    "total_alloc_bytes": 3257910080,
+    "mallocs": 256488
+  },
+  "current": {
+    "elapsed_ns": 5780353277,
+    "total_alloc_bytes": 2176020224,
+    "mallocs": 198488
+  },
+  "percent_reduction": {
+    "elapsed_ns": 28.898723986966036,
+    "total_alloc_bytes": 33.20809443580469,
+    "mallocs": 22.613143694831727
+  }
+}
+
+=== REPRODUCE.txt ===
+M6f exact-file OpenJSONLStorageStrict measurement
+Remote Linux amd64; Go 1.26.10. PowerShell unavailable; POSIX shell used.
+Baseline commit dbba812e4da1af3e23d427781a05c12f8dc53dd5.
+Current commit and runtime diff in current-head.txt/current-storage.diff.
+Commands executed for preparation (D = this directory):
+ git worktree add --detach "$D/baseline" dbba812e4da1af3e23d427781a05c12f8dc53dd5
+ # Exclusive-create baseline/superagent/m6f_export_fixture_test.go from export_test.go.
+ . "$D/env.sh"
+ cd "$D/baseline"
+ M6F_FIXTURE="$D/growing1000.jsonl" "$GO" test -mod=readonly ./superagent -run '^TestM6fExportFixture$' -count=1 -v
+ "$GO" build -mod=readonly -o "$D/open-baseline" "$D/open.go"
+ cd <CHECKOUT>
+ "$GO" build -mod=readonly -o "$D/open-current" "$D/open.go"
+Then, only after competing task checks/benchmarks are paused:
+ sh "$D/measure.sh"
+The measurement script refuses overwriting existing result files. For another run use a fresh directory,
+copy the existing byte-identical fixture and helper sources (verify SHA256), and recompile binaries.
+Regenerating the fixture changes timestamps and is NOT an exact-byte reproduction.
+Each sample starts a fresh process and streams SHA256 before runtime.GC and measurement.
+Measure time.Since and runtime.MemStats TotalAlloc/Mallocs deltas for OpenJSONLStorageStrict only.
+Exclude fixture generation, binary compilation, streaming SHA256, Header/Log digest and Close.
+Allocations are cumulative, NOT peak, retained memory or RSS. Timings include validation, decoding,
+and allocations/GC within Open. Shared host CPU/GC/disk cache are not isolated; file is warm-cache.
+Baseline three samples precede optimized three samples, not randomized. No other benchmarks/tests
+from this task run during the six samples. No live APIs, providers, DB services or paid execution.
+
+
+=== env.sh ===
+export GOTOOLCHAIN=local GOWORK=off GOPROXY=off GOSUMDB=off
+export GOMODCACHE=<GO_CACHE_ROOT>/mod
+export GOCACHE=<VALIDATION_DIR>/cache
+export GOTMPDIR=<VALIDATION_DIR>/tmp
+export TMPDIR="$GOTMPDIR"
+export PIGO_LIVE_TEST=0 PIGO_KIRO_LIVE_TEST=0 PIGO_KIRO_ACP_LIVE_TEST=0 PIGO_COMMANDCODE_LIVE_TEST=0
+GO=<GO_CACHE_ROOT>/go/bin/go
+
+
+=== export_test.go ===
+package superagent
+import("io";"os";"testing")
+func TestM6fExportFixture(t *testing.T) {
+ path,n,size:=growthFixture(t,1000,true)
+ src,err:=os.Open(path);if err!=nil {t.Fatal(err)};defer src.Close()
+ dst,err:=os.OpenFile(os.Getenv("M6F_FIXTURE"),os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600);if err!=nil {t.Fatal(err)}
+ copied,err:=io.Copy(dst,src);if err!=nil {t.Fatal(err)};if err=dst.Close();err!=nil {t.Fatal(err)}
+ if copied!=size {t.Fatal("short copy")};t.Logf("records=%d bytes=%d",n,size)
+}
+
+
+=== open.go ===
+package main
+import("crypto/sha256";"encoding/hex";"encoding/json";"fmt";"io";"os";"runtime";"time";"github.com/Icatme/pi-go/agent/session")
+func die(err error){if err!=nil {panic(err)}}
+func main(){
+ path:=os.Args[1]
+ f,e:=os.Open(path);die(e);h:=sha256.New();size,e:=io.Copy(h,f);die(e);die(f.Close());fileHash:=hex.EncodeToString(h.Sum(nil))
+ runtime.GC();var before,after runtime.MemStats;runtime.ReadMemStats(&before)
+ started:=time.Now();s,err:=session.OpenJSONLStorageStrict(path);elapsed:=time.Since(started);runtime.ReadMemStats(&after);die(err)
+ // All observation, Log copying, digest generation and Close are outside measurement.
+ log:=s.Log();header:=s.Header();outHash:=sha256.New();enc:=json.NewEncoder(outHash);die(enc.Encode(header));for _,item:=range log{die(enc.Encode(item))};die(s.Close())
+ result:=map[string]any{"elapsed_ns":elapsed.Nanoseconds(),"total_alloc_bytes":after.TotalAlloc-before.TotalAlloc,"mallocs":after.Mallocs-before.Mallocs,"fixture_sha256":fileHash,"fixture_bytes":size,"records":len(log),"decoded_sha256":hex.EncodeToString(outHash.Sum(nil)),"header":header,"first_seq":log[0].Seq,"last_seq":log[len(log)-1].Seq,"go_version":runtime.Version(),"gomaxprocs":runtime.GOMAXPROCS(0)}
+ data,e:=json.Marshal(result);die(e);fmt.Println(string(data))
+}
+
+
+=== measure.sh ===
+#!/bin/sh
+set -eu
+D=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$D/env.sh"
+# Compile both binaries before running this script. Run only after all task benchmarks/tests pause.
+# Every sample is a new process. Streamed SHA256 warms the file cache before measurement.
+# No Log/Close/digest operation is included in elapsed time or allocation deltas.
+set -C
+sha256sum "$D/growing1000.jsonl" > "$D/fixture-before.sha256"
+for variant in baseline current; do
+  for sample in 1 2 3; do
+    "$D/open-$variant" "$D/growing1000.jsonl" > "$D/$variant-$sample.json"
+  done
+done
+sha256sum "$D/growing1000.jsonl" > "$D/fixture-after.sha256"
+cmp "$D/fixture-before.sha256" "$D/fixture-after.sha256"

@@ -176,6 +176,18 @@ func (s *logState) newEntryItem(lane string, input NewEntry) (LogItem, error) {
 }
 
 func (s *logState) validateItem(item LogItem) error {
+	if err := s.validateItemStructure(item); err != nil {
+		return err
+	}
+	if item.Entry != nil {
+		if _, err := cloneValidated(*item.Entry); err != nil {
+			return sessionError(ErrorInvalidEntry, "entry payload is not valid JSON", err)
+		}
+	}
+	return nil
+}
+
+func (s *logState) validateItemStructure(item LogItem) error {
 	if item.Seq == 0 || item.Seq != s.nextSequence() {
 		return sessionError(ErrorCorruptLog, fmt.Sprintf("expected seq %d, got %d", s.nextSequence(), item.Seq), nil)
 	}
@@ -188,7 +200,7 @@ func (s *logState) validateItem(item LogItem) error {
 		if item.Entry == nil || item.Lane != nil {
 			return sessionError(ErrorCorruptLog, "entry log item has mismatched payload", nil)
 		}
-		return s.validateEntry(*item.Entry, item.Seq)
+		return s.validateEntryStructure(*item.Entry, item.Seq)
 	case LogItemLane:
 		if item.Lane == nil || item.Entry != nil {
 			return sessionError(ErrorCorruptLog, "lane log item has mismatched payload", nil)
@@ -199,7 +211,7 @@ func (s *logState) validateItem(item LogItem) error {
 	}
 }
 
-func (s *logState) validateEntry(entry Entry, seq uint64) error {
+func (s *logState) validateEntryStructure(entry Entry, seq uint64) error {
 	if entry.Seq != seq {
 		return sessionError(ErrorCorruptLog, "entry seq does not match log seq", nil)
 	}
@@ -224,9 +236,6 @@ func (s *logState) validateEntry(entry Entry, seq uint64) error {
 	}
 	if err := validateStoredEntryPayload(entry.Type, entry.Message, entry.Compaction, entry.Custom); err != nil {
 		return err
-	}
-	if _, err := cloneValidated(entry); err != nil {
-		return sessionError(ErrorInvalidEntry, "entry payload is not valid JSON", err)
 	}
 	return nil
 }
@@ -290,10 +299,20 @@ func (s *logState) validateLanePointer(pointer LanePointer, seq uint64) error {
 }
 
 func (s *logState) apply(item LogItem) error {
-	if err := s.validateItem(item); err != nil {
+	if err := s.validateItemStructure(item); err != nil {
 		return err
 	}
-	cloned := mustCloneJSON(item)
+	// Retain the JSON validation result instead of normalizing the entry and
+	// discarding it before cloning the whole item again. Public append paths
+	// already freeze caller marshalers; replay supplies strictly decoded JSON.
+	// Keep the full-item round trip for legacy string and payload normalization.
+	cloned, err := cloneValidated(item)
+	if err != nil {
+		if item.Entry != nil {
+			return sessionError(ErrorInvalidEntry, "entry payload is not valid JSON", err)
+		}
+		return sessionError(ErrorCorruptLog, "lane payload is not valid JSON", err)
+	}
 	switch cloned.Kind {
 	case LogItemEntry:
 		entry := *cloned.Entry

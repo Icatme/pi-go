@@ -1,0 +1,70 @@
+# Presentation whitespace normalized; numeric samples unchanged.
+# M6f final batch samples after original allocation-order correction.
+# Command: go test -mod=readonly ./agent/session -run ^$ -bench ^BenchmarkValidatedReplay$/././batch/ -benchtime=100ms -count=5 -benchmem
+# GOMAXPROCS not explicitly set; observed suffix -9.
+goos: linux
+goarch: amd64
+pkg: github.com/Icatme/pi-go/agent/session
+cpu: AMD EPYC 9V74 80-Core Processor
+BenchmarkValidatedReplay/custom/100/batch/original-9                  14           8450589 ns/op             82457 log-B         2861524 B/op       9847 allocs/op
+BenchmarkValidatedReplay/custom/100/batch/original-9                  13           7758722 ns/op             82457 log-B         2833120 B/op       9846 allocs/op
+BenchmarkValidatedReplay/custom/100/batch/original-9                  15           7846859 ns/op             82457 log-B         2864351 B/op       9846 allocs/op
+BenchmarkValidatedReplay/custom/100/batch/original-9                  15           9160140 ns/op             82457 log-B         2887188 B/op       9850 allocs/op
+BenchmarkValidatedReplay/custom/100/batch/original-9                  15           8488947 ns/op             82457 log-B         2843533 B/op       9847 allocs/op
+BenchmarkValidatedReplay/custom/100/batch/optimized-9                 18           6547129 ns/op             82457 log-B         2285111 B/op       7243 allocs/op
+BenchmarkValidatedReplay/custom/100/batch/optimized-9                 18           6287820 ns/op             82457 log-B         2300003 B/op       7244 allocs/op
+BenchmarkValidatedReplay/custom/100/batch/optimized-9                 20           6309096 ns/op             82457 log-B         2273781 B/op       7246 allocs/op
+BenchmarkValidatedReplay/custom/100/batch/optimized-9                 19           6880169 ns/op             82457 log-B         2282430 B/op       7244 allocs/op
+BenchmarkValidatedReplay/custom/100/batch/optimized-9                 18           6428467 ns/op             82457 log-B         2249556 B/op       7244 allocs/op
+BenchmarkValidatedReplay/custom/1000/batch/original-9                  2          80925161 ns/op            826759 log-B        27558056 B/op      97257 allocs/op
+BenchmarkValidatedReplay/custom/1000/batch/original-9                  2          92562266 ns/op            826759 log-B        27553724 B/op      97240 allocs/op
+BenchmarkValidatedReplay/custom/1000/batch/original-9                  2          79528966 ns/op            826759 log-B        27557176 B/op      97248 allocs/op
+BenchmarkValidatedReplay/custom/1000/batch/original-9                  2          74205651 ns/op            826759 log-B        27556624 B/op      97248 allocs/op
+BenchmarkValidatedReplay/custom/1000/batch/original-9                  2          89279708 ns/op            826759 log-B        27552900 B/op      97236 allocs/op
+BenchmarkValidatedReplay/custom/1000/batch/optimized-9                 2          62937834 ns/op            826759 log-B        22049232 B/op      71232 allocs/op
+BenchmarkValidatedReplay/custom/1000/batch/optimized-9                 2          71829038 ns/op            826759 log-B        22047828 B/op      71231 allocs/op
+BenchmarkValidatedReplay/custom/1000/batch/optimized-9                 2          66537515 ns/op            826759 log-B        22050320 B/op      71250 allocs/op
+BenchmarkValidatedReplay/custom/1000/batch/optimized-9                 2          65401533 ns/op            826759 log-B        22048576 B/op      71233 allocs/op
+BenchmarkValidatedReplay/custom/1000/batch/optimized-9                 2          70336358 ns/op            826759 log-B        22052776 B/op      71263 allocs/op
+BenchmarkValidatedReplay/message/100/batch/original-9                 14           8602424 ns/op             87657 log-B         3551336 B/op      20865 allocs/op
+BenchmarkValidatedReplay/message/100/batch/original-9                 16           8824177 ns/op             87657 log-B         3512894 B/op      20858 allocs/op
+BenchmarkValidatedReplay/message/100/batch/original-9                 15           9452016 ns/op             87657 log-B         3550253 B/op      20862 allocs/op
+BenchmarkValidatedReplay/message/100/batch/original-9                 14           9469009 ns/op             87657 log-B         3536674 B/op      20862 allocs/op
+BenchmarkValidatedReplay/message/100/batch/original-9                 12           9100952 ns/op             87657 log-B         3550177 B/op      20862 allocs/op
+BenchmarkValidatedReplay/message/100/batch/optimized-9                14           8701362 ns/op             87657 log-B         2824960 B/op      15854 allocs/op
+BenchmarkValidatedReplay/message/100/batch/optimized-9                18           7292596 ns/op             87657 log-B         2832375 B/op      15856 allocs/op
+BenchmarkValidatedReplay/message/100/batch/optimized-9                14           7775226 ns/op             87657 log-B         2853489 B/op      15854 allocs/op
+BenchmarkValidatedReplay/message/100/batch/optimized-9                18           7025792 ns/op             87657 log-B         2821697 B/op      15856 allocs/op
+BenchmarkValidatedReplay/message/100/batch/optimized-9                16           7804365 ns/op             87657 log-B         2854817 B/op      15860 allocs/op
+BenchmarkValidatedReplay/message/1000/batch/original-9                 2          85521338 ns/op            878759 log-B        35514784 B/op     207272 allocs/op
+BenchmarkValidatedReplay/message/1000/batch/original-9                 2          81393039 ns/op            878759 log-B        35504360 B/op     207247 allocs/op
+BenchmarkValidatedReplay/message/1000/batch/original-9                 2          80481521 ns/op            878759 log-B        35503420 B/op     207244 allocs/op
+BenchmarkValidatedReplay/message/1000/batch/original-9                 2          95169776 ns/op            878759 log-B        35505820 B/op     207249 allocs/op
+BenchmarkValidatedReplay/message/1000/batch/original-9                 2          85201054 ns/op            878759 log-B        35506116 B/op     207253 allocs/op
+BenchmarkValidatedReplay/message/1000/batch/optimized-9                2          61988408 ns/op            878759 log-B        28563708 B/op     157238 allocs/op
+BenchmarkValidatedReplay/message/1000/batch/optimized-9                2          66389834 ns/op            878759 log-B        28558292 B/op     157221 allocs/op
+BenchmarkValidatedReplay/message/1000/batch/optimized-9                2          84267852 ns/op            878759 log-B        28561860 B/op     157232 allocs/op
+BenchmarkValidatedReplay/message/1000/batch/optimized-9                2          76682310 ns/op            878759 log-B        28574508 B/op     157266 allocs/op
+BenchmarkValidatedReplay/message/1000/batch/optimized-9                2          86688160 ns/op            878759 log-B        28563756 B/op     157238 allocs/op
+BenchmarkValidatedReplay/mixed/100/batch/original-9                   13          10244928 ns/op             85057 log-B         3217185 B/op      15374 allocs/op
+BenchmarkValidatedReplay/mixed/100/batch/original-9                   14          19598334 ns/op             85057 log-B         3152304 B/op      15356 allocs/op
+BenchmarkValidatedReplay/mixed/100/batch/original-9                   10          10614401 ns/op             85057 log-B         3191222 B/op      15368 allocs/op
+BenchmarkValidatedReplay/mixed/100/batch/original-9                   14          10242092 ns/op             85057 log-B         3202822 B/op      15357 allocs/op
+BenchmarkValidatedReplay/mixed/100/batch/original-9                   14           8416883 ns/op             85057 log-B         3236966 B/op      15362 allocs/op
+BenchmarkValidatedReplay/mixed/100/batch/optimized-9                  18           7859820 ns/op             85057 log-B         2540984 B/op      11553 allocs/op
+BenchmarkValidatedReplay/mixed/100/batch/optimized-9                  18           6864651 ns/op             85057 log-B         2514878 B/op      11550 allocs/op
+BenchmarkValidatedReplay/mixed/100/batch/optimized-9                  16           9392398 ns/op             85057 log-B         2590947 B/op      11557 allocs/op
+BenchmarkValidatedReplay/mixed/100/batch/optimized-9                  19           7210574 ns/op             85057 log-B         2570179 B/op      11556 allocs/op
+BenchmarkValidatedReplay/mixed/100/batch/optimized-9                  14           7752874 ns/op             85057 log-B         2581461 B/op      11560 allocs/op
+BenchmarkValidatedReplay/mixed/1000/batch/original-9                   2          90803031 ns/op            852759 log-B        32044780 B/op     152247 allocs/op
+BenchmarkValidatedReplay/mixed/1000/batch/original-9                   2          86822646 ns/op            852759 log-B        30473164 B/op     152250 allocs/op
+BenchmarkValidatedReplay/mixed/1000/batch/original-9                   2          74054628 ns/op            852759 log-B        30475240 B/op     152255 allocs/op
+BenchmarkValidatedReplay/mixed/1000/batch/original-9                   2          85377288 ns/op            852759 log-B        32041064 B/op     152241 allocs/op
+BenchmarkValidatedReplay/mixed/1000/batch/original-9                   2          87383566 ns/op            852759 log-B        30990376 B/op     152238 allocs/op
+BenchmarkValidatedReplay/mixed/1000/batch/optimized-9                  2          71378066 ns/op            852759 log-B        24770092 B/op     114250 allocs/op
+BenchmarkValidatedReplay/mixed/1000/batch/optimized-9                  2          71838264 ns/op            852759 log-B        25294836 B/op     114241 allocs/op
+BenchmarkValidatedReplay/mixed/1000/batch/optimized-9                  2          63248546 ns/op            852759 log-B        25295248 B/op     114234 allocs/op
+BenchmarkValidatedReplay/mixed/1000/batch/optimized-9                  2          70531579 ns/op            852759 log-B        25293228 B/op     114234 allocs/op
+BenchmarkValidatedReplay/mixed/1000/batch/optimized-9                  2          64110286 ns/op            852759 log-B        25298468 B/op     114249 allocs/op
+PASS
+ok      github.com/Icatme/pi-go/agent/session   12.849s
