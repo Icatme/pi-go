@@ -271,7 +271,7 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 			},
 			ShouldRetry: shouldRetryOpenAIResponsesRequest,
 			ShouldRetryResponse: func(status int, body []byte, message string) bool {
-				return shouldRetryOpenAIProviderResponse(status, body, message)
+				return shouldRetryCompletionsModelResponse(model, status, body, message)
 			},
 			CanRetryStreamError: func() bool {
 				return len(response.Content) == 0 && len(response.HostedToolExecutions) == 0 && !response.UsageReported

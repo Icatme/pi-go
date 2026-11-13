@@ -3778,3 +3778,11 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+## 2026-11-13: narrowly classify DashScope token throttling
+
+- Compared pi issue #10656 with Alibaba Cloud's official error-code page (updated 2026-11-12): HTTP 429 insufficient_quota / Throttling.AllocationQuota with the two documented TPS/TPM messages is throttling, while free allocation exhaustion and overdue bills are not.
+- Only explicitly configured alibaba/dashscope/bailian chat-completions models receive this exception. Require 429, recognized structured code/type and exact documented wording; do not infer from model name or relax OpenAI quota behavior. Unknown providers retain existing classification. No global code-based retry override.
+- Explicit overdue-bill, budget and unpurchased-service codes on those providers now terminate instead of retrying generic 429. Existing retry count/delay bounds and no-stream-output boundaries remain authoritative.
+- Two HTTP throttle cases failed before the fix, then passed. Added OpenAI/free-quota/zero-retry/overdue HTTP negatives and narrow-classifier cases. No live provider calls, new provider catalog, merge or deployment.
+- Source: https://www.alibabacloud.com/help/en/model-studio/error-code
