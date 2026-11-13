@@ -228,7 +228,9 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 		if apiKey == "" {
 			apiKey = GetEnvAPIKey(model.Provider)
 		}
-		if apiKey == "" {
+		compat, _ := model.Compat.(*OpenAICompletionsCompat)
+		allowUnauthenticated := compat != nil && compat.AllowUnauthenticated
+		if (apiKey == "" && !allowUnauthenticated) || (apiKey != "" && strings.TrimSpace(apiKey) == "") {
 			applyRequestError(&response, errors.New("missing api key"))
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
@@ -238,12 +240,12 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: response})
 		baselineResponse := cloneAssistantMessage(response)
 		state := &openAICompletionsStreamState{ToolCalls: map[int]*openAICompletionsToolCallState{}}
+		baseHeaders := map[string]string{"Content-Type": "application/json", "Accept": "text/event-stream"}
+		if apiKey != "" {
+			baseHeaders["Authorization"] = "Bearer " + apiKey
+		}
 		headers := mergeRequestHeaders(
-			map[string]string{
-				"Authorization": "Bearer " + apiKey,
-				"Content-Type":  "application/json",
-				"Accept":        "text/event-stream",
-			},
+			baseHeaders,
 			model.Headers,
 			options.Headers,
 		)

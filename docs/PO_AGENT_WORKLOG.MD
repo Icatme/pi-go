@@ -3778,3 +3778,9 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+## 2026-11-13 — Explicit optional authentication for custom Completions endpoints (Pi 9508)
+
+- After source comparison with https://github.com/earendil-works/pi/issues/9508 and owner-directed continued development, add OpenAICompletionsCompat.AllowUnauthenticated (default false). Only an explicitly opted-in Completions model with an empty resolved key may proceed without a synthesized Authorization header. Existing matched auth-map/env/explicit credentials and trusted header overrides retain their normal behavior. This option is not credential suppression, URL authorization or a security boundary; use a distinct custom provider identity for a public endpoint when no stored credentials should apply.
+- Missing key still fails before dispatch by default; whitespace-only configured key is rejected rather than emitted as an empty Bearer or downgraded to anonymous. Authorization resolver errors still stop before dispatch. Other protocols are unchanged, and no built-in provider is opted in.
+- The no-auth HTTP case fails on baseline (zero requests/missing key) and passes after fix. Tests cover omitted/false/true option, absent header, explicit key, whitespace key, trusted custom header, independent clone and matching-vs-unrelated stored credentials. Full pkg/pigo race32.535s and vet; added stored-credential focused race1.108s. Independent review recorded in PR. No live upstream, CI dispatch, merge or deployment.
