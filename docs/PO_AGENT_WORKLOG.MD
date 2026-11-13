@@ -3778,3 +3778,10 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+## 2026-11-13 - Google thought-signature part preservation
+
+- Compared Pi issue [#11538](https://github.com/earendil-works/pi/issues/11538) with pi-go master `ae4e17f`; pi-go was dropping Google signatures on text, thinking, and tool parts entirely. Google [documents](https://cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures) that signatures stay on their original parts and signed/unsigned parts must not be merged.
+- Added opaque signature decoding/replay and signed-part boundaries, including trailing empty-text parts. Added `SignatureOnly` metadata on text/thinking content and Context JSON to distinguish an absent text field from an explicit empty string; unsigned text can still coalesce. No signature is fabricated, decrypted, validated cryptographically, or replayed across provider/API/model identity.
+- Regression covers HTTP SSE -> content -> Context persistence -> full replay transforms for trailing empty text, separate signed parts, signature-only parts, thinking boundaries, and parallel tool calls. All six cases (including signed/unsigned/signed text) fail on the original baseline and pass after the fix. Historical signatures already discarded cannot be reconstructed. Older serializers that do not preserve the new marker cannot retain the absent/empty distinction.
+- Go 1.26.10: all `pkg/pigo` tests passed under race, `go vet ./...` and `go mod tidy -diff` passed. Full-repository race evaluation was started separately; its result is tracked in the PR. No live model calls, credentials, deployment, or CI dispatch.

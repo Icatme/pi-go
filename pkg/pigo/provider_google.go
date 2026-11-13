@@ -30,6 +30,37 @@ type googlePart struct {
 	FunctionCall     *googleFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *googleFunctionResponse `json:"functionResponse,omitempty"`
 	Thought          bool                    `json:"thought,omitempty"`
+	ThoughtSignature string                  `json:"thoughtSignature,omitempty"`
+	textPresent      bool
+}
+
+// Preserve the distinction between a signed empty-text part and a signature-only
+// part. Google requires opaque signatures to stay on their original parts.
+func (part *googlePart) UnmarshalJSON(data []byte) error {
+	type plain googlePart
+	var wire plain
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*part = googlePart(wire)
+	_, part.textPresent = fields["text"]
+	return nil
+}
+
+func (part googlePart) MarshalJSON() ([]byte, error) {
+	type plain googlePart
+	var text *string
+	if part.Text != "" || part.textPresent {
+		text = &part.Text
+	}
+	return json.Marshal(struct {
+		plain
+		Text *string `json:"text,omitempty"`
+	}{plain: plain(part), Text: text})
 }
 
 type googleInlineData struct {
@@ -340,36 +371,28 @@ func convertGoogleUserContent(content any) []googlePart {
 }
 
 func convertGoogleAssistantContent(model Model, message AssistantMessage) []googlePart {
-	isSameModel := message.Provider == model.Provider && message.Model == model.ID
+	isSameModel := message.Provider == model.Provider && message.API == model.API && message.Model == model.ID
 	parts := make([]googlePart, 0, len(message.Content))
 
 	for _, block := range message.Content {
 		switch typed := block.(type) {
 		case TextContent:
-			if strings.TrimSpace(typed.Text) == "" {
+			sig := resolveThoughtSignature(isSameModel, typed.TextSignature)
+			if strings.TrimSpace(typed.Text) == "" && sig == "" {
 				continue
 			}
-			part := googlePart{Text: typed.Text}
-			if sig := resolveThoughtSignature(isSameModel, typed.TextSignature); sig != "" {
-				// Thought signatures on text parts are not directly representable in our
-				// simple part model; keep the text only.
-				_ = sig
-			}
-			parts = append(parts, part)
+			parts = append(parts, googlePart{Text: typed.Text, ThoughtSignature: sig,
+				textPresent: sig != "" && !typed.SignatureOnly})
 		case ThinkingContent:
-			if strings.TrimSpace(typed.Thinking) == "" {
+			sig := resolveThoughtSignature(isSameModel, typed.ThinkingSignature)
+			if strings.TrimSpace(typed.Thinking) == "" && sig == "" {
 				continue
 			}
-			if isSameModel {
-				parts = append(parts, googlePart{
-					Thought: true,
-					Text:    typed.Thinking,
-				})
-			} else {
-				parts = append(parts, googlePart{Text: typed.Thinking})
-			}
+			parts = append(parts, googlePart{Text: typed.Thinking, Thought: isSameModel,
+				ThoughtSignature: sig, textPresent: sig != "" && !typed.SignatureOnly})
 		case ToolCall:
 			parts = append(parts, googlePart{
+				ThoughtSignature: resolveThoughtSignature(isSameModel, typed.ThoughtSignature),
 				FunctionCall: &googleFunctionCall{
 					ID:   normalizeGoogleToolCallID(typed.ID),
 					Name: typed.Name,
@@ -536,10 +559,11 @@ func processGoogleStreamEvent(data string, model Model, response *AssistantMessa
 				finishGoogleCurrentBlock(response, stream, state)
 			}
 			toolCall := ToolCall{
-				ID:           googleToolCallID(part.FunctionCall.ID, part.FunctionCall.Name, state),
-				Name:         part.FunctionCall.Name,
-				Arguments:    cloneMap(part.FunctionCall.Args),
-				RawArguments: part.FunctionCall.rawArguments,
+				ID:               googleToolCallID(part.FunctionCall.ID, part.FunctionCall.Name, state),
+				Name:             part.FunctionCall.Name,
+				Arguments:        cloneMap(part.FunctionCall.Args),
+				RawArguments:     part.FunctionCall.rawArguments,
+				ThoughtSignature: part.ThoughtSignature,
 			}
 			contentIndex := len(response.Content)
 			response.Content = append(response.Content, toolCall)
@@ -550,11 +574,13 @@ func processGoogleStreamEvent(data string, model Model, response *AssistantMessa
 		}
 
 		isThinking := part.Thought
-		if part.Text == "" {
+		if part.Text == "" && part.ThoughtSignature == "" {
 			continue
 		}
 
-		if state.CurrentBlock == nil || !googleSameBlockType(state.CurrentBlock, isThinking) {
+		// A signed part is an indivisible replay unit, even when its text is empty.
+		// Only consecutive unsigned deltas may share a content block.
+		if part.ThoughtSignature != "" || state.CurrentBlock == nil || !googleSameBlockType(state.CurrentBlock, isThinking) {
 			finishGoogleCurrentBlock(response, stream, state)
 			contentIndex := len(response.Content)
 			if isThinking {
@@ -572,13 +598,20 @@ func processGoogleStreamEvent(data string, model Model, response *AssistantMessa
 		if isThinking {
 			thinking := state.CurrentBlock.(*ThinkingContent)
 			thinking.Thinking += part.Text
+			thinking.ThinkingSignature = part.ThoughtSignature
+			thinking.SignatureOnly = part.ThoughtSignature != "" && !part.textPresent
 			response.Content[state.CurrentBlockIndex] = *thinking
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingDelta, ContentIndex: state.CurrentBlockIndex, Delta: part.Text, Partial: cloneAssistantMessage(*response)})
 		} else {
 			text := state.CurrentBlock.(*TextContent)
 			text.Text += part.Text
+			text.TextSignature = part.ThoughtSignature
+			text.SignatureOnly = part.ThoughtSignature != "" && !part.textPresent
 			response.Content[state.CurrentBlockIndex] = *text
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventTextDelta, ContentIndex: state.CurrentBlockIndex, Delta: part.Text, Partial: cloneAssistantMessage(*response)})
+		}
+		if part.ThoughtSignature != "" {
+			finishGoogleCurrentBlock(response, stream, state)
 		}
 	}
 
