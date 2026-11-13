@@ -327,7 +327,7 @@ func streamOpenAIResponsesSSE(
 				options.OnResponse(providerResponseFromHTTPResponse(httpResponse), model)
 			}
 			if apiErr != nil {
-				return withProviderFailure(err, ProviderFailureUpstream, "http_error")
+				return withProviderHTTPStatus(withProviderFailure(err, ProviderFailureUpstream, "http_error"), status)
 			}
 			return err
 		}
@@ -343,7 +343,7 @@ func streamOpenAIResponsesSSE(
 			body, readErr := io.ReadAll(httpResponse.Body)
 			_ = httpResponse.Body.Close()
 			if readErr != nil {
-				return withProviderFailure(readErr, ProviderFailureStream, "body_read")
+				return withProviderHTTPStatus(withProviderFailure(readErr, ProviderFailureStream, "body_read"), httpResponse.StatusCode)
 			}
 			message := parseOpenAIResponsesError(body, httpResponse.Status)
 			if shouldRetryOpenAIProviderResponse(httpResponse.StatusCode, body, message) && attempt < maxRetries {
@@ -352,7 +352,7 @@ func streamOpenAIResponsesSSE(
 				}
 				continue
 			}
-			return withProviderFailure(errors.New(message), ProviderFailureUpstream, "http_error")
+			return withProviderHTTPStatus(withProviderFailure(errors.New(message), ProviderFailureUpstream, "http_error"), httpResponse.StatusCode)
 		}
 
 		state := openAIResponsesStreamingState{

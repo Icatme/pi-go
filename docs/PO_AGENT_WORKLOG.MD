@@ -3784,3 +3784,10 @@
 - Compared upstream https://github.com/earendil-works/pi/issues/11071 with ae4e17f. Existing transport observation exposes status, but terminal provider_failure diagnostics discard it. Added optional http_status only at the shared HTTPStreamClient non-2xx error boundary and ProviderHTTPStatusOf accessor; ProviderFailure fields, retry classification/budgets and error text remain unchanged.
 - Underlying error chain is retained; interrupted non-2xx body keeps body_read classification. HTTP200 stream errors, local/transport errors, older records and uninstrumented adapters do not infer status. Reader accepts integer diagnostic representations across JSON persistence and rejects invalid values.
 - Local HTTP fixture baseline without wiring fails status401; patched 401/503, broken-body, single-attempt and clone/Context JSON restoration regressions pass focused race1.034s. Full package validation and independent review recorded in PR. No live calls, CI dispatch, deployment or merge. Coverage is shared HTTPStreamClient consumers only, not universal SDK/native-adapter status parity.
+
+
+## 2026-11-13 — Native Anthropic and Responses HTTP diagnostics
+
+- Follow up pi-mono #11071 on top of PR #216: preserve actual terminal HTTP status at native Anthropic and OpenAI Responses SDK error boundaries, without changing retry policy, error text or classification. Stream-internal HTTP 200 errors never synthesize HTTP status from provider error codes.
+- Local HTTP fixtures reproduce missing 403/503 status on both baseline adapters and verify clone/Context JSON persistence and one request; a Responses 503→403 retry fixture records final 403 with exactly two requests.
+- Validation: focused and full pkg/pigo race tests, vet and independent review. No live provider, merge or deployment. This does not claim universal SDK/hosted-adapter coverage.
