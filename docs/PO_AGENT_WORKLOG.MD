@@ -3784,3 +3784,10 @@
 - Compared upstream https://github.com/earendil-works/pi/issues/11071 with ae4e17f. Existing transport observation exposes status, but terminal provider_failure diagnostics discard it. Added optional http_status only at the shared HTTPStreamClient non-2xx error boundary and ProviderHTTPStatusOf accessor; ProviderFailure fields, retry classification/budgets and error text remain unchanged.
 - Underlying error chain is retained; interrupted non-2xx body keeps body_read classification. HTTP200 stream errors, local/transport errors, older records and uninstrumented adapters do not infer status. Reader accepts integer diagnostic representations across JSON persistence and rejects invalid values.
 - Local HTTP fixture baseline without wiring fails status401; patched 401/503, broken-body, single-attempt and clone/Context JSON restoration regressions pass focused race1.034s. Full package validation and independent review recorded in PR. No live calls, CI dispatch, deployment or merge. Coverage is shared HTTPStreamClient consumers only, not universal SDK/native-adapter status parity.
+
+
+## 2026-11-13 — Codex WebSocket handshake HTTP diagnostic
+
+- Partial #11071 follow-up: retain an actual failed WebSocket upgrade HTTP status without parsing error text, changing fallback/retry policy, or restarting an already-streaming response. Successful HTTP 200 with a failed upgrade remains a protocol error without non-2xx status.
+- Local403/502 baseline failures verify status and Context JSON round-trip, one connection attempt, and preserved bad-handshake error identity; existing no-fallback-after-start regressions remain. Full pkg/pigo race, vet and independent review.
+- Depends on PR216. Not a solution to #12124 service-enforced long-running connection limits; no live model, merge or deployment.
