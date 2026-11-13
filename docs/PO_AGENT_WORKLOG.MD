@@ -3778,3 +3778,9 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+## 2026-11-13 — Scoped terminal HTTP status evidence (Pi 11071)
+
+- Compared upstream https://github.com/earendil-works/pi/issues/11071 with ae4e17f. Existing transport observation exposes status, but terminal provider_failure diagnostics discard it. Added optional http_status only at the shared HTTPStreamClient non-2xx error boundary and ProviderHTTPStatusOf accessor; ProviderFailure fields, retry classification/budgets and error text remain unchanged.
+- Underlying error chain is retained; interrupted non-2xx body keeps body_read classification. HTTP200 stream errors, local/transport errors, older records and uninstrumented adapters do not infer status. Reader accepts integer diagnostic representations across JSON persistence and rejects invalid values.
+- Local HTTP fixture baseline without wiring fails status401; patched 401/503, broken-body, single-attempt and clone/Context JSON restoration regressions pass focused race1.034s. Full package validation and independent review recorded in PR. No live calls, CI dispatch, deployment or merge. Coverage is shared HTTPStreamClient consumers only, not universal SDK/native-adapter status parity.

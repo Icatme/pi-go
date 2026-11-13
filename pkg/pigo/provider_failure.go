@@ -69,6 +69,9 @@ func recordProviderFailure(message *AssistantMessage, err error) {
 	// A JSON error alone cannot identify the response boundary: local request
 	// encoding can wrap the same errors. Protocol readers classify at source.
 	details := map[string]any{"kind": failure.Kind, "reason": failure.Reason}
+	if status := recordedProviderHTTPStatus(err); status != 0 {
+		details["http_status"] = status
+	}
 	if failure.Code != "" {
 		details["code"] = failure.Code
 	}
