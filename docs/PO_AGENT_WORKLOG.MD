@@ -3778,3 +3778,9 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+## 2026-11-13 — Anthropic fallback boundary safety (Pi issue 9074)
+
+- Compared current open issue https://github.com/earendil-works/pi/issues/9074 with master ae4e17f and official https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (read 2026-11-13). The shared Anthropic SSE parser silently dropped fallback markers, allowing pre-handoff tool calls to finish as executable toolUse and signed content to lose its boundary.
+- Added a narrow explicit parse failure for unsupported fallback blocks. No model retry, signature rewriting, new fallback API, or successful mixed-model transcript is introduced. Partial content remains error evidence and existing failed-response replay filtering excludes it.
+- Three local HTTP fixtures (before output, after thinking, after client tool) failed on baseline and pass with guard; focused race 1.039s. Full package validation recorded in PR. No live provider/account calls, merge or deployment. Full fallback content/persistence/replay and per-attempt accounting remain unsupported.

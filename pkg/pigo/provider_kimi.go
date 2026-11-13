@@ -572,6 +572,11 @@ func processAnthropicStreamEvent(
 		}
 		contentIndex := len(response.Content)
 		switch event.ContentBlock.Type {
+		case "fallback":
+			// Fallback replay needs a positional boundary and per-model usage.
+			// Until the content model supports it, fail rather than silently
+			// mixing signatures or executing pre-handoff tool calls.
+			return false, withProviderFailure(errors.New("unsupported Anthropic model fallback boundary"), ProviderFailureParse, "unsupported_fallback")
 		case "text":
 			response.Content = append(response.Content, TextContent{})
 			states[event.Index] = &anthropicStreamingBlockState{ContentIndex: contentIndex, Kind: "text"}
