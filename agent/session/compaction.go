@@ -281,8 +281,11 @@ func ValidateCompactionCut(prefix, tail []agent.Message) error {
 
 func validateCompactionCut(prefix, tail []agent.Message) error {
 	combined := make([]agent.Message, 0, len(prefix)+len(tail))
-	combined = append(combined, cloneMessages(prefix)...)
-	combined = append(combined, cloneMessages(tail)...)
+	// The validator only reads roles and tool IDs; it has no host callbacks.
+	// Copy the slice elements, not argument/metadata payloads. Durable JSON
+	// validation remains at PrepareCompaction/Compact entry boundaries.
+	combined = append(combined, prefix...)
+	combined = append(combined, tail...)
 	starts, err := completeTurnStarts(combined)
 	if err != nil {
 		return err

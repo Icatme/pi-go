@@ -3778,3 +3778,10 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+## 2026-11-13 — Avoid payload copies in read-only compaction-cut validation (Pi 9010)
+
+- On ae4e17f, ValidateCompactionCut deep-cloned full argument/metadata payloads before completeTurnStarts, which only reads roles and tool identifiers and maintains its own pairing maps; no caller callback runs. Use a new combined slice with copied message elements, without copying unrelated payloads. PrepareCompaction and Compact retain their cloneValidated durable-JSON validation, and host callback isolation is unchanged.
+- Earlier audit concern that cloneMessages performed JSON validation was corrected by source inspection: cloneJSONValue only recursively copies common maps/slices. No validation was removed. Existing complete-turn/tool-pairing checks remain unchanged.
+- 1MiB argument benchmark (10x,2 repeats): baseline about1.06MB/op,12allocs; new1208B/op,4allocs. Do not read timing as reliable speedup or payload throughput. Added valid/invalid-cut assertions that nested payload and caller spare backing capacity are unchanged. Fullsession race16.710s/vet pass; focused mutation plus non-durable-input gate race1.139s. Independent review recorded in PR.
+- No live provider, CI dispatch, merge or deployment. This is a narrow second allocation improvement, not complete compaction/host RSS optimization.
