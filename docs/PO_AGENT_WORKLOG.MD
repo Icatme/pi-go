@@ -3778,3 +3778,9 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+
+## 2026-11-13: Nested Error output diagnostics
+
+- Audited pi #10650 body and five comments. Go had a related but different failure: text/console/return of allSettled with a rejected host Error aborted with unsupported_json, rather than TS empty objects. Added output-only native Error name/message conversion; no stack/cause/extra-property copy or getter/toJSON invocation. Arguments/store/image stay plain JSON; custom subclasses unsupported.
+- Red/green output regressions, mixed success/failure, native Error, explicit JSON.stringify preservation, rejected accessor, no tool dispatch for Error arguments pass. Full codemode race 23.232s, codemodetool 12.349s, toolset 6.742s and vet pass; final additional targeted race 4.469s passes. No live model/MCP or deployment.
