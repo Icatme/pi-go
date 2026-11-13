@@ -44,7 +44,7 @@ func marshalSamplingParams(request any, params SamplingParams) ([]byte, error) {
 			"thinking", "enable_thinking", "stream", "stream_options", "store",
 			"max_tokens", "max_completion_tokens", "max_output_tokens", "service_tier",
 			"text", "include", "prompt_cache_key", "prompt_cache_retention",
-			"prompt_cache_options", "metadata", "previous_response_id", "truncation":
+			"provider", "providerOptions", "prompt_cache_options", "metadata", "previous_response_id", "truncation":
 			return nil, fmt.Errorf("sampling parameters cannot override protocol field %q", key)
 		}
 		encoded, err := json.Marshal(value)

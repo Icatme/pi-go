@@ -13,24 +13,53 @@ import (
 
 var errOpenAICompletionsStreamMissingTerminal = errors.New("openai completions stream ended without finish_reason")
 
+// Gateway routing is opt-in through model compatibility, including custom proxies.
+// Keep these wire shapes separate: Vercel's `provider` shorthand supports sort only.
+type openRouterRoutingWire struct {
+	AllowFallbacks         *bool          `json:"allow_fallbacks,omitempty"`
+	RequireParameters      *bool          `json:"require_parameters,omitempty"`
+	DataCollection         string         `json:"data_collection,omitempty"`
+	ZDR                    *bool          `json:"zdr,omitempty"`
+	EnforceDistillableText *bool          `json:"enforce_distillable_text,omitempty"`
+	Order                  []string       `json:"order,omitempty"`
+	Only                   []string       `json:"only,omitempty"`
+	Ignore                 []string       `json:"ignore,omitempty"`
+	Quantizations          []string       `json:"quantizations,omitempty"`
+	Sort                   any            `json:"sort,omitempty"`
+	MaxPrice               map[string]any `json:"max_price,omitempty"`
+	PreferredMinThroughput any            `json:"preferred_min_throughput,omitempty"`
+	PreferredMaxLatency    any            `json:"preferred_max_latency,omitempty"`
+}
+
+type vercelGatewayRoutingWire struct {
+	Only  []string `json:"only,omitempty"`
+	Order []string `json:"order,omitempty"`
+}
+
+type openAICompletionsProviderOptions struct {
+	Gateway *vercelGatewayRoutingWire `json:"gateway,omitempty"`
+}
+
 type openAICompletionsRequest struct {
-	Model                string                          `json:"model"`
-	Messages             []openAICompletionsMessage      `json:"messages"`
-	Stream               bool                            `json:"stream"`
-	StreamOptions        *openAICompletionsStreamOptions `json:"stream_options,omitempty"`
-	Store                *bool                           `json:"store,omitempty"`
-	MaxTokens            int                             `json:"max_tokens,omitempty"`
-	MaxCompletionTokens  int                             `json:"max_completion_tokens,omitempty"`
-	Temperature          *float64                        `json:"temperature,omitempty"`
-	SamplingParams       SamplingParams                  `json:"-"`
-	Tools                []openAICompletionsTool         `json:"tools,omitempty"`
-	ToolChoice           any                             `json:"tool_choice,omitempty"`
-	ResponseFormat       any                             `json:"response_format,omitempty"`
-	ReasoningEffort      string                          `json:"reasoning_effort,omitempty"`
-	Thinking             *openAICompletionsThinking      `json:"thinking,omitempty"`
-	EnableThinking       *bool                           `json:"enable_thinking,omitempty"`
-	PromptCacheKey       string                          `json:"prompt_cache_key,omitempty"`
-	PromptCacheRetention string                          `json:"prompt_cache_retention,omitempty"`
+	Provider             *openRouterRoutingWire            `json:"provider,omitempty"`
+	ProviderOptions      *openAICompletionsProviderOptions `json:"providerOptions,omitempty"`
+	Model                string                            `json:"model"`
+	Messages             []openAICompletionsMessage        `json:"messages"`
+	Stream               bool                              `json:"stream"`
+	StreamOptions        *openAICompletionsStreamOptions   `json:"stream_options,omitempty"`
+	Store                *bool                             `json:"store,omitempty"`
+	MaxTokens            int                               `json:"max_tokens,omitempty"`
+	MaxCompletionTokens  int                               `json:"max_completion_tokens,omitempty"`
+	Temperature          *float64                          `json:"temperature,omitempty"`
+	SamplingParams       SamplingParams                    `json:"-"`
+	Tools                []openAICompletionsTool           `json:"tools,omitempty"`
+	ToolChoice           any                               `json:"tool_choice,omitempty"`
+	ResponseFormat       any                               `json:"response_format,omitempty"`
+	ReasoningEffort      string                            `json:"reasoning_effort,omitempty"`
+	Thinking             *openAICompletionsThinking        `json:"thinking,omitempty"`
+	EnableThinking       *bool                             `json:"enable_thinking,omitempty"`
+	PromptCacheKey       string                            `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention string                            `json:"prompt_cache_retention,omitempty"`
 }
 
 type openAICompletionsStreamOptions struct {
@@ -313,6 +342,12 @@ func buildOpenAICompletionsRequest(model Model, ctx Context, options ProviderStr
 		Messages: convertOpenAICompletionsMessages(model, ctx, compat),
 		Stream:   true,
 		Tools:    convertOpenAICompletionsTools(currentContextTools(ctx)),
+	}
+	if configured, ok := model.Compat.(*OpenAICompletionsCompat); ok && configured != nil {
+		request.Provider = (*openRouterRoutingWire)(configured.OpenRouterRouting)
+		if configured.VercelGatewayRouting != nil {
+			request.ProviderOptions = &openAICompletionsProviderOptions{Gateway: (*vercelGatewayRoutingWire)(configured.VercelGatewayRouting)}
+		}
 	}
 	if compat.SupportsUsageInStreaming {
 		request.StreamOptions = &openAICompletionsStreamOptions{IncludeUsage: true}

@@ -3778,3 +3778,25 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+## 2026-11-13: Chat Completions gateway routing audit (upstream #9211)
+
+- Inspected https://github.com/earendil-works/pi/issues/9211. Its upstream
+  Anthropic/catalog failure is not reproduced as a catalog claim here; pi-go has
+  a narrower confirmed defect: both existing Chat Completions compatibility
+  routing options were unused by the request builder.
+- Serialize explicit OpenRouter settings as `provider` with snake_case fields,
+  and Vercel settings as `providerOptions.gateway`. Preserve explicit false
+  constraints and omit unconfigured routing; no hostname inference or new
+  provider catalog entries. Public configuration structs retain their existing
+  JSON representation. Sampling parameters cannot replace these protocol fields.
+- Contracts checked against the official routing documentation:
+  https://openrouter.ai/docs/guides/routing/provider-selection and
+  https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/advanced.
+  Vercel's `provider` shorthand is for sort, not only/order. Routing enforcement
+  remains the gateway's responsibility; ordering is not a hard allowlist.
+- Red before the fix: both routing wire regressions and both sampling-override
+  checks failed. Green after: exact serialization, custom-proxy HTTP/SSE fixture,
+  consecutive OpenRouter/Vercel/plain-request isolation, package race tests and
+  vet (Go 1.26.10). No real gateway request, credential, billing, Anthropic routing
+  extension, downstream application validation, merge or deployment.
