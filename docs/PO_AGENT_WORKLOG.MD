@@ -3778,3 +3778,9 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+## 2026-11-13 — OpenAI-compatible Gemini tool signatures
+
+- Audited upstream earendil-works/pi #10157 against Google's documented OpenAI-compatible `tool_calls[].extra_content.google.thought_signature` contract. pi-go dropped the field on parse and replay.
+- Preserve the opaque value in the existing ToolCall.ThoughtSignature slot, including late signature-only streaming deltas; replay only for identical provider/API/model identity. No fabricated signatures, cross-provider forwarding or gateway-specific metadata passthrough. Native Google part-signature PR #201 is independent.
+- HTTP SSE and message-fallback regressions cover parallel signed/unsigned calls, Context JSON persistence, replay and cross-model/provider/API stripping. Both fail on original master and pass with the fix. Live-provider behavior was not tested and historical missing signatures cannot be recovered. Validation details are tracked in the PR.

@@ -64,10 +64,19 @@ type openAICompletionsToolDefinition struct {
 	Parameters  any    `json:"parameters"`
 }
 
+type openAICompletionsToolExtraContent struct {
+	Google *openAICompletionsGoogleContent `json:"google,omitempty"`
+}
+
+type openAICompletionsGoogleContent struct {
+	ThoughtSignature string `json:"thought_signature,omitempty"`
+}
+
 type openAICompletionsToolCall struct {
-	ID       string                        `json:"id,omitempty"`
-	Type     string                        `json:"type"`
-	Function openAICompletionsToolFunction `json:"function"`
+	ExtraContent *openAICompletionsToolExtraContent `json:"extra_content,omitempty"`
+	ID           string                             `json:"id,omitempty"`
+	Type         string                             `json:"type"`
+	Function     openAICompletionsToolFunction      `json:"function"`
 }
 
 type openAICompletionsToolFunction struct {
@@ -100,10 +109,11 @@ type openAICompletionsDelta struct {
 }
 
 type openAICompletionsDeltaToolCall struct {
-	Index    int                           `json:"index"`
-	ID       string                        `json:"id,omitempty"`
-	Type     string                        `json:"type,omitempty"`
-	Function openAICompletionsToolFunction `json:"function,omitempty"`
+	ExtraContent *openAICompletionsToolExtraContent `json:"extra_content,omitempty"`
+	Index        int                                `json:"index"`
+	ID           string                             `json:"id,omitempty"`
+	Type         string                             `json:"type,omitempty"`
+	Function     openAICompletionsToolFunction      `json:"function,omitempty"`
 }
 
 type openAICompletionsUsage struct {
@@ -150,11 +160,12 @@ type resolvedOpenAICompletionsCompat struct {
 }
 
 type openAICompletionsToolCallState struct {
-	ID           string
-	Name         string
-	Arguments    string
-	ContentIndex int
-	Started      bool
+	ThoughtSignature string
+	ID               string
+	Name             string
+	Arguments        string
+	ContentIndex     int
+	Started          bool
 }
 
 type openAICompletionsReasoningDetailState struct {
@@ -614,9 +625,14 @@ func openAICompletionsAssistantMessage(model Model, message AssistantMessage, co
 				thinkingSignature = typed.ThinkingSignature
 			}
 		case ToolCall:
+			var extra *openAICompletionsToolExtraContent
+			if typed.ThoughtSignature != "" && message.Provider == model.Provider && message.API == model.API && message.Model == model.ID {
+				extra = &openAICompletionsToolExtraContent{Google: &openAICompletionsGoogleContent{ThoughtSignature: typed.ThoughtSignature}}
+			}
 			converted.ToolCalls = append(converted.ToolCalls, openAICompletionsToolCall{
-				ID:   typed.ID,
-				Type: "function",
+				ExtraContent: extra,
+				ID:           typed.ID,
+				Type:         "function",
 				Function: openAICompletionsToolFunction{
 					Name:      typed.Name,
 					Arguments: mustJSON(typed.Arguments),
@@ -966,6 +982,11 @@ func appendOpenAICompletionsToolCall(response *AssistantMessage, stream *Assista
 	if delta.Function.Name != "" {
 		toolState.Name = delta.Function.Name
 	}
+	// The signature is opaque metadata, not an arguments fragment. It may
+	// arrive in a later signature-only delta and must survive later unsigned deltas.
+	if delta.ExtraContent != nil && delta.ExtraContent.Google != nil && delta.ExtraContent.Google.ThoughtSignature != "" {
+		toolState.ThoughtSignature = delta.ExtraContent.Google.ThoughtSignature
+	}
 	toolState.Arguments += delta.Function.Arguments
 	toolCall := openAICompletionsToolCallFromState(toolState)
 	if !toolState.Started {
@@ -984,7 +1005,7 @@ func openAICompletionsToolCallFromState(state *openAICompletionsToolCallState) T
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
-	return ToolCall{ID: state.ID, Name: state.Name, Arguments: arguments}
+	return ToolCall{ID: state.ID, Name: state.Name, Arguments: arguments, ThoughtSignature: state.ThoughtSignature}
 }
 
 func finalizeOpenAICompletionsResponse(response *AssistantMessage, stream *AssistantMessageEventStream, state *openAICompletionsStreamState) {
