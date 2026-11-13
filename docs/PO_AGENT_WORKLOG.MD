@@ -3778,3 +3778,9 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+
+## 2026-11-13: llama.cpp decode overflow classification
+
+- Audited upstream pi #10885 body and six comments against master ae4e17f. Reproduced missed `Context size has been exceeded.` classification for plain, wrapped HTTP 500, and case-insensitive errors. Added one narrowly worded overflow pattern.
+- Regression includes non-error/aborted results, neutral wording, negation and rate-limit exclusions. Full pkg/pigo race (34.277s) and vet pass on Go 1.26.5. Classification only: no new automatic compaction/retry; no live llama.cpp/LM Studio or deployment validation.

@@ -211,3 +211,23 @@ func TestGetOverflowPatternsContainsExpectedPatterns(t *testing.T) {
 		}
 	}
 }
+
+func TestIsContextOverflowLlamaDecodeExhaustion(t *testing.T) {
+	for _, text := range []string{
+		"Context size has been exceeded.",
+		`Engine protocol predict stream returned an error: {"code":500,"message":"Context size has been exceeded.","type":"server_error"}`,
+		"CONTEXT SIZE HAS BEEN EXCEEDED.",
+	} {
+		for _, reason := range []StopReason{StopReasonError, StopReasonStop, StopReasonAborted} {
+			message := AssistantMessage{Provider: "custom-local", StopReason: reason, ErrorMessage: text}
+			if got, want := IsContextOverflow(message, 0), reason == StopReasonError; got != want {
+				t.Errorf("reason=%s text=%q: got %v want %v", reason, text, got, want)
+			}
+		}
+	}
+	for _, text := range []string{"Context size is 65536.", "Context size has not been exceeded.", "rate limit: Context size has been exceeded."} {
+		if IsContextOverflow(AssistantMessage{StopReason: StopReasonError, ErrorMessage: text}, 0) {
+			t.Errorf("false positive for %q", text)
+		}
+	}
+}

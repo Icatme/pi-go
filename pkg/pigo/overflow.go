@@ -17,6 +17,8 @@ var overflowPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)input \(\d+ tokens\) is longer than the model'?s context length \(\d+ tokens\)`),
 	regexp.MustCompile(`(?i)exceeds the limit of \d+`),
 	regexp.MustCompile(`(?i)exceeds the available context size`),
+	// llama.cpp decode-time KV exhaustion, also surfaced through LM Studio.
+	regexp.MustCompile(`(?i)context size has been exceeded`),
 	regexp.MustCompile(`(?i)greater than the context length`),
 	regexp.MustCompile(`(?i)context window exceeds limit`),
 	regexp.MustCompile(`(?i)exceeded model token limit`),
