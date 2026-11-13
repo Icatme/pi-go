@@ -136,3 +136,29 @@ func TestConfigSnapshotConnectionStartAndReconnect(t *testing.T) {
 		t.Fatalf("unchanged scope unexpectedly invalidated configuration: %v", err)
 	}
 }
+
+func TestEnvironmentInheritancePolicyIsDetached(t *testing.T) {
+	inherit := false
+	manager, err := New(Config{Scope: Scope{Identity: "alice", AuthEpoch: 1}, Servers: []ServerConfig{
+		{Name: "isolated", Command: "fixture", Trusted: true, InheritEnv: &inherit},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeManager(t, manager)
+	inherit = true
+	if *manager.Servers()[0].InheritEnv {
+		t.Fatal("caller mutated manager policy")
+	}
+	snapshot, err := manager.ConfigSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers := snapshot.Servers()
+	*servers[0].InheritEnv = true
+	servers = manager.Servers()
+	*servers[0].InheritEnv = true
+	if *snapshot.Servers()[0].InheritEnv || *manager.Servers()[0].InheritEnv {
+		t.Fatal("exported pointer mutated frozen policy")
+	}
+}

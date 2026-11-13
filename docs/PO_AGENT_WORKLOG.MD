@@ -3778,3 +3778,9 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+
+## 2026-11-13: Explicit MCP stdio environment isolation
+
+- Audited pi issue #11361 body and both comments. Added opt-in `ServerConfig.InheritEnv`: nil/true keeps inherited environment with explicit overrides; false passes only explicit Env (subject to platform-required os/exec variables). Both normalization and snapshots detach the pointer. No deployed policy changed.
+- Synthetic real subprocess test failed isolated mode before implementation and passed after; default/explicit inheritance and override behavior retained. Full mcp race (6.081s) and vet passed on Linux Go 1.26.5. Windows behavior documented but not executed; no real credentials used.

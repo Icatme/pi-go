@@ -92,7 +92,11 @@ func startManagedProcess(ctx context.Context, s ServerConfig, stderrLimit int) (
 	}
 	cmd := exec.Command(s.Command, s.Args...)
 	cmd.Dir = s.Dir
-	cmd.Env = append(os.Environ(), s.Env...)
+	cmd.Env = make([]string, 0, len(s.Env))
+	if s.InheritEnv == nil || *s.InheritEnv {
+		cmd.Env = append(cmd.Env, os.Environ()...)
+	}
+	cmd.Env = append(cmd.Env, s.Env...)
 	control, err := prepareProcess(cmd)
 	if err != nil {
 		return nil, err

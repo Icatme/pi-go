@@ -26,6 +26,13 @@ the first matching wildcard rule wins. Listing is never permission to execute.
 For stdio, set `Command`, argument-vector `Args`, optional `Dir`/`Env` and
 `Trusted: true`; there is no shell command interpolation. Windows uses a hidden
 process and a Job Object, attaching the process before its first thread resumes.
+Stdio children inherit the parent environment by default; explicit `Env` entries
+override inherited values. To opt out, set `inherit := false` and
+`InheritEnv: &inherit`, then list only the child's required `KEY=value` entries
+in `Env`. Use an absolute `Command` path for deterministic executable selection:
+Go resolves a bare command using the parent PATH before spawning. This option
+does not sandbox files or network access; Windows may still add its required
+SYSTEMROOT variable through `os/exec`.
 Unix owns the assigned process group, not every possible descendant. A trusted
 stdio server and its descendants must stay in that group: `setsid`, `setpgid`
 or daemonization that escapes it is unsupported. Such servers require host
