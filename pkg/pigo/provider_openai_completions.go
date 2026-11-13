@@ -343,7 +343,7 @@ func buildOpenAICompletionsRequest(model Model, ctx Context, options ProviderStr
 func resolveOpenAICompletionsCompat(model Model) resolvedOpenAICompletionsCompat {
 	resolved := resolvedOpenAICompletionsCompat{
 		SupportsStore:              true,
-		SupportsDeveloperRole:      true,
+		SupportsDeveloperRole:      defaultOpenAIDeveloperRole(model),
 		SupportsReasoningEffort:    true,
 		SupportsUsageInStreaming:   true,
 		MaxTokensField:             "max_completion_tokens",
@@ -489,7 +489,7 @@ func convertOpenAICompletionsMessages(model Model, ctx Context, compat resolvedO
 			}
 			if text != "" {
 				role := "system"
-				if model.Reasoning && compat.SupportsDeveloperRole {
+				if compat.SupportsDeveloperRole {
 					role = "developer"
 				}
 				messages = append(messages, openAICompletionsMessage{Role: role, Content: text})

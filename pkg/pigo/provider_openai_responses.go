@@ -218,7 +218,7 @@ type resolvedOpenAIResponsesCompat struct {
 
 func resolveOpenAIResponsesCompat(model Model) resolvedOpenAIResponsesCompat {
 	resolved := resolvedOpenAIResponsesCompat{
-		SupportsDeveloperRole:      true,
+		SupportsDeveloperRole:      defaultOpenAIDeveloperRole(model),
 		SendSessionIDHeader:        true,
 		SupportsLongCacheRetention: true,
 		SupportsMaxOutputTokens:    true,
