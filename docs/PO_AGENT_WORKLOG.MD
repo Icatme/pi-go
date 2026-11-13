@@ -3778,3 +3778,9 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+## 2026-11-13: reject cancelled queue hook output
+
+- Compared upstream earendil-works/pi#9783 with the Go engine. Offline regressions reproduced initial steering callback cancellation still appending its returned message and calling the model successfully; follow-up callback cancellation also appended unaccepted text.
+- Check the context immediately before and after host queue getters. Cancelled callback output is not accepted; host getter errors and successful delivery remain unchanged. Document that host getters retain ownership of queue acceptance/rollback: the engine cannot reverse side effects inside an arbitrary getter.
+- Two regression scenarios failed before the patch and passed afterwards. Full agent race tests passed (7.350s), plus agent vet; additional before-call cancellation and successful/error getter tests added and validated. No live provider, persistent host queue transaction, merge, CI dispatch, or deployment claimed.

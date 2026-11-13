@@ -17,6 +17,9 @@ import (
 )
 
 // LoopHooks customize runtime behavior between turns.
+// Queue getters must observe ctx and own their queue acceptance/rollback policy.
+// Results returned after cancellation are not accepted into the transcript;
+// the engine cannot undo side effects performed inside a host getter.
 type LoopHooks struct {
 	Journal             RunJournal
 	ResolveDefinition   func(context.Context, AgentDefinition, AgentSnapshot) (AgentDefinition, error)
@@ -1827,12 +1830,18 @@ func resolveLoopDefinition(ctx context.Context, hooks LoopHooks, definition Agen
 }
 
 func dequeueHookMessages(ctx context.Context, getter func(context.Context) ([]Message, error)) ([]Message, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if getter == nil {
 		return nil, nil
 	}
 
 	messages, err := getter(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	return normalizeMessages(messages), nil
