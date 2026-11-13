@@ -1,5 +1,12 @@
 # PO Agent Worklog
 
+## 2026-11-13 - Compatible-provider typed streaming content
+
+- Investigated upstream [pi #7062](https://github.com/earendil-works/pi/issues/7062), the [Databricks content reference](https://docs.databricks.com/aws/en/machine-learning/foundation-model-apis/api-reference), and [Mistral reasoning chunks](https://docs.mistral.ai/inference/conversations/reasoning). The Go failure differs from JavaScript's `[object Object]`: string-only `delta.content` decoding aborts on a typed array, including the message fallback.
+- Decode plain strings/null and typed text, Databricks reasoning summary-text, and Mistral thinking parts. Preserve whitespace and emit reasoning separately; reject unknown/malformed types rather than silently dropping content. Parse each entire content value before emitting any of its parts. Keep existing terminal/finish checks unchanged.
+- Red baseline: both HTTP SSE typed-content fixtures failed with array-to-string JSON decoding errors before the fix. Added delta/message, nested reasoning, unknown/malformed shape, no-partial-array, and missing-finish regressions. Updated the diagnostic field-type fixture to a still-invalid reasoning field because empty content arrays are now supported; unsupported content retains a structured parse diagnostic through streaming, cloning, and persistence.
+- Validation: Go 1.26.10 targeted tests passed with race; `go vet ./pkg/pigo` and `git diff --check` passed. Full `go test -race ./pkg/pigo -count=1` passed (33.816s). Local fixtures only; no live provider, paid calls, deployment, or manual CI dispatch. Existing shared text/thinking block aggregation is unchanged; opaque reasoning-signature replay is outside this fix.
+
 ## 2026-07-28 - Core review remediation
 
 - Removed stale provider-scope policy from `AGENTS.md`; provider scope remains a product/documentation concern rather than an agent rule.

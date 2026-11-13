@@ -91,7 +91,7 @@ type openAICompletionsChoice struct {
 }
 
 type openAICompletionsDelta struct {
-	Content          string                           `json:"content,omitempty"`
+	Content          json.RawMessage                  `json:"content,omitempty"`
 	ReasoningContent string                           `json:"reasoning_content,omitempty"`
 	Reasoning        string                           `json:"reasoning,omitempty"`
 	ReasoningText    string                           `json:"reasoning_text,omitempty"`
@@ -735,8 +735,19 @@ func processOpenAICompletionsStreamEvent(data string, model Model, response *Ass
 			appendOpenAICompletionsThinking(response, stream, state, reasoning, signature)
 		}
 		appendOpenAICompletionsReasoningDetails(response, stream, state, delta.ReasoningDetails)
-		if delta.Content != "" {
-			appendOpenAICompletionsText(response, stream, state, delta.Content)
+		parts, err := decodeOpenAICompletionsContent(delta.Content)
+		if err != nil {
+			return false, withProviderFailure(err, ProviderFailureParse, "unsupported_content")
+		}
+		for _, part := range parts {
+			if part.text == "" {
+				continue
+			}
+			if part.thinking {
+				appendOpenAICompletionsThinking(response, stream, state, part.text, "")
+			} else {
+				appendOpenAICompletionsText(response, stream, state, part.text)
+			}
 		}
 		for index, toolDelta := range delta.ToolCalls {
 			if messageFallback {
