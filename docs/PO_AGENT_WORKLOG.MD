@@ -3778,3 +3778,23 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+## 2026-11-13 — OpenCode Go Kimi K2.7 request shape
+
+- Compared upstream pi issue #10237 (including the reporter's November 6
+  correction) with `ae4e17f`. The report confirms a request-shape discrepancy,
+  not a reproducible reasoning-content leak.
+- Kimi's official parameter reference says K2.7 Code has always-on thinking,
+  an optional `thinking` control and no `reasoning_effort` support:
+  https://platform.kimi.ai/docs/api/models-overview . OpenCode documents this
+  model on its Chat Completions endpoint. The pi issue's gateway-specific
+  captured requests provide the additional OpenCode context:
+  https://github.com/earendil-works/pi/issues/10237 .
+- Corrected only `opencode-go/kimi-k2.7-code`: use the existing thinking-object
+  format, never emit reasoning_effort, and exclude unsupported off from the
+  catalog. Empty/default reasoning omits the optional control rather than
+  sending disabled. Kimi K3 and all other model definitions remain unchanged.
+- Actual local HTTP fixtures cover default, medium and high requests plus
+  reasoning_content parsing. All three fail against the old catalog and pass
+  with the fix. Go 1.26.10: OpenCode tests, the full pkg/pigo race suite and
+  pkg/pigo vet passed. No real provider call, CI dispatch, merge or deployment.
