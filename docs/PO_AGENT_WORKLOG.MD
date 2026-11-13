@@ -3784,3 +3784,10 @@
 - Compared upstream https://github.com/earendil-works/pi/issues/11071 with ae4e17f. Existing transport observation exposes status, but terminal provider_failure diagnostics discard it. Added optional http_status only at the shared HTTPStreamClient non-2xx error boundary and ProviderHTTPStatusOf accessor; ProviderFailure fields, retry classification/budgets and error text remain unchanged.
 - Underlying error chain is retained; interrupted non-2xx body keeps body_read classification. HTTP200 stream errors, local/transport errors, older records and uninstrumented adapters do not infer status. Reader accepts integer diagnostic representations across JSON persistence and rejects invalid values.
 - Local HTTP fixture baseline without wiring fails status401; patched 401/503, broken-body, single-attempt and clone/Context JSON restoration regressions pass focused race1.034s. Full package validation and independent review recorded in PR. No live calls, CI dispatch, deployment or merge. Coverage is shared HTTPStreamClient consumers only, not universal SDK/native-adapter status parity.
+
+
+## 2026-11-13 — Google terminal HTTP diagnostic parity
+
+- Follow up pi-mono #11071 on top of the terminal-status diagnostic change: attach the actual non-2xx response status at native Google SSE error return. No retry, auth, stream parsing or error-body cancellation policy changes.
+- Local HTTP fixtures reproduce missing 403/503 status on the baseline and verify the additive diagnostic, one request, clone/Context JSON round-trip; an HTTP 200 stream error containing code 503 does not become an HTTP 503 diagnostic.
+- Validation: focused and full pkg/pigo race tests plus vet; no live provider or deployment. This branch depends on PR #216. Preserve the independent PR #205 error-body read/cancellation change when integrating; this change does not replace it.

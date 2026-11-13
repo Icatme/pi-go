@@ -487,7 +487,7 @@ func streamGoogleSSE(model Model, ctx context.Context, client *http.Client, opti
 	}
 	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
 		body, _ := io.ReadAll(httpResponse.Body)
-		return fmt.Errorf("google upstream returned status %d: %s", httpResponse.StatusCode, parseGoogleErrorMessage(body))
+		return withProviderHTTPStatus(fmt.Errorf("google upstream returned status %d: %s", httpResponse.StatusCode, parseGoogleErrorMessage(body)), httpResponse.StatusCode)
 	}
 
 	state := &googleStreamState{}
