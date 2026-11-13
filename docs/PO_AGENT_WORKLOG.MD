@@ -1,5 +1,10 @@
 # PO Agent Worklog
 
+## 2026-11-13 - Pi instruction-role issue audit
+
+- Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.
+- Go 1.26.5 full pkg/pigo tests, race and vet passed; original code fails the new regression. No live calls or deployment. See docs/pi-issue-audit-20261113.md.
+
 ## 2026-07-28 - Core review remediation
 
 - Removed stale provider-scope policy from `AGENTS.md`; provider scope remains a product/documentation concern rather than an agent rule.
