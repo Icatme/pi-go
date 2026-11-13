@@ -156,7 +156,9 @@ func Compact(ctx context.Context, plan CompactionPlan, summarize Summarizer) (Co
 
 	result, err := summarize(ctx, SummaryRequest{
 		PreviousSummary: plan.PreviousSummary,
-		Messages:        cloneMessages(plan.MessagesToSummarize),
+		// The normalized, system-filtered prefix is exclusively owned here.
+		// Transfer it to the callback; it is not read again after summarize.
+		Messages: plan.MessagesToSummarize,
 	})
 	if err != nil {
 		return CompactionData{}, err

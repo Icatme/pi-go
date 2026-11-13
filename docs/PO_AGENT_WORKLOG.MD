@@ -3785,3 +3785,10 @@
 - Earlier audit concern that cloneMessages performed JSON validation was corrected by source inspection: cloneJSONValue only recursively copies common maps/slices. No validation was removed. Existing complete-turn/tool-pairing checks remain unchanged.
 - 1MiB argument benchmark (10x,2 repeats): baseline about1.06MB/op,12allocs; new1208B/op,4allocs. Do not read timing as reliable speedup or payload throughput. Added valid/invalid-cut assertions that nested payload and caller spare backing capacity are unchanged. Fullsession race16.710s/vet pass; focused mutation plus non-durable-input gate race1.139s. Independent review recorded in PR.
 - No live provider, CI dispatch, merge or deployment. This is a narrow second allocation improvement, not complete compaction/host RSS optimization.
+
+
+## 2026-11-13 — Transfer owned summary request prefix
+
+- Partial follow-up to pi-mono #9010: after durable JSON normalization and system-message filtering, Compact transfers its already detached prefix to the summarizer instead of copying all tool arguments once again. All existing durable validation and retained-tail cloning remain.
+- Callback mutation regression covers raw arguments, originally shared caller metadata, retained tail, and a callback-held request mutated after Compact returns. Independent review found no ownership blocker; full session race and vet passed.
+- A reproducible 64KiB/1MiB/4MiB pipeline benchmark measures Prepare and Compact separately. This removes one payload-sized allocation from Compact, not the remaining JSON/transcript copies, process RSS or provider latency. No live model, merge or deployment.
