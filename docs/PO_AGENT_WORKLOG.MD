@@ -3784,3 +3784,9 @@
 
 - Audited upstream pi #11211 against master ae4e17f. Reproduced blocked custom-transport reads after cancellation; bound cancellable response bodies before shared HTTP error buffering and classified Anthropic ordinary/hosted interrupted error reads as aborted.
 - Eight cancel/timeout × ordinary/hosted × 200/503 regressions and close-once coverage pass. Full pkg/pigo ordinary tests (16.727s), race (32.710s), and vet pass on Go 1.26.5. No live provider, merge, or deployment. Details: `docs/pi-anthropic-cancellation-audit-20261113.md`.
+
+
+## 2026-11-13: Google cancelled HTTP error-body classification
+
+- Audited pi #12070 body and comment. Go already applies TimeoutMs to the Google request context and has no google-vertex adapter or matching TS retry-pattern layer. Reproduced a narrower bug: non-2xx Google response handling discarded readErr, losing cancellation/deadline identity. Preserve the wrapped read error.
+- Four synthetic 200/503 × cancel/timeout tests pass on top of the shared body-cancellation change (PR #202); the 503 classification tests failed before this fix. Full pkg/pigo race 33.842s and vet passed. No idle-timeout semantics, automatic retries, live provider validation or deployment introduced.
