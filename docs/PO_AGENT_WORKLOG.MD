@@ -3778,3 +3778,9 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+
+## 2026-11-13: Provider response-body cancellation
+
+- Audited upstream pi #11211 against master ae4e17f. Reproduced blocked custom-transport reads after cancellation; bound cancellable response bodies before shared HTTP error buffering and classified Anthropic ordinary/hosted interrupted error reads as aborted.
+- Eight cancel/timeout × ordinary/hosted × 200/503 regressions and close-once coverage pass. Full pkg/pigo ordinary tests (16.727s), race (32.710s), and vet pass on Go 1.26.5. No live provider, merge, or deployment. Details: `docs/pi-anthropic-cancellation-audit-20261113.md`.
