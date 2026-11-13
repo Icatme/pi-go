@@ -3778,3 +3778,9 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+## 2026-11-13 — Avoid intermediate string in durable JSON clones (Pi 9010)
+
+- Compared https://github.com/earendil-works/pi/issues/9010 with ae4e17f: the exact TypeScript prompt pipeline is absent, but compaction uses cloneValidated, which marshaled bytes then copied them into a string for decoding. Decode directly from bytes instead. Deep cloning, JSON validation, UseNumber and isolation remain unchanged; no truncation or relaxed ownership.
+- A 1 MiB local benchmark (5 iterations, 3 repeats) showed before 8.20–9.05 MB/op and after 7.15–7.99 MB/op; roughly one payload-sized allocation removed, not a latency guarantee. Benchmark validates output. Added nested mutation isolation, >2^53 json.Number and invalid NaN regression.
+- Full agent/session race passed 16.356s and vet passed before the added focused regression; focused regression rerun also passed. Independent read-only review found no blocker. Full compaction allocation/lifetime and host summarizer RSS remain unverified; not a complete fix for all upstream memory complaints. No live provider calls, deployment or merge.
