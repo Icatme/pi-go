@@ -3778,3 +3778,9 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+
+## 2026-11-13: Search hints for already declared tools
+
+- Audited pi #11921 body/comments. Reproduced direct-tool search incorrectly saying no allowed tools matched. When no inactive tools match, report matching tools already present in the current model context without reloading them or spending selection records. Inactive matches retain priority; hidden tools and direct tools absent from current context are not hinted.
+- Red/green direct lookup, repeated loaded lookup, selection-budget preservation, no dispatch and final permission/directory retirement regressions pass. Full agent/toolset race 8.300s and vet pass Go 1.26.5. No real MCP service or model was used; no merge/deployment.

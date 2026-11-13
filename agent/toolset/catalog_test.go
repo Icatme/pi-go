@@ -320,3 +320,28 @@ func TestPolicyChangeDuringOtherNamespaceConnectHidesMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestActiveSearchHintRechecksFinalPermission(t *testing.T) {
+	f := newFixture(t, managed.Codemode, mixedRules())
+	ts, err := New(f.manager, f.sandbox, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools, err := ts.Resolve(t.Context(), agent.AgentSnapshot{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checks atomic.Int32
+	out := agent.RunToolCall(t.Context(), agent.ToolCall{ID: "active-search", Name: "tool_search", ParsedArgs: map[string]any{"query": "direct"}}, agent.RunToolCallOptions{
+		Tools: tools, Context: agent.AgentContext{Tools: tools},
+		CheckToolPermission: func(context.Context, agent.BeforeToolCallContext) error {
+			if checks.Add(1) == 3 {
+				return f.manager.SetExposure("issues", managed.Hidden, nil)
+			}
+			return nil
+		},
+	})
+	if !errors.Is(out.Err, managed.ErrStale) || strings.Contains(resultText(out.Result), "direct_issue") || out.Result.Details != nil || f.writes.Load() != 0 {
+		t.Fatalf("stale active hint leaked or dispatched: %+v", out)
+	}
+}
