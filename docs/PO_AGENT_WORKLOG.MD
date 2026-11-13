@@ -1,10 +1,9 @@
 # PO Agent Worklog
 
-## 2026-11-13 - Upstream instruction-role audit
+## 2026-11-13 - Pi instruction-role issue audit
 
-- Compared Pi issue [#12101](https://github.com/earendil-works/pi/issues/12101) with pi-go master `ae4e17f`. Reproduced the same two errors in both Chat and Responses: unknown reasoning endpoints received developer by default, while an explicit developer capability was ignored for non-reasoning models.
-- Unknown compatible endpoints now default to system; explicit `SupportsDeveloperRole` selects the role independently of reasoning. Known native OpenAI/Codex reasoning defaults remain intact, with exact host matching rather than hostname substrings.
-- Offline regressions fail against the original implementation and pass after the fix. `go test ./pkg/pigo -count=1` and `go vet ./pkg/pigo` passed with Go 1.26.5. No live provider requests, deployment, or broader application validation were performed.
+- Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.
+- Go 1.26.5 full pkg/pigo tests, race and vet passed; original code fails the new regression. No live calls or deployment. See docs/pi-issue-audit-20261113.md.
 
 ## 2026-07-28 - Core review remediation
 
@@ -1720,7 +1719,1909 @@
   the existing adapter selects `/alpha/generate`. Messages returns 403
   `permission_error` without the upgrade code and is not broadened into a
   generic permission-error fallback. Public catalog discovery succeeds, but
-  no n…33767 tokens truncated…Windows/macOS and
+  no native Messages/Responses inference succeeded with these credentials.
+- DeepSeek V4.1 Flash (`deepseek/deepseek-v4.1-flash`, high): all three checks
+  passed through generate. Arithmetic returned 423 with 88 nonempty thinking
+  deltas; one tool call had the expected name/arguments and consumed the random
+  result on the next turn; PNG quadrants returned red,blue,green,yellow.
+- Qwen 3.8 Omni Flash (`Qwen/Qwen3.8-Omni-Flash`, xhigh): final probe passed all
+  three checks, with 91 nonempty thinking deltas for the arithmetic request and
+  correct tool replay/image answer. The first probe requested unsupported high,
+  which the generate adapter omitted; it produced a correct numeric answer with
+  unwanted prose. Its independent image request also emitted a literal
+  `</think>` and duplicate answer. Select a supported effort in the harness and
+  retain these observed output-format anomalies; a later pass does not prove
+  output stability.
+- GPT-6 Luna (`gpt-6-luna`, high): tool call/result replay passed twice. No raw
+  reasoning-delta events arrived in either reasoning attempt (one had only
+  reasoning-start/end). Arithmetic returned 278 first and 423 on diagnostic
+  reproduction. Image recognition twice returned yellow,yellow,green,green
+  instead of red,blue,green,yellow. The diagnostic payload checks confirmed the
+  requested model/effort and unmodified image bytes. This is a failed live
+  validation; no parser filtering or retry was added to hide the result.
+- Claude Haiku 5.5 and Gemini 4 Argon remain unverified: the generate endpoint
+  explicitly rejects them with MODEL_NOT_IN_PLAN, requiring GOAT+ and Pro+
+  respectively. No subscription or billing settings were changed. Official
+  https://commandcode.ai/docs/plans/goat#api-support confirms Go lacks Provider
+  API access and GOAT includes it; eligible credentials are needed to complete
+  native protocol checks.
+- Added `pkg/pigo/provider_commandcode_capabilities_live_test.go` with the
+  additional PIGO_COMMANDCODE_LIVE_MODELS opt-in, live-catalog lookup, bounded
+  requests, protocol/error-shape evidence, input-byte assertions and strict
+  output checks. Offline focused Command Code tests, pkg/pigo vet and diff
+  whitespace checks pass with PIGO_LIVE_TEST=0. No production code changed;
+  this test and work-log update remain local, without a new commit or push.
+
+### GOAT credential follow-up and Luna image diagnosis
+
+- The user supplied `CommadCode_GOAT` in `V:\env\.env`. Read only that entry
+  into the test process's canonical COMMAND_CODE_API_KEY environment variable;
+  never printed or copied its value into repository files. The new credential
+  succeeds directly on `/provider/v1/messages` and `/provider/v1/responses`,
+  without the Go-plan generate fallback.
+- Claude Haiku 5.5: arithmetic, tool call/result replay and PNG input pass on
+  Messages. Adaptive/high reasoning returns a thinking block and an empty
+  thinking delta plus a nonempty signature (1604/1692 characters in diagnostic
+  samples); raw thinking text length is zero. The parsed ThinkingContent keeps
+  that signature. This is opaque signed reasoning, not a missing parser delta.
+  The live check now distinguishes signed reasoning from visible thinking and
+  does not claim the former exposes a reasoning stream.
+- DeepSeek V4.1 Flash: all three checks pass on native Responses. Arithmetic
+  returns 423 with 72 nonempty thinking deltas; tool replay and the same PNG
+  fixture succeed. This completes native-protocol evidence previously blocked
+  by the Go credential.
+- GPT-6 Luna: native Responses arithmetic returns 423 with 105 nonempty
+  reasoning-summary deltas; tool call and result replay pass. The earlier
+  missing-delta finding was observed on the Go/generate path, whose raw stream
+  did not contain text deltas for reasoning. It is not a general inability of
+  Luna or pi-go to stream reasoning through the native API.
+- Luna PNG recognition still fails with the new key. The same synthetic image
+  has red/blue/green/yellow quadrants; pi-go sends unchanged image bytes, yet
+  native Responses returns yellow/yellow/green/green. Bypassed pi-go entirely
+  using bounded standard-library HTTP requests: Responses returned
+  yellow/yellow/green/yellow and Chat Completions yellow/yellow/green/cyan for
+  the PNG. A separately encoded RGB PNG with no scanline filtering/compression
+  also failed (yellow/yellow/green/red), ruling out a Go PNG filter/compression
+  detail as the explanation. Each fixture was decoded locally and its quadrant
+  center pixels checked before transmission.
+- The same image encoded as JPEG (quality 95) returns red/blue/green/yellow in
+  two direct HTTP probes and the pi-go Responses probe. DeepSeek recognizes
+  the original PNG using the same direct Responses request. Evidence therefore
+  localizes the remaining fault to the upstream Command Code/Luna PNG handling
+  or recognition path; it does not identify which upstream internal layer is
+  responsible. No automatic image conversion or production fallback was added.
+  Representative Luna request IDs: PNG Responses gen_01M4WJRVFCYX55HHCV6MVHTBQR;
+  PNG Chat gen_01M4WJRZCD70JND9RD5MSCQ34F; unfiltered PNG
+  gen_01M4WJVM2M8FWXS6Z9F3FV214G; JPEG through pi-go
+  gen_01M4WJZBYR27D19FV4F04KGY45.
+- The gated test supports PIGO_COMMANDCODE_LIVE_IMAGE_FORMAT=png|jpeg (default
+  png), logs only event types, field sizes and safe protocol parameters, and
+  preserves strict image assertions. Final live Haiku/DeepSeek suite and Luna
+  JPEG probe pass; Luna PNG remains a documented failure. Focused offline
+  Command Code tests, pkg/pigo vet and diff whitespace checks pass. Production
+  code, persisted environment settings and the prior pushed commit are
+  unchanged; test/work-log changes remain local.
+
+### Model adaptation fixes after GOAT live validation
+
+- User approved automatic PNG-to-JPEG preparation for Command Code GPT-6 Luna.
+  The adapter now converts user and tool-result PNGs before protocol selection,
+  using Go's standard library, JPEG quality 95, unchanged dimensions and a white
+  background for transparency. Caller history stays unchanged; already prepared
+  JPEGs are not re-encoded. Other models and formats retain their original data.
+  Invalid PNG/base64 and excessive dimensions fail before HTTP. Local decode
+  limits are 32 MiB PNG data, 64 Mi pixels and JPEG's 65535-pixel side limit.
+- Fixed the shared Anthropic serializer dropping signed thinking with empty
+  visible text. Same-model/provider/protocol replay now retains the exact empty
+  thinking field and signature; foreign opaque signatures and unsigned empty
+  blocks remain excluded. Two-turn Command Code regression coverage reproduces
+  the original dropped block and verifies the corrected wire payload.
+- Generate requests now trim and clamp requested reasoning levels against model
+  metadata, matching native routing: Qwen 3.8 high selects xhigh and minimal
+  selects low; off, non-reasoning and non-selectable models omit the effort.
+- Regression tests failed before the fixes and pass afterward. Added image
+  tests for alpha compositing, unchanged dimensions, caller immutability,
+  idempotence, unaffected models, malformed/oversized headers, and actual
+  Responses/Completions/upgrade-to-generate payloads. Replaced the older Luna
+  fake-PNG fixture with a real PNG. README documents conversion and limits.
+- GOAT live validation after production changes: Haiku 5.5 and Qwen 3.8 Omni
+  Flash pass reasoning, tool call/result replay and image checks. Luna passes
+  tools and the original PNG fixture through automatic JPEG preparation
+  (gen_01M4WKXMDTXBTRE5XP9K2EX4WT). No retry or protocol fallback was needed.
+- The first Luna reasoning check returned the correct answer plus encrypted
+  reasoning, with no visible deltas. The harness previously only recognized
+  opaque Anthropic signatures; it now requires a real Responses encrypted
+  payload when visible deltas are absent, and checks that payload on replay.
+  A follow-up Luna run returned 108 visible reasoning deltas and successfully
+  replayed its encrypted block (gen_01M4WM1KTCP109X2FCXXH2V54S followed by
+  gen_01M4WM1RKJPNZEEK0WESKGHETQ).
+- Haiku's opaque signature replay is verified on real Messages requests,
+  including exact signature presence in the outbound payload. One arithmetic
+  answer was Markdown-bold 423; the semantic arithmetic check now permits a
+  single bold/code wrapper while rejecting extra prose or wrong numbers.
+  The final focused run passes both reasoning and continuation, with a
+  1700-character opaque signature and no visible thinking text
+  (msg_011Cg1iTazVPmvfbKatZjAgD -> msg_011Cg1iTnss5h3mfzyvvJix9).
+- Validation: root and examples go test ./... pass; root go vet ./... and
+  go build ./... pass; focused Command Code/Anthropic/Kimi/Transform race tests
+  pass. Final focused regression tests pass. Live checks use a compiled test
+  executable, explicit model selection, MaxRetries=0 and the temporary process
+  credential only. No environment file, stored authentication or dependencies
+  were changed. No UI testing or release/tag is part of this update.
+
+## 2026-10-14: Publish v0.15.0
+
+- User requested a new pi-go release containing the Command Code catalog and
+  live-validation fixes. Latest published version is v0.14.0; choose v0.15.0
+  for the new model/protocol support and public sampling configuration surface.
+  Include master changes 8d958d9, fe8f5d5 and 48c9a4f, update pigo.Version and
+  the examples requirement together, and retain all third-party versions.
+- Release notes describe native endpoint selection, bounded upgrade-required
+  fallback, opaque reasoning replay, supported effort clamping and Luna PNG
+  preparation. Call out lossy JPEG/white compositing and local decoding limits,
+  plan-dependent access, logical Responses thinking levels and Go 1.26.2.
+- Follow the existing publication process: verify the final release commit's
+  six CI jobs, build five CGO-disabled CLI targets from a clean checkout, check
+  embedded VCS revision/clean flags and Unix executable modes, and publish a
+  new annotated tag plus formal GitHub Release with SHA256SUMS.txt. Download
+  and verify every asset and check public Go module resolution. Keep generated
+  packaging and publication evidence under ignored dist/release-v0.15.0.
+- Reuse the completed implementation tests and paid synthetic model probes
+  recorded above. Validate the version bump locally and rely on exact-commit
+  CI for the release-wide platform checks. No additional live-model calls,
+  downstream repository edits, UI acceptance or new release workflow.
+- Exact-release CI 38527695410 exposed an existing Windows OAuth lock race in
+  TestOAuthFileStoreCrossProcessCAS: Mkdir returned ERROR_ACCESS_DENIED while
+  another process's directory deletion was pending. A normal local stress run
+  did not reproduce it, so added a deterministic Windows fixture that marks
+  the lock for deletion while keeping its handle open. The regression fails
+  before the fix with the same public storage failure.
+- Preserve the exclusive directory-lock protocol. Windows creation now uses
+  NtCreateFile(FILE_CREATE), distinguishing STATUS_DELETE_PENDING and existing
+  name collisions from permission errors before Win32 collapses the status.
+  Close the creation handle immediately; keep the existing contention deadline,
+  cancellation and stale-lock handling. Other operating systems still use
+  Mkdir. Reuse the existing x/sys version; no library or lock-format migration.
+  Windows tests cover pending deletion, acquisition after the final handle
+  closes, real ACL denial without retry, and extended-length paths. The native
+  status and directory lifetime follow Microsoft NtCreateFile/RemoveDirectory
+  documentation. Replace only the unpublished local release tag after the fix;
+  rebuild all artifacts and require the new exact commit's full CI to pass.
+- The Windows deletion-pending regression passes after the fix. All OAuth
+  file-store regressions pass for 12 race-enabled iterations using Go 1.26.2
+  (the CI toolchain); root all-package tests and vet pass with Go 1.26.4.
+  Reference: https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile
+
+## 2026-10-15 - Preserve provider failure origin for relay diagnostics
+
+- Repair the error-origin loss at the SDK boundary. ProviderFailureOf reads a
+  structured provider_failure diagnostic from AssistantMessage; the diagnostic
+  survives cloning, streamed terminal errors and Context JSON persistence.
+  Native Chat Completions, Responses and Anthropic Messages identify explicit
+  upstream HTTP/error events, interrupted response reads/missing terminal
+  events, and response decoding failures. Local callbacks, cancellation and
+  unclassified SDK failures remain distinct from upstream failures.
+- Preserve original SDK error text and add interrupted HTTP error-body evidence.
+  Error wrappers keep errors.Is/As identity. Retry predicates, counters, delays,
+  output/usage guards and configured budgets are unchanged; diagnostics are
+  evidence only and never grant retry permission.
+- P1 regression extends protocol failure coverage because prior stream/result
+  tests did not assert error origin and persistence together. Cover the reported
+  HTTP-200 ambiguity, malformed JSON/field types/finish reasons, EOF, DONE without
+  a terminal event, reader failures, non-2xx and interrupted error bodies across
+  the three native protocols. Existing retry and HTTP evidence tests also pass.
+- Verified: focused pkg/pigo ProviderFailure, ProviderHTTP, HTTPStreamClient,
+  OpenAI Responses/Completions, Anthropic, stream retry and callback contracts
+  (2.759s), plus go vet ./pkg/pigo. No whole-repository tests/race or paid live
+  model requests. No dependency or source-version changes.
+- User authorizes pushing this repair to an independent source branch so
+  ai-relay can pin a downloadable immutable commit. Formal release/tag and
+  production deployment are outside this step.
+- Final source audit found that the Anthropic hosted continuation boundary
+  returned an untyped missing-terminal error after recording its typed version,
+  so the outer error handler overwrote the diagnostic. Extend the existing
+  hosted missing-message-stop regression: it fails with sdk_error/unclassified
+  before the repair and passes after propagating the same typed error. Focused
+  diagnostic/hosted/Anthropic/retry tests (0.359s) and pkg/pigo vet pass.
+- Pre-push consumer review reproduced a false response_parse_error for local
+  request serialization: an invalid RawMessage returned by OnPayload raises a
+  JSON syntax error before any HTTP request. Remove JSON-type guessing from
+  the generic error recorder; response readers retain explicit classification
+  at the decoding boundary. Extend the existing P1 diagnostics test to assert
+  sdk_error/unclassified, retained error text and zero dispatches. The new case
+  fails before the fix; focused protocol/HTTP/hosted/retry/callback tests
+  (2.627s) and pkg/pigo vet pass afterwards. Retry behavior remains unchanged.
+
+## 2026-10-23 — Explicit trusted skill catalogs
+
+- Add opt-in `agent/skills`, inspired by Pi coding-agent's metadata catalog and
+  on-demand SKILL.md loading. Keep skill discovery/read lifecycle out of the
+  single-agent loop and document that skills are guidance, not permissions.
+- Require explicit trusted roots, strict typed frontmatter, deterministic
+  first-valid-wins diagnostics, bounded text/discovery and confined resource
+  reads through pinned Go `os.Root` handles. Reload atomically publishes the next
+  index; fatal errors preserve the previous snapshot. No HOME scan, network,
+  execution, dependency installation, tenant policy or document business layer.
+- Add only yaml.v3 v3.0.1; reuse existing cloud cache for offline validation.
+- Focused package race tests and vet pass with Go 1.26.5 on Linux. Coverage includes
+  malformed metadata, catalog escaping, path and symlink confinement, duplicate
+  selection, limits, metadata changes, retained handles and concurrent reload.
+  No live models, CI, release/tag, or deployment performed. Windows/macOS runtime
+  behavior and downstream JZ integration remain unverified.
+- Existing `agent` tests also pass; Windows amd64 skill tests cross-compile.
+  Broader `agent/toolset` verification could not start with the offline cache
+  (missing wazero v1.12.0, x/oauth2 v0.35.0, x/sync v0.20.0); no claim of a
+  complete repository regression pass is made.
+
+### Compile-time FS skill snapshots
+
+- Add `NewFS` / immutable `FSCatalog` for trusted `embed.FS` skill bundles, sharing
+  the strict frontmatter parser and prompt formatter with the disk catalog.
+  Construction copies bounded text; subsequent reads never access the source.
+  Relative FS roots, text/entry/depth/aggregate limits, first-name diagnostics,
+  symlink/special-resource rejection and detached metadata are covered by tests.
+- Expose an application-assigned version label, not a digest or permission claim.
+  No runtime reload, remote install, execution, tenant logic, or real deployment.
+- MapFS and actual go:embed fixtures cover immutable reads after source changes,
+  disk/FS semantic parity, explicit-only skills, path rejection, all size limits,
+  invalid text, symlinks, bundle boundaries and concurrent reads. Linux race tests
+  and vet pass with the existing offline Go 1.26.5 toolchain.
+
+## 2026-10-23 - Integrate provider diagnostics for downstream upgrades
+
+- The latest master declares version 0.16.0, but its published module omitted
+  the three provider-diagnostic fixes already consumed by ai-relay. A temporary
+  consumer modfile reproduced undefined ProviderFailureOf and failure-kind
+  constants. The user explicitly authorizes integrating and pushing these
+  existing fixes before updating ai-relay to a downloadable module revision.
+- Merge the provider-failure-diagnostics branch into current master. Resolve
+  the worklog-only conflict by retaining both dated entries. Provider production
+  code matches the previously consumed diagnostics branch; the new skill
+  catalog APIs and version declaration remain intact.
+- Integration tests exposed fixture assumptions. Stream/complete comparisons
+  now ignore per-call diagnostic timestamps on a copied slice while retaining
+  every diagnostic field. Embedded skill resources compare with the actual
+  embedded bytes, including Windows CRLF. Reload failure uses a missing empty
+  root on all platforms; Unix still checks reads across rename, and Windows
+  checks rename after Close to prove successful and failed reloads release
+  their handles. The two skills failures reproduce on unmodified master.
+- Windows Go 1.26.5, GOWORK=off: focused diagnostics, hosted continuation and
+  fixture regressions pass; full pkg/pigo and agent/skills race tests pass;
+  package vet, module verification and tidy-diff pass. Tidy adds missing sums
+  for yaml.v3's existing test dependency without changing module versions.
+- Publication is an ordinary master fast-forward containing both histories.
+  No existing tag is moved and no release, binary packaging, paid provider
+  call, deployment or UI acceptance is performed. Full repository/agent/runtime
+  suites and non-Windows execution are outside this integration check.
+
+## 2026-10-23 - Port independent JZBeacon agent improvements
+
+- Add host-owned ToolDefinition.MaxArgumentBytes. Check raw JSON before parsing,
+  parsed and schema-normalized JSON, and before-hook mutations before approval
+  or execution. Direct/model/child calls share the existing lifecycle. Child
+  resource bounds remain independent; failure code/reason is resource/argument_bytes
+  with not-started/not-dispatched facts and parser/hook error causes preserved.
+- Add agent/strictschema as an opt-in closed-shape declaration converter and
+  optional-null omission normalizer. Freeze schemas, preserve scalar constraints,
+  empty values and numeric lexemes, enforce input/output bounds, and reject
+  ambiguous or unsupported shapes. It does not enable provider strict mode or
+  replace the ordinary schema/business validator. No dependency is added.
+- Extend session.CompactionOptions with ProtectedTailMessages. The existing
+  complete-turn planner retains the protected suffix and tool pairs, alongside
+  token retention and current system declarations, without rewriting a plan after
+  selection or mutating the durable branch.
+- Keep JZ-specific context epochs/CAS, tenant/source authorization, task plans,
+  memory-space ownership, result receipt deduplication, endpoint network policy,
+  relay-specific token estimation and published route output budgets in the host.
+  Complete-turn compaction and MCP catalog validation already exist in pi-go.
+- Windows Go 1.26.4, GOWORK=off: all agent/... tests passed; agent, agent/session
+  and agent/strictschema race tests passed; agent/... vet and diff checks passed.
+  Tests use local fakes only. Provider/live/full-repository suites were not run.
+- Work is isolated from the original pi-go checkout's existing edits. JZBeacon's
+  dependency pin and application code are unchanged; no local replace, release
+  tag, production operation or new SHA-based scheme is introduced.
+
+## 2026-10-23 - Fix PR 33 omission and preparation-error regressions
+
+- Reproduce both review findings with new failing regressions before changing
+  production code. The default anyOf validator deliberately coerces values in
+  branch order, so retain that existing runtime contract and fix the generated
+  nullable declaration: match exact null first, guarded by enum=[null]. This
+  keeps omitted scalars null and prevents empty strings, zero or false from
+  entering the null branch after failing their original constraints.
+- Cover raw and parsed default tool arguments, nested objects/arrays, empty
+  containers, required nulls and valid scalar zeros. Verify minLength, pattern,
+  numeric minimum, enum and const failures stop before approval or execution;
+  valid values and optional null omission still work.
+- Preserve parser and before-hook errors inside Unicode rejections by joining
+  their causes under the existing typed error. Keep the invalid_unicode reason,
+  not-started/not-dispatched facts and safe presentation. Direct and child-call
+  regressions verify both errors.Is chains and that host error text stays out
+  of the displayed error.
+- Windows Go 1.26.4, GOWORK=off: focused regressions pass after the fix;
+  go test -mod=readonly ./agent/... -count=1, race tests for agent, agent/session
+  and agent/strictschema, go vet -mod=readonly ./agent/... and git diff --check
+  pass. Provider/live, full-repository and non-Windows tests were not run.
+- Update the existing draft PR branch using a normal push and retain its
+  [skip ci] publication convention. No dependency, version or tag changes.
+
+## 2026-10-23 - Resolve the five skills review findings
+
+- Reproduce the UTF-8 BOM failure in both disk and FS catalogs before changing
+  production code. Strip exactly one leading BOM before checking frontmatter;
+  preserve BOM characters in the body and preserve all resource bytes. Expand
+  disk/FS parity tests across LF, CRLF, BOM+LF and BOM+CRLF, including raw
+  SKILL.md reads. Cover BOM with an empty body, misplaced/repeated BOMs and YAML
+  merge-key rejection without weakening the existing strict metadata checks.
+- Replace archived gopkg.in/yaml.v3 with go.yaml.in/yaml/v3 v3.0.5 from the
+  [YAML organization](https://github.com/yaml/go-yaml). Maintenance checked on
+  2026-10-23: the selected stable version was released on 2026-07-26, the v3
+  branch was updated on 2026-10-13, and the repository is active. Its Go 1.16
+  minimum and pure-Go implementation fit this module; the Node API is unchanged.
+  v3 is the maintained stable/security-fix line; v4 remains a release candidate.
+  The alternative goccy/go-yaml had no repository update within six months,
+  so it was not selected. Open-issue searches found no Windows/Go 1.26 matches;
+  local compatibility is established by the Windows checks below, not that search.
+- Retain and verify the already-integrated Windows reload/close regression and
+  embedded-resource byte comparison. Failed reload keeps the previous snapshot,
+  Close releases Windows handles, and embedded CRLF resources remain unchanged.
+- Tidy removes the old YAML and check.v1 entries from the root module. Root and
+  examples resolve their complete dependency graphs with -mod=readonly. The
+  examples module retains its existing indirect YAML dependencies and versions.
+  Add these graph checks to CI and include agent/skills in the existing five-OS
+  race matrix. Only standard Go dependency checksum entries change; no custom
+  content hashes or version/tag changes are introduced.
+- Windows Go 1.26.4, GOWORK=off, live-model tests disabled: agent/skills race
+  tests pass; root and examples both pass full go test -mod=readonly -count=1
+  ./..., go vet -mod=readonly ./..., go list -mod=readonly -m all, go mod verify
+  and go mod tidy -diff. The examples tidy comparison required local LF
+  normalization of checkout-only CRLF, with no dependency/content diff.
+  git diff --check passes. Linux/macOS execution and the CI matrix were not run.
+
+## 2026-10-23 - Review latest PR 33 after repository synchronization
+
+- Fetch origin and confirm local master already matches origin/master. Preserve
+  all eight pre-existing modified paths. Review the latest open draft PR 33 in
+  its existing clean checkout; do not modify its production code or PR state.
+- Reproduce a strictschema integration defect: the default agent validator
+  coerces optional null scalars into empty strings, zero or false before
+  Normalize can remove them. With an optional minLength=1 string, an explicit
+  empty string is instead coerced to null and omitted, allowing execution that
+  the original schema rejects. The regression test uses a custom raw parser
+  and therefore misses the ordinary parser path.
+- Reproduce lost error identity when a before hook both mutates an argument to
+  invalid Unicode and returns a sentinel error. MaxArgumentBytes=0 preserves
+  errors.Is; enabling the new limit drops the hook cause in the Unicode check.
+  The corresponding post-parser Unicode branch also replaces the original error.
+- Windows Go 1.26.4, GOWORK=off: agent/... tests and vet pass, as do race tests
+  for agent, agent/session and agent/strictschema and the PR diff whitespace
+  check. Standalone local executables reproduce both findings without changing
+  the reviewed checkout. The PR has no remote CI results; live providers,
+  non-Windows execution and full-repository tests were not run in this review.
+
+## 2026-10-23 - Re-review and merge PR 33
+
+- Re-review the complete latest PR diff, the exact-null omission declaration,
+  parser/hook error chains, argument limits and protected compaction boundary.
+  No remaining blocking findings. Confirm the reviewed head is unchanged from
+  the previously passing three-package race run and includes current master.
+- On Windows Go 1.26.4 with GOWORK=off, focused strictschema/argument-budget/
+  protected-compaction regressions pass. Both root and examples modules also
+  pass go test -mod=readonly ./... -count=1 and go vet -mod=readonly ./... with
+  live-provider tests explicitly disabled. PR diff whitespace checks pass.
+- Update the PR validation evidence, mark the draft ready and merge through
+  GitHub with an expected-head guard under the user's authorization. Confirm
+  GitHub reports merged, remote master contains the reviewed head and the merge
+  tree exactly equals the tested tree. No source changes were needed this pass.
+- Pre-merge remote CI had no results. Non-Windows execution, live providers,
+  post-merge remote CI and a full-repository race suite are not verified here.
+  Preserve the primary checkout's existing eight modified paths; its local
+  master remains at its prior commit rather than rewriting uncommitted work.
+
+## 2026-10-23 - Synchronize local master while preserving local edits
+
+- Fetch origin and fast-forward local master to the merged PR 33. Only the
+  shared worklog overlaps the eight existing modified files, so temporarily
+  stash that path and keep the other seven files in place.
+- Resolve the worklog append conflict by retaining all incoming and local
+  entries. Restore the original unstaged state and verify the other seven
+  files byte-for-byte against the pre-sync snapshot.
+- Confirm local master matches origin/master, the index has no staged or
+  unresolved changes and git diff --check passes. Keep the existing stashes;
+  remove only this synchronization's temporary stash after verification.
+  This operation does not commit or push the preserved local work.
+
+## 2026-10-23 - Prepare minor version 0.17.0
+
+- Advance pkg/pigo.Version from 0.16.0 to 0.17.0 for the additive agent and
+  provider APIs merged since the previous version declaration. Add release
+  preparation notes covering argument bounds, strict-schema omission, protected
+  compaction tails and classified provider failures.
+- Retain the examples module's existing published-version requirement and its
+  local replacement, following the previous version-preparation convention.
+  Preserve all pre-existing uncommitted files and earlier worklog entries.
+- Windows Go 1.26.4, GOWORK=off: go test -mod=readonly ./internal/cli -count=1
+  passes; compile cmd/pigo and verify pigo --help reports pigo 0.17.0. Full
+  repository and live-provider suites are not rerun for this metadata update.
+- This request updates local version metadata and notes only; no commit, push,
+  Git tag, GitHub Release or binary publication is performed.
+
+## 2026-10-23 - Prepare v0.17.0 source tag publication
+
+- The user authorized committing and pushing the version update and creating
+  the annotated v0.17.0 tag. Scope the commit to the version constant, release
+  notes, examples module version and these version worklog entries. Preserve
+  the earlier local skills, dependency, CI and worklog edits outside this commit.
+- Advance the examples requirement to github.com/Icatme/pi-go v0.17.0 while
+  retaining the existing local replacement. Refresh the release notes for
+  source-tag publication; no GitHub Release or binary assets are included.
+- Validate an isolated snapshot of the committed baseline plus the two version
+  declarations, excluding unrelated local changes. Windows Go 1.26.4,
+  GOWORK=off, live-provider tests disabled: root and examples both pass
+  go test -mod=readonly ./... -count=1 and go vet -mod=readonly ./...;
+  examples resolves the expected local v0.17.0 module. The compiled CLI
+  reports pigo 0.17.0. Non-Windows execution and remote CI are not verified.
+- Publication uses one atomic push for master and the annotated tag, followed
+  by remote-ref verification. Normal Git commit/tag identities are checked
+  for this publication; no additional checksum scheme is introduced.
+
+## 2026-10-23 - Review and publish the remaining skills changes
+
+- Review all eight remaining modified paths before the authorized commit/push.
+  No blocking findings. The parser removes exactly one initial UTF-8 BOM before
+  checking the frontmatter delimiter; body BOMs and raw resource text remain
+  intact. Disk/FS parity covers LF, CRLF, optional leading BOM and raw reads;
+  malformed metadata, duplicate BOMs, aliases and merge keys remain rejected.
+- Recheck the YAML dependency against upstream sources: the original repository
+  is archived; the YAML organization fork is active, with recent main-branch
+  work on 2026-10-22 and v3.0.5 released on 2026-07-26. Its Go 1.16 minimum
+  fits this module. v3 receives security fixes only; the current v4 version is
+  still v4.0.0-rc.6, so keep the stable v3 API for this focused change. The
+  alternative goccy/go-yaml's latest commit is dated 2026-04-07, over six months
+  ago. Upstream v3 CI is Linux-based; Windows compatibility is checked locally.
+  Sources: https://github.com/yaml/go-yaml/blob/main/README.md and
+  https://github.com/yaml/go-yaml/releases/tag/v3.0.5.
+- Windows Go 1.26.4, GOWORK=off, live-provider tests disabled: skills race tests
+  pass. Root and examples both pass go test -mod=readonly ./... -count=1,
+  go vet -mod=readonly ./..., go list -mod=readonly -m all, go mod verify and
+  go mod tidy -diff. Changed Go files are gofmt-clean and diff checks pass.
+  No production code or regression-test repairs were needed during this review.
+- Include the earlier preserved worklog entries in the authorized eight-file
+  commit. Publish to master without moving the existing v0.17.0 source tag.
+  Non-Windows execution and post-push remote CI are not verified here.
+
+## 2026-10-23 - Reorganize the README and documentation navigation
+
+- Reduce the root README from 437 to 160 lines, with installation, a complete
+  quick start, CLI usage, package responsibilities and runnable example links.
+  Replace the overlapping highlights/positioning sections with a short overview.
+- Move provider/authentication details, account quotas, model streaming/sampling
+  and development commands into four focused guides under docs/. Rebuild the
+  documentation index around guides, agent references, MCP and design notes.
+  Preserve the existing provider, quota and sampling contracts in their guides.
+- The quick start now reads an environment credential, bounds the request with
+  a context deadline, checks its stop reason and prints the text response.
+  The streaming guide handles events, final results and cancellation explicitly.
+- Documentation validation: 77 local links/anchors resolve; Markdown fences and
+  whitespace checks pass; all 14 PowerShell blocks parse. Four Go snippets
+  (quick start, streaming, sampling and quota) compile with GOWORK=off and
+  -mod=readonly. These snippets are not executed against live providers.
+  git diff --check passes. Full test suites are not rerun for this docs-only change.
+
+## 2026-10-23 - MIT licensing and v0.17.1 release preparation
+
+- Add the standard MIT license for Icatme and pi-go contributors, preserving
+  Mario Zechner's original Pi AI copyright notice. Add the README license
+  badge and section; retain the existing QuickJS upstream notices.
+- Include the preceding README/documentation reorganization in this release.
+  Advance pkg/pigo.Version and the examples module requirement to 0.17.1;
+  keep the published v0.17.0 tag intact. Add release notes for the 0.17 series.
+- Windows Go 1.26.4, GOWORK=off, all live gates disabled: root and examples
+  pass go test -mod=readonly -race ./... -count=1, go vet -mod=readonly ./...
+  and go mod verify. The MIT grant matches the upstream text. Local Markdown
+  links/anchors, code fences, whitespace and git diff --check pass. The four Go
+  documentation snippets were compiled during the preceding README update.
+- Prepare five CGO-disabled CLI archives from the clean release commit:
+  Windows amd64, Linux amd64/arm64 and macOS amd64/arm64. Package the root MIT
+  license, Go runtime license and the linked modules' license/notice files.
+  Gate publication on build metadata, archive contents, Unix executable modes
+  and the packaged Windows CLI version banner. SHA256SUMS.txt is included only
+  for download integrity; no additional source checksum scheme is introduced.
+- The authorized release uses a new annotated v0.17.1 tag and GitHub Release.
+  Download verification and the resulting publication status are reported on
+  the release page and in the task reply. Linux/macOS runtime acceptance and
+  live provider calls are separate from local cross-compilation evidence.
+
+## 2026-10-28 — CommandCode v0.7.10 selective catalog sync
+
+- Compared upstream `patlux/pi-commandcode-provider` at
+  `63c8e5ccea73850266c34e655d3a76039316d4aa` (v0.7.10 / CLI 1.88.0)
+  against pi-go master `d831f6c39848d326962d82b2f8cf0f5b3805c295`.
+  Updated the CLI snapshot header and seven newly documented model capability
+  entries; added eight upstream reviewed display prices. Existing prices and
+  tiers remain unchanged. This is an estimate snapshot, not current billing.
+- Removed the two retired free Ling entries and MiMo 2.5/2.5 Pro from built-in
+  models, capabilities and estimated prices. No alias from a retired/free model
+  to a paid model is introduced. Existing user configurations and cached catalogs
+  are not deleted; a stale cache can still contain retired IDs until refresh.
+  Newly documented models remain discovery-only:
+  no guessed native endpoint, context limit or automatic model switch is added.
+  Kimi K3.1 Pro remains text-only/non-reasoning with unknown capabilities until
+  upstream publishes metadata. DeepSeek `off` keeps pi-go's existing normalized
+  mapping rather than forwarding an `off` reasoning parameter.
+- This is not a 502 fix claim. JZ uses relay-owned native adapter contracts;
+  no generate fallback, retry count, auth, quota query or relay contract changes
+  are included. Upstream v0.7.8's JS iterator fallback and quota cancellation
+  mechanisms are not copied blindly into Go. pi-go's public QueryQuota already
+  supplies one default 15-second context deadline; custom transports ignoring
+  context are not newly claimed as covered.
+- Regression coverage checks discovered model capabilities/prices/header,
+  endpoint preservation, conservative unknown capabilities, no implicit model
+  enablement and retired metadata removal. Live provider/model calls, CI,
+  release and deployment are not part of this batch.
+- Cloud offline validation (Go 1.26.10, live flags disabled): CommandCode focused
+  tests and root `go test -mod=readonly -count=1 ./...` passed. After adding the
+  JSON discovery regression, full provider `-race` passed (28.800s) and root
+  `go vet -mod=readonly ./...` passed. Independent source review accepted the
+  final changes. Windows and real providers were not run. Publication is a
+  non-CI-matching branch only: a PR targeting master would trigger the existing
+  workflow, so no PR, merge, release or downstream dependency bump is performed.
+
+## 2026-10-28 — v0.17.2 combined release candidate
+
+- Combined reviewed catalog commit `271976a438687c22dfe3f672ad1ec674b9fa5446`
+  and Responses diagnostic commit `77484dac232f820cc8e973d94adfdc7c00a931a8`.
+  Prepared package/examples version 0.17.2 and candidacy/compatibility notes.
+- Go 1.26.10 cloud offline validation: root tests and vet, provider race tests
+  (29.253s), module verification, examples tests and vet passed. Independent
+  combined source review found no blocking issue. Live calls and Windows/macOS
+  execution were not performed. The candidate is not evidence of a resolved
+  real-world 502 or deployed downstream applications.
+- Publication remains blocked by the no-CI requirement: master PR/push triggers
+  the existing workflow. No workflow was disabled and no feature-branch tag was
+  substituted for mainline integration. The current connector also lacks tag/
+  release upload operations, and the cloud GitHub CLI is not authenticated.
+  This candidate branch is not a published version and must not be used as a
+  claim that v0.17.2 already resolves through the module proxy.
+
+## 2026-10-28 — Owner-requested manual-only GitHub CI
+
+- Removed automatic push and pull_request triggers from the sole Go tests
+  workflow after the owner explicitly requested disabling automatic GitHub CI.
+  Retained workflow_dispatch and all existing jobs/permissions unchanged; no
+  manual run is dispatched. This applies only to pi-go, not account-wide settings.
+- Parsed both YAML versions and verified that only the event triggers change.
+  The configuration-only commit precedes release-candidate integration; GitHub
+  evaluates push workflows from the pushed tip, whose triggers exclude push.
+  No skip marker or temporary workflow-disable/re-enable race is used.
+
+## 2026-10-28 — Final candidate and manual-only CI integration
+
+- Combined the reviewed v0.17.2 candidate with CI-only master commit
+  `028cb4e2305b78719487853447e34947f6c82d1e`, preserving both parent histories.
+  Compared the final source tree: runtime and tests are unchanged from the
+  candidate validated above; only CI configuration and status documentation
+  differ. The sole workflow remains manual-only; no run is dispatched.
+- This resolves the CI configuration blocker, not the release credential gap.
+  A tag, release assets and downstream module resolution remain separate gates.
+
+## 2026-10-28 - Publish the v0.17.2 source tag
+
+- Fast-forward the clean local master to the reviewed remote integration.
+  Keep the prepared package and examples versions at 0.17.2; update the release
+  notes from candidate status to source-tag distribution.
+- Windows Go 1.26.4, GOWORK=off, all live-provider gates disabled: focused
+  CommandCode catalog and Responses error-evidence regression tests pass.
+  Root and examples both pass go test -mod=readonly ./... -count=1,
+  go vet -mod=readonly ./... and go mod verify. Full provider race tests pass;
+  a compiled CLI reports pigo 0.17.2. git diff --check passes.
+- Publication uses an atomic push of master and a new annotated v0.17.2 tag,
+  followed by remote-ref and direct Go-module resolution checks. Existing
+  public tags remain intact. No additional source or artifact hashes are added.
+- This request publishes the source tag without a GitHub Release or binary
+  downloads. GitHub CI remains manual-only and no workflow is dispatched.
+  Non-Windows execution, live providers and downstream deployment are outside
+  these local validation results.
+
+## 2026-11-01 — Exact JSON evidence for completed tool calls
+
+- Added optional original argument JSON on completed tool calls from Responses,
+  OpenAI chat completions, DeepSeek chat, Anthropic Messages and Command Code.
+  The in-memory evidence survives event/result cloning. Existing argument maps
+  and serialized conversation formats keep their existing representation.
+- Added local transport regressions for large integers and duplicate keys in
+  terminal arguments, including a Responses call with no argument delta.
+
+## 2026-11-02 — Kiro watchlist and tested development integration
+
+- Carry #50's explicit upstream/plugin watchlist into the Kiro development stack,
+  preserving its source commit as an additional remote merge parent. Existing
+  instructions and other plugin baselines are unchanged; Kiro implementation
+  wording now points to docs/kiro-followup-status.md instead of saying absent.
+- Read-only upstream main remains dd93f2e (package version 0.12.3), dated
+  2026-10-29 22:21:36 UTC. No new main delta observed; tag-list API unavailable.
+- Latest code at #111 includes independent synthetic Go/race tests of scoped
+  credentials, explicit buffered/live-text registration and internal mixed
+  text/tool worker. Final code full-repository race and vet passed with Go1.26.2;
+  this documentation integration leaves code blobs unchanged.
+- Draft branches only: no master merge, release/deployment, automatic login,
+  real credential/service/tool calls or CI dispatch. Community protocol evidence
+  and fake tests do not prove service authorization, account/model availability,
+  actual billing or complete upstream compatibility. See status document for
+  exact tests, source links and remaining public mixed-Agent integration.
+
+## 2026-11-02 — Explicit incremental text/tools registration
+
+- Upstream baseline remains pi-provider-kiro dd93f2e / package0.12.3 (main checked
+  at 05:09 UTC; no new main delta). Added a distinct public incremental config,
+  options and API registration; existing buffered/live-text modes retain behavior.
+- Uses live provisional text plus completed-only tool lifecycle. Actual no-tools
+  and tool-enabled fake Agent tests now cover Auto/session opt-in, permission deny,
+  cancellation upon ToolCallEnd, truncation/late Close, exact9007199254740993 raw
+  argument replay and execution. All tools/services in tests are local fakes.
+- Official Go1.26.2, cached deps, live flags disabled: focused registration/Agent
+  race repeated three times passed1.172s; final code full-repository race passed
+  (pigo30.590s), go vet, gofmt and diff checks passed. Parent review was independent
+  static inspection, not a second execution. See incremental registration doc.
+- This remains a draft development branch, not master/release/deployment. No
+  real credentials, service calls, CI dispatch or automatic login/model setup.
+  Preview text cannot be revoked; a tool lifecycle event is never authorization
+  without complete successful result and current schema/permission/context checks.
+
+## 2026-11-02 — Offline refresh response semantics
+
+- Compared pinned pi-provider-kiro dd93f2e src/oauth.ts and test/oauth.test.ts.
+  Independently implemented supplied-response parsing for IDC, desktop and
+  external-IDP families, keeping exact scope and actual expiry separate from
+  refresh-after. Unknown/new fields and missing expiry deliberately reject.
+- No credentials discovered, sources replaced, endpoints called, timers started,
+  persistent access created, CLI/IDE data read/written or real refresh performed.
+  Only omitted desktop/IdP refresh fields retain caller's old token; null/empty
+  reject. IDC needs rotation evidence. Secrets are excluded from JSON/fmt output.
+- Official Go1.26.2 offline/cache-only: focused refresh race x3 passed1.052s;
+  full repository race passed (pigo30.731s), go vet/gofmt/diff checks passed.
+  Parent review was static, not independently executed. Synthetic tests cover
+  expiry bounds/overflow, scope/family conflict, unknown fields and redaction.
+- Still a draft-only internal parser, not automatic OAuth/login or proof of
+  endpoint/account/billing compatibility. No CI or real service calls.
+
+## 2026-11-02 — Scoped offline catalog selection
+
+- Kept pinned management/models baseline dd93f2e. Bound parsed catalog evidence
+  to caller-asserted profile/region and observation time; selection requires
+  explicit current time/maxAge and alias versus exact-service-ID namespace.
+- No fetch/cache/default model/registry/entitlement claim. A concrete alias can
+  equal another record's service ID despite unique aliases, so lookup never
+  guesses namespace. Returned limits/schema/metadata are detached; no properties
+  or prices inferred from missing fields. Catalog JSON/fmt hides private state.
+- Official Go1.26.2 offline/cache-only: final focused race x3 passed1.080s;
+  full-repository race passed (pigo30.947s), vet/gofmt/diff checks passed. Four
+  original tests cover scope/freshness boundaries, explicit namespace ambiguity,
+  nil limits, 16 concurrent mutable return copies and invalid observations.
+  Parent review was static only. No live credentials/service/CI or deployment.
+
+## 2026-11-02 — Offline scoped management request assembly
+
+- Compared dd93f2e management.ts requestManagement/ListAvailableModels wire shape.
+  Added a construct-only GET for explicit region/profile/origin/UA, safe query
+  escaping and one explicit scoped credential callback. No default network,
+  profile/region discovery, token inference, retries or registry changes.
+- Existing User-Agent validation is extracted unchanged for both request paths.
+  Management requests intentionally omit POST target/content and runtime headers.
+  Returned headers/URL remain sensitive and must not be logged or redirected.
+- Go1.26.2 cached dependencies/live flags disabled: focused catalog/client-header
+  race x3 passed1.041s; full repository race passed (pigo31.546s), vet/gofmt/diff
+  checks passed. Three original tests exercise all auth families, malformed
+  inputs, scope/cancellation/error and callback option-mutation isolation.
+  Parent review was static only. No real credential/service/CI/merge/deployment.
+
+## 2026-11-02 — Injected catalog response pipeline
+
+- Joined explicit scoped management request to one injected executor and bounded
+  JSON response handling, then Close-validated explicit clock and scoped catalog.
+  No default network, profile probes, retry/cache/automatic model registration.
+- HTTP200/MIME/UTF8/encoding/length guards, maxBytes+1 EOF probe, sticky reader
+  errors and no-progress limit apply. Response+transport error still closes body;
+  Close failure/cancellation discard catalog. No raw errors or tokens logged.
+- Go1.26.2 offline/cache-only: final focused race x3 passed1.042s; final full
+  repository race passed (pigo31.108s), vet/gofmt/diff checks passed. Four original
+  tests cover blocked Close ordering, status/header/length/read failures, exact
+  budget, final bytes+error/wrappedEOF, nil response/body and clock rejection.
+  Parent review was static, not a second execution. All I/O is injected fake.
+- Scope/timestamp are assertions and executor must cooperate with cancellation;
+  no real service/account/billing validation, CI, merge or deployment.
+
+## 2026-11-02 — Explicit public catalog observations (draft, stacked on #117)
+
+- Baseline: pi-provider-kiro v0.12.3 dd93f2e; independently authored public-facing
+  cases extend management/models scenario coverage, without copying upstream code.
+- Added explicit FetchKiroModelCatalog config with required injected scope/auth/
+  executor/clock/limits; opaque immutable catalog and observation values; Models
+  and explicit alias/service Select require exact scope and freshness. Detached
+  raw getters preserve metadata/numeric evidence, absent limits stay absent.
+- Shared prior scoped guard/clone semantics; no automatic registration/cache/
+  login/refresh/default model/network. Scope/time are caller assertions, not
+  entitlement. Runtime service-ID routing and real service acceptance remain open.
+- Three external-package Go tests cover no registration, callback lifecycle and
+  redaction, Close-before-clock, nil/zero values, deep-copy/concurrent getters,
+  scope/age rejection, exact large integers, missing limits and opaque formatting.
+- Actual validation: official Go 1.26.2 cloud, cached dependencies, live flags off;
+  final focused public/scoped race x3 passed (1.047s); final full repository
+  go test -race ./... passed (pigo 31.687s; other packages passed/cached);
+  go vet ./..., gofmt and git diff --check passed. Parent independent static
+  review found no definite blocker; it did not independently execute tests.
+- No CI dispatch, real account/network/tool execution, master merge or deployment.
+  See kiro-public-catalog-observation.md for public API ownership/trust boundaries.
+
+## 2026-11-02 — Explicit catalog service-ID to runtime regression (draft)
+
+- Stacked on #118; no production implementation change. Independently authored
+  scenario from the upstream dd93f2e distinction between host alias and kiroModelId.
+- Synthetic catalog intentionally has overlapping alias/service namespaces.
+  Public Select(ServiceID) feeds caller-owned Model.ID; public registration and
+  StreamSimple preserve exact ID in current/history wire paths and final result.
+  Catalog/runtime are each invoked once; registration invokes neither callback.
+- Documentation now explains manual ServiceID mapping and explicitly excludes
+  automatic alias resolution, per-dispatch catalog freshness, capability defaults,
+  entitlement, model registration and real endpoint compatibility guarantees.
+- Actual official cloud Go 1.26.2/cached dependencies/live flags disabled:
+  final catalog-runtime/public focused race x3 passed 1.042s; full repository
+  go test -race ./... passed (pigo30.407s, others passed/cached); go vet ./...,
+  gofmt and diff check passed. Parent independent static review found no definite
+  blocker; no independent execution by reviewer. No real service or CI dispatch.
+
+## 2026-11-02 — IDC-only offline refresh request (draft)
+
+- Baseline community oauth.ts dd93f2e442–467 plus official AWS CreateToken docs
+  read on 2026-11-02. Independently implemented standard-partition regional OIDC
+  JSON POST with explicit clientId/clientSecret/refreshToken/refresh_token grant.
+- Required explicit UA, context and encoded-byte budget; no arbitrary endpoint,
+  China/GovCloud/isolated suffix guessing, default client, executor, credential
+  source, token import, refresh execution or persistence. Region syntax does not
+  prove endpoint availability/account authorization. This is an internal helper.
+- Input options JSON/fmt hide secrets; fixed errors; request body intentionally
+  contains secrets and must not be logged/persisted/redirected. GetBody absent
+  removes only convenience replay, not a transport-enforced retry guarantee.
+- Three original tests cover exact fields/URL/headers, escaping and exact byte
+  budget, secret-free diagnostics, invalid inputs/partitions and cancellation.
+- Official cloud Go1.26.2, cached dependencies/live flags off: focused IDC race x3
+  passed1.032s; full repository race passed(pigo31.276s, other packages passed/
+  cached); vet/gofmt/diff passed. Independent parent static review found no definite
+  blocker, not independently run. No CI/master merge/deploy/live service calls.
+- Follow-up: request and prior response parser remain disconnected; any sender,
+  source mutation, client registration or actual login requires separate review.
+
+## 2026-11-02 — Injected IDC attempt, fake-only (draft)
+
+- Stacked on #120. Joins strict request and response components with exactly one
+  explicitly injected executor call; no default client, redirect/retry, login,
+  client registration, source mutation, credential persistence or live call.
+- Validates scope-region and policy before executor; reuses existing bounded JSON
+  transport reader for status/MIME/encoding/length/EOF/Close. Clock/parser run only
+  after successful Close; all failures return zero secret result and fixed error.
+- Four original test functions cover input snapshot mutation, exact request,
+  close-gated rotation/expiry, blocked Close withholding result, response+error,
+  302/401/header/length/budget/read/close/cancel/JSON/missing-rotation/clock failures
+  and preflight preventing executor. Rejected response bodies are not read.
+- Sources retained: official AWS CreateToken and community dd93f2e. Required IDC
+  rotation remains a documented conservative difference from optional official
+  refreshToken. Callback behavior is trusted, cooperative; plaintext memory is
+  not zeroized and bodies must never be logged/redirected. No account proof.
+- Actual official cloud Go1.26.2/cached deps/live disabled: final focused race x3
+  passed1.035s; full repository race passed(pigo30.669s, others passed/cached);
+  vet/gofmt/diff passed. Parent independent static review found no definite
+  blocker, not independently executed. No CI/master merge/deployment.
+
+## 2026-11-02 — Explicit caller-owned public IDC refresh (draft)
+
+- Stacked on #121. Public RefreshKiroIDC requires explicit scope/client inputs,
+  request/response budgets, lifetime/skew, clock and executor. Opaque result getters
+  return copied in-memory credentials/rotation/expiry only. No defaults, source
+  updates, persistence, login, registration, retries or live service calls.
+- Public typed error exposes ExecutorInvoked only: false means this helper did
+  not invoke it; true means server-side rotation outcome may be unknown even if
+  no/partial/all body was read or response/Close/parse/clock failed. Not a sent flag
+  or retry-safe classification. No raw error retained, no old-token validity claim.
+- Three original external-package tests cover success/getters/ownership, opaque
+  fmt/JSON (callback config deliberately not JSON-serializable), errors.As/nil/zero values,
+  preflight no dispatch, and each indeterminate rotation stage with single call.
+- Final official cloud Go1.26.2/cached dependencies/live flags off: focused public
+  IDC race x3 passed1.038s; final full repository race passed(pigo31.042s, others
+  passed/cached); vet/gofmt/diff passed. Independent parent static review found
+  no definite blocker; it did not independently run tests. No CI/master/deploy.
+- Required response rotation remains a conservative IDC subset. Executor must
+  not redirect/retry/log and must honor cancellation; plaintext is not zeroized.
+  Real endpoint/account/client compatibility remains unverified.
+
+## 2026-11-02 — Confirmed refresh expiry-anchor correction / #122 audit
+
+- A new reproducer FAILED against the prior implementation: fake Close advanced
+  clock by ten minutes and ExpiresAt became06:10 instead of conservative06:00.
+  RFC6749§5.1 lifetime is from response generation, not client Close completion.
+- Fixed only IDC attempt timing: validated clock before executor, second clock
+  after successful Close, reject backward/invalid/end>=expiry; parse anchored to
+  start. The pure parser and exported struct layout remain unchanged. Clock's
+  success-path invocation count changes1→2 and is explicitly documented.
+- Post-dispatch expiry/time failures retain ExecutorInvoked=true (rotation may
+  already have happened); pre-clock invalid/error/cancel are false with0 executor.
+  RefreshAfter may already be due, never extends expiry. Trusted same-clock
+  semantics are required; this is conservative, not actual server timestamp proof.
+- Added Close-delay reproducer and external boundary matrix for prezero/error/
+  year/cancel, ending backward/exact-expired/beyond/within; updated existing
+  callback-count tests. Fixed stale 'no public API' docs and recorded a scoped
+  audit of rotation omission, extension fields, secrets and real-service gaps.
+- Final official cloud Go1.26.2, cached dependencies/live disabled: focused IDC
+  race x3 passed1.055s; full repository race passed(pigo30.711s, others passed/
+  cached); vet/gofmt/diff passed. Independent child confirmed defect and static
+  correction review, no separate test run. No CI/master merge/deploy/live calls.
+
+## 2026-11-02 — Explicit successful IDC omission retention (draft)
+
+- Sources: official AWS CreateToken optional refreshToken and RFC6749§6 optional
+  replacement. Added separate RefreshKiroIDCWithOptions and controlled
+  WithKiroIDCRetainMissingRefreshToken; zero/duplicate option rejects before any
+  callback. Strict old entry and no-option behavior/config layout remain unchanged.
+- Only fully validated successful responses with genuinely absent refreshToken
+  retain the exact request-token snapshot. Explicit null/empty/duplicate/invalid
+  or transport/Close/clock/expiry failures still zero-return. Explicit returned
+  token wins even if identical; RetainedRefreshToken reports provenance only.
+- No source manager/lock/cache/storage/login. Caller must serialize same-generation
+  refresh across processes and fence late results against the actual generation;
+  a failed/unknown attempt never proves old-token validity or retry safety.
+- Three original external test functions compare strict/no-option/opt-in field
+  cases and late failures, no-callback invalid options, and16 independent fake
+  tokens concurrently with no global state. This is not same-token concurrency
+  safety. Independent child static review found no blocker; existing docs updated
+  to distinguish default strict path from new explicit retention option.
+- Actual official cloud Go1.26.2/cached dependencies/live off: focused response/
+  attempt/public/retention race x3 passed1.064s; full repository race passed
+  (pigo30.456s, others passed/cached); vet/gofmt/diff passed. Reviewer did not
+  independently execute. No real account/service/CI/master merge/deployment.
+
+## 2026-11-02 — Offline desktop refresh request subset (draft)
+
+- Pinned community oauth.ts dd93f2e endpoint constant/desktop branch supplies
+  POST prod.<region>.auth.desktop.kiro.dev/refreshToken with JSON refreshToken.
+  This is not official public API guarantee or proof of service-use permission.
+- Independently implemented internal constructor, bounded safe hostname shape,
+  asserted profile scope, explicit UA/token/context/escaped-byte budget. No default
+  desktop impersonation, arbitrary URL, IDC secrets, bearer header, executor,
+  discovery/login/CLI/desktop launch, persistence or real service request.
+- Three original tests cover exact URL/method/headers/one body field, escaped byte
+  budget, redaction, invalid inputs, cancellation and value snapshot ownership.
+  Secret body must not be logged/redirected; GetBody=nil not transport enforcement.
+- Actual official cloud Go1.26.2, cached deps/live off: focused desktop request
+  race x3 passed1.036s; repository race passed(pigo30.714s, others passed/cached);
+  vet/gofmt/diff passed. Independent child static review no blocker, no independent
+  execution. No CI/master merge/deploy. Desktop attempt remains next separate step.
+
+## 2026-11-02 — Single injected desktop refresh attempt (draft)
+
+- Stacked on #125; exact pinned desktop family, no official API guarantee.
+  Connects explicit request to shared bounded JSON/HTTP reader and existing desktop
+  parser; no new network client, login, token discovery/source update/persistence.
+- Preflight/start-clock before executor; one explicit invocation; successful Close
+  before end-clock/parser. Anchors expiry to start, rejects rollback/exact-expiry.
+  Bool means executor invoked, not sent/receipt/retry safety. Every returned failure
+  after invocation is true+zero result, including profile mismatch/Close/time.
+- Returned profile must match asserted scope; absence is not account proof.
+  Rotation absence retains exact prior token under existing desktop semantics;
+  null/empty reject and explicit rotation wins. No same-generation source locking.
+- Three original table-driven tests cover exact body/snapshot/scope/rotation/
+  Close-delay expiry, profile mismatch/null, token null/empty, transport/redirect/
+  headers/length/budget/Close/cancel/clock/expiry failures and preflight no invocation.
+- Official cloud Go1.26.2, cached deps/live off: focused desktop attempt race x3
+  passed1.039s; full repo race passed(pigo30.585s, others passed/cached); vet/gofmt/
+  diff passed. Independent child static review no blocker, not independent run.
+  No real credential/service/desktop/CI/master merge/deploy operation occurred.
+
+## 2026-11-02 — Explicit caller-owned public desktop refresh (draft)
+
+- Stacked on #126; public RefreshKiroDesktop config supplies all scope/token/UA/
+  budget/time/executor inputs. Opaque result and typed ExecutorInvoked error carry
+  no implicit source/cache/login/store. Scope/retention are not identity/validity
+  guarantees. The community endpoint is not an official third-party API promise.
+- Three original external tests cover actual wrapper fake wire, omission/rotation/
+  explicitly returned same token provenance, profile/expiry, secret getters/copies,
+  fmt/JSON/zero/errors.As, no-dispatch and post-dispatch unknown failures and Close.
+- The added same-token test initially had an incorrect expected NEW value and
+  failed; corrected only that test expectation. Production parser correctly
+  returned the explicitly supplied old value with retained=false throughout.
+- Final official cloud Go1.26.2/cached dependencies/live off: focused public
+  desktop race x3 passed1.041s; full repository race passed(pigo30.858s, others
+  passed/cached); vet/gofmt/diff passed. Independent child static review found no
+  blocker, not independently executed. Prior pre-final runs are not final passes.
+- No real service/account/desktop/credentials, CI dispatch, master merge or deploy.
+  Caller controls generation serialization and must prohibit retries/redirects/
+  secret logging; arbitrary callback behavior remains trusted/cooperative.
+
+## 2026-11-02 — Caller-owned refresh/runtime handoff and convergence (test-only)
+
+- Stacked on #127; no production change. Both public IDC/desktop refresh APIs feed
+  a caller-authored expiry-check Credentials callback into public registration/
+  StreamSimple. Synthetic frames/fixture helpers only support data construction.
+- Six scenarios assert access only in Authorization, no access in JSON or other
+  headers/URL, no refresh/client secrets in runtime URL/body/headers; wrong scope
+  and exact expiry suppress runtime. Valid-then-expired second request does not
+  renew implicitly. One refresh only; registration invokes no source or executor.
+- Independent child review found a coverage wording gap, not a production leak:
+  added explicit non-Authorization access-header/URL assertions and corrected the
+  helper description before final tests. No concurrency blocker found.
+- Final official cloud Go1.26.2/cached deps/live off: focused handoff race x3
+  passed1.041s; final repository race passed(pigo30.588s, others passed/cached);
+  vet/gofmt/diff passed. Independent review was static, not separately run.
+- Read-only upstream main rechecked06:43UTC: stilldd93f2e/v0.12.3 committed
+  2026-10-29T22:21:36Z. No new main delta. Existing tag-list gap is not hidden.
+- Added convergence review: connected APIs/test limits, live/identity/executor/
+  raw-persisted-history/IdP/extension gaps, and integrated review before further
+  features. No real service/account, source store, CI/master merge/deploy.
+
+## 2026-11-02 — v0.18.0 integration and release validation
+
+- Integrated the original heads of 91 open PRs from the Kiro and runtime stacks.
+  Reconciled the Kiro retry formatting branches and the earlier adapter design.
+- Review reproduced three defects. Kiro now checks the original conversation
+  before a generic clone can lose content, Agent records context usage only
+  on successful completion, and Codemode copies JSON without invoking an
+  inherited descriptor getter. Added regressions through the public entry points.
+- Windows amd64, Go 1.26.4, live flags off. Root and examples passed uncached
+  race tests, vet and module verification. The external ToolCall compatibility
+  probe passed. The Codemode prelude suite passed all 30 cases in both Node VM
+  and the pinned QuickJS WASM runtime.
+- Updated package and examples versions and documented the AgentEvent and
+  ToolCall migration points. Kiro endpoint and account behavior remain unverified.
+
+## 2026-11-03 — opt-in in-process receipt compatibility foundation
+
+- Based on v0.18.0 master, independently of the incompatible #144 struct-field
+  additions. Preserves old public layouts, Invoke, execution JSON and persistent
+  formats; positional literal regressions cover the affected API surfaces.
+- New direct Agent/Codemode wrappers return a bounded, separate host receipt
+  handle. Central per-body reservation/sealing covers static/dynamic children,
+  cancellation, panic and output-hook/projection failure. No report means
+  unknown; pending calls remain observable after a canceled caller returns.
+- Actual temporary-file commit test retains commit through hook failure; missing
+  capture refuses before file I/O. Real Agent and checkpoint runners reject
+  nested capture before receipt-required tool bodies, not before their own
+  model calls or persistence bookkeeping. No automatic retry or write defaults.
+- Offline Go1.26.2: full root tests and vet passed; Agent, Codemode, native adapter
+  and collector race tests passed, including independent review. No CI, live
+  service, local user computer, Eino dependency or deployment was used.
+- Deliberately not a full #144 repair: no model-loop/session/checkpoint receipt
+  persistence, JS receipt projection, restart recovery or write-stack replay.
+  #144 and dependent write-tool merge blockers remain pending separate phases.
+
+## 2026-11-03 — session-backed direct receipt calls (phase 2)
+
+- Adds an explicit single-use direct-call binding over #150, not a model-loop
+  journal or checkpoint extension. Old public types, runtime payloads, headers
+  and JSONL batches are unchanged. No write-tool-stack migration or defaults.
+- Atomic intent and final pairs each preserve legacy Pending:true. New reads
+  validate scope/epoch, branch/head, fence/intent IDs, phase and bounded facts.
+  Pending histories refuse execution after restart. Only the original live
+  handle can be finalized; no replay, reset or caller-invented effect receipt.
+- Tests cover real file commit/hook failure, Codemode child effects, lost ACK
+  before/after execution, authorization changes during permission and storage,
+  concurrent binding CAS/Finalize, fork, compaction, bounds and malformed pairs.
+  Existing torn-tail repair can trim a partial final; surviving intent remains
+  fenced. A newline-terminated corrupt batch is rejected instead.
+- Actual current-writer/baseline-5dcf3c4-reader probe passed: old JSONL reader
+  browses both custom receipt payloads, old PrepareRun returns ErrInterrupted.
+  New reader also accepts valid legacy runtime history. This is read
+  compatibility, not permission for unaware old runners to resume new writes.
+- Offline cloud Go1.26.2: full root tests/vet and five relevant race packages
+  passed; independent review and receipt-focused race passed. Actual checkpoint
+  nesting test rejects this mode before business/receipt I/O, while accurately
+  allowing checkpoint's own prior persistence bookkeeping.
+- Limits remain: effects and log append are not one transaction, pending intent
+  lacks live partial facts, durability follows Storage, and crashes may need
+  external investigation. #144/write stack, model-loop receipt persistence and
+  checkpoint recovery remain separate blocked work. No CI/live service, local
+  user computer, extra dependencies, merge or deployment.
+
+## 2026-11-03 — opt-in non-persistent model receipt runs (phase 3)
+
+- Adds Runner.RunWithReceipts without changing old public layouts, snapshots,
+  events, Invoke or journal formats. A private mode parameter reaches the loop;
+  no inheritable context grant can turn legacy nested execution into this mode.
+  Legacy Runner/Engine and checkpoint entries block capture; non-nil journals
+  are rejected before a new receipt run starts. No durable model recovery added.
+- Registration closes in the actual runner goroutine before done, while pending
+  host/child bodies retain their original handle until they really exit.
+- Error scheduling is intentionally unchanged. A regression actually appends to
+  a file twice after a committed first-call error: the model can call again and
+  both receipts survive. Capture is not a retry barrier, idempotency policy or
+  automatic write safety. Host policy remains separate, not implicitly granted.
+- Offline cloud Go1.26.2: full root tests/vet, relevant six-package race and
+  independent review/race passed. Tests include real file/hook/panic/cancel,
+  dynamic model turns, cumulative capacity, permissions, Codemode late bodies,
+  nested legacy/checkpoint rejection and concurrent same-Runner handle isolation.
+- Temporary composition with #149 filesystem production code showed a small
+  migration: require capture before create/replace/edit I/O, report immediately
+  after publication and remove #144 LocalEffect fields. Five integration race
+  tests passed through real model/Codemode/session direct paths. This experiment
+  did not port the entire old filesystem test suite or docs, and is not a
+  published filesystem migration or permission to merge that stack.
+- Model session/checkpoint persistence and write-stack replay remain separate;
+  no large recovery framework, defaults, dependencies, CI, user-local computer,
+  live model, merge or deployment was introduced.
+
+## Compatible filesystem integration (2026-11-03)
+
+- Reintroduced the complete #149 filesystem package on #152 without #144's
+  incompatible public fields. Production migration changes only the three write
+  entry guards and shared post-publication receipt reporting. Core defaults,
+  dependency manifests and CI workflows remain unchanged.
+- Preserved all original 80 tests and two examples; migrated commit assertions
+  to actual immutable host receipts. Added five model/Codemode/direct-session/
+  legacy-entry integration tests and documented the superseded PR topology.
+- Offline Go1.26.2 full root tests and full root race passed, as did vet,
+  examples tests, module verification and Windows/Darwin test compilation
+  (compilation is not runtime/platform support). Independent fstools race passed.
+- Historical unkeyed public struct literals compile. A real create_file call
+  persisted via the direct session binding was reopened by the old baseline:
+  it browsed both raw receipt payloads and refused continuation with ErrInterrupted.
+- Review caught a potentially vacuous legacy edit guard fixture; it now uses a
+  valid existing source, while replace uses different existing content. Both
+  assert refusal and unchanged bytes. Permission/socket fixtures may skip under
+  restricted OS privileges; no privilege bypass or external service was used.
+- Nonpersistent model operation and repeated-call risks remain explicit. No
+  model journal/checkpoint recovery, automatic retry safety, merge, CI,
+  deployment, user-local execution or Eino dependency was introduced.
+
+## Explicit host-executor tool adapters (2026-11-03)
+
+- Added opt-in run_command/run_python factories in agent/exectools. They accept
+  trusted host functions, never discover/start a process or install a runtime.
+  Only bounded args/source are model-controlled; backend, tenant, environment,
+  filesystem/network and actual resource/termination policy remain host-owned.
+- Require capture/current permission before dispatch; recheck before output.
+  Synchronous deadlines request cancellation, not kill/reap guarantees. Shared
+  bounded stdout/stderr writers seal on return/panic, discard excess without
+  accumulating it, and safely encode invalid UTF-8/control bytes with flags.
+  Nonzero exits preserve bounded Agent diagnostics with IsError; Native keeps
+  its existing rejection contract. Backend errors expose only safe messages.
+- No inferred commit on start/success, no retry or sandbox claims. Explicit host
+  reports survive downstream failure. No presets, old structs/Invoke, runtime
+  scheduling, dependency manifests, persistence formats or CI workflows changed.
+- Mock/public API tests cover strict raw and host arguments (including null,
+  case aliases and duplicate keys), budgets, concurrent output/tenant closures,
+  late writes, cancellation/deadline versus noncooperative body exit, explicit
+  commits through error/panic/hook/validation, Native leaf policy and model runs.
+- Offline Go1.26.2 full root tests, relevant six-package race, vet, module verify,
+  historical unkeyed literal compilation, Windows/Darwin test compilation and
+  independent mock race/review passed. Cross-compilation certifies no backend.
+- Corrected receipt documentation's pre-#153 migration-status sentences. No
+  actual shell/Python backend, external service, install, live model, CI,
+  user-local execution, merge or deployment was performed.
+
+## 2026-11-03 - User-local PR review and v0.19.0 preparation
+
+- Execution was verified on the user's JACKIE-LAPTOP Windows host. The desktop
+  project inventory identified V:\gitdownload\pi-go as local; that original
+  checkout was clean and remained unchanged. Work used an isolated checkout in
+  the Codex task directory and the host's existing WSL2 distribution.
+- Reviewed #150 -> #151 -> #152 -> #153 -> #154 at their current heads, plus
+  independent docs #138/#142. #153 replaces #139-141, #143 and #145-149;
+  #144 is excluded. Root and agent AGENTS.md were read; no .agents directory
+  exists in this repository.
+- Local codex review found one concrete regression: receiptcapture.Block(nil)
+  panicked before the Engine's existing context normalization. All five public
+  Engine entry cases reproduced it. The fix preserves non-nil contexts and
+  normalizes nil before applying the block. Five regression cases now pass.
+  A focused local codex re-review found no actionable issue; its own test attempt
+  was blocked by its read-only sandbox, so the tests were run separately below.
+- The fix was pushed to #152 as 9906351d580fb2651df50d714bd6fd56f3d5ca84.
+  The local integration carries the identical patch as 0f3bc31.
+- Windows Go1.26.4: uncached full root tests, root vet and module verification,
+  examples tests/vet, explicit compat_toolcall and external historical positional
+  literals passed. After the fix, Agent/collector/checkpoint/Codemode/session
+  tests and target-branch Agent/collector vet passed again.
+- Local WSL Linux Go1.26.2: uncached full root race, full root vet and examples
+  race passed. After the fix, all Agent/Codemode/collector packages passed race
+  again. Locked dependencies came from existing Windows/WSL caches; no module
+  versions were changed for setup. All live-service flags stayed disabled.
+- A real new direct-call API wrote a file and JSONL receipts. The actual v0.18.0
+  baseline then opened the log, browsed both receipt records and returned
+  ErrInterrupted from its old PrepareRun. Old positional literals built with both
+  baseline and current source. PR #142's exact new configuration compiled and
+  constructed inertly without starting an MCP server.
+- v0.19.0 notes, package version and examples pin are prepared. CLI/provider
+  and examples tests passed after the version changes; the Windows CLI built
+  successfully and reported pigo 0.19.0.
+
+## 2026-11-04 - Reviewed stack integration for v0.19.0
+
+- After the user's explicit confirmation, #150, #151, #152, #153 and #154 were
+  merged in that dependency order, followed by independent docs #138 and #142.
+  Stacked PRs were retargeted to master only after their prerequisites merged.
+  Merge commits preserve the original histories, including the #152 fix.
+- Master ee1061b27e230f3a757067b8d8291da868e8e069 has exactly the same file tree
+  as the locally reviewed and tested integration before its version bump.
+  No PR Approval was submitted. #144 and the superseded filesystem PRs were
+  not merged; OCAI was outside this task.
+- The release follows the existing five-platform CLI archive, bundled-license
+  and SHA256SUMS convention. Archive building and final remote verification
+  must use the merged release commit; a locally prepared version is not itself
+  a published release or a downstream dependency upgrade.
+
+## 2026-11-05 - Open filesystem and receipt PR review
+
+- Reviewed #139–141, #143–149 against the v0.19.0 integration. #153 already
+  contains the nine filesystem proposals. #150–152 provide the receipt API
+  used by the integrated tools. The corrections below apply to that implementation.
+- Reject duplicate and incorrectly cased filesystem argument names before
+  execution. A raw read request could previously select the second of two
+  different paths. A staging-time permission denial now reports that the
+  destination was not published; a failed destination syscall remains uncertain.
+- Bound Codemode local and remote status fields before recording or forwarding
+  them. Agent, Codemode and its native adapter preserve typed-nil tool failures
+  and their receipt facts without dereferencing a missing error payload.
+- Windows Go 1.26.4 passed the offline root module tests and vet. WSL Linux Go
+  1.26.2 passed race tests for agent, fstools, codemodetool, codemode and
+  agent/session, including Linux publication regressions, and vet for the
+  agent and codemode package trees.
+
+## 2026-11-05 - Local SuperAgent prototype in the pi-go module
+
+- Added `superagent.SuperAgent` and `cmd/pi-superagent` to this repository. The
+  coordinator uses Pi's existing Runner for routing and per-task worker runs,
+  and session JSONL storage for event admission, subscriptions and snapshots.
+- Verified separate task histories, cross-source follow-up, admission deduplication,
+  report replay and continued stdin service while workers run. Abruptly terminating
+  a worker process leaves an interrupted event on reopen. No automatic replay of
+  an already-started call is attempted.
+- Windows Go 1.26.4 root tests and vet passed with live-model flags off. WSL
+  Linux Go 1.26.2 race passed for the new package and command. Built and ran
+  the Windows CLI offline. Production messaging connectors, external watchdog
+  and remote execution are outside this local prototype.
+
+## 2026-11-05 - SuperAgent tool outcomes and recovery review
+
+- PiWorker uses the receipt-aware Runner and waits for admitted executors to
+  exit, including late Codemode children. Reports distinguish a completed model
+  run, a length-limited answer and a run that ended after tool errors. PiRouter
+  rejects partial/failed decisions and honors the provider stream veto hook.
+- A started worker with an uncertain result fences its task. Previously admitted
+  follow-ups are blocked, including late attachments. Trusted reconciliation
+  names the exact cause event and records a note; only fresh instructions can
+  resume work. Offline reconciliation does not dispatch queued events.
+- Reports retain host-reported local commits independently of tool success.
+  Raw callback errors are available to the current host through FailureCause.
+  CLI returns the journal error if its terminal write fails with stdin open.
+- Verified real Linux create_file publication followed by a rejected result,
+  persistent receipts, blocked follow-up after a process kill following an
+  external write, and Windows byte-lock failure during the final append.
+  Windows offline root tests and vet passed. Linux race passed for superagent
+  and its CLI. Rebuilt the local Windows EXE and ran the offline demo.
+
+## 2026-11-05 - Live SuperAgent task control
+
+- Added run-targeted steering and cooperative cancellation, and live task
+  subscriptions. Targets use task ID and the source event identity so an old
+  command cannot steer or abort a later invocation. PiWorker polls steering
+  through its native receipt-aware Runner hooks; queued controls settle as
+  delivered or undelivered. Progress carries bounded, task-scoped phase updates.
+- The local JSONL CLI supports status, steer, abort, subscribe and unsubscribe
+  on the running process. A control error is reported for that frame. Steering
+  responses correlate admission and delivery. EOF drains outstanding receipt
+  responses before the final state is printed.
+- Verified native one-at-a-time and all steering delivery, ordinary queued
+  follow-ups, other-task isolation, late local commits after abort, review
+  fences, stale targeting, slow readers, unsubscribe and full-duplex CLI I/O.
+  Windows offline root-module tests and vet passed. WSL Linux race passed for
+  superagent and cmd/pi-superagent. Built the Windows EXE and exercised the
+  local demo and interactive control protocol without provider calls.
+
+## 2026-11-05 - SuperAgent review fixes and Agent parity
+
+- Reproduced the duplicate-path write using a local Responses server, the
+  native receipt-aware Runner and Linux `atomic_replace`. The Agent now
+  rejects an executable model batch with ambiguous wire arguments before
+  dispatch. Google and Mistral also retain the original argument object for
+  this check. All eight filesystem tools validate direct raw and parsed inputs.
+  The regression checks both file contents and zero receipts, plus a successful
+  one-path replacement.
+- PiWorker counts top-level completions against the model's requested calls.
+  Nested success and failure cases cover both `Terminate` and `FinishTurn`,
+  including parent-linked commit receipts and the resulting review status.
+- Failed and aborted Pi runs retain their accepted task transcript and
+  delivered steering. The journal stores the failure status and receipts
+  alongside that snapshot. Regression tests cover reopening the journal,
+  operator reconciliation, a fresh follow-up, and progress callback failure.
+- Windows offline root-module tests and vet passed. Linux race tests passed for
+  agent, agent/fstools, internal/jsontext, pkg/pigo, superagent and cmd/pi-superagent.
+  Rebuilt the local Windows EXE and ran its offline demo through IDLE.
+
+## 2026-11-05 - Embedded SuperAgent controls and remaining review fixes
+
+- The CLI dispatches input independently of stdout. Its ordered frame queue
+  spills to OS temporary files during backpressure. A real tool regression
+  blocks stdout with 300 status requests, aborts before file publication,
+  and lets another task complete before output resumes. Broken-output cleanup,
+  initial subscription progress at EOF and steering receipt delivery after a
+  terminal journal write failure have separate coverage.
+- Direct Go calls also cancel the worker with an unread progress subscription.
+  Completed workers expose a finalizing phase until their report is committed.
+  Canceling a subscription immediately frees its slot. Added an executable Go
+  package example and made service embedding the first documented entry point.
+- New tasks persist independent provider session IDs. Old journals retain
+  their original provider affinity. PiWorker restores the selected model with
+  current host configuration and routes JSON-shaped steering as ordinary text.
+  Linux filesystem publication now releases staging before classifying a host
+  permission panic, including a typed-nil error.
+- Windows offline root-module tests and vet passed. Linux race tests passed
+  for agent, agent/fstools, superagent and cmd/pi-superagent. The offline CLI
+  demo reached IDLE. Changes are local.
+
+## 2026-11-05 - SuperAgent library development plan
+
+- Added [the staged development plan](superagent-development-plan.md) and
+  linked it from the package README. It maps PDF sections 2–7 to nine
+  milestones with dependencies, implementation boundaries and acceptance tests.
+- The first executable slice connects a Worker report to the resident Router
+  and a durable host reply. Unsolicited discovery of new business work and
+  speculative execution are deferred. Recovery of authorized work and
+  independent Watchdog supervision remain in scope.
+
+## 2026-11-05 - Same-chat and snapshot optimization integration
+
+- Combined draft #160 at `4670b5f` and all three #161 commits ending at
+  `420209a` on an isolated branch targeting #160. Original branches and their
+  #159 shared base remain unchanged and unmerged.
+- Terminal correction evidence reads the same validated decoded snapshot;
+  replay still checks saved bytes, and main/task/control authority boundaries
+  remain intact. Added before-replay and read-only evidence assertions.
+- Remote Go 1.26.10 offline tests/vet, full race, examples, repeated snapshot
+  and correction recovery tests, two-task acceptance and original benchmarks
+  passed. Independent review found no blocker. No CI, live provider, local
+  computer, extra billed task, merge or deployment was used.
+- Exact inputs, verification scope and limitations are recorded in
+  [the integration report](superagent-m2a-snapshot-integration.md).
+
+## 2026-11-05 - SuperAgent shared-state lease slice
+
+- Based on M5a draft #169, added optional same-host SQLite domain leases and
+  fenced coordinator append. Existing JSONL APIs and the single coordinator
+  scheduler remain unchanged. Driver selection and remaining M6 scope are in
+  [M6a](superagent-m6a.md); this is not multi-host or production validation.
+- Read-only locked JSONL snapshots reject torn tails without repair. Atomic
+  import retains legacy single/batch records, task/provider/delivery identities,
+  subscriptions, private snapshots, reply attempts and external-effect review.
+- Offline full tests, vet, full race, storage and integration race repeated 20 times,
+  external examples tests/vet passed on Linux amd64 Go 1.26.10. Real subprocess
+  contention, kill/recovery and SIGSTOP/takeover/SIGCONT fence old writers.
+  Independent review's URI space-escaping finding was fixed and re-reviewed.
+- No live provider/platform, production DB, user-local task, manual CI, merge or
+  deployment. Shared files require a trusted private local directory. External
+  effects still need exact-operation evidence; lease fencing cannot undo them.
+
+
+## 2026-11-05 - SuperAgent fixed-device protocol slice
+
+- Based on draft #170's exact tree, added optional host-authenticated fixed-device
+  backend protocol with durable request identity, acknowledgments, query/stop,
+  monotonic epoch fences and non-replaying restart. See [M7a](superagent-m7a.md).
+- Two independent subprocess devices cover request/response loss and process
+  death after effect before acknowledgment. Native Pi/M4/M6 integration covers
+  new Worker input while waiting, coordinator replacement, review/quota retention
+  and one original-call completion. Device credential canaries stay off the wire
+  and out of model, snapshots, coordinator log, replies and device registry.
+- Independent review fixes preserve receipt fingerprints across regressions,
+  reject impossible replay transitions and persist restart uncertainty correctly.
+- Explicit Create is provisioning only; Open never recreates missing state. No
+  real devices, user computer, model/provider, new access credentials, extra paid
+  execution, manual CI, merge or deployment. This is not fleet scheduling,
+  device-global durable quota, a persistent runner or power-loss validation.
+- Final Linux amd64 Go 1.26.10 root readonly tests, vet, full race, device race
+  x20 and separate examples tests/vet passed. Optional full module inventory
+  could not complete with GOPROXY=off because some indirect-module metadata is
+  uncached; no dependency versions changed and no manual CI was requested.
+
+
+## 2026-11-05 - SuperAgent read-only Watchdog slice
+
+- Based on unmerged draft #171's exact tree, added independent diagnostic
+  session/model memory and injected clock, with a persistent bounded patrol
+  cursor and atomic evidence/recheck records on the existing fenced writer.
+  See [M8a](superagent-m8a.md). No retry/cancel/send/new-task actions are exposed.
+- Normal slow work, queue waiting, live tools, explicitly observed device
+  disconnection, suspected model loops and review barriers remain distinct.
+  Uncertain external effects keep review; stale results are historical only.
+- Failing tests preceded implementation. Independent review corrected goal
+  provenance, reconciled-ready handling, numeric model-memory fidelity, settled
+  task classification and strict replay memory/source validation.
+- Fake-clock, controllable-model, restart/cursor, append failure and actual
+  sharedsqlite epoch-takeover fixtures are included. No provider/real device,
+  user computer, extra paid execution, manual CI, merge or deployment was used.
+- This is the read-only M8a slice, not an authorized repair executor, independent
+  out-of-process control plane, automatic notification or full M8 completion.
+- Final Linux amd64 Go 1.26.10 readonly tests, vet, full race, Watchdog race
+  x20 and separate examples tests/vet passed. Optional full module inventory
+  remains blocked by uncached indirect metadata with GOPROXY=off; dependencies
+  are unchanged. Final independent rereview found no remaining blocker.
+
+
+## 2026-11-05 - SuperAgent offline evaluation baseline slice
+
+- M9a is stacked on unmerged draft #172's exact tree. Added a deterministic
+  300-delivery/20-request experiment with separate expected routing and observed
+  ledgers, simulated timing/budgets, five repetitions and a checked-in compact
+  baseline covering full-result SHA-256. See [M9a](superagent-m9a.md).
+- Two structural scheduling surrogates are implemented; two single-Pi prompt
+  baselines and the pre-M1 historical baseline explicitly remain missing.
+  Real model calls are zero and tokens are null, not estimated usage.
+- Fixed-service Router load sweep covers 1/5/10/20/40 events per virtual minute,
+  maximum batches 1/8 and five repeats. The synthetic bypass fixture reduces
+  scripted calls but shows no completion latency improvement.
+- Actual runtime tests separately cover 300 valid Submit attempts, input/report/
+  reply identity, failure isolation, worker results, journal reopen deduplication
+  and legacy Open compatibility. These are not wall-time model benchmarks.
+- Independent review identified zero-stop event scheduling and correctness
+  scoring gaps; both have regression coverage. No production runtime or journal
+  format, dependency, provider configuration or default behavior changed.
+- No user computer, live service/model/device, credentials, extra paid execution,
+  manual CI, merge or deployment was used. This is not final M9 acceptance.
+- Linux amd64 Go 1.26.10 readonly full tests/vet/race, focused evaluation race
+  x5, separate examples tests/vet and deterministic CLI baseline checks passed.
+  Final independent review found no remaining blocker. PowerShell was not
+  available on this cloud verification host; no Windows validation is claimed.
+
+
+## 2026-11-05 - SuperAgent batch/background composition acceptance
+
+- Inspected draft #173 exact HEAD/tree before implementing the M4a deferred
+  batch-main item. M6a already exposes BatchRouter plus Background through
+  OpenMainJournal. Direct integration tests passed without a production change;
+  no reproduced runtime defect or new constructor is claimed. See [M4b](superagent-m4b.md).
+- Added public combined-constructor coverage for ordered mixed backlog and
+  reversed decisions, original Worker/provider/delivery identity, private output,
+  stop plus late commit, authorization/quota/stale capability and unknown barriers.
+- Native Pi protocol acceptance now runs in single and batch main modes. Real
+  same-host SQLite takeover covers held inference, stale-owner fencing, exact-ID
+  backend recovery, no Start replay and terminal reopen deduplication.
+- Corrected the outdated plan and M4a limitation; durable remote execution still
+  remains out of scope. Production code, journal format and dependencies unchanged.
+- No live model/service/device, user computer, Codex/extra paid execution, manual
+  CI, merge or deployment. Linux-only verification and independent review results
+  are recorded in the PR; no PowerShell or Windows execution is claimed.
+
+
+## 2026-11-05 - SuperAgent public history admission security correction
+
+- Based on draft #175 exact remote HEAD cc3bb8ef / tree bcef2e95. The public
+  probe and tests-first single/batch regressions reproduced denied/noise text
+  leaking through thread links, trigger JSON and ignored report backlinks.
+- One immutable root-admission predicate now protects all history nodes, task
+  associations, reports and offered refs. It preserves accepted/model-ignored
+  input, authorized fanout, privileged non-noise history and host audit records.
+- Regression coverage includes all ignored reasons, direct reference guesses,
+  native Pi tools and saved snapshots, paginated graph traversal, cache/cursors,
+  duplicate policy changes, reopen and pre-gate journal upgrade. See
+  [history admission boundary](superagent-history-admission.md).
+- Existing leaked model snapshots/derived content cannot be undone by filtering
+  the index. The upgrade note requires trusted-host review of potentially
+  contaminated sessions rather than claiming restart sanitizes them.
+- Full readonly tests/vet, serialized full race (-p=1), examples tests/vet and
+  focused race x20 passed. Independent security review found no blocker and
+  passed focused race x3. Initial parallel race and one repeated stream-test
+  run hit the unchanged pkg/pigo two-second deadline; base stream x20 and the
+  final full race passed. No provider code/test changes hide this sensitivity.
+- No journal schema/dependency change, live service/model/device, user machine,
+  Codex/extra paid execution, manual CI, merge or deployment. Linux amd64 Go
+  1.26.10 only; PowerShell/Windows/macOS execution is not claimed.
+
+## 2026-11-05 - Correct GitHub edited-comment actor binding
+
+- Full-stack review reproduced a rejected legitimate edit on draft #175's tree:
+  authenticated editor 7 editing author 8's comment failed the original
+  sender-equals-author check. GitHub documents [editing others' comments](https://docs.github.com/en/communities/moderating-comments-and-conversations/managing-disruptive-comments#editing-a-comment)
+  and identifies the initiating actor as [sender](https://docs.github.com/en/webhooks/webhook-events-and-payloads#the-sender-property).
+- Only supported edited issue/review comments may have distinct author and
+  sender. Principal stays bound to authenticated sender; author must independently
+  be a canonical positive uint64. Creation/submission equality is unchanged.
+- Red regressions preceded the fix. Tests cover both comment types, editor allow/
+  deny policy, host intent, spoofed sender/target/object, malformed author, durable
+  replay and edited own-message echoes without cross-type ID collisions.
+- Independent read-only review and channel tests found no blockers. Linux amd64
+  Go 1.26.10 readonly full tests/vet/race, focused GitHub race x20 and separate
+  examples tests/vet passed using cached modules with live-test flags disabled.
+- The parallel history-admission visibility security fix is not included;
+  composition still requires verification. No dependency/journal format change,
+  live GitHub/provider/device, user computer, credentials, Codex/extra paid
+  execution, manual CI, merge or deployment. PowerShell/Windows/macOS untested.
+
+
+## 2026-11-05 - SuperAgent optional PostgreSQL journal development slice
+
+- Built M6b on #178 exact HEAD 6292543b / tree 3fd1dd4. New optional
+  sharedpostgres implements the existing LeasedJournal without changing the
+  scheduler, JSONL or SQLite APIs. The host supplies database/sql, TLS/credentials
+  and one-time schema migration; the library opens no DSN or server.
+- Post-lock clock_timestamp and final original-grant checks fence owner/epoch/seq
+  in one transaction. An independent monotonic deadline cancels ownership despite
+  blocked I/O. Unknown or late COMMIT receipts never update cache or retry work.
+- bytea imports preserve raw header/LogItem bytes, including legacy batches,
+  without repairing or writing the quiesced source. Only absent domains import.
+- Offline test-first scripts cover lease timing, rollback, uncertainty, corruption,
+  fencing, caller-owned DB and migration. Eight live PG tests are explicitly
+  double-gated and were NOT run: no PostgreSQL service was available. Independent
+  read-only review found no blocker and passed offline race x5 and vet.
+- Real PostgreSQL, independent processes/hosts, TCP partitions and database restart
+  remain unverified; keep the PR draft. See [M6b](superagent-m6b.md) and its package
+  README. No local user machine, credentials, service, Codex/extra paid task,
+  manual CI, merge or deployment; remote Linux Go 1.26.10 only.
+
+## 2026-11-05 - SuperAgent durable local helper development slice
+
+- M4c builds on #179 HEAD ec9bbe6b / exact tree c60213e4. The isolated local
+  checkout used an equivalent-tree commit; publication is parented to the exact
+  remote HEAD, with the final tested tree compared before branch creation.
+- Added optional agent/background/helper: explicit fixed binary/tool registration,
+  immutable operation/request/original epoch, durable admission/claim/stop/receipt,
+  independent Linux helper processes, and query-only recovery. Existing Local,
+  coordinator and device APIs remain unchanged; no dependencies added.
+- Test-first missing API failure preceded implementation. Isolated self-written
+  subprocesses prove coordinator death without relaunch, helper death remaining
+  unknown, duplicate-claim prevention, stop and cancellation-ignoring late commit,
+  old-epoch revocation and native coordinator review/completion integration.
+- Independent review led to durable stop redelivery, fail-closed corrupt stops,
+  terminal-before-stop-notification ordering, tombstone/quota and replay checks,
+  escaped receipt size bounds and a bounded native admission handshake. Direct
+  forged-record regression cases reject impossible admissions and transitions.
+- Only durably observed facts are preserved: Local does not expose synchronous
+  call receipts until return, so death before then remains unknown with quota.
+  No PID/exit-code/no-effect inference, replay, rollback or detached-body guarantee.
+- Full checks, repeated helper race, exact tree and independent review results are
+  recorded in the draft PR. See [M4c](superagent-m4c.md). No production service,
+  real device, user computer, credentials, live model, Codex/extra paid execution,
+  manual CI, merge or deployment. Linux process-crash evidence is not host reboot,
+  power-loss, adversarial filesystem or Windows/macOS acceptance.
+
+## 2026-11-05 - SuperAgent GitHub HTTP protocol development slice
+
+- M5b builds on #180 HEAD d4b50e45 / exact tree 3fe26ff3. The isolated remote
+  checkout uses an equivalent-tree commit; publication uses the exact remote
+  parent and compares the final tested tree before branch creation.
+- Optional GitHubWebhook validates bounded raw-body HMAC, unambiguous supported
+  events, exact repo/PR targets and independent host actor/intent authority.
+  GitHub headers are unsigned: the durable event ID is a raw-body digest, and
+  duplicates surface ErrGitHubReplay plus current evidence/original admission.
+  Identical signed bodies cannot prove independent event identity or freshness;
+  host audit and independent verification remain required. No automatic send.
+- Optional GitHubTransport posts only through host client/endpoint/destinations,
+  refuses redirects, validates exact 201 comment receipts, respects the later
+  rate hint and never creates a token, retries POST or scans to prove absence.
+  Unknown outcomes remain fenced across restart; no platform idempotency claim.
+- Test-first missing-API failure, real httptest HTTP regressions and independent
+  read-only review cover forged/raw-byte/header replays, cross-repo isolation,
+  editing actor, grant drift, approved send/echo and lost-ack recovery. Review
+  fixed dual-hint early retry and changed-grant replay receipt contracts.
+- Full offline validation and exact final-tree evidence are in the draft PR.
+  See [M5b](superagent-m5b.md). No real GitHub/GHES, existing credentials, user
+  computer, live model, Codex/extra paid execution, manual CI, merge or deployment.
+
+
+## 2026-11-05 - SuperAgent durable device chain integration slice
+
+- M7b builds on draft #181 HEAD 998760a7 / exact tree 385244ee. It composes
+  existing M6a sharedsqlite, M7a HTTP device and M4c helper implementations;
+  production code, journal formats, module files and dependencies are unchanged.
+- External-package fixtures run only our own endpoint/native test executables
+  over loopback. Real endpoint process death leaves the helper alive; both
+  registries reopen without dispatch, and recovery observes the original ID.
+- Per-owner transports retain their original epoch. Explicit M6 Close/reopen
+  takeover rejects all old commands before a replacement device command; native
+  pre-effect permission remains bound to the original manifest epoch.
+- Lost Start/Stop acknowledgments, faults before/after helper calls, native
+  process failure, stop-before-start tombstones and late commits retain the
+  existing unknown/review/quota barriers. Direct M7 inspection is read-only;
+  the existing M4 replay watcher redelivers its persisted same-ID stop intent.
+- Private result canary is produced in helper snapshots but absent from device
+  HTTP/registry, coordinator state, Worker inputs, reports and replies. No raw
+  result transport, credential-in-arguments guarantee or external exactly-once
+  claim is added. Fixtures cover process crashes, not host reboot/power loss.
+- Verification commands, exact final-tree evidence and independent review are
+  recorded in the draft PR; see [M7b](superagent-m7b.md). No real device/model,
+  production service, user computer, Codex/extra paid execution, CI trigger,
+  merge or deployment. Real cross-host/TLS/production authority remain untested.
+
+
+## 2026-11-05 - SuperAgent host-authorized Watchdog refresh slice
+
+- M8b builds on draft #182 HEAD f13027d0 / exact tree d1a10893. Check/RunWatchdog
+  remain read-only; a separate explicit host authorizer binds one current finding,
+  task revision, original run/delivery and background operation to one Inspect.
+- Durable reservation precedes the original backend's exact-ID read. Duplicate
+  calls/restart return the same record without repeating Inspect; pending never
+  auto-resumes. Atomic result + background facts preserve unknown/review/quota
+  barriers and the existing task's single private completion on proven exit.
+- New task input, newer finding, changed facts or old runtime invalidate unused
+  decisions. Replay compares durable task facts and reconstructed running delivery,
+  not process-local counters. SQLite takeover fences late authorization/results.
+- Test-first API failure, offline boundary/replay/privacy/concurrency tests and
+  external example cover the slice. Independent review identified incomplete
+  replay freshness checks; fixed and re-reviewed with direct replay counterexamples
+  plus legitimate active-Worker and terminal close/reopen coverage.
+- Exact frozen-tree validation and publication evidence are in the draft PR; see
+  [M8b](superagent-m8b.md). No Start/Stop/retry/Steer/new task or general repair API,
+  real device/model/platform, user computer, Codex/extra paid execution, manual CI,
+  merge or deployment. Existing background watchers retain their own contract.
+
+## 2026-11-05 - GPT-6.1 Terra on the OpenAI Responses API
+
+- Registered `openai/gpt-6.1-terra` with text and image input, a 1,050,000-token
+  context window and 128,000 output tokens. Its default reasoning effort is
+  medium. Explicit off sends `none` and enables temperature and top-p.
+  [Model specification](https://developers.openai.com/api/docs/models/gpt-6.1-terra)
+- Added standard and above-272K input pricing, including cached reads and
+  30-minute writes. Long cache retention sends `prompt_cache_options.ttl`.
+  [Pricing](https://developers.openai.com/api/docs/pricing) and
+  [parameter guide](https://developers.openai.com/api/docs/guides/latest-model#gpt-6-astra-update-api-and-model-parameters)
+- Windows Go 1.26.10 passed the full `pkg/pigo` tests and vet, plus focused
+  race tests for Terra and sampling. A local HTTP fixture exercised function
+  tools, reasoning, sampling and cache settings through `CompleteSimple`.
+
+
+## 2026-11-05 - M9b real-runtime serial protocol slice
+
+- Added `internal/runtimeeval` and `pi-superagent-runtime-eval`: actual
+  PiMainRouter/PiWorker and single Runner + host subtask queue, four arms with
+  identical 12-delivery inputs, one worker slot and request/call budget caps.
+- Test-first event/effect/receipt/reply/history conservation; five repeat checks,
+  source-scoped duplicates, callback fast paths, completed-journal reopen,
+  controlled tool barriers, cancellation and uncooperative-body joining.
+- Independent review corrected counter meaning (tasks, worker invocations,
+  worker/outer tool calls and effects are separate) and result metadata checks.
+- Scripted protocol evidence only, unknown token/cost/latency fields remain null.
+  No historical baseline, real model performance, full M9/release acceptance,
+  live services, user computer, additional paid work, CI, merge or deployment.
+  See [M9b boundaries and reproduction](superagent-m9b.md).
+
+## 2026-11-05 - M6c PostgreSQL coordinator acceptance preparation
+
+- Added five double-gated `TestPostgresCoordinator*` entries on #185's exact
+  baseline tree. Real OpenMainJournal plus in-process scripted callbacks covers
+  migration boundaries, task/report/snapshot/subscription and outbox conservation,
+  expired-lease takeover, unknown reply-claim COMMIT and background late evidence.
+- Reused the existing disposable-database fixture, bounded operations and random
+  domain cleanup. No runtime, dependency, schema or CI configuration changes.
+- No PostgreSQL service was used: these cases compile and explicitly skip.
+  Offline suite success is not real PostgreSQL coordinator acceptance. Restart
+  means coordinator/journal reopen; ACK loss is injection, not a TCP partition.
+- Full offline verification, independent review and exact-tree publication
+  evidence are recorded in the draft PR. See [M6c](superagent-m6c.md).
+
+## 2026-11-05 - M9c concurrent actual-runtime load conservation
+
+- Added a separate 300-delivery/280-identity/20-task fixture through actual
+  unbatched/batched subscribed SuperAgent and Pi adapters. Sixteen concurrent
+  ingress goroutines, four gated native tool bodies, raw reports/receipts/replies
+  and private histories are checked against post-execution expectations.
+- Fixed virtual tool-gate service is explicitly separate from real runtime
+  clocks. Variable batch grouping and script calls are retained as observations,
+  not claimed as live-model performance, prompt-policy gains or historical data.
+- Added test-first scorer corruption, malformed batch response, whole-run
+  cancellation/join and completed-journal replay/conflicting-duplicate coverage.
+- No production runtime, provider, dependency, schema or CI changes. Full offline
+  checks, independent review and exact-tree publication are recorded in the
+  draft PR. No final M9/release acceptance, real services, user computer,
+  extra paid execution, CI dispatch, merge or deployment.
+  See [M9c boundaries and reproduction](superagent-m9c.md).
+
+## 2026-11-06 - M9d bounded mixed-runtime recovery acceptance
+
+- Test-first follow-up to draft #187's exact tree, using actual unbatched/batched
+  Pi main adapters and PiWorker. A separate 35-submission/23-identity/8-task
+  fixture retains 30 terminal delivery records, including two-target fanout.
+- A settles despite a blocked main model and B tool. Cancellation preserves A's
+  late fsynced write and native committed receipt. Six independent requests
+  complete while B remains running; the correction appears only in B's history.
+- An isolated child exits without Close after A's committed-write/model failure
+  and B's committed-write/pre-terminal boundary. Recovery preserves known facts,
+  leaves B's unpersisted receipt unknown, blocks old follow-ups, and resumes only
+  fresh instructions after fixture-host reconciliation. Exact before/after effect
+  evidence and completed reopen reject repeats; corrupted evidence is rejected.
+- Independent review tightened actual multi-input batch and exact reconciliation
+  checks. Final full offline checks and exact-tree publication are recorded in
+  the draft PR. No production API/dependency/schema/CI changes or live services.
+  This is bounded protocol acceptance, not continuous-rate performance, full
+  M9/four-strategy/release acceptance, or model token/cost evidence. No user
+  computer, extra paid execution, CI dispatch, merge or deployment.
+  See [M9d boundaries and reproduction](superagent-m9d.md).
+
+## 2026-11-06 - SuperAgent PR merge review
+
+- Reviewed #157–#161 and #163–#188 in dependency order. Joined the original
+  #161 and #176 histories at their adapted implementations in #163 and #178.
+  Preserved the separate edited-comment actor worklog entry from #176.
+- Rejected hidden actions during failed main-input replay and fenced late
+  background inspections after coordinator shutdown. The coordinator and durable
+  helper now reject invalid arguments before authorization or quota reservation.
+- Fixed drive-qualified SQLite filenames on Windows and blocked network/device
+  paths. The device client now checks acceptance and native receipt evidence
+  before trusting an active or terminal state.
+- Repaired the late-commit PostgreSQL fixture to supply a native agent receipt.
+  All eight journal and five coordinator cases passed on isolated PostgreSQL
+  17.9 and 18.3 instances, both normally and under the Go race detector. These
+  runs used one primary at a time and independent client pools.
+- Added corrupt-evidence regressions for serial, concurrent, and crash
+  evaluation. An empty effect, an extra reply to ignored input, or a reply
+  tied to a different decision can no longer pass the corresponding scorer.
+- The 256-event durable backlog exceeded the five-second small-fixture guard
+  under concurrent test load on Windows. Its drain now has a separate
+  one-minute deadline and still checks every terminal event and worker.
+- Windows tests covered SQLite process contention and recovery. Linux helper
+  and device process suites ran in WSL2. Provider calls, physical devices,
+  cross-host failover, deployment, and release publication were outside scope.
+- Final Windows Go 1.26.4 root tests and vet passed. Race coverage passed for
+  every root package across the full invocation and a final SuperAgent-package
+  rerun after fixing the backlog deadline. The earlier full invocation failed
+  that deadline and is retained as a failed attempt. The separate examples
+  module passed tests, race, vet, and module-graph resolution.
+- Dependency activity was checked before merging. pgx v5.11.0 is actively
+  maintained and confined to database tests. Its indirect pgservicefile and
+  pgpassfile parsers last changed in 2024 and 2023, respectively. They remain
+  pinned because the maintained driver uses them, while these tests use
+  explicit isolated DSNs. Their low maintenance activity remains a risk.
+- All merges use the reviewed head as a guard and compare the resulting Git
+  tree with the tested candidate. Commit IDs are used only for merge safety
+  and ancestry checks.
+
+## 2026-11-06 - M1d structured public report references
+
+- Confirmed the explicit multi-report M1c gap remained on draft #188. Added
+  bounded exact-domain report selections for reply/clarify and coordinator-owned
+  citations preserving original status, partial failure, committed receipt and
+  review facts. Original single-report fields and transport semantics remain.
+- Frozen callback visibility plus durable public-ingress validation reject
+  unavailable/hidden/foreign/duplicate identities. No private snapshots or raw
+  background output are read. Single/batch, all four Pi main adapters, replay
+  boundaries, unknown sends and external Go embedding are covered offline.
+- Test-first missing-field compilation failure precedes implementation. Independent
+  review corrected batch view lifetime; final checks and exact-tree publication
+  are recorded in the draft PR. No semantic claim about generated prose, outbound
+  rendering change, real service, extra paid execution, CI dispatch, merge or
+  deployment. See [M1d contract and limitations](superagent-m1d.md).
+- Publication caught #188 advancing from c55c41d to 13ff33b. Reconstructed and
+  verified the exact new base tree, preserved all parallel review changes, and
+  retained its failed-entry hidden-action guard using a slice-aware empty check.
+  Re-ran full validation and independent review rather than reusing old results.
+  The preceding Windows/WSL/PostgreSQL work remains separately attributed.
+
+## 2026-11-06 - Keep database integrations host-owned
+
+- Applied the requested AI-library boundary before the aggregate stack enters
+  master. Removed the PostgreSQL implementation, schema, gated tests, pgx and
+  its parser/pool dependencies from the root module. Historical M6b/M6c reports
+  are explicitly superseded by this boundary.
+- Exported the existing Journal contract and embedded it in LeasedJournal.
+  Hosts can implement their own database persistence and supply it through
+  OpenMainJournal, with public session types and explicit ownership semantics.
+  The bundled SQLite adapter supports same-host local-disk coordination.
+- Replaced #186's PostgreSQL acceptance scope with a SQLite regression for a
+  durable reply claim whose acknowledgement is lost. It preserves the original
+  attempt, refuses repeat sending and verifies recovery without Worker replay.
+  The other coordinator scenarios already have SQLite/neutral coverage.
+- Root module enumeration and all-package test dependencies contain no
+  PostgreSQL drivers. The separate Mattermost example's upstream module graph
+  still lists lib/pq; go mod why and compiled-package enumeration confirm that
+  the examples do not use it. No example-library upgrade was made.
+- Root and examples tests/vet passed, along with SuperAgent/SQLite race tests.
+  The new #189 report-reference slice was reviewed against this storage
+  boundary and passed focused race tests. Earlier recorded PostgreSQL runs
+  describe the superseded candidate.
+
+## 2026-11-06 - Prepare v0.20.0 source release
+
+- Updated the library version and examples module reference to v0.20.0, and
+  added release notes for SuperAgent and the host-owned storage boundary.
+- Release scope is an annotated source tag only, as requested. No platform
+  archives or downloadable binary assets are included.
+- Previously started Windows root/examples race tests and vet, Linux root
+  tests/vet, and Linux helper/device/SQLite race checks completed successfully.
+  No further test runs are required for this metadata-only release change.
+
+## 2026-11-06 - Connect CLI to the persistent main session
+
+- Started from master 74bb8f8, then incorporated the complete v0.20.0 source
+  release tree at 7a90824 before final validation. `run` and `demo` now reuse
+  `OpenMain` / `PiMainRouter`; no coordinator or storage implementation was
+  duplicated. No module changes; root module and compiled-package enumeration
+  confirm no PostgreSQL driver. Host-owned Journal/LeasedJournal is unchanged.
+- Added stable REPLY frames with host-owned destinations, authoritative report
+  references and existing public facts, plus safe MAIN_ERROR observations.
+  Explicit, idempotent `ack_reply` acknowledges only direct consumption.
+  Neither stdout success nor this read acknowledgement certifies an external
+  send; uncertain attempts cannot be cleared by the control.
+- Acceptance tests failed first on the legacy CLI's missing replies and missing
+  partial-reply-output handling. New tests cover same-chat independent tasks,
+  explicit follow-up, stable replay, acknowledgement recovery/boundaries,
+  public facts/privacy, partial output, mixed-frame disk spooling, context-budget
+  failure visibility and one-way legacy upgrade without changed Worker history.
+  Existing exact steer/abort and blocked-stdout tests now exercise OpenMain,
+  same-chat isolation and progress-vs-Thread subscription boundaries.
+- Offline remote Linux amd64, cached official Go 1.26.10, readonly modules and
+  disabled live flags: root `go test -mod=readonly -count=1 ./...`,
+  `go test -mod=readonly -race -count=1 ./...` and `go vet -mod=readonly ./...`
+  passed. The same test/race/vet checks passed in `examples/`.
+  CLI race tests passed 20 repetitions; the new main-session subset also passed
+  10 race repetitions. Root runtimeeval race coverage took 257 seconds, not a
+  skipped stage. The existing stale-catalog accounting test passed this run;
+  its separate correction is not included in this slice.
+- Executable offline demo/replay verified two independent tasks, five reports
+  and four identical pending replies without transport attempts. Windows amd64
+  and macOS arm64 CLI tests cross-compiled; neither platform was runtime-tested.
+- Independent review found a Windows-only test assertion issue: FileMode cannot
+  prove Unix permissions there. Restricted that assertion to non-Windows;
+  reviewer accepted the correction. No unresolved blocking finding. The existing
+  Replies snapshot API still copies full history while polling; long-journal
+  polling optimization is separate work, not a claimed benchmark improvement.
+- No real provider/channel, user-machine access, Codex execution, additional
+  billed service, manual CI dispatch, merge or deployment. Migration and
+  consumer details: [CLI main-session contract](superagent-cli-main.md).
+
+## 2026-11-06 - Review PR #190 stale-call request accounting
+
+- Reviewed the fixture and dispatch guard: receiving middleware counts tool
+  discovery and invocation before handlers, while asynchronous cancellation
+  notifications no longer invalidate the already-stale invocation assertion.
+  Classified rejection, zero attempts, zero remote dispatch and zero writes
+  remain checked. No runtime repair or dependency change was needed.
+- Windows Go 1.26.4: the focused regression passed 100 repetitions; the full
+  agent/toolset package passed race testing and vet. Live-service flags were
+  disabled and module resolution was readonly. Manual CI was not dispatched.
+- PR merge is authorized by the user. The reviewed head will guard the merge,
+  with resulting tree and ancestry verification before moving to PR #191.
+
+## 2026-11-06 - Review and integrate PR #191 CLI main session
+
+- PR #190 was merged first and its resulting tree and ancestry were verified.
+  Updated #191 with the new master, resolving only the appended worklog
+  conflict and retaining both records. Reviewed routing, exact controls,
+  reply acknowledgement, output staging/replay and legacy migration against
+  the existing coordinator contracts; no blocking runtime defect was found.
+- Windows Go 1.26.4: root and examples full tests and vet passed. Focused
+  CLI/SuperAgent tests and race tests passed. Changed Go files pass gofmt
+  after checkout line-ending normalization; git diff --check is clean.
+- Compiled and ran the Windows CLI offline: two tasks, five reports, four
+  stable replay replies, no transport attempts, and idempotent acknowledgement
+  persisted across restart. Temporary executable and journal were removed.
+- Opening a legacy journal remains a one-way main-session upgrade. No new
+  dependencies or compatibility wrappers were introduced. No live provider,
+  external channel, manual CI or release was run; this review did not rerun
+  full-root race testing. Merge uses the tested head as its safety guard,
+  followed by resulting tree/ancestry and local master synchronization checks.
+
+## 2026-11-06 - Prepare v0.21.0 source release
+
+- Bumped the package version and examples module reference to v0.21.0 for
+  the CLI main-session feature merged in #191 and test correction in #190.
+  Release notes describe reply consumption, stable replay and the one-way
+  legacy journal upgrade. No dependency or runtime implementation changed.
+- Reused the integrated root/examples tests and vet, focused race tests and
+  Windows CLI executable validation recorded above. Release-specific checks
+  cover matching version references, readonly module resolution, compilation
+  and diff hygiene; no redundant full-suite run is needed for metadata changes.
+- Publication scope is the release commit on master and an annotated source
+  tag, pushed together with remote target verification. No GitHub Release,
+  binary assets, manual CI or deployment is included.
+
+
+## 2026-11-06 - Extract reusable SuperAgent task assessment from JZBeacon
+
+- Added PiTaskAssessor, TaskAssessmentInput, TaskCandidate, TaskAssessment and typed workload hints under superagent. One isolated model request selects new, attach, clarify or status using host-offered opaque task IDs and CanAttach eligibility. Strict parsing rejects unknown/duplicate fields, invalid workloads and unavailable tasks; context bounds include the policy, input and tool declaration. No journal, admission, business execution or model-role selection is performed by this API.
+- Kept the existing MainRouter, history, task attachment, progress subscription and worker-report APIs as their respective owners. The new assessor copies only static model/reasoning/transport configuration; business prompts, history, tools, resolvers and execution hooks are not inherited. Hosts retain context selection, authorization, persistence and status rendering.
+- Moved the generic protocol/cancellation regression coverage out of JZBeacon. Cancellation closes once and waits for cleanup; provider, stream-event, Wait and Close errors retain their causes and always return a zero decision. A terminal event or model ErrorMessage cannot be overridden by a later valid tool call. Added external-package usage coverage and documented the host boundary.
+- Validation passed: full superagent race suite, final assessment-specific race regressions after stream-error fixes, go vet ./superagent, formatting and diff checks. Cross-repository validation via a temporary Go workspace passed JZBeacon operatoragent/airelay/services race tests, integration-package vet and the full JZBeacon module build; final understanding/gateway race tests also passed after the last error-boundary change. No paid model or live service calls were used.
+- Source changes remain local on codex/superagent-task-assessment. No dependency, package version, committed replace directive, commit, push, tag, CI dispatch or production change. JZBeacon still pins published pi-go v0.21.0; publishing this API and updating that pin are required before a standalone consumer build can use it.
+
+
+## 2026-11-06 - Review and release SuperAgent assessment as v0.22.0
+
+- Independently reviewed the SDK API/protocol/stream lifecycle and the JZBeacon adapter boundary. Found and reproduced one remaining error-classification defect: assistant error/aborted stop reasons with an empty error message were treated as invalid decision input. The assessor now reports model failure before protocol validation, retaining existing event/Wait/cancellation causes; both SDK and host regressions cover this boundary without fallback or retry.
+- Updated the package version and examples module reference to v0.22.0 and added source-release notes. This additive SuperAgent API requires no new third-party dependency and leaves existing coordinators, history, worker progress and report APIs intact. Existing examples retain their pre-existing local module replacement; no replacement was added for the downstream JZBeacon consumer.
+- Validation passed on Windows with GOWORK=off and live tests disabled: scripts/test.ps1 (all root and examples packages), full superagent race suite, root go vet -mod=readonly ./... and examples go vet -mod=readonly ./.... The focused terminal-error regression reproduced the defect before the fix, then passed with assessment/public-API/example race coverage. Formatting and diff checks passed. Host failure-boundary regression also passed against the local SDK before publication.
+- The user authorized commit and source-tag publication. Release delivery targets the default master branch and annotated v0.22.0 tag together, followed by remote identity and published Go module verification. No GitHub binary release, manual CI, live provider call or production deployment is included.
+
+## 2026-11-06 - M3d main-context compaction and roadmap reconciliation
+
+- Rechecked released master `406e0ed` / v0.22.0, merged development PRs and the
+  JZBeacon v0.22.0 pin before choosing new work. Updated the development plan and
+  stale README status: main routing, fanout, channel/device protocols and
+  Watchdog inspection already exist. Remaining work is separated into bounded
+  model context, identity-preserving storage, supervision, evaluation and real
+  host acceptance. PostgreSQL remains host-owned; JZBeacon was not changed.
+- Added an optional host `MainContextCompactor` to all four Pi main adapters.
+  It replaces only a completed prior prefix with explicitly untrusted summary
+  context and retains a complete recent turn. The callback gets detached prior
+  messages, not current inputs, offers or session settings. Invalid cuts,
+  unmatched tools, incomplete decisions, errors, panic and cancellation fail
+  closed; successful compaction persists only with the ordinary valid decision.
+- Fixed preflight undercount of runner-inserted system/tool declarations and
+  added the actual request boundary guard to the plain adapters. Full JSON
+  escaping and native history schemas remain counted. Tightly configured old
+  budgets may now reject previously undercounted requests; documented this and
+  the variadic constructor function-value compatibility detail in M3d.
+- Regression coverage exercises all four adapters, retained native tool pairs,
+  real history recall, callback mutation/large-number isolation, overflow during
+  recall, repeated compaction, single/batch durable replies, original report
+  references, review barriers, unresolved delivery attempts, duplicate ingress,
+  reopen without repeated work and failed-decision snapshot preservation.
+- Passed on remote Linux amd64, Go 1.26.10, readonly module files, live-provider
+  and live-example flags disabled:
+  - `go test -mod=readonly -count=1 ./...`
+  - `go vet -mod=readonly ./...`
+  - `go test -mod=readonly -race -count=1 ./superagent/... ./agent/session ./cmd/pi-superagent`
+  - Separate examples module readonly tests and vet.
+  - Gofmt and `git diff --check`.
+- Independent source review and focused tests found no blocking defect; its
+  budget-compatibility wording correction was incorporated. Initial broad runs
+  encountered missing cached versions and temporary-filesystem exhaustion;
+  existing declared modules were fetched from the standard Go proxy and build
+  scratch/cache moved to the remote workspace, after which all listed final
+  checks passed. No module versions changed.
+- This does not compact the journal, prove summary fidelity, automatically
+  configure JZBeacon or supply a billed summarizer. No live model, real platform,
+  database service, user computer, Codex task, extra paid service, CI dispatch,
+  source tag, merge or deployment was used. Windows/macOS execution and full-root
+  race testing were not performed for this slice. See [M3d](superagent-m3d.md).
+
+## 2026-11-06 - M6d journal growth and replay baseline
+
+- Added a test-only synthetic custom-Router fixture and JSONL open, detached
+  Log-copy and coordinator-restore benchmarks. Fixed 4 KiB message snapshots
+  and growing 256-byte-text-per-input snapshots each cover 100/1,000 inputs;
+  generation is excluded from timing. No runtime/API, journal format, dependency
+  or SQLite adapter changed.
+- Completed all 12 benchmark cases with one operation and three repetitions per
+  case. At 1,000 inputs the fixed fixture stores 5,099,606 bytes; the growing
+  fixture stores 177,530,750 bytes. Growing-fixture median open/Log/restore times
+  are approximately 7.75/3.16/5.63 seconds, with restore including Log copying.
+  Full run including setup took 133.752 seconds. These are shared-host diagnostic
+  samples, not isolated before/after performance, cold-disk or peak-memory claims.
+  Raw samples and measurement limits are preserved in [M6d](superagent-m6d.md).
+- The identity regression passes: exact serialized header/log, main/Provider
+  and Worker state, report/reply identities, actual HistoryRef, duplicate/conflict
+  behavior, private-data exclusion and no restore callbacks or journal mutation.
+  Final `go test -mod=readonly -race -count=1 ./superagent` and
+  `go vet -mod=readonly ./superagent` pass, as do gofmt and whitespace checks.
+  Independent measurement/code review found no blocking issue. Prior M3d full
+  root/examples validation remains the unchanged runtime baseline; this slice
+  does not claim another full-root or multi-platform test run.
+- Documented why deleting/renumbering old transitions violates the current
+  Journal and public-reference contracts. Future checkpoints require an explicit
+  bootstrap/version/atomic-tail contract preserving authority and unknown effects.
+  Measurement suggests examining detached-copy reserialization before introducing
+  a new format. No log truncation, new backend, real database/provider/device,
+  user computer, additional paid execution, CI dispatch, merge or deployment.
+
+## 2026-11-06 - M6e detached custom journal copies
+
+- Replaced whole-log JSON reserialization only for already validated
+  custom/lane logs in `agent/session`. Entry/Custom/Lane pointers and raw bytes
+  remain detached. Any ordinary message/compaction keeps the original
+  whole-log JSON clone; append/replay validation, persistence, locks, IDs and
+  wire format are unchanged. No database implementation or module change.
+- Differential tests compare every read with the former JSON implementation,
+  mutate populated exported fields, and reopen strict JSONL. Both backends
+  cover mixed, custom-only, lane-only and custom-to-message transitions,
+  including raw JSON, nil/empty values, large numbers and nested tool metadata.
+- Compared exact base `101baeaf` with final code, five one-operation samples
+  per growth case, with no concurrent validation workload. At 1,000 growing
+  inputs median Log is 2,706.459 -> 38.325 ms and restore is 5,731.682 ->
+  2,821.949 ms. Log cumulative allocation falls from 1,432,865,968 to
+  181,371,936 B/op. Opening validation and disk growth remain unchanged;
+  timestamp-varying fixtures, shared-host noise and allocation-versus-memory
+  limits are stated in [M6e](superagent-m6e.md), alongside all raw samples.
+- Same-state original/final benchmarks cover custom, message and mixed logs.
+  A prototype with per-entry JSON fallback regressed ordinary-message costs;
+  final code instead preserves the original whole-log fallback. No generic
+  message performance improvement is claimed.
+- Final root tests/vet, affected race (`agent/session`, `superagent/...`,
+  `cmd/pi-superagent`), examples tests/vet, focused regression, both benchmark
+  sets, formatting and whitespace checks pass. Independent source/coverage
+  and measurement review found no blocker. Full-root race, Windows/macOS and
   real-host validation were not run. No live provider/database service, user
   computer, Codex task, extra paid service, CI dispatch, merge, release or
   deployment.
