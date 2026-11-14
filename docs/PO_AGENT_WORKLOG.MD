@@ -4435,3 +4435,12 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14: Checked Anthropic hosted-request usage aggregation
+
+- Pinned master `4115596fa5ca3252a855f0960e52bfdbc8c73170`, separate from snapshot-validation PR265. Local HTTP reproduction used two individually representable request usages whose cumulative total exceeded int range. Baseline continued into a third request and returned negative aggregate counts with a successful Stop (RED 0.041s).
+- Check all five cumulative integer fields before any addition. A negative operand or overflowing sum returns typed parse `invalid_usage_aggregate` without saturating, guessing charges, or replacing the prior aggregate. The loop stops before sending the next request or emitting continuation lifecycle for that round; it does not pretend the model completed successfully. The already completed second request is not undone.
+- Preserve current content, earlier hosted execution records, and the prior aggregate/cost in Usage. Add bounded `anthropic_usage_aggregate` diagnostic evidence containing previous/request usage snapshots: fixed decimal-string count and original cost fields, no response/prompt/tool body. These strings survive generic Context serialization exactly; they are diagnostic evidence, not a new billing API. Scope explicitly says previous requests only, so retained Usage is not represented as the complete final bill.
+- Valid addition still sums independently computed per-request costs, rather than repricing all requests at a cumulative tier. This does not replace provider-specific snapshot validation or validate arbitrary cost configuration.
+- Final targeted race x3 passed in 1.832s, covering two-request/no-third behavior, previous execution/current content, one terminal error/no Done, clone+Context JSON round-trip exact counts above 2^53, bounded diagnostics, each integer field's overflow, negative operands, exact MaxInt acceptance, and existing valid multi-round usage/cost behavior. No live requests, paid calls, CI dispatch, merge, or deployment.
+- Final-runtime full `pkg/pigo` race passed in 54.780s; vet passed. Independent static review found no blocker.

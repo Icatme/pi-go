@@ -249,7 +249,15 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 			options.RequestContext = observedRequestContext
 		}
 		if response.UsageReported {
-			usage = addAnthropicHostedToolUsage(usage, response.Usage)
+			combined, aggregateErr := addAnthropicHostedToolUsage(usage, response.Usage)
+			if aggregateErr != nil {
+				appendAnthropicUsageAggregateDiagnostic(&response, usage, response.Usage)
+				response.Usage = usage
+				response.UsageReported = usageReported
+				response.HostedToolExecutions = append(cloneHostedToolExecutions(executions), cloneHostedToolExecutions(response.HostedToolExecutions)...)
+				return response, aggregateErr
+			}
+			usage = combined
 			usageReported = true
 		}
 		response.Usage = usage
@@ -299,7 +307,14 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 	}, nil
 }
 
-func addAnthropicHostedToolUsage(total Usage, next Usage) Usage {
+func addAnthropicHostedToolUsage(total Usage, next Usage) (Usage, error) {
+	max := int(^uint(0) >> 1)
+	for _, pair := range [][2]int{{total.Input, next.Input}, {total.Output, next.Output}, {total.CacheRead, next.CacheRead}, {total.CacheWrite, next.CacheWrite}, {total.TotalTokens, next.TotalTokens}} {
+		if pair[0] < 0 || pair[1] < 0 || pair[1] > max-pair[0] {
+			return total, withProviderFailure(errors.New("Anthropic hosted usage aggregate cannot be represented; retained usage covers previous requests only"), ProviderFailureParse, "invalid_usage_aggregate")
+		}
+	}
+
 	total.Input += next.Input
 	total.Output += next.Output
 	total.CacheRead += next.CacheRead
@@ -310,7 +325,7 @@ func addAnthropicHostedToolUsage(total Usage, next Usage) Usage {
 	total.Cost.CacheRead += next.Cost.CacheRead
 	total.Cost.CacheWrite += next.Cost.CacheWrite
 	total.Cost.Total += next.Cost.Total
-	return total
+	return total, nil
 }
 
 func emitHostedToolLifecycle(stream *AssistantMessageEventStream, partial AssistantMessage, call HostedToolExecution) {
