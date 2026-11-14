@@ -295,9 +295,15 @@ func convertMistralUserContent(content any, supportsImages bool) any {
 }
 
 type mistralContentChunk struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	ImageURL string `json:"image_url,omitempty"`
+	Type     string                     `json:"type"`
+	Text     string                     `json:"text,omitempty"`
+	ImageURL string                     `json:"image_url,omitempty"`
+	Thinking []mistralThinkingTextChunk `json:"thinking,omitempty"`
+}
+
+type mistralThinkingTextChunk struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 func convertMistralAssistantContent(blocks []ContentBlock) ([]mistralContentChunk, []mistralToolCall) {
@@ -313,8 +319,8 @@ func convertMistralAssistantContent(blocks []ContentBlock) ([]mistralContentChun
 		case ThinkingContent:
 			if strings.TrimSpace(typed.Thinking) != "" {
 				contentParts = append(contentParts, mistralContentChunk{
-					Type: "thinking",
-					Text: typed.Thinking,
+					Type:     "thinking",
+					Thinking: []mistralThinkingTextChunk{{Type: "text", Text: typed.Thinking}},
 				})
 			}
 		case ToolCall:

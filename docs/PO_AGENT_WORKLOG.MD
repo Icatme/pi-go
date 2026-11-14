@@ -4435,3 +4435,9 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Mistral thinking request schema
+
+- Encode each existing nonblank ThinkingContent as a thinking chunk with required thinking:[{type:text,text:...}] rather than an invalid top-level text member. Official SDK ThinkChunk blob772339d5ce77f5201bbb438fa275939bdd33dca6 and ContentChunk union blobdc34ed6d4aa6d1282cd58ed69827d3868dd28522 provide exact schema evidence: https://github.com/mistralai/client-python/blob/main/src/mistralai/client/models/thinkchunk.py .
+- Found while auditing upstream #10080. This is only the concrete schema repair, not a claim that multiple leading thinking chunks are accepted. Do not merge/reorder blocks or invent signature replay policy: old signature omission remains, original history and nonblank text bytes remain unchanged. No new parser capability is implied.
+- Actual localhost outgoing request baseline RED0.010s. Initial targetrace3 1.095s; independent review/race3 1.399s no blockers. Final runtime full pkg/pigo race49.590s + vet passed; final additional user text/image controls targetrace3 1.136s. No paid/live calls, CI dispatch, merge or deployment.
