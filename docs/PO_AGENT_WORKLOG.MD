@@ -1,5 +1,12 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Z.AI periodic quota retry boundary
+
+- Reproduced upstream pi #11537 against 755e003 using a local HTTP fixture: Chat Completions retried Chinese HTTP 429 code 1308 three times with MaxRetries=2; the Go Anthropic transport already made one request. Official https://docs.bigmodel.cn/cn/api/api-code and https://docs.z.ai/api-reference/api-code identify 1308 as a periodic usage cap, distinct from transient 1302/1305 throttling.
+- Stop Chat Completions retries only for explicitly identified zai/zhipu/bigmodel providers, HTTP 429 and structured code 1308. Accept string/numeric codes and nested or top-level payloads, with nested error authoritative. Do not infer routing or policy from model names/URLs, apply a global Chinese-message heuristic, change other business codes, or add an agent retry loop. Anthropic behavior remains unchanged.
+- Offline regression verifies one physical request, error stop reason, original reset timestamp and HTTP 429 diagnostic. Negative coverage retains existing retry behavior for unrelated providers, model-name-only matches, wrong status, 1302/1305, unstructured prose, malformed JSON and conflicting outer/nested codes.
+- Go 1.26.10: targeted quota/DashScope regression tests with race repeated three times passed (1.600s), full `go test -race ./pkg/pigo -count=1` passed (40.655s), and `go vet ./pkg/pigo` passed. Initial test-link attempt ran out of shared temporary disk space; builds were moved to workspace and rerun successfully. No live credentials, paid model calls, production deployment or CI dispatch.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.
