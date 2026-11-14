@@ -806,6 +806,11 @@ func processOpenAICompletionsStreamEvent(data string, model Model, response *Ass
 			if messageFallback {
 				toolDelta.Index = index
 			}
+			// A new named call cannot reuse an index already bound to another ID.
+			// Do not guess how subsequent index-only fragments should be routed.
+			if existing := state.ToolCalls[toolDelta.Index]; existing != nil && existing.ID != "" && toolDelta.ID != "" && existing.ID != toolDelta.ID && toolDelta.Function.Name != "" {
+				return false, withProviderFailure(errors.New("conflicting tool call identities for stream index"), ProviderFailureParse, "tool_call_index_collision")
+			}
 			appendOpenAICompletionsToolCall(response, stream, state, toolDelta)
 		}
 		if strings.TrimSpace(choice.FinishReason) != "" {
