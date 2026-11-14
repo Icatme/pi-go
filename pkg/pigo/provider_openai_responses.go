@@ -134,6 +134,11 @@ func buildOpenAIResponsesRequest(customTools map[string]string, model Model, ctx
 		parallelToolCalls = *resolvedOptions.ParallelToolCalls
 	}
 	resolvedTranscript := ResolveTranscript(transcript, supportsTranscriptSystemMessages(model))
+	var err error
+	resolvedTranscript.Messages, err = uniqueForeignResponsesCallIDs(model, resolvedTranscript.Messages, strings.TrimSpace(resolvedOptions.PreviousResponseID))
+	if err != nil {
+		return openAIResponsesRequest{}, err
+	}
 
 	requestBody := openAIResponsesRequest{
 		Model:             model.ID,
