@@ -4435,3 +4435,26 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Ordinary Responses query URL preservation
+
+- A synthetic localhost regression on master 4115596 reproduced lost query
+  parameters for a base URL and a duplicated `/responses` path for a full
+  endpoint URL (race RED 0.047s). This is separate from Chat URL handling.
+- For valid absolute HTTP(S) URLs containing a query or fragment only, build the
+  endpoint by URL components and pass the absolute URL to the existing SDK's
+  public `Client.Post`. Preserve raw query bytes/order/duplicates, forced empty
+  query, encoded path, origin/userinfo and fragment semantics. No-query,
+  relative, opaque and malformed inputs retain the original SDK path. No new
+  whitespace trimming, Azure routing, credentials, HTTP implementation or retry
+  policy. Fragments remain client-side, not part of the HTTP request target.
+- Verified the pinned official openai-go v3.35.0 public client and request
+  resolution implementation: [Client.Post](https://github.com/openai/openai-go/blob/v3.35.0/client.go)
+  and [request configuration](https://github.com/openai/openai-go/blob/v3.35.0/internal/requestconfig/requestconfig.go).
+  `WithQuery` sets/encodes query values and is intentionally not used because it
+  would alter duplicate parameters and encoding.
+- Final targeted race x3 passed (1.521s), including actual request URI, custom
+  HTTP client, response observer, unchanged synthetic auth/header and bounded
+  retry controls. Independent target race x3 passed (1.677s), with no blocking
+  review findings. Full `pkg/pigo` race passed (45.569s); package vet and diff
+  checks passed. No live provider, real credential, paid request or deployment.
