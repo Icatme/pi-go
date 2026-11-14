@@ -69,7 +69,9 @@ func TestMistralErrorBodyPreservesReadCause(t *testing.T) {
 		return &http.Response{StatusCode: 503, Header: make(http.Header), Body: body}, nil
 	})}
 	model := Model{BaseURL: "https://example.invalid"}
-	err := streamMistralSSE(model, t.Context(), client, ProviderStreamOptions{}, []byte(`{}`), "fixture", &AssistantMessage{}, newAssistantMessageEventStream())
+	stream := newAssistantMessageEventStream()
+	defer stream.Close()
+	err := streamMistralSSE(model, t.Context(), client, ProviderStreamOptions{}, []byte(`{}`), "fixture", &AssistantMessage{}, stream)
 	if !errors.Is(err, cause) || calls != 1 || body.closes != 1 {
 		t.Fatalf("error=%v calls=%d closes=%d", err, calls, body.closes)
 	}
