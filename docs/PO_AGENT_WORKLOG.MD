@@ -4023,3 +4023,12 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Publication uses an expected-head update of master, an annotated v0.23.1 tag
   and a GitHub Release with no uploaded assets. Exact tree and tag-target checks
   protect API publication while Git HTTPS is unavailable.
+
+## 2026-11-14 — Streamed Chat reasoning signatures (pi #9534, OpenRouter #583)
+
+- Accept `reasoning.text` streaming deltas with a nonempty string signature and absent/null text, normalizing the missing incremental text to empty before existing field validation. Persisted reasoning-detail validation is not loosened.
+- A nonempty signature closes its text block. Later text starts another detail, even if both blocks report index zero. Explicit conflicting IDs/formats also prevent attachment to the prior text. This preserves the text/signature pairing rather than concatenating two signed thoughts and dropping the later signature.
+- Evidence: official OpenRouter provider fix https://github.com/OpenRouterTeam/ai-sdk-provider/pull/583 and reasoning replay guidance https://openrouter.ai/docs/guides/best-practices/reasoning-tokens checked 2026-11-14. This supports complete signature-only deltas, not concatenation of fragmented cryptographic signatures; no speculative signature repair, provider retry, or model identity change is introduced.
+- Baseline actual localhost SSE tests lost the one-block signature and incorrectly merged two blocks. New tests cover same-index signed blocks, outgoing replay, identity/format conflicts, invalid delta fields, null text, and unchanged strict persisted parsing. The old consecutive-detail test expected a second signed block to be discarded; it now requires a separate block while retaining opaque-large-integer and event snapshot assertions.
+- Existing metadata policy remains: first-block unknown fields are retained; late merged chunks only fill the existing allowlist (id/format/index/signature). This is not full arbitrary late-field preservation. Empty assistant filtering is unchanged; replay fixtures include a normal answer. No real model call or quality claim.
+- Final validation: targeted reasoning tests `-race -count=3` passed (1.366s); full `go test -race ./pkg/pigo -count=1` passed (41.748s), and `go vet ./pkg/pigo` passed. Independent final review and targeted race×3 passed (1.335s). No CI dispatch or deployment.

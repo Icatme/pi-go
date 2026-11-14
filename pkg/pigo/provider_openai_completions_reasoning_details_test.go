@@ -216,27 +216,31 @@ func TestOpenAICompletionsMergesConsecutiveReasoningDetails(t *testing.T) {
 	finalizeOpenAICompletionsResponse(&response, stream, state)
 	signature := response.Content[0].(ThinkingContent).ThinkingSignature
 	details := parseOpenAICompletionsReasoningDetails(signature)
-	if len(details) != 5 {
+	if len(details) != 6 {
 		t.Fatalf("expected merged text/summary and discrete encrypted entries, got %s", signature)
 	}
 	first := parseOpenAICompletionsReasoningDetail(details[0])
 	for name, expected := range map[string]string{
-		"text": `"first second third"`, "id": `"reason_1"`, "format": `"provider.v1"`,
+		"text": `"first second"`, "id": `"reason_1"`, "format": `"provider.v1"`,
 		"index": `9007199254740993`, "signature": `"sig1"`, "opaque": `{"n":9007199254740993}`,
 	} {
 		if string(first[name]) != expected {
 			t.Errorf("merged text field %s = %s, want %s", name, first[name], expected)
 		}
 	}
-	summary := parseOpenAICompletionsReasoningDetail(details[1])
+	closed := parseOpenAICompletionsReasoningDetail(details[1])
+	if string(closed["text"]) != `" third"` || string(closed["signature"]) != `"ignored"` || string(closed["id"]) != `"ignored"` {
+		t.Fatalf("signed block was merged: %s", details[1])
+	}
+	summary := parseOpenAICompletionsReasoningDetail(details[2])
 	if string(summary["summary"]) != `"summary"` || string(summary["id"]) != `""` || string(summary["index"]) != "0" {
-		t.Fatalf("summary merge changed identity fields: %s", details[1])
+		t.Fatalf("summary merge changed identity fields: %s", details[2])
 	}
-	if !strings.Contains(string(details[2]), `"opaque":{"n":9007199254740995}`) || !strings.Contains(string(details[2]), `"index":9007199254740993`) {
-		t.Fatalf("encrypted metadata must remain opaque: %s", details[2])
+	if !strings.Contains(string(details[3]), `"opaque":{"n":9007199254740995}`) || !strings.Contains(string(details[3]), `"index":9007199254740993`) {
+		t.Fatalf("encrypted metadata must remain opaque: %s", details[3])
 	}
-	if text, _ := requiredOpenAICompletionsStringField(parseOpenAICompletionsReasoningDetail(details[4]), "text"); text != "separate" {
-		t.Fatalf("text separated by encrypted details was merged: %s", details[4])
+	if text, _ := requiredOpenAICompletionsStringField(parseOpenAICompletionsReasoningDetail(details[5]), "text"); text != "separate" {
+		t.Fatalf("text separated by encrypted details was merged: %s", details[5])
 	}
 	var sawStart, sawEnd, sawDone bool
 	for event := range stream.Events() {
