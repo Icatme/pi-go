@@ -1,0 +1,11 @@
+# Default provider HTTP redirects
+
+The HTTP client created by `NewProviderHTTPClient(nil, ...)` follows redirects only within the **original HTTP origin**: scheme, case-insensitive DNS hostname, and effective port (80/443 when omitted). It compares every hop with the initial URL, not just the previous hop. Scoped IPv6 hostnames are compared exactly to avoid treating case-sensitive zone identifiers as equivalent. Redirect URLs with user information, opaque URLs, or non-HTTP(S) schemes are not accepted. There is no DNS-based equivalence or subdomain trust expansion. The existing ten-redirect limit remains.
+
+This intentionally changes the default: cross-host, cross-port, HTTP-to-HTTPS, and HTTPS-to-HTTP redirects are no longer followed. Configure the final endpoint directly. A host requiring a different policy can provide an explicit `http.Client`; its `CheckRedirect`, transport, timeout and cookie-jar behavior remain unchanged. The library does not rewrite that client's security policy.
+
+The guard prevents the redirected request, including its API-key/custom headers and replayable body, from being sent to the other origin. It returns `http.ErrUseLastResponse`, leaving the original 3xx response for existing provider handling instead of introducing a new `url.Error` containing the blocked Location. It does not sanitize server response bodies or observer-visible headers. Original-origin retry behavior is unchanged: existing provider policies may retry the original request if a 3xx error body contains retryable text. Do not interpret the guard as a universal no-retry guarantee or as proof the initial request was unbilled.
+
+The policy covers library-owned provider HTTP clients. Explicit clients, WebSocket dialers, and separate discovery/authentication HTTP paths are not automatically changed. This is an independently reproduced Go boundary, not a claim that an Undici advisory applies to Go.
+
+Offline tests use only synthetic credentials and local listeners. They cover 307/308 cross-host/port rejection, same-origin body/header preservation, explicit-client compatibility, effective-port and scoped-address rules, hop limits, an injected downgrade transport, and provider error handling. No paid vendor requests or production configuration changes are involved.

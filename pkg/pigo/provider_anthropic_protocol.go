@@ -86,10 +86,20 @@ func anthropicToolNameForInboundLegacy(name string, tools []Tool, isOAuth bool) 
 	if !isOAuth {
 		return name
 	}
-	lowerName := strings.ToLower(name)
-	for _, tool := range tools {
-		if strings.ToLower(tool.Name) == lowerName {
-			return tool.Name
+	// Reverse actual wire identities first; custom names remain case-sensitive.
+	for _, exact := range []bool{true, false} {
+		match, count := "", 0
+		for _, tool := range tools {
+			wire := anthropicToolNameForOutboundLegacy(strings.TrimSpace(tool.Name), true)
+			if (exact && wire == name) || (!exact && strings.ToLower(wire) == strings.ToLower(name)) {
+				match, count = tool.Name, count+1
+			}
+		}
+		if count == 1 {
+			return match
+		}
+		if count > 1 {
+			return name
 		}
 	}
 	return name

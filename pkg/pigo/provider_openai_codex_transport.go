@@ -300,6 +300,7 @@ func streamOpenAICodexWebSocket(
 	})
 
 	state := openAIResponsesStreamingState{
+		AllowNestedError:     true,
 		CustomTools:          customTools,
 		CurrentTextIndex:     -1,
 		CurrentThinkingIndex: -1,

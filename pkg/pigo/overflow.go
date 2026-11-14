@@ -77,14 +77,12 @@ func IsContextOverflow(message AssistantMessage, contextWindow int) bool {
 		}
 	}
 	if contextWindow > 0 && message.StopReason == StopReasonStop {
-		inputTokens := message.Usage.Input + message.Usage.CacheRead
-		if inputTokens > contextWindow {
+		if nonnegativeTokenSumExceeds(contextWindow, message.Usage.Input, message.Usage.CacheRead) {
 			return true
 		}
 	}
 	if contextWindow > 0 && message.StopReason == StopReasonLength && message.Usage.Output == 0 {
-		inputTokens := message.Usage.Input + message.Usage.CacheRead
-		if inputTokens >= int(float64(contextWindow)*0.99) {
+		if nonnegativeTokenSumExceeds(int(float64(contextWindow)*0.99)-1, message.Usage.Input, message.Usage.CacheRead) {
 			return true
 		}
 	}

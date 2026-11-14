@@ -248,6 +248,13 @@ func (o *OAuth) Authenticate(ctx context.Context) error {
 		}
 		return &AuthRequiredError{StatusCode: resp.StatusCode}
 	}
+	challengeFields, err := authSplitChallenges(resp.Header.Values("WWW-Authenticate"))
+	if err != nil {
+		resp.Body.Close()
+		return ErrOAuthConfiguration
+	}
+	resp.Header = resp.Header.Clone()
+	resp.Header["Www-Authenticate"] = challengeFields
 	if resp.StatusCode == http.StatusForbidden {
 		challenges, err := oauthex.ParseWWWAuthenticate(resp.Header.Values("WWW-Authenticate"))
 		if err != nil || !authInsufficientScope(challenges) {

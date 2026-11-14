@@ -274,6 +274,32 @@ func resolveOpenAIResponsesURL(baseURL string) string {
 	return trimmed + "/responses"
 }
 
+// resolveOpenAIResponsesAbsoluteRequestURL preserves caller-supplied query bytes
+// when the SDK resolves a relative request against its base URL. Other inputs
+// retain the existing SDK base/relative-path behavior.
+func resolveOpenAIResponsesAbsoluteRequestURL(baseURL string) string {
+	if !strings.ContainsAny(baseURL, "?#") {
+		return ""
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Opaque != "" || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return ""
+	}
+	path := strings.TrimRight(parsed.EscapedPath(), "/")
+	if !strings.HasSuffix(path, "/responses") {
+		if path == "" {
+			path = "/v1"
+		}
+		path += "/responses"
+	}
+	decoded, err := url.PathUnescape(path)
+	if err != nil {
+		return ""
+	}
+	parsed.Path, parsed.RawPath = decoded, path
+	return parsed.String()
+}
+
 func streamOpenAIResponsesSSE(
 	model Model,
 	requestContext context.Context,
@@ -298,6 +324,10 @@ func streamOpenAIResponsesSSE(
 	}
 
 	sdkClient := openai.NewClient(clientOptions...)
+	requestURL := "responses"
+	if absoluteURL := resolveOpenAIResponsesAbsoluteRequestURL(model.BaseURL); absoluteURL != "" {
+		requestURL = absoluteURL
+	}
 
 	payload := json.RawMessage(bodyBytes)
 	requestOptions := []openaioption.RequestOption{
@@ -318,7 +348,7 @@ func streamOpenAIResponsesSSE(
 	streamStarted := false
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		var httpResponse *http.Response
-		err := sdkClient.Post(requestContext, "responses", payload, &httpResponse, requestOptions...)
+		err := sdkClient.Post(requestContext, requestURL, payload, &httpResponse, requestOptions...)
 		if err != nil {
 			status := 0
 			var apiErr *openai.Error

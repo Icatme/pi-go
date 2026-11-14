@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -503,9 +505,50 @@ func resolveThoughtSignature(isSameModel bool, signature string) string {
 	return signature
 }
 
+// resolveGoogleStreamURL preserves legacy routing unless a base query or fragment
+// needs component-wise joining. The transport requires SSE; conflicting explicit
+// alt values are configuration errors, never silently overridden.
+func resolveGoogleStreamURL(base, modelID string) (string, error) {
+	base = strings.TrimSpace(base)
+	legacy := strings.TrimRight(base, "/") + "/models/" + modelID + ":streamGenerateContent?alt=sse"
+	if !strings.ContainsAny(base, "?#") {
+		return legacy, nil
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Opaque != "" || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return legacy, nil
+	}
+	query, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return "", withProviderFailure(fmt.Errorf("Google streaming URL has an invalid query"), ProviderFailureSDK, "invalid_stream_query")
+	}
+	if values, exists := query["alt"]; exists {
+		for _, value := range values {
+			if value != "sse" {
+				return "", withProviderFailure(fmt.Errorf("Google streaming URL requires SSE transport"), ProviderFailureSDK, "invalid_stream_query")
+			}
+		}
+	} else {
+		if u.RawQuery != "" {
+			u.RawQuery += "&"
+		}
+		u.RawQuery += "alt=sse"
+	}
+	escaped := strings.TrimRight(u.EscapedPath(), "/") + "/models/" + modelID + ":streamGenerateContent"
+	path, err := url.PathUnescape(escaped)
+	if err != nil {
+		return legacy, nil
+	}
+	u.Path, u.RawPath = path, escaped
+	return u.String(), nil
+}
+
 func streamGoogleSSE(model Model, ctx context.Context, client *http.Client, options ProviderStreamOptions, bodyBytes []byte, apiKey string, response *AssistantMessage, stream *AssistantMessageEventStream) error {
-	url := strings.TrimRight(strings.TrimSpace(model.BaseURL), "/") + "/models/" + model.ID + ":streamGenerateContent?alt=sse"
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	endpoint, err := resolveGoogleStreamURL(model.BaseURL, model.ID)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return err
 	}
@@ -571,7 +614,9 @@ func processGoogleStreamEvent(data string, model Model, response *AssistantMessa
 		response.ResponseID = chunk.ResponseID
 	}
 	if chunk.UsageMetadata != nil {
-		applyGoogleUsage(response, model, *chunk.UsageMetadata)
+		if err := applyGoogleUsage(response, model, *chunk.UsageMetadata); err != nil {
+			return true, err
+		}
 	}
 
 	if len(chunk.Candidates) == 0 {
@@ -711,7 +756,15 @@ func googleToolCallID(id, name string, state *googleStreamState) string {
 	return fmt.Sprintf("%s_%d_%d", name, time.Now().UnixMilli(), state.ToolCallCounter)
 }
 
-func applyGoogleUsage(response *AssistantMessage, model Model, usage googleUsageMetadata) {
+func applyGoogleUsage(response *AssistantMessage, model Model, usage googleUsageMetadata) error {
+	for _, count := range []int{usage.PromptTokenCount, usage.CandidatesTokenCount, usage.ThoughtsTokenCount, usage.CachedContentTokenCount, usage.TotalTokenCount} {
+		if count < 0 {
+			return withProviderFailure(fmt.Errorf("Google usage contains a negative token count"), ProviderFailureParse, "invalid_usage")
+		}
+	}
+	if usage.CachedContentTokenCount > usage.PromptTokenCount || usage.CandidatesTokenCount > math.MaxInt-usage.ThoughtsTokenCount {
+		return withProviderFailure(fmt.Errorf("Google usage token counts cannot be represented"), ProviderFailureParse, "invalid_usage")
+	}
 	response.Usage = Usage{
 		Input:       usage.PromptTokenCount - usage.CachedContentTokenCount,
 		Output:      usage.CandidatesTokenCount + usage.ThoughtsTokenCount,
@@ -721,6 +774,7 @@ func applyGoogleUsage(response *AssistantMessage, model Model, usage googleUsage
 	}
 	response.UsageReported = true
 	response.Usage.Cost = CalculateCost(model, response.Usage)
+	return nil
 }
 
 func mapGoogleStopReason(reason string, content []ContentBlock) StopReason {

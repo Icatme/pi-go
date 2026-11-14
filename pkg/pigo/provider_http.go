@@ -51,12 +51,13 @@ type ProviderHTTPPolicy struct {
 // and cookie jar; failures through that client remain unknown. A nil base uses a
 // shared private standard transport with environment proxies and HTTP/2, independent
 // of http.DefaultClient and http.DefaultTransport. Supply an explicit client
-// to preserve customizations to those globals.
+// to preserve customizations to those globals. The owned client follows redirects
+// only within the original HTTP origin; explicit clients retain their policy.
 // It bounds error bodies before any SDK consumes them and reports transport evidence.
 func NewProviderHTTPClient(base *http.Client, policy ProviderHTTPPolicy) *http.Client {
 	ownedTransport := base == nil
 	if ownedTransport {
-		base = &http.Client{Transport: defaultProviderHTTPTransport}
+		base = &http.Client{Transport: defaultProviderHTTPTransport, CheckRedirect: checkOwnedProviderRedirect}
 	}
 	client := *base
 	transport := base.Transport

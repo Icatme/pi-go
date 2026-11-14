@@ -97,18 +97,22 @@ func marshalIndentedJSON(value any) string {
 // validateSchemaValue intentionally supports a small JSON-Schema-like subset.
 // Keywords outside the implemented set, including $ref, are ignored instead of resolved.
 func validateSchemaValue(schema map[string]any, value any, path string) (any, []schemaValidationError) {
+	return validateSchemaValueMode(schema, value, path, true)
+}
+
+func validateSchemaValueMode(schema map[string]any, value any, path string, allowCoercion bool) (any, []schemaValidationError) {
 	if len(schema) == 0 {
 		return value, nil
 	}
 
 	if anyOf, ok := schema["anyOf"].([]any); ok && len(anyOf) > 0 {
-		return validateSchemaAlternatives(anyOf, value, path, false)
+		return validateSchemaAlternatives(anyOf, value, path, false, allowCoercion)
 	}
 	if oneOf, ok := schema["oneOf"].([]any); ok && len(oneOf) > 0 {
-		return validateSchemaAlternatives(oneOf, value, path, true)
+		return validateSchemaAlternatives(oneOf, value, path, true, allowCoercion)
 	}
 	if allOf, ok := schema["allOf"].([]any); ok && len(allOf) > 0 {
-		return validateSchemaAllOf(schema, allOf, value, path)
+		return validateSchemaAllOf(schema, allOf, value, path, allowCoercion)
 	}
 
 	if constValue, ok := schema["const"]; ok && !jsonValuesEqual(value, constValue) {
@@ -126,20 +130,45 @@ func validateSchemaValue(schema map[string]any, value any, path string) (any, []
 
 typeValidation:
 	if schemaType, ok := schema["type"]; ok {
-		return validateTypedSchema(schema, schemaType, value, path)
+		return validateTypedSchema(schema, schemaType, value, path, allowCoercion)
 	}
 
 	switch {
 	case schema["properties"] != nil || schema["required"] != nil:
-		return validateObjectSchema(schema, value, path)
+		return validateObjectSchema(schema, value, path, allowCoercion)
 	case schema["items"] != nil:
-		return validateArraySchema(schema, value, path)
+		return validateArraySchema(schema, value, path, allowCoercion)
 	default:
 		return value, nil
 	}
 }
 
-func validateSchemaAlternatives(alternatives []any, value any, path string, requireSingle bool) (any, []schemaValidationError) {
+func validateSchemaAlternatives(alternatives []any, value any, path string, requireSingle bool, allowCoercion bool) (any, []schemaValidationError) {
+	// Preserve a genuine null when it already satisfies this union.
+	// Non-null values retain the existing branch-order coercion policy.
+	// Probe recursively with coercion disabled; a coerced value is not evidence
+	// that the original instance matched an alternative.
+	if allowCoercion && value == nil {
+		nativeMatches := 0
+		for _, alternative := range alternatives {
+			schema, ok := alternative.(map[string]any)
+			if !ok {
+				continue
+			}
+			if _, errs := validateSchemaValueMode(schema, cloneAny(value), path, false); len(errs) == 0 {
+				nativeMatches++
+				if !requireSingle {
+					return cloneAny(value), nil
+				}
+			}
+		}
+		if nativeMatches > 0 {
+			if requireSingle && nativeMatches != 1 {
+				return nil, []schemaValidationError{{Path: path, Message: "must match exactly one schema"}}
+			}
+			return cloneAny(value), nil
+		}
+	}
 	var (
 		matches int
 		result  any
@@ -149,7 +178,7 @@ func validateSchemaAlternatives(alternatives []any, value any, path string, requ
 		if !ok {
 			continue
 		}
-		validated, errors := validateSchemaValue(schema, cloneAny(value), path)
+		validated, errors := validateSchemaValueMode(schema, cloneAny(value), path, allowCoercion)
 		if len(errors) == 0 {
 			matches++
 			result = validated
@@ -172,14 +201,14 @@ func validateSchemaAlternatives(alternatives []any, value any, path string, requ
 	return nil, []schemaValidationError{{Path: path, Message: "must match at least one schema"}}
 }
 
-func validateSchemaAllOf(baseSchema map[string]any, alternatives []any, value any, path string) (any, []schemaValidationError) {
+func validateSchemaAllOf(baseSchema map[string]any, alternatives []any, value any, path string, allowCoercion bool) (any, []schemaValidationError) {
 	currentValue := cloneAny(value)
 	for _, alternative := range alternatives {
 		schema, ok := alternative.(map[string]any)
 		if !ok {
 			continue
 		}
-		validated, errors := validateSchemaValue(removeSchemaCompositionKeywords(schema), currentValue, path)
+		validated, errors := validateSchemaValueMode(removeSchemaCompositionKeywords(schema), currentValue, path, allowCoercion)
 		if len(errors) > 0 {
 			return nil, errors
 		}
@@ -187,13 +216,13 @@ func validateSchemaAllOf(baseSchema map[string]any, alternatives []any, value an
 	}
 
 	remainingSchema := removeSchemaCompositionKeywords(baseSchema)
-	return validateSchemaValue(remainingSchema, currentValue, path)
+	return validateSchemaValueMode(remainingSchema, currentValue, path, allowCoercion)
 }
 
-func validateTypedSchema(schema map[string]any, schemaType any, value any, path string) (any, []schemaValidationError) {
+func validateTypedSchema(schema map[string]any, schemaType any, value any, path string, allowCoercion bool) (any, []schemaValidationError) {
 	switch typed := schemaType.(type) {
 	case string:
-		return validateSingleType(schema, typed, value, path)
+		return validateSingleType(schema, typed, value, path, allowCoercion)
 	case []any:
 		// For union types, first check if the value already matches a member type
 		// without coercion. Only coerce if no member matches natively.
@@ -205,11 +234,11 @@ func validateTypedSchema(schema map[string]any, schemaType any, value any, path 
 			}
 			candidateTypes = append(candidateTypes, candidateType)
 			if matchesJSONType(value, candidateType) {
-				return validateSingleType(schema, candidateType, value, path)
+				return validateSingleType(schema, candidateType, value, path, allowCoercion)
 			}
 		}
 		for _, candidateType := range candidateTypes {
-			validated, errors := validateSingleType(schema, candidateType, cloneAny(value), path)
+			validated, errors := validateSingleType(schema, candidateType, cloneAny(value), path, allowCoercion)
 			if len(errors) == 0 {
 				return validated, nil
 			}
@@ -249,12 +278,20 @@ func matchesJSONType(value any, schemaType string) bool {
 	}
 }
 
-func validateSingleType(schema map[string]any, schemaType string, value any, path string) (any, []schemaValidationError) {
+func validateSingleType(schema map[string]any, schemaType string, value any, path string, allowCoercion bool) (any, []schemaValidationError) {
+	if !allowCoercion {
+		switch schemaType {
+		case "object", "array", "string", "number", "integer", "boolean", "null":
+			if !matchesJSONType(value, schemaType) {
+				return nil, []schemaValidationError{{Path: path, Message: "must be " + schemaType}}
+			}
+		}
+	}
 	switch schemaType {
 	case "object":
-		return validateObjectSchema(schema, value, path)
+		return validateObjectSchema(schema, value, path, allowCoercion)
 	case "array":
-		return validateArraySchema(schema, value, path)
+		return validateArraySchema(schema, value, path, allowCoercion)
 	case "string":
 		return validateStringSchema(schema, value, path)
 	case "number":
@@ -282,7 +319,7 @@ func validateSingleType(schema map[string]any, schemaType string, value any, pat
 	}
 }
 
-func validateObjectSchema(schema map[string]any, value any, path string) (any, []schemaValidationError) {
+func validateObjectSchema(schema map[string]any, value any, path string, allowCoercion bool) (any, []schemaValidationError) {
 	objectValue, ok := value.(map[string]any)
 	if !ok {
 		return nil, []schemaValidationError{{Path: path, Message: "must be object"}}
@@ -320,7 +357,7 @@ func validateObjectSchema(schema map[string]any, value any, path string) (any, [
 		if !exists {
 			continue
 		}
-		validated, propertyErrors := validateSchemaValue(propertySchema, currentValue, joinSchemaPath(path, name))
+		validated, propertyErrors := validateSchemaValueMode(propertySchema, currentValue, joinSchemaPath(path, name), allowCoercion)
 		if len(propertyErrors) > 0 {
 			errors = append(errors, propertyErrors...)
 			continue
@@ -350,7 +387,7 @@ func validateObjectSchema(schema map[string]any, value any, path string) (any, [
 				if _, known := properties[key]; known {
 					continue
 				}
-				validated, propertyErrors := validateSchemaValue(typed, currentValue, joinSchemaPath(path, key))
+				validated, propertyErrors := validateSchemaValueMode(typed, currentValue, joinSchemaPath(path, key), allowCoercion)
 				if len(propertyErrors) > 0 {
 					errors = append(errors, propertyErrors...)
 					continue
@@ -366,7 +403,7 @@ func validateObjectSchema(schema map[string]any, value any, path string) (any, [
 	return result, nil
 }
 
-func validateArraySchema(schema map[string]any, value any, path string) (any, []schemaValidationError) {
+func validateArraySchema(schema map[string]any, value any, path string, allowCoercion bool) (any, []schemaValidationError) {
 	arrayValue, ok := value.([]any)
 	if !ok {
 		return nil, []schemaValidationError{{Path: path, Message: "must be array"}}
@@ -396,7 +433,7 @@ func validateArraySchema(schema map[string]any, value any, path string) (any, []
 
 	result := make([]any, len(arrayValue))
 	for index, item := range arrayValue {
-		validated, itemErrors := validateSchemaValue(itemsSchema, item, joinSchemaPath(path, strconv.Itoa(index)))
+		validated, itemErrors := validateSchemaValueMode(itemsSchema, item, joinSchemaPath(path, strconv.Itoa(index)), allowCoercion)
 		if len(itemErrors) > 0 {
 			errors = append(errors, itemErrors...)
 			continue

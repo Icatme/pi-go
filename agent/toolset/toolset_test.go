@@ -515,3 +515,31 @@ func TestSearchReportsMatchingAlreadyDeclaredTool(t *testing.T) {
 		t.Fatal("search dispatched a tool")
 	}
 }
+
+func TestToolSearchExactHiddenNameDoesNotExposeHiddenTool(t *testing.T) {
+	f := newFixture(t, managed.Codemode, mixedRules())
+	ts, err := New(f.manager, f.sandbox, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools, err := ts.Resolve(t.Context(), agent.AgentSnapshot{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := agent.ToolCall{ID: "exact-hidden", Name: "tool_search", ParsedArgs: map[string]any{"query": "mcp__issues__hidden_issue", "limit": 1}}
+	out := agent.RunToolCall(t.Context(), call, agent.RunToolCallOptions{Tools: tools, Context: agent.AgentContext{Tools: tools}})
+	if out.Err != nil {
+		t.Fatal(out.Err)
+	}
+	if text := resultText(out.Result); strings.Contains(text, "hidden_issue") || strings.Contains(text, "SECRET_") {
+		t.Fatalf("hidden exact name leaked: %s", text)
+	}
+	message := agent.NewToolResultMessage(call, out.Result, out.IsError)
+	loaded, err := ts.Resolve(t.Context(), agent.AgentSnapshot{Messages: []agent.Message{message}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(toolNames(loaded), "hidden_issue") {
+		t.Fatal("hidden exact name admitted")
+	}
+}

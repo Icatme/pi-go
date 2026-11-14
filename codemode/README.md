@@ -175,3 +175,5 @@ original prelude failed 10 of the same 30 cases in both engines. This verifies
 these JS semantics in the pinned reactor, **not** Go compilation, wazero host
 integration, real tool authorization, concurrency, cancellation races or full
 sandbox isolation. Those still require the Go suite.
+
+Optional per-query `descriptionBudget: {maxPerMatchBytes, maxTotalBytes}` returns marked UTF-8 description prefixes without changing ranking, names or permissions. Zero ceilings omit nonempty descriptions; absent preserves full text. Before using truncated guidance, read the complete contract with `describeTool(name)`. This is not a total JSON/token budget. See [budget contract](../docs/search-description-budget.md).

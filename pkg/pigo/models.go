@@ -46,10 +46,9 @@ func GetModels(provider Provider) []Model {
 
 func CalculateCost(model Model, usage Usage) UsageCost {
 	rates := model.Cost
-	inputTokens := usage.Input + usage.CacheRead + usage.CacheWrite
 	matchedThreshold := -1
 	for _, tier := range model.CostTiers {
-		if inputTokens > tier.InputTokensAbove && tier.InputTokensAbove > matchedThreshold {
+		if nonnegativeTokenSumExceeds(tier.InputTokensAbove, usage.Input, usage.CacheRead, usage.CacheWrite) && tier.InputTokensAbove > matchedThreshold {
 			rates = tier.Rates
 			matchedThreshold = tier.InputTokensAbove
 		}
