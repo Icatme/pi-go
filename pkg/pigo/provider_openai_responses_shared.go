@@ -806,6 +806,12 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 		return nil
 	}
 
+	reasoningIDs := make(map[string]int)
+	for _, item := range terminal.Output {
+		if item.Type == "reasoning" && item.ID != "" {
+			reasoningIDs[item.ID]++
+		}
+	}
 	for _, item := range terminal.Output {
 		if state.AnchorsTools && item.Type == "function_call" {
 			if err := validateOpenAIResponsesFunctionItem(state, item); err != nil {
@@ -820,7 +826,9 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 		}
 		itemKey := openAIResponsesItemKey(item)
 		if itemKey != "" && state != nil && state.FinalizedItemKeys[itemKey] {
-			backfillOpenAIResponsesReasoningCipher(response, item)
+			if reasoningIDs[item.ID] == 1 {
+				backfillOpenAIResponsesReasoningCipher(response, item)
+			}
 			continue
 		}
 

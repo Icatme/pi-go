@@ -4130,3 +4130,13 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Signature updates preserve unknown JSON fields and large integer values via RawMessage. A new content slice preserves already emitted partial snapshots. Ambiguous IDs, missing IDs/ciphertext, malformed signatures and invalid existing ciphertext types are left unchanged. This does not introduce Azure deployment support or change store options.
 - Protocol sources: [OpenAI reasoning guide](https://developers.openai.com/api/docs/guides/reasoning) and [Azure Responses guide](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses?tabs=rest). Stateless multi-turn use needs replayable encrypted output. Localhost SSE and serialized next-request fixtures cover ordinary Responses and Codex; no live Azure/OpenAI request or paid validation.
 - Baseline regression failed. Final slice-identity/terminal-only targeted race x3 passed1.447s; added null/wrong-type boundaries targeted race x3 passed1.196s. Full pkg/pigo race passed42.342s; vet passed. Independent reviews found no blocking issue. Old stored signatures missing ciphertext cannot be retroactively repaired without the original terminal response.
+
+## 2026-11-14 - PR #243 review correction: ambiguous terminal reasoning
+
+- Reproduced duplicate reasoning IDs in a terminal Responses output selecting the
+  first opaque ciphertext for an already completed item. Require a unique
+  reasoning ID in the terminal output before filling the missing signature.
+- The new localhost HTTP regression failed for both Responses and Codex before
+  the fix. All terminal ciphertext tests pass with race on Windows Go 1.26.4.
+  Existing signatures, completed content and event counts remain unchanged.
+- Offline fixtures only; no live model, CI dispatch, release or deployment.

@@ -116,3 +116,37 @@ func TestResponsesTerminalCipherBackfillBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func TestResponsesTerminalCipherDuplicateIdentity(t *testing.T) {
+	for _, api := range []API{"openai-responses", "openai-codex-responses"} {
+		t.Run(string(api), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, `data: {"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","status":"completed","summary":[{"type":"summary_text","text":"summary"}]}}
+
+data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"first"},{"type":"reasoning","id":"rs_1","encrypted_content":"second"}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}
+
+`)
+			}))
+			defer server.Close()
+			model := Model{ID: "fixture", Provider: "openai", API: api, BaseURL: server.URL, Reasoning: true, Input: []InputType{InputText}}
+			stream := StreamSimple(model, Context{Messages: []Message{UserMessage{Content: "hello"}}}, SimpleStreamOptions{APIKey: makeOpenAICodexToken("fixture"), Transport: TransportSSE})
+			ends := 0
+			var completed ThinkingContent
+			for event := range stream.Events() {
+				if event.Type == AssistantMessageEventThinkingEnd {
+					ends++
+					completed = event.Partial.Content[0].(ThinkingContent)
+				}
+			}
+			result := stream.Result()
+			if result.StopReason != StopReasonStop || len(result.Content) != 1 || ends != 1 {
+				t.Fatalf("result=%+v ends=%d", result, ends)
+			}
+			thinking := result.Content[0].(ThinkingContent)
+			if thinking != completed || thinking.Thinking != "summary" || strings.Contains(thinking.ThinkingSignature, "encrypted_content") {
+				t.Fatalf("ambiguous terminal output changed completed reasoning: %+v", thinking)
+			}
+		})
+	}
+}
