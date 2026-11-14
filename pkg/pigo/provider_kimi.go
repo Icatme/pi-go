@@ -352,6 +352,34 @@ func completeAnthropicOnce(model Model, ctx Context, options AnthropicMessagesPr
 	return completeAnthropicOnceWithStream(model, ctx, options, apiKey, isOAuth, nil, true, false, nil)
 }
 
+func validateAnthropicOAuthToolNames(bodyBytes []byte) error {
+	var wire struct {
+		Tools []anthropicTool `json:"tools"`
+	}
+	if err := json.Unmarshal(bodyBytes, &wire); err != nil {
+		return nil
+	}
+	return validateAnthropicOAuthTools(wire.Tools)
+}
+
+func validateAnthropicOAuthTools(tools []anthropicTool) error {
+	seen := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		name := tool.Name
+		if tool.Type == "builtin_function" && tool.Function != nil {
+			name = tool.Function.Name
+		}
+		if name == "" {
+			continue
+		}
+		if seen[name] {
+			return withProviderFailure(errors.New("Anthropic OAuth tool names collide after wire normalization"), ProviderFailureSDK, "invalid_tool_names")
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
 func completeAnthropicOnceWithStream(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool, stream *AssistantMessageEventStream, emitTerminal bool, observeRequest bool, observedRequestContext *context.Context) (AssistantMessage, error) {
 	response := AssistantMessage{
 		API:        model.API,
@@ -360,7 +388,14 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 		StopReason: StopReasonStop,
 		Timestamp:  time.Now().UTC(),
 	}
-	payload := any(buildAnthropicRequest(model, ctx, options, isOAuth, true))
+	requestBody := buildAnthropicRequest(model, ctx, options, isOAuth, true)
+	if isOAuth {
+		if err := validateAnthropicOAuthTools(requestBody.Tools); err != nil {
+			applyRequestError(&response, err)
+			return response, err
+		}
+	}
+	payload := any(requestBody)
 	if options.OnPayload != nil {
 		if next := options.OnPayload(payload, model); next != nil {
 			payload = next
@@ -369,6 +404,13 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
 		return AssistantMessage{}, err
+	}
+
+	if isOAuth && options.OnPayload != nil {
+		if err := validateAnthropicOAuthToolNames(bodyBytes); err != nil {
+			applyRequestError(&response, err)
+			return response, err
+		}
 	}
 
 	requestContext := options.RequestContext
