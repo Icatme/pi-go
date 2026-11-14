@@ -13,6 +13,7 @@ import (
 	"io"
 	mathrand "math/rand/v2"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -745,6 +746,28 @@ func newCommandCodeThreadID() (string, error) {
 }
 
 func resolveCommandCodeGenerateURL(baseURL string) string {
+	base := strings.TrimSpace(baseURL)
+	if !strings.ContainsAny(base, "?#") {
+		return resolveLegacyCommandCodeGenerateURL(baseURL)
+	}
+	if parsed, err := url.Parse(base); err == nil && parsed.Opaque == "" {
+		path := strings.TrimRight(parsed.EscapedPath(), "/")
+		if !strings.HasSuffix(path, "/alpha/generate") {
+			path = strings.TrimSuffix(path, "/provider/v1") + "/alpha/generate"
+		}
+		decoded, err := url.PathUnescape(path)
+		if err != nil {
+			return resolveLegacyCommandCodeGenerateURL(baseURL)
+		}
+		parsed.Path = decoded
+		parsed.RawPath = path
+		return parsed.String()
+	}
+	// Keep malformed/opaque URL handling unchanged; the request layer validates it.
+	return resolveLegacyCommandCodeGenerateURL(baseURL)
+}
+
+func resolveLegacyCommandCodeGenerateURL(baseURL string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if trimmed == "" {
 		trimmed = resolveCommandCodeAPIBaseURL()

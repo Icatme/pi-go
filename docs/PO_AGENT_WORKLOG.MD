@@ -4435,3 +4435,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Preserve explicit CommandCode Generate URL queries
+
+- Actual localhost Generate backend regression reproduced both provider/v1 and complete alpha/generate URLs absorbing the appended suffix into query (RED0.013s). Tests use the explicit Generate test helper rather than the public default native Chat route.
+- Only explicit query/fragment-bearing bases use parsed escaped-path suffix replacement. Preserve provider/v1 -> alpha/generate behavior, raw query, escaped path and fragment. No-query/default configuration and malformed/opaque handling stay legacy; discovery, native Chat/Responses, auth headers, retries and vendor identity/user-agent are unchanged.
+- Final target race x3 passed1.116s, independent target race x3 passed1.100s and static review no blocker. Full pkg/pigo race passed41.927s and vet exited0. Real HTTP tests verify exact URI, explicit fixture Authorization and one request; component controls cover ForceQuery, duplicates, escaped slash, fragment, custom path and legacy fallback.
+- Synthetic localhost requests only. Not a claim of real CommandCode outage or new URL validation; no live model, credentials discovery, CI dispatch, merge, release or deployment.
