@@ -1,5 +1,12 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Detect missing dedicated DeepSeek terminal
+
+- Actual localhost audit reproduced partial DeepSeek content followed by EOF without finish_reason returning successful Stop. Track a nonblank finish_reason and reject missing terminal as stream_interrupted/missing_terminal before finalization; [DONE] alone is insufficient. Preserve existing partial snapshot and reported usage, no retry or tool-end/done success events.
+- Explicit upstream error keeps its existing Done(Error)/message behavior; valid finish plus EOF remains compatible. This does not add full raw-argument audit retention: partial tool state remains as previously decoded, and normal-finalization-only RawArguments behavior is unchanged. A fixture with unclosed argument JSON verifies final error and no ToolCallEnd.
+- Target race x3 initial1.164s, final test-only unclosed-argument coverage1.515s; final runtime full pkg/pigo race44.337s and vet passed. Independent parent target1.090s/static review passed. Patch applies cleanly to dedicated DeepSeek replay commit5cc9279 in an isolated worktree; this is apply-check evidence, not a combined full test.
+- Official contract checked: https://api-docs.deepseek.com/api/create-chat-completion/ describes final non-null finish_reason and usage before DONE. No live model, paid calls, automatic retry, merge, release or CI dispatch.
+
 ## 2026-11-14 - Reject explicit tool-index identity collisions
 
 - Reproduced upstream Pi #11881/#11908 on master 755e003: distinct named call IDs at one Chat Completions stream index silently yielded a successful toolUse with concatenated arguments and an overwritten ID. Reject that explicit conflict as response_parse_error/tool_call_index_collision before mutating the existing call; do not guess a split or retry.

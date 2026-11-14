@@ -383,11 +383,15 @@ func streamDeepSeekChatSSE(model Model, ctx context.Context, client *http.Client
 	}); err != nil {
 		return err
 	}
+	if !state.FinishSeen && response.StopReason != StopReasonError {
+		return withProviderFailure(fmt.Errorf("DeepSeek stream ended without finish_reason"), ProviderFailureStream, "missing_terminal")
+	}
 	finalizeDeepSeekChatResponse(response, stream, state)
 	return nil
 }
 
 type deepSeekChatState struct {
+	FinishSeen      bool
 	TextIndex       int
 	TextStarted     bool
 	Text            strings.Builder
@@ -469,6 +473,7 @@ func processDeepSeekChatStreamEvent(data string, model Model, response *Assistan
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallDelta, ContentIndex: toolState.Index, Delta: toolDelta.Function.Arguments, ToolCall: toolCall, Partial: *response})
 		}
 		if strings.TrimSpace(choice.FinishReason) != "" {
+			state.FinishSeen = true
 			response.StopReason = mapDeepSeekFinishReason(choice.FinishReason, response.Content)
 		}
 	}
