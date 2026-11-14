@@ -3968,6 +3968,14 @@
   No full-repository runtime/race repeat, examples repeat, UI acceptance, live
   provider request, main-branch merge, release or deployment was performed here.
 
+## 2026-11-14: post-merge Pi issue follow-up
+
+Synced master `9a8e190` after #223; original #200–222 remain superseded. Rechecking Mistral #12148 found no Go strict-tool emission, but independently reproduced dropped cancellation/timeout errors while reading non-2xx bodies. Preserve the original read-error chain with a minimal adapter fix and targeted cancel/timeout × 200/503 regressions. MCP #11763 does not map to current go-sdk cancellation propagation (SDK cancellation race regression passed three times); Code Mode #11122 has no matching TS renderer. See `docs/pi-issue-followup-20261114.md` for scope and unresolved image-count budgeting. No live models, paid execution, merge, release or deployment.
+
+## 2026-11-14: DeepSeek error-response cancellation boundary
+
+From master `9a8e190`, independently of Mistral #224, reproduced loss of cancel/deadline classification while reading native DeepSeek non-2xx bodies; preserve readErr with `%w`. HTTP200 controls and matching CommandCode cases already pass, so CommandCode is unchanged. Added regression for read-error identity, one request, body closure and non-cancellation error behavior. See `docs/pi-deepseek-error-body-20261114.md`; no extra retry/timeout policy, live model, release, merge or deployment.
+
 ## 2026-11-14: upstream contract regression guards
 
 Rechecked pi #11226 and #9134 on master `9a8e190`: Go already avoids the top-level Code Mode binding collision and preserves root Anthropic tool-schema constraints. Add real sandbox/serialized request regressions rather than unnecessary runtime patches. Temporary overlays recreating each reported defect make the new tests fail as expected. Notes distinguish these negative findings from the independent Mistral #224 and DeepSeek #225 fixes. See `docs/pi-upstream-contract-guards-20261114.md`; no real service, paid model, merge or deployment.

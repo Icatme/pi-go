@@ -66,9 +66,12 @@ only when the host accepts concurrent independent calls; names such as `bash` or
 or proof that a remote job has completed.
 
 Code Mode has its own ordering: use explicit `await` between dependent calls, or
-the sandbox's host-owned sequential option where appropriate. Setting an Agent
-ToolDefinition mode is not a promise that arbitrary `Promise.all` scripts become
-serial.
+the sandbox's host-owned sequential option where appropriate. The
+`agent/codemodetool` adapter propagates a Native tool's `ToolExecutionSequential`
+mode to `RunOptions.Sequential`, serializing host tool calls even within
+`Promise.all`. A standalone sandbox does not inspect Agent tool definitions;
+its host must set this option explicitly. Serial dispatch alone does not express
+which result a later call needs; use `await` for those data dependencies.
 
 ## Permission, cancellation and receipts
 
