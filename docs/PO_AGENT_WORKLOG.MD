@@ -4435,3 +4435,9 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14: Reject unrepresentable Google usage snapshots
+
+- Reproduced candidates+thoughts integer overflow and cached content greater than prompt producing negative uncached input on master4115596 with synthetic fixtures, not production traffic. Validate all raw token fields as nonnegative, cached<=prompt and representable output sum before changing usage. Official Gemini UsageMetadata documents promptTokenCount as including cached content: https://ai.google.dev/api/generate-content#UsageMetadata . No total conservation heuristic or provider count guessing is added.
+- Invalid snapshots produce typed parse/invalid_usage, retaining earlier emitted text and any prior valid snapshot, without automatic retry. Prior usage on an error is partial evidence, not verified final billing. Legal zero/all-cache/exact-MaxInt and independent provider total semantics remain unchanged.
+- Direct arithmetic plus actual localhost SSE tests cover with/without prior valid usage, partial text, one request, one error and no done. Target race x3 passed1.079s; full pkg/pigo race43.337s and vet passed. No paid/provider/production tests or deployment; remaining provider arithmetic has separate patches/audit.

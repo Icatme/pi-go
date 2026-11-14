@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -571,7 +572,9 @@ func processGoogleStreamEvent(data string, model Model, response *AssistantMessa
 		response.ResponseID = chunk.ResponseID
 	}
 	if chunk.UsageMetadata != nil {
-		applyGoogleUsage(response, model, *chunk.UsageMetadata)
+		if err := applyGoogleUsage(response, model, *chunk.UsageMetadata); err != nil {
+			return true, err
+		}
 	}
 
 	if len(chunk.Candidates) == 0 {
@@ -711,7 +714,15 @@ func googleToolCallID(id, name string, state *googleStreamState) string {
 	return fmt.Sprintf("%s_%d_%d", name, time.Now().UnixMilli(), state.ToolCallCounter)
 }
 
-func applyGoogleUsage(response *AssistantMessage, model Model, usage googleUsageMetadata) {
+func applyGoogleUsage(response *AssistantMessage, model Model, usage googleUsageMetadata) error {
+	for _, count := range []int{usage.PromptTokenCount, usage.CandidatesTokenCount, usage.ThoughtsTokenCount, usage.CachedContentTokenCount, usage.TotalTokenCount} {
+		if count < 0 {
+			return withProviderFailure(fmt.Errorf("Google usage contains a negative token count"), ProviderFailureParse, "invalid_usage")
+		}
+	}
+	if usage.CachedContentTokenCount > usage.PromptTokenCount || usage.CandidatesTokenCount > math.MaxInt-usage.ThoughtsTokenCount {
+		return withProviderFailure(fmt.Errorf("Google usage token counts cannot be represented"), ProviderFailureParse, "invalid_usage")
+	}
 	response.Usage = Usage{
 		Input:       usage.PromptTokenCount - usage.CachedContentTokenCount,
 		Output:      usage.CandidatesTokenCount + usage.ThoughtsTokenCount,
@@ -721,6 +732,7 @@ func applyGoogleUsage(response *AssistantMessage, model Model, usage googleUsage
 	}
 	response.UsageReported = true
 	response.Usage.Cost = CalculateCost(model, response.Usage)
+	return nil
 }
 
 func mapGoogleStopReason(reason string, content []ContentBlock) StopReason {
