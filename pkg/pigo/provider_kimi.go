@@ -101,10 +101,11 @@ type anthropicCacheControl struct {
 }
 
 type anthropicResponse struct {
-	ID         string                   `json:"id"`
-	Content    []anthropicResponseBlock `json:"content"`
-	StopReason string                   `json:"stop_reason"`
-	Usage      *anthropicUsage          `json:"usage,omitempty"`
+	Diagnostics json.RawMessage          `json:"diagnostics,omitempty"`
+	ID          string                   `json:"id"`
+	Content     []anthropicResponseBlock `json:"content"`
+	StopReason  string                   `json:"stop_reason"`
+	Usage       *anthropicUsage          `json:"usage,omitempty"`
 }
 
 type anthropicResponseBlock struct {
@@ -565,6 +566,7 @@ func processAnthropicStreamEvent(
 	case "message_start":
 		if event.Message != nil {
 			response.ResponseID = event.Message.ID
+			appendAnthropicCacheDiagnostics(response, event.Message.Diagnostics)
 			if event.Message.Usage != nil {
 				applyAnthropicUsage(response, model, *event.Message.Usage)
 			}
