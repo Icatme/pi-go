@@ -3,12 +3,15 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 )
 
 const localDataDirName = ".pigo"
 const authFileName = "auth.json"
+
+const maxCLIAuthBytes = 1 << 20
 
 type storedOAuthCredentials struct {
 	Type      string `json:"type"`
@@ -19,8 +22,17 @@ type storedOAuthCredentials struct {
 }
 
 func loadAuth(path string) map[string]storedOAuthCredentials {
-	body, err := os.ReadFile(path)
+	file, err := openCLIAuthRead(path)
 	if err != nil {
+		return map[string]storedOAuthCredentials{}
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxCLIAuthBytes {
+		return map[string]storedOAuthCredentials{}
+	}
+	body, err := io.ReadAll(io.LimitReader(file, maxCLIAuthBytes+1))
+	if err != nil || len(body) > maxCLIAuthBytes {
 		return map[string]storedOAuthCredentials{}
 	}
 
