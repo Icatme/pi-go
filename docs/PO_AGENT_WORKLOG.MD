@@ -1,5 +1,12 @@
 # PO Agent Worklog
 
+## 2026-11-14 — Chat Length with incomplete tool identity
+
+- Follow-up to #5921/PR242: localhost Chat → Pigo adapter → Engine probes confirmed that a Length response with blank tool name/ID still emitted invalid identity on the next request. Blank ID also caused the adapter to drop the empty-ID tool result and message transformation to synthesize another empty-ID result. No live provider rejection was claimed.
+- Narrow the earlier Length exclusion intentionally: a terminal Length batch with missing/whitespace ID or name now uses the existing typed malformed_tool_call failure path before toolcall-end/done. Remove the entire malformed batch to avoid orphan sibling results, retain text/thinking/usage and earlier partial evidence. Identity-complete Length, including truncated arguments, keeps its original Length/error-feedback/recovery behavior. Unrelated errors/abort, other providers, custom model output and old saved history are not repaired.
+- Expanded provider regressions across stop/tool_calls/length and blank/missing identity; ordinary/gated actual HTTP integration covers malformed mixed batches, no execution/results/automatic second request, Continue rejection and safe explicit-prompt recovery. A separate complete-identity Length fixture verifies normal error feedback and automatic recovery without executing tools or gates. Overlaying the pre-follow-up runtime reproduces the new failures.
+- Final runtime full pkg/pigo race passed (42.143s); full agent race passed again after the normal gated-Length fixture (7.148s). Both packages passed vet. No live calls, deployment or changes to retry policy.
+
 ## 2026-11-14 - Reject completed Chat tool batches with missing identity
 
 - Audited upstream Pi #5921 and reproduced Chat returning a successful tool-use response with blank tool name/ID. At successful stop/tool-use finalization only, reject blank identity with a typed malformed_tool_call parse error and remove the entire executable tool batch from the final response using a fresh content slice. Preserve text, reasoning metadata and usage; finalize indexed reasoning before filtering. Earlier streamed partial evidence is not authorization to execute tools. No automatic retry or toolcall-end/done for the malformed batch.

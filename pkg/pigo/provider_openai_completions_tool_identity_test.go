@@ -11,62 +11,64 @@ import (
 )
 
 func TestCompletionsRejectsMalformedFinalToolBatch(t *testing.T) {
-	for _, tc := range []struct{ name, id, tool string }{{"missing name", "bad", ""}, {"blank name", "bad", " \t"}, {"missing id", "", "echo"}, {"blank id", " \t", "echo"}} {
-		t.Run(tc.name, func(t *testing.T) {
-			var requests atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requests.Add(1)
-				w.Header().Set("Content-Type", "text/event-stream")
-				fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"text retained\",\"reasoning_content\":\"thought retained\"}}]}\n\n")
-				fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"good\",\"function\":{\"name\":\"echo\",\"arguments\":\"{}\"}},{\"index\":1,\"id\":%q,\"function\":{\"name\":%q,\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3,\"total_tokens\":8}}\n\ndata: [DONE]\n\n", tc.id, tc.tool)
-			}))
-			defer server.Close()
-			model := Model{ID: "test", API: "openai-completions", Provider: "fixture", BaseURL: server.URL, MaxTokens: 1024}
-			stream := Stream(model, Context{}, ProviderStreamOptions{APIKey: "fixture", MaxRetries: 2})
-			events := collectAssistantMessageEvents(stream.Events())
-			result := stream.Result()
-			if result.StopReason != StopReasonError {
-				t.Fatalf("not error: %#v", result)
-			}
-			failure, ok := ProviderFailureOf(result)
-			if !ok || failure.Kind != ProviderFailureParse || failure.Reason != "malformed_tool_call" {
-				t.Fatalf("failure: %#v", failure)
-			}
-			if result.Usage.Input != 5 || result.Usage.Output != 3 {
-				t.Fatalf("usage: %#v", result.Usage)
-			}
-			var text, thought bool
-			for _, b := range result.Content {
-				switch b := b.(type) {
-				case ToolCall:
-					t.Fatal("executable call survived")
-				case TextContent:
-					text = b.Text == "text retained"
-				case ThinkingContent:
-					thought = b.Thinking == "thought retained"
+	for _, finish := range []string{"tool_calls", "stop", "length"} {
+		for _, tc := range []struct{ name, id, tool string }{{"missing name", "bad", ""}, {"blank name", "bad", " \t"}, {"missing id", "", "echo"}, {"blank id", " \t", "echo"}} {
+			t.Run(finish+"/"+tc.name, func(t *testing.T) {
+				var requests atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requests.Add(1)
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"text retained\",\"reasoning_content\":\"thought retained\"}}]}\n\n")
+					fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"good\",\"function\":{\"name\":\"echo\",\"arguments\":\"{}\"}},{\"index\":1,\"id\":%q,\"function\":{\"name\":%q,\"arguments\":\"{}\"}}]},\"finish_reason\":%q}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3,\"total_tokens\":8}}\n\ndata: [DONE]\n\n", tc.id, tc.tool, finish)
+				}))
+				defer server.Close()
+				model := Model{ID: "test", API: "openai-completions", Provider: "fixture", BaseURL: server.URL, MaxTokens: 1024}
+				stream := Stream(model, Context{}, ProviderStreamOptions{APIKey: "fixture", MaxRetries: 2})
+				events := collectAssistantMessageEvents(stream.Events())
+				result := stream.Result()
+				if result.StopReason != StopReasonError {
+					t.Fatalf("not error: %#v", result)
 				}
-			}
-			if !text || !thought {
-				t.Fatalf("text/thinking lost: %#v", result.Content)
-			}
-			partialToolSeen := false
-			for _, event := range events {
-				if event.Type == AssistantMessageEventDone || event.Type == AssistantMessageEventToolCallEnd {
-					t.Fatalf("unexpected terminal event: %s", event.Type)
+				failure, ok := ProviderFailureOf(result)
+				if !ok || failure.Kind != ProviderFailureParse || failure.Reason != "malformed_tool_call" {
+					t.Fatalf("failure: %#v", failure)
 				}
-				for _, b := range event.Partial.Content {
-					if _, ok := b.(ToolCall); ok {
-						partialToolSeen = true
+				if result.Usage.Input != 5 || result.Usage.Output != 3 {
+					t.Fatalf("usage: %#v", result.Usage)
+				}
+				var text, thought bool
+				for _, b := range result.Content {
+					switch b := b.(type) {
+					case ToolCall:
+						t.Fatal("executable call survived")
+					case TextContent:
+						text = b.Text == "text retained"
+					case ThinkingContent:
+						thought = b.Thinking == "thought retained"
 					}
 				}
-			}
-			if !partialToolSeen {
-				t.Fatal("previous partial evidence lost")
-			}
-			if requests.Load() != 1 {
-				t.Fatalf("retried %d", requests.Load())
-			}
-		})
+				if !text || !thought {
+					t.Fatalf("text/thinking lost: %#v", result.Content)
+				}
+				partialToolSeen := false
+				for _, event := range events {
+					if event.Type == AssistantMessageEventDone || event.Type == AssistantMessageEventToolCallEnd {
+						t.Fatalf("unexpected terminal event: %s", event.Type)
+					}
+					for _, b := range event.Partial.Content {
+						if _, ok := b.(ToolCall); ok {
+							partialToolSeen = true
+						}
+					}
+				}
+				if !partialToolSeen {
+					t.Fatal("previous partial evidence lost")
+				}
+				if requests.Load() != 1 {
+					t.Fatalf("retried %d", requests.Load())
+				}
+			})
+		}
 	}
 }
 
@@ -111,10 +113,10 @@ func TestCompletionsMalformedBatchKeepsIndexedReasoning(t *testing.T) {
 	}
 }
 
-func TestCompletionsTruncatedToolIdentityRetainsLength(t *testing.T) {
+func TestCompletionsTruncatedArgumentsWithIdentityRetainsLength(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"partial\",\"function\":{\"arguments\":\"{\"}}]},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"partial\",\"function\":{\"name\":\"echo\",\"arguments\":\"{\"}}]},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
 	result := Complete(Model{ID: "test", API: "openai-completions", Provider: "fixture", BaseURL: server.URL, MaxTokens: 1024}, Context{}, ProviderStreamOptions{APIKey: "fixture"})

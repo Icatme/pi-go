@@ -329,7 +329,7 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 		if err == nil && !state.FinishSeen {
 			err = withProviderFailure(errOpenAICompletionsStreamMissingTerminal, ProviderFailureStream, "missing_terminal")
 		}
-		if err == nil && (response.StopReason == StopReasonStop || response.StopReason == StopReasonToolUse) {
+		if err == nil && (response.StopReason == StopReasonStop || response.StopReason == StopReasonToolUse || response.StopReason == StopReasonLength) {
 			err = validateOpenAICompletionsToolBatch(&response, state)
 		}
 		if err != nil {
