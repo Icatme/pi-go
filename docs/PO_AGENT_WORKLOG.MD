@@ -4370,3 +4370,24 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Normal/gated Run and Continue/new-user recovery fixtures verify zero tool/gate executions, one preserved audit result/event, snapshot JSON restoration and no orphan in the next HTTP request. Boundary fixtures cover reused IDs, genuine execution metadata, unmarked/unknown/ambiguous records, original IDs, clone isolation and unchanged source history. The JSONL storage regression verifies one marked message survives close/reopen and detached Entry mutation, not a claim of every Engine Journal lifecycle.
 - Custom models/serializers retain their existing audit-history contract and do not automatically gain this projection; see `docs/agent-unexecuted-result-projection.md`. Provenance is structured runtime metadata, not cryptographic authentication for imported JSON.
 - Final runtime full race: agent 7.005s, pkg/pigo 43.420s; vet for both passed. Final expanded targeted race x3 passed: agent 1.211s, session 1.079s. Independent final-runtime target race x3: agent 1.160s, session 1.072s, no review blockers. No paid/live provider, CI dispatch, deployment, automatic retry or release.
+
+## 2026-11-14 - Review and integrate open PRs #228-259
+
+- Reviewed all 32 open drafts in three independent review sessions, then checked
+  the integrated code. No existing review threads or CI checks were present;
+  automatic CI remains disabled. No third-party dependency was added or updated.
+- Fixed #243's reproduced duplicate terminal reasoning ID ambiguity with a
+  uniqueness check and dual-API HTTP regression. Kept both overflow patterns,
+  Anthropic model/cache diagnostics, and Responses phase/ciphertext backfills
+  while resolving actual three-way conflicts. Preserved every original worklog
+  addition; #258 follows #236 and must target master for final delivery.
+- Windows Go 1.26.4 offline validation passed: targeted Chat/Responses/agent
+  regressions; full race suites for pkg/pigo (41.821s), agent and all subpackages,
+  mcp (8.907s), and internal/cli (1.182s); affected-package vet and diff checks.
+  This includes Windows runtime credential-reader tests, not just cross-compiles.
+- Prepared successive PR candidates for merge commits, with original-head and
+  predecessor ancestry checks. Publication and merge use expected-head guards
+  so reviewed code cannot be replaced by concurrent branch changes.
+- No full-root/examples suite, live provider, UI acceptance, manual CI dispatch,
+  release, downstream update or deployment. The primary worktree's uncommitted
+  superagent/README.md edit is preserved.
