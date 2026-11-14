@@ -1,5 +1,11 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Explicit Responses additional-tools compatibility switch
+
+- Audited upstream Pi #11637: a custom gateway can inherit a native model's additional_tools behavior. Added optional OpenAIResponsesCompat.SupportsAdditionalTools=false to send the complete current tool set at top level instead. Nil retains defaults; true does not grant registry capabilities. No URL guessing, automatic fallback, system-message capability change, or previous_response_id relaxation.
+- Deep-copy the new pointer and cover late additions/removals, redeclarations, historical calls/results, current-tool uniqueness, unknown-model true and dynamic full-history guards. Added gateway configuration documentation. Independent review passed. Full pkg/pigo race passed (41.935s), vet passed; subsequently expanded replay/redeclaration test plus new switch/clone tests passed race count3 (1.236s). No runtime changes followed full-suite validation.
+- Broad repeated legacy tests hit an existing duplicate-provider-registration panic; the complete suite was run once, not claimed repeat-safe. No live-provider or deployment validation.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.

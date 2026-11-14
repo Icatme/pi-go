@@ -313,10 +313,11 @@ func TestDeepSeekFlashToolImagesAndMinimalReasoning(t *testing.T) {
 
 func TestResponsesCompatSwitchCopiesAreIndependent(t *testing.T) {
 	for name, selectFlag := range map[string]func(*OpenAIResponsesCompat) **bool{
-		"session header": func(c *OpenAIResponsesCompat) **bool { return &c.SendSessionIdHeader },
-		"long cache":     func(c *OpenAIResponsesCompat) **bool { return &c.SupportsLongCacheRetention },
-		"explicit cache": func(c *OpenAIResponsesCompat) **bool { return &c.SupportsExplicitPromptCacheMode },
-		"output limit":   func(c *OpenAIResponsesCompat) **bool { return &c.SupportsMaxOutputTokens },
+		"additional tools": func(c *OpenAIResponsesCompat) **bool { return &c.SupportsAdditionalTools },
+		"session header":   func(c *OpenAIResponsesCompat) **bool { return &c.SendSessionIdHeader },
+		"long cache":       func(c *OpenAIResponsesCompat) **bool { return &c.SupportsLongCacheRetention },
+		"explicit cache":   func(c *OpenAIResponsesCompat) **bool { return &c.SupportsExplicitPromptCacheMode },
+		"output limit":     func(c *OpenAIResponsesCompat) **bool { return &c.SupportsMaxOutputTokens },
 	} {
 		t.Run(name, func(t *testing.T) {
 			original := &OpenAIResponsesCompat{}
