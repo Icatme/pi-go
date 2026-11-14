@@ -330,6 +330,9 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 		if err == nil && !state.FinishSeen {
 			err = withProviderFailure(errOpenAICompletionsStreamMissingTerminal, ProviderFailureStream, "missing_terminal")
 		}
+		if err == nil && (response.StopReason == StopReasonStop || response.StopReason == StopReasonToolUse || response.StopReason == StopReasonLength) {
+			err = validateOpenAICompletionsToolBatch(&response, state)
+		}
 		if err != nil {
 			applyOpenAICompletionsReasoningDetails(&response, state)
 			applyRequestError(&response, err)
@@ -1064,6 +1067,29 @@ func openAICompletionsToolCallFromState(state *openAICompletionsToolCallState) T
 		arguments = map[string]any{}
 	}
 	return ToolCall{ID: state.ID, Name: state.Name, Arguments: arguments, ThoughtSignature: state.ThoughtSignature}
+}
+
+// Validate only the fully received batch: streamed deltas may legitimately omit
+// identity fields until later chunks. A malformed batch must not reach an agent
+// as executable calls, even on the final error message.
+func validateOpenAICompletionsToolBatch(response *AssistantMessage, state *openAICompletionsStreamState) error {
+	for _, call := range state.ToolCalls {
+		if strings.TrimSpace(call.ID) != "" && strings.TrimSpace(call.Name) != "" {
+			continue
+		}
+		// Finalize indexed reasoning metadata before removing any preceding calls.
+		applyOpenAICompletionsReasoningDetails(response, state)
+		// Do not edit the backing array retained by previously emitted partials.
+		content := make([]ContentBlock, 0, len(response.Content))
+		for _, block := range response.Content {
+			if _, isToolCall := block.(ToolCall); !isToolCall {
+				content = append(content, block)
+			}
+		}
+		response.Content = content
+		return withProviderFailure(errors.New("OpenAI Completions returned a tool call without an id or name"), ProviderFailureParse, "malformed_tool_call")
+	}
+	return nil
 }
 
 func finalizeOpenAICompletionsResponse(response *AssistantMessage, stream *AssistantMessageEventStream, state *openAICompletionsStreamState) {
