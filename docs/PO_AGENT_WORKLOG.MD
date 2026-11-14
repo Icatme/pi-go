@@ -1,5 +1,11 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Opt-in scoped Google tool-result image encoding
+
+- Confirmed two adjacent Google tool results encode images as sibling parts on v0.23.1, without structural per-function ownership. Verified Google's GenerateContent FunctionResponse.parts contract and Gemini3+ support boundary in official API/Cloud docs (accessed2026-11-14; publication date unavailable).
+- Add GoogleGenerativeAICompat.SupportsMultimodalFunctionResponses=true for explicit verified model/endpoint support: nest each result's images under its own functionResponse, preserving IDs, names, output/error and image order. Nil/false retain legacy wire; no model catalog or AI-relay admission changes, and default legacy ownership is not claimed fixed. New pointer is deep-copied.
+- Offline baseline wire regression fails; opt-in paired-image, multi-image, error/text and immutability tests pass. Final runtime full pkg/pigo race passed39.295s and vet passed; independent static review passed. Subsequent test-only additions check nil Compat and MIME preservation, and the final targeted tests passed race count3 in1.063s. No actual Google model calls or deployment. See docs/google-multimodal-function-responses.md for support/legacy limits.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.
