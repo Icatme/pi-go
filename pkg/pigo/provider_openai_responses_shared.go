@@ -820,6 +820,7 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 		}
 		itemKey := openAIResponsesItemKey(item)
 		if itemKey != "" && state != nil && state.FinalizedItemKeys[itemKey] {
+			backfillOpenAIResponsesReasoningCipher(response, item)
 			continue
 		}
 
@@ -851,6 +852,54 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 		}
 	}
 	return nil
+}
+
+// A terminal response may supply encrypted replay data absent from item.done.
+// Preserve the completed block and its lifecycle; only fill an unambiguous gap.
+func backfillOpenAIResponsesReasoningCipher(response *AssistantMessage, item openAIResponsesResponseItem) {
+	if item.Type != "reasoning" || strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.EncryptedContent) == "" {
+		return
+	}
+	found := -1
+	var signature map[string]json.RawMessage
+	var thinking ThinkingContent
+	for index, content := range response.Content {
+		block, ok := content.(ThinkingContent)
+		if !ok {
+			continue
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal([]byte(block.ThinkingSignature), &fields) != nil {
+			continue
+		}
+		var kind, id string
+		if json.Unmarshal(fields["type"], &kind) != nil || kind != "reasoning" || json.Unmarshal(fields["id"], &id) != nil || id != item.ID {
+			continue
+		}
+		if found >= 0 {
+			return
+		}
+		found, signature, thinking = index, fields, block
+	}
+	if found < 0 {
+		return
+	}
+	if raw, exists := signature["encrypted_content"]; exists {
+		var existing string
+		if json.Unmarshal(raw, &existing) != nil || existing != "" {
+			return
+		}
+	}
+	signature["encrypted_content"], _ = json.Marshal(item.EncryptedContent)
+	encoded, err := json.Marshal(signature)
+	if err != nil {
+		return
+	}
+	thinking.ThinkingSignature = string(encoded)
+	// Previously emitted partial events retain their original content slice.
+	content := append([]ContentBlock(nil), response.Content...)
+	content[found] = thinking
+	response.Content = content
 }
 
 func openAIResponsesItemKey(item openAIResponsesResponseItem) string {
