@@ -4362,3 +4362,32 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - This change is stacked on PR236's exact head e04e4521998d3fdd046547732ee8f49d928af740, reusing its GoogleGenerativeAICompat rather than redefining a competing type. The official [FunctionDeclaration reference](https://ai.google.dev/api/caching#FunctionDeclaration) documents parametersJsonSchema for JSON Schema and mutual exclusion with legacy parameters. Original upstream issue/comments read. Baseline serialized wire confirmed const/$defs/ref schema was placed in the legacy slot; no live rejection was reproduced.
 - Add SupportsParametersJSONSchema *bool. Only explicit true uses parametersJsonSchema; nil/false preserve parameters. No endpoint/model-name guessing, catalog activation, schema rewriting, reference resolution, Vertex/Cloud Code Assist expansion, or promise that every JSON Schema keyword is supported. Preserve nil-schema empty-object default and clone the new pointer. Independent of the image opt-in from PR236.
 - Actual local HTTP tests cover nil/false/true x full/nil schema, exactly one field/request, tool identity/description, unmodified source schema, clone isolation and no-tools/no-compat controls. Old runtime overlay failed both explicit-true cases; legacy cases passed. Final runtime full pkg/pigo race passed41.025s and vet passed; final expanded target race x3 passed1.313s. Independent review and target race x3 passed1.095s. No live calls, manual CI, merge, release or deploy.
+
+## 2026-11-14 — Preserve failed-generation audit results without orphan model replay (#1139)
+
+- Read upstream1139/960/1033 and distinguished host-malformed history from Go's own runtime. Actual localhost Chat stream with valid tool identity/arguments followed by an upstream error produced zero executions but one synthetic error result. The next user request replayed that result after filtering its failed assistant, creating an orphan. Independent reproduction confirmed this Go-specific path; no upstream maintainer claim is treated as proof that Go never creates synthetic results.
+- Mark only `failUnexecutedToolCalls` results with typed `ToolResultPayload.Provenance = generation_failed_unexecuted`. Keep audit snapshots, events, JSON and storage records. The agent-to-pigo projection excludes only an exact marked/error/no-execution result uniquely paired to the current Error/Aborted assistant by call ID, original ID and name. Duplicate IDs are ambiguous even with different names; new user/assistant rounds reset the scope. Ordinary executed errors, legacy/unknown provenance and mismatches remain unchanged. No text-based inference, global ID deletion, pigo SDK history rewrite or old-record migration.
+- Normal/gated Run and Continue/new-user recovery fixtures verify zero tool/gate executions, one preserved audit result/event, snapshot JSON restoration and no orphan in the next HTTP request. Boundary fixtures cover reused IDs, genuine execution metadata, unmarked/unknown/ambiguous records, original IDs, clone isolation and unchanged source history. The JSONL storage regression verifies one marked message survives close/reopen and detached Entry mutation, not a claim of every Engine Journal lifecycle.
+- Custom models/serializers retain their existing audit-history contract and do not automatically gain this projection; see `docs/agent-unexecuted-result-projection.md`. Provenance is structured runtime metadata, not cryptographic authentication for imported JSON.
+- Final runtime full race: agent 7.005s, pkg/pigo 43.420s; vet for both passed. Final expanded targeted race x3 passed: agent 1.211s, session 1.079s. Independent final-runtime target race x3: agent 1.160s, session 1.072s, no review blockers. No paid/live provider, CI dispatch, deployment, automatic retry or release.
+
+## 2026-11-14 - Review and integrate open PRs #228-259
+
+- Reviewed all 32 open drafts in three independent review sessions, then checked
+  the integrated code. No existing review threads or CI checks were present;
+  automatic CI remains disabled. No third-party dependency was added or updated.
+- Fixed #243's reproduced duplicate terminal reasoning ID ambiguity with a
+  uniqueness check and dual-API HTTP regression. Kept both overflow patterns,
+  Anthropic model/cache diagnostics, and Responses phase/ciphertext backfills
+  while resolving actual three-way conflicts. Preserved every original worklog
+  addition; #258 follows #236 and must target master for final delivery.
+- Windows Go 1.26.4 offline validation passed: targeted Chat/Responses/agent
+  regressions; full race suites for pkg/pigo (41.821s), agent and all subpackages,
+  mcp (8.907s), and internal/cli (1.182s); affected-package vet and diff checks.
+  This includes Windows runtime credential-reader tests, not just cross-compiles.
+- Prepared successive PR candidates for merge commits, with original-head and
+  predecessor ancestry checks. Publication and merge use expected-head guards
+  so reviewed code cannot be replaced by concurrent branch changes.
+- No full-root/examples suite, live provider, UI acceptance, manual CI dispatch,
+  release, downstream update or deployment. The primary worktree's uncommitted
+  superagent/README.md edit is preserved.
