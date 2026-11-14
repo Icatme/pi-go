@@ -4435,3 +4435,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Prefer exact authorized tool names in discovery (#11331)
+
+- Reproduced upstream earendil-works/pi#11331 on master4115596 without a model request: searching the full `mcp__app__thread_read` name with limit1 returned another tool whose shorter description had a higher BM25 score (RED0.005s).
+- Prioritize exact case-sensitive full names among existing BM25 candidates before truncating to the requested limit. Namespace filtering and caller-provided authorized catalogs still run first. Remaining BM25 scores and ordering are unchanged; Score is still the BM25 score, not an invented boost. No suffix aliases, case-insensitive exact matching, hidden-tool inference, or Chinese segmentation change. Empty/tokenless queries retain their existing behavior.
+- Regressions cover exact top1, namespace exclusion, absent authorized tools, alias/case controls, unchanged scores and remaining ordering; actual sandbox searchTools returns the intended name without executing it, and managed tool_search cannot disclose/load a hidden exact-name tool.
+- Target race x3 passed codemode6.186s and agent/toolset6.164s; final-runtime full race passed codemode38.078s and agent/toolset11.894s, both vet passed. Only local fake tools/localhost fixtures, no live provider, CI dispatch, merge or deployment. Independent review is recorded with the PR publication.

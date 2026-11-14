@@ -155,8 +155,9 @@ func searchTools(catalog []toolDescription, raw string) ([]SearchMatch, error) {
 	return SearchTools(summaries, req.Query, SearchOptions{Limit: limit})
 }
 
-// SearchTools performs the same BM25 search used inside the sandbox. Callers
-// must supply only authorized summaries; hidden names are never inferred.
+// SearchTools prioritizes exact tool names among BM25 matches, as in the sandbox.
+// Scores remain BM25 scores; exact matches may therefore precede higher scores.
+// Callers must supply only authorized summaries; hidden names are never inferred.
 func SearchTools(catalog []ToolSummary, query string, options SearchOptions) ([]SearchMatch, error) {
 	if len(catalog) > 256 || len(query) > 4096 || !utf8.ValidString(query) || len(options.Namespace) > 128 || !utf8.ValidString(options.Namespace) {
 		return nil, fmt.Errorf("searchTools catalog or query exceeds metadata limits")
@@ -216,7 +217,13 @@ func SearchTools(catalog []ToolSummary, query string, options SearchOptions) ([]
 			results = append(results, SearchMatch{Name: t.Name, Description: t.Description, Namespace: t.Namespace, Score: score})
 		}
 	}
-	sort.SliceStable(results, func(i, j int) bool { return results[i].Score > results[j].Score })
+	sort.SliceStable(results, func(i, j int) bool {
+		iExact, jExact := results[i].Name == query, results[j].Name == query
+		if iExact != jExact {
+			return iExact
+		}
+		return results[i].Score > results[j].Score
+	})
 	if len(results) > limit {
 		results = results[:limit]
 	}
