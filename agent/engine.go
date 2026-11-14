@@ -1641,6 +1641,7 @@ func (e *Engine) failUnexecutedToolCalls(snapshot *AgentSnapshot, calls []ToolCa
 		call := cloneToolCall(original)
 		result := errorToolResult(reason)
 		message := NewToolResultMessage(call, result, true)
+		message.ToolResult.Provenance = ToolResultProvenanceGenerationFailedUnexecuted
 		snapshot.Messages = append(snapshot.Messages, message)
 		messages = append(messages, message)
 		msg := cloneMessage(message)

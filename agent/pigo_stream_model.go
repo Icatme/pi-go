@@ -180,6 +180,9 @@ func convertMessagesToPigo(messages []Message) []pigo.Message {
 	}
 
 	converted := make([]pigo.Message, 0, len(messages))
+	type failedCallIdentity struct{ id, originalID, name string }
+	var failedCalls map[failedCallIdentity]int
+	var failedIDs map[string]int
 	for _, message := range messages {
 		switch message.Role {
 		case RoleSystem:
@@ -187,12 +190,32 @@ func convertMessagesToPigo(messages []Message) []pigo.Message {
 				converted = append(converted, convertSystemMessageToPigo(message))
 			}
 		case RoleUser:
+			failedCalls = nil
+			failedIDs = nil
 			if user, ok := convertUserMessageToPigo(message); ok {
 				converted = append(converted, user)
 			}
 		case RoleAssistant:
+			failedCalls = nil
+			failedIDs = nil
+			if message.StopReason == StopReasonError || message.StopReason == StopReasonAborted {
+				failedCalls = make(map[failedCallIdentity]int)
+				failedIDs = make(map[string]int)
+				for _, call := range message.ToolCalls {
+					failedCalls[failedCallIdentity{call.ID, call.OriginalID, call.Name}]++
+					failedIDs[call.ID]++
+				}
+			}
 			converted = append(converted, convertAssistantMessageToPigo(message))
 		case RoleTool:
+			// Keep the audit message; only omit an explicitly unexecuted result
+			// paired with its failed assistant in this projection's current round.
+			result := message.ToolResult
+			if result != nil && result.Provenance == ToolResultProvenanceGenerationFailedUnexecuted &&
+				result.IsError && result.Execution == nil && result.ToolCallID != "" &&
+				failedIDs[result.ToolCallID] == 1 && failedCalls[failedCallIdentity{result.ToolCallID, result.OriginalToolCallID, result.ToolName}] == 1 {
+				continue
+			}
 			if toolResult, ok := convertToolResultMessageToPigo(message); ok {
 				converted = append(converted, toolResult)
 			}

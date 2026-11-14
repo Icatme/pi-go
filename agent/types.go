@@ -231,18 +231,27 @@ type ToolResult struct {
 	ChildCalls *ChildCallReport `json:"-"`
 }
 
+// ToolResultProvenance records runtime-created results that did not execute a tool.
+// It is audit metadata, not authority to execute or retry a tool.
+type ToolResultProvenance string
+
+const ToolResultProvenanceGenerationFailedUnexecuted ToolResultProvenance = "generation_failed_unexecuted"
+
 // ToolResultPayload stores tool-result specific message data.
 type ToolResultPayload struct {
-	ToolCallID         string             `json:"tool_call_id"`
-	OriginalToolCallID string             `json:"original_tool_call_id,omitempty"`
-	ToolName           string             `json:"tool_name"`
-	Content            []Part             `json:"content,omitempty"`
-	Details            any                `json:"details,omitempty"`
-	StructuredContent  json.RawMessage    `json:"structured_content,omitempty"`
-	IsError            bool               `json:"is_error"`
-	Execution          *ToolExecutionInfo `json:"execution,omitempty"`
-	Failure            *ToolFailure       `json:"failure,omitempty"`
-	ChildCalls         *ChildCallReport   `json:"-"`
+	// Provenance is set only by the runtime's generation-failure path. Unknown or
+	// absent values remain model-visible; older histories are not guessed from text.
+	Provenance         ToolResultProvenance `json:"provenance,omitempty"`
+	ToolCallID         string               `json:"tool_call_id"`
+	OriginalToolCallID string               `json:"original_tool_call_id,omitempty"`
+	ToolName           string               `json:"tool_name"`
+	Content            []Part               `json:"content,omitempty"`
+	Details            any                  `json:"details,omitempty"`
+	StructuredContent  json.RawMessage      `json:"structured_content,omitempty"`
+	IsError            bool                 `json:"is_error"`
+	Execution          *ToolExecutionInfo   `json:"execution,omitempty"`
+	Failure            *ToolFailure         `json:"failure,omitempty"`
+	ChildCalls         *ChildCallReport     `json:"-"`
 }
 
 // Message is the canonical runtime message envelope.
