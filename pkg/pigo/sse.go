@@ -21,6 +21,7 @@ func readSSEStreamLimit(reader io.Reader, onEvent func(string, string) (bool, er
 		maxBytes = defaultMaxSSEEventBytes
 	}
 	scanner := bufio.NewScanner(reader)
+	scanner.Split(splitSSELines())
 	scanner.Buffer(make([]byte, 0, min(64*1024, maxBytes)), maxBytes)
 	var eventName string
 	var data strings.Builder
@@ -89,4 +90,37 @@ func readSSEStreamLimit(reader io.Reader, onEvent func(string, string) (bool, er
 	}
 	_, err := dispatch()
 	return err
+}
+
+// splitSSELines recognizes LF, CRLF and CR. CR terminates immediately so an
+// open CR-only event stream does not wait for another byte. A following LF is
+// consumed without producing a second line, including across reader chunks.
+func splitSSELines() bufio.SplitFunc {
+	afterCR := false
+	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if len(data) == 0 {
+			return 0, nil, nil
+		}
+		skipped := 0
+		if afterCR {
+			afterCR = false
+			if data[0] == '\n' {
+				skipped = 1
+				data = data[1:]
+			}
+		}
+		for i, b := range data {
+			switch b {
+			case '\n':
+				return skipped + i + 1, data[:i], nil
+			case '\r':
+				afterCR = true
+				return skipped + i + 1, data[:i], nil
+			}
+		}
+		if atEOF && len(data) > 0 {
+			return skipped + len(data), data, nil
+		}
+		return skipped, nil, nil
+	}
 }
