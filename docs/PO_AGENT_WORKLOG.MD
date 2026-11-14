@@ -1,5 +1,13 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Bounded CLI credential-file reads
+
+- Upstream pi #11421 concerns project settings; the related Go issue is `loadAuth` reading current-directory `.pigo/auth.json` with unbounded `os.ReadFile`. A synthetic FIFO blocked a bounded child process, and a final symlink to synthetic credentials was followed before the fix. No real credentials or device stream was read.
+- Restrict this CLI read to regular files up to 1 MiB, using a bounded reader to handle growth after Stat. Unix uses actual-open NOFOLLOW/NONBLOCK plus descriptor validation; Windows opens the final reparse point and rejects reparse/non-disk handles. Other platforms fail closed. Preserve empty-map failure behavior without logging contents. Do not change saveAuth, library credentials or home-auth integrations.
+- This protects the final component, not parent-directory symlinks, atomic snapshots of concurrent writes, or deadlines for arbitrary filesystem I/O. Separate write-path hardening is not included. Documentation had no explicit host symlink contract for this default CLI store.
+- Linux Go 1.26.10: new/roundtrip targeted race tests repeated three times passed (1.441s), full internal/cli race passed (1.205s), and vet passed. Windows amd64 test binary cross-compilation passed, not runtime validation. Other Unix targets were not executed. An initial child-process race test hit the race runtime's exit sleep; the fixture now disables only that sleep and requires successful child exit.
+- Added valid/exact-limit/oversize/directory checks plus Linux FIFO/final-symlink regressions. No deployment, external auth, paid calls or manual CI dispatch.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.

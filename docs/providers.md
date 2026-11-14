@@ -31,7 +31,16 @@ and [Agent history migration](kiro-agent-authored-compatibility.md).
 
 ## Credentials and local files
 
-- `.pigo/auth.json` is CLI-managed auth storage
+- `.pigo/auth.json` is CLI-managed auth storage in the current working directory.
+  CLI reads require a regular file of at most 1 MiB and reject a final symlink
+  (Windows reparse point). Invalid/unreadable storage retains the existing empty
+  credential-map behavior; credentials and file contents are not logged.
+  Read guards are implemented for Unix and Windows; unsupported platforms fail
+  closed rather than falling back to a blocking special-file read. This is not
+  a complete project trust boundary: only the final path component is checked,
+  parent-directory symlinks are not rejected, concurrent in-place changes are not
+  made atomic, and ordinary filesystem I/O is not guaranteed a deadline. It does not change credential writes, parent-directory trust,
+  library-supplied credentials, or explicitly supported user-home auth sources.
 - `.pigo/.env` is local test/helper API-key input
 - `01_auth.json` is test-only and ignored by git
 - library runtime auth should normally be passed explicitly via options or auth config; `commandcode` additionally supports the upstream user-home auth files listed below
