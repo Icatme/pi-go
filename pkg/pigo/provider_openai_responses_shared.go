@@ -677,7 +677,10 @@ func processOpenAIResponsesStreamEventWithProvider(
 			return false, err
 		}
 		outputErr := emitOpenAIResponsesTerminalOutputIfNeeded(response, stream, state, terminal)
-		applyOpenAIResponsesTerminal(model, response, terminal, requestServiceTier)
+		usageErr := applyOpenAIResponsesTerminal(model, response, terminal, requestServiceTier)
+		if usageErr != nil {
+			return true, usageErr
+		}
 		if outputErr != nil {
 			return true, outputErr
 		}
@@ -710,7 +713,9 @@ func processOpenAIResponsesStreamEventWithProvider(
 			response.ResponseModel = terminal.Model
 		}
 		if terminal.Usage != nil {
-			applyOpenAIResponsesUsage(model, response, *terminal.Usage, terminal.ServiceTier, requestServiceTier)
+			if err := applyOpenAIResponsesUsage(model, response, *terminal.Usage, terminal.ServiceTier, requestServiceTier); err != nil {
+				return true, err
+			}
 		}
 		if terminal.Error != nil && strings.TrimSpace(terminal.Error.Message) != "" {
 			response.StopReason = StopReasonError
@@ -1327,7 +1332,7 @@ func combineOpenAIResponsesToolCallID(callID string, itemID string) string {
 // Shared terminal response handling
 // ============================================================================
 
-func applyOpenAIResponsesTerminal(model Model, response *AssistantMessage, terminal openAIResponsesResponse, requestServiceTier string) {
+func applyOpenAIResponsesTerminal(model Model, response *AssistantMessage, terminal openAIResponsesResponse, requestServiceTier string) error {
 	if terminal.Model != "" && terminal.Model != model.ID {
 		response.ResponseModel = terminal.Model
 	}
@@ -1339,12 +1344,16 @@ func applyOpenAIResponsesTerminal(model Model, response *AssistantMessage, termi
 	}
 	response.StopReason = mapOpenAIResponsesStopReason(terminal.Status, response.Content)
 	if terminal.Usage != nil {
-		applyOpenAIResponsesUsage(model, response, *terminal.Usage, terminal.ServiceTier, requestServiceTier)
+		return applyOpenAIResponsesUsage(model, response, *terminal.Usage, terminal.ServiceTier, requestServiceTier)
 	}
+	return nil
 }
 
-func applyOpenAIResponsesUsage(model Model, response *AssistantMessage, usage openAIResponsesUsage, responseServiceTier string, requestServiceTier string) {
-	inputTokens := usage.InputTokens - usage.InputDetails.CachedTokens - usage.InputDetails.CacheWriteTokens
+func applyOpenAIResponsesUsage(model Model, response *AssistantMessage, usage openAIResponsesUsage, responseServiceTier string, requestServiceTier string) error {
+	if err := validateOpenAIResponsesUsageCounts(usage); err != nil {
+		return withProviderFailure(err, ProviderFailureParse, "invalid_usage")
+	}
+	inputTokens := usage.InputTokens - (usage.InputDetails.CachedTokens + usage.InputDetails.CacheWriteTokens)
 	if inputTokens < 0 {
 		inputTokens = 0
 	}
@@ -1360,6 +1369,19 @@ func applyOpenAIResponsesUsage(model Model, response *AssistantMessage, usage op
 	if model.Provider != "opencode-go" {
 		applyOpenAIResponsesServiceTierPricing(model, &response.Usage, resolveOpenAIResponsesServiceTier(responseServiceTier, requestServiceTier))
 	}
+	return nil
+}
+
+func validateOpenAIResponsesUsageCounts(usage openAIResponsesUsage) error {
+	for _, value := range []int{usage.InputTokens, usage.OutputTokens, usage.TotalTokens, usage.InputDetails.CachedTokens, usage.InputDetails.CacheWriteTokens} {
+		if value < 0 {
+			return errors.New("OpenAI Responses usage contains a negative token count")
+		}
+	}
+	if usage.InputDetails.CachedTokens > math.MaxInt-usage.InputDetails.CacheWriteTokens || usage.InputTokens > math.MaxInt-usage.OutputTokens {
+		return errors.New("OpenAI Responses usage token counts overflow")
+	}
+	return nil
 }
 
 func parseOpenAIResponsesResponseOutput(items []openAIResponsesResponseItem) []ContentBlock {

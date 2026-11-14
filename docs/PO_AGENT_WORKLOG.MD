@@ -4435,3 +4435,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Reject invalid OpenAI Responses usage before arithmetic
+
+- Validate negative token counts and overflowing cache-component/input-output sums before updating usage. Invalid frames produce typed parse failure `invalid_usage`; previously accepted usage remains intact. Preserve valid zero usage, existing small cache-exceeds-input clamping, rates, and service-tier pricing. This is not complete usage consistency validation and does not require reported total conservation.
+- Apply the same terminal handling to Responses and Codex Responses. Invalid usage takes precedence over an upstream terminal failure to avoid treating corrupt accounting as a retryable upstream failure. Previously streamed text is retained; no automatic retry or extra request is introduced.
+- Offline regressions cover negative fields, integer limits, unchanged valid boundaries and preserved earlier usage. Eight actual localhost SSE cases cover both APIs across completed/done/incomplete/failed, including previously streamed text and a real failed status/error. Independent enhanced target race x3 passed 1.126s. Runtime full pkg/pigo race passed 45.149s and vet passed before the test-only enhancement; the final enhanced-suite full pkg/pigo race passed 43.258s and vet passed.
+- No live model request, billing, deployment, release, manual CI dispatch or merge.
