@@ -3790,3 +3790,10 @@
 
 - Audited pi #12070 body and comment. Go already applies TimeoutMs to the Google request context and has no google-vertex adapter or matching TS retry-pattern layer. Reproduced a narrower bug: non-2xx Google response handling discarded readErr, losing cancellation/deadline identity. Preserve the wrapped read error.
 - Four synthetic 200/503 × cancel/timeout tests pass on top of the shared body-cancellation change (PR #202); the 503 classification tests failed before this fix. Full pkg/pigo race 33.842s and vet passed. No idle-timeout semantics, automatic retries, live provider validation or deployment introduced.
+
+## 2026-11-14 - Refresh PR #205 cancellation dependency
+
+- Incorporated the latest #202 parent, including its Responses canceled-EOF
+  regression. Kept the Google body-read error chain unchanged. Windows Go 1.26.4
+  Google/Anthropic cancellation, body close-once and Responses EOF regressions
+  passed with GOWORK=off; no live provider calls or main-branch merge.
