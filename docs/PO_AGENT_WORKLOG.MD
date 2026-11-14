@@ -1,5 +1,12 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Distinguish Responses content filtering from output limits
+
+- Upstream Pi #11953 prompted a localhost Responses/Codex reproduction: explicit `incomplete_details.reason=content_filter` was discarded and classified as Length. Only this explicit incomplete reason now becomes `upstream_error/content_filter`; it is not an error.code. Missing, unknown and max_output_tokens reasons retain prior behavior. No automatic continuation, retry, filter bypass, or paid validation.
+- Preserve reported usage, partial output and tool-call audit evidence. SDK partial/tool-end events are not execution permission. Actual Pigo-to-Engine ordinary/gated tests confirm zero tool execution, zero gate calls, one HTTP request; final error is authoritative.
+- Baseline RED 0.012s; final targeted race x3 pigo 1.498s / agent 1.590s. Independent Engine race x3 1.197s and static review passed. Final full pkg/pigo race 55.315s, full agent race 11.809s and both package vet checks passed.
+- Isolated application atop PR263-273 integration d8d93d59 was clean. Targeted combination race x3 pigo 2.043s / agent 1.362s; separate invalid_usage+content_filter test 1.175s verifies usage validation retains priority. This is targeted combination evidence, not a new full combination suite. No release, merge or CI dispatch.
+
 ## 2026-11-14 - Reject explicit tool-index identity collisions
 
 - Reproduced upstream Pi #11881/#11908 on master 755e003: distinct named call IDs at one Chat Completions stream index silently yielded a successful toolUse with concatenated arguments and an overwritten ID. Reject that explicit conflict as response_parse_error/tool_call_index_collision before mutating the existing call; do not guess a split or retry.

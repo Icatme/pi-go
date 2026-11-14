@@ -64,14 +64,19 @@ type openAIResponsesTextFormat struct {
 	Strict bool            `json:"strict,omitempty"`
 }
 
+type openAIResponsesIncompleteDetails struct {
+	Reason string `json:"reason"`
+}
+
 type openAIResponsesResponse struct {
-	Model       string                        `json:"model"`
-	ID          string                        `json:"id"`
-	Status      string                        `json:"status"`
-	ServiceTier string                        `json:"service_tier,omitempty"`
-	Output      []openAIResponsesResponseItem `json:"output"`
-	Usage       *openAIResponsesUsage         `json:"usage,omitempty"`
-	Error       *openAIResponsesResponseError `json:"error,omitempty"`
+	IncompleteDetails *openAIResponsesIncompleteDetails `json:"incomplete_details,omitempty"`
+	Model             string                            `json:"model"`
+	ID                string                            `json:"id"`
+	Status            string                            `json:"status"`
+	ServiceTier       string                            `json:"service_tier,omitempty"`
+	Output            []openAIResponsesResponseItem     `json:"output"`
+	Usage             *openAIResponsesUsage             `json:"usage,omitempty"`
+	Error             *openAIResponsesResponseError     `json:"error,omitempty"`
 }
 
 type openAIResponsesResponseItem struct {
@@ -680,6 +685,9 @@ func processOpenAIResponsesStreamEventWithProvider(
 		applyOpenAIResponsesTerminal(model, response, terminal, requestServiceTier)
 		if outputErr != nil {
 			return true, outputErr
+		}
+		if terminal.Status == "incomplete" && terminal.IncompleteDetails != nil && terminal.IncompleteDetails.Reason == "content_filter" {
+			return true, withProviderFailure(errors.New("response incomplete: content_filter"), ProviderFailureUpstream, "content_filter")
 		}
 		if response.StopReason == StopReasonToolUse {
 			for _, call := range state.ToolCalls {
