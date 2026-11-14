@@ -4435,3 +4435,11 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14: Overflow-safe token threshold comparisons
+
+- Isolated from master `4115596fa5ca3252a855f0960e52bfdbc8c73170`. Positive input/cache counts whose sum exceeds `int` range wrapped pricing-tier and context-overflow comparisons. Baseline boundary regressions failed in 0.058s.
+- Compare nonnegative token components against a remaining threshold instead of forming an overflowing sum. Preserve configured rates, highest eligible pricing tier, exact threshold equality, and all cost-component calculations. Do not saturate or manufacture billed counts. `IsContextOverflow` retains its existing Input+CacheRead scope (not CacheWrite), Stop/Length conditions, and existing 99% Length threshold formula; it still only classifies, not retries or compacts.
+- Negative input/cache components are not accepted as evidence for a tier or usage-based context overflow. This is not full usage validation: provider parsing/arithmetic and invalid monetary inputs remain separate concerns. Explicit error-text overflow classification is unchanged.
+- Targeted race x3 passed in 1.402s, including exact big.Int comparison oracle across boundary combinations, MaxInt sums, negative components in each position, sorted-independent tier selection, and Length threshold equality/below-boundary through MaxInt. Existing cost/overflow target race x3 passed in 2.406s. No live provider, billing, CI dispatch, merge, or deployment.
+- Final-runtime full `pkg/pigo` race passed in 44.326s; vet passed. Independent final target race x3 passed in 1.072s and static review found no blocker.
