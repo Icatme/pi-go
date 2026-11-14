@@ -117,9 +117,10 @@ type googleTool struct {
 }
 
 type googleFunctionDeclaration struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Parameters  any    `json:"parameters,omitempty"`
+	Name                 string `json:"name"`
+	Description          string `json:"description,omitempty"`
+	Parameters           any    `json:"parameters,omitempty"`
+	ParametersJSONSchema any    `json:"parametersJsonSchema,omitempty"`
 }
 
 type googleToolConfig struct {
@@ -266,7 +267,7 @@ func buildGoogleRequest(model Model, ctx Context, options ProviderStreamOptions)
 		}
 	}
 	if len(ctx.Tools) > 0 {
-		request.Tools = convertGoogleTools(ctx.Tools)
+		request.Tools = convertGoogleTools(model, ctx.Tools)
 	}
 	if resolvedOptions.ToolChoice != "" {
 		request.ToolConfig = &googleToolConfig{
@@ -469,7 +470,7 @@ func convertGoogleToolResultContent(model Model, message ToolResultMessage) []go
 	return parts
 }
 
-func convertGoogleTools(tools []Tool) []googleTool {
+func convertGoogleTools(model Model, tools []Tool) []googleTool {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -479,11 +480,14 @@ func convertGoogleTools(tools []Tool) []googleTool {
 		if parameters == nil {
 			parameters = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
-		declarations = append(declarations, googleFunctionDeclaration{
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  parameters,
-		})
+		declaration := googleFunctionDeclaration{Name: tool.Name, Description: tool.Description}
+		compat, _ := model.Compat.(*GoogleGenerativeAICompat)
+		if compat != nil && compat.SupportsParametersJSONSchema != nil && *compat.SupportsParametersJSONSchema {
+			declaration.ParametersJSONSchema = parameters
+		} else {
+			declaration.Parameters = parameters
+		}
+		declarations = append(declarations, declaration)
 	}
 	return []googleTool{{FunctionDeclarations: declarations}}
 }
