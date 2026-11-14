@@ -4047,3 +4047,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 
 - Upstream Pi #11675's `Input too long: model limit N tokens` wording was not recognized on master 755e003. Added a narrow pattern requiring a numeric model token limit, including comma-formatted counts, without changing token estimation, output clamping or retry/compaction behavior.
 - Baseline plain/comma fixtures fail; positive and negative tests retain error-only classification and rate-limit exclusions. Added the example to existing Chat/Responses HTTP wire regression coverage so classification does not replay requests. Full pkg/pigo race passed (39.874s), vet passed, and independent review checked the scope. No live-provider validation or deployment.
+
+## 2026-11-14 - MCP SSE CR-only line endings
+
+- Reproduced upstream pi #11764 against 755e003: LF/CRLF RPC observation passed while CR-only lost the response. Both the observer and pinned Go MCP SDK consumed LF-only framing.
+- HTTP SSE now recognizes CR immediately and emits CRLF for the pinned SDK, swallowing a following LF across chunks. Existing LF/CRLF framing and JSON payload bytes are preserved; stdio is unchanged. Frame limits conservatively count normalized bytes, including the added LF for CR-only lines. This is delimiter normalization, not a byte-for-byte SSE framing promise. EOF handling retains existing observer/SDK semantics; no new incomplete-event dispatch behavior is introduced.
+- Added one-byte fragmented/mixed endings, comments/empty lines, trailing CR/EOF, escaped JSON byte preservation, normalized whole-event limits, open-stream prompt delivery, close-unblocking and actual SDK tool-call tests. A bounded microbenchmark records linear buffered line reading, not production performance claims.
+- Go 1.26.10: targeted race tests repeated three times passed; final full `go test -race ./mcp -count=1` passed (8.641s) and `go vet ./mcp` passed. Independent final full MCP race (7.248s) and vet also passed. Offline local fixtures only; no external server, live OAuth/model, production deployment or CI dispatch.

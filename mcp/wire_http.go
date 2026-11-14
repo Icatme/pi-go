@@ -123,6 +123,7 @@ type observedSSEBody struct {
 	buffer           []byte
 	err              error
 	responseReceived bool
+	afterCR          bool
 }
 
 func (r *observedSSEBody) Read(p []byte) (int, error) {
@@ -138,7 +139,7 @@ func (r *observedSSEBody) Read(p []byte) (int, error) {
 		var event, data []byte
 		var name string
 		for {
-			line, err := readWireLine(r.reader, r.observer.limits.MaxFrameBytes-len(event))
+			line, err := r.readSSELine(r.observer.limits.MaxFrameBytes - len(event))
 			event = append(event, line...)
 			if err != nil && !errors.Is(err, io.EOF) {
 				r.err = err
@@ -155,7 +156,7 @@ func (r *observedSSEBody) Read(p []byte) (int, error) {
 			if len(text) > 0 {
 				field, value, _ := strings.Cut(string(text), ":")
 				// Match the pinned SDK's scanEventsLimited interpretation, while
-				// returning the untouched event bytes to that scanner.
+				// returning LF-compatible framing to that scanner. JSON bytes are unchanged.
 				value = strings.TrimSpace(value)
 				switch field {
 				case "data":
@@ -198,3 +199,37 @@ func (r *observedSSEBody) Read(p []byte) (int, error) {
 }
 
 func (r *observedSSEBody) Close() error { return r.source.Close() }
+
+// readSSELine recognizes all SSE line endings. CR is emitted immediately as
+// CRLF so the pinned SDK can parse it without waiting for another byte. A
+// following LF is swallowed, even across reads. Existing LF/CRLF framing is
+// preserved; CR-only framing conservatively counts its added LF in the limit.
+func (r *observedSSEBody) readSSELine(limit int) ([]byte, error) {
+	var line []byte
+	for {
+		b, err := r.reader.ReadByte()
+		if err != nil {
+			return line, err
+		}
+		if r.afterCR {
+			r.afterCR = false
+			if b == '\n' {
+				continue
+			}
+		}
+		if len(line) >= limit {
+			return nil, ErrWireLimit
+		}
+		line = append(line, b)
+		switch b {
+		case '\r':
+			if len(line) >= limit {
+				return nil, ErrWireLimit
+			}
+			r.afterCR = true
+			return append(line, '\n'), nil
+		case '\n':
+			return line, nil
+		}
+	}
+}
