@@ -4262,3 +4262,24 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
   Independent static review and targeted race tests repeated three times passed
   (1.409s). Final test-only request/pricing assertions and response.done alias
   coverage passed targeted race tests three times (1.496s).
+
+## 2026-11-14: Handle CR-only provider SSE line endings
+
+- While checking upstream pi #9036, confirmed a narrower Go defect: provider
+  SSE accepted LF/CRLF but treated CR-only events as one payload. This does not
+  reproduce the report's unbounded JavaScript CRLF buffer or prove a real Codex
+  backend uses these endings. Existing Go event/line limits already bounded it.
+- Add a stateful Scanner split function accepting LF, CRLF and CR per the SSE
+  line grammar (https://html.spec.whatwg.org/dev/server-sent-events.html).
+  CR completes immediately; a subsequent LF is swallowed even across reads.
+  Preserve the existing EOF flush, reader-error handling and payload/event
+  budgets. Do not normalize JSON strings, change retries, or touch MCP PR232.
+- Tests cover buffered/bytewise and mixed endings, trailing CR/CRLF/LF/no
+  delimiter, escaped JSON CR and exact large integer bytes, multiline events,
+  comments/empty lines, open-pipe immediate CR delivery, reader failure, and
+  line/cumulative event limits. Local HTTP Chat/Responses/Google completion and
+  Responses cancellation fixtures exercise the actual provider path.
+- Final target race x3 passed (1.492s); independent target race x3 passed
+  (1.392s). Full pkg/pigo runtime race passed (40.429s), followed by go vet;
+  mixed-ending test-only additions subsequently passed the target suite.
+  No live provider requests, CI or production deployment were performed.
