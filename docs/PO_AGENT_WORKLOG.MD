@@ -4023,3 +4023,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Publication uses an expected-head update of master, an annotated v0.23.1 tag
   and a GitHub Release with no uploaded assets. Exact tree and tag-target checks
   protect API publication while Git HTTPS is unavailable.
+
+## 2026-11-14 - Explicit HTTP request body preflight
+
+- Evaluated upstream pi #12105 on master 755e003: 400/413 is terminal for the offline Codex fixture, but reusing a caller's oversized context sends the same byte volume. The image-count helper deliberately does not solve byte caps.
+- Added opt-in `NewHTTPRequestBodyLimitTransport`: an explicit positive HTTP body limit, fail-closed unknown length, bounded actual-byte validation, context cancellation, original-body close-once, and replayable cloned request. Fixed typed error text excludes request contents. No automatic installation, trimming, cap inference, retry or WebSocket coverage.
+- Independent review led to handshake-based blocked-read cancellation, actual preflight-attempt count, limit+1/no-read, original GetBody and trailer preservation tests. Final full pkg/pigo race passed (39.521s), vet passed, targeted race x3 passed before final test additions; Go1.26.11. Local HTTP fixtures only, no live model, production or CI dispatch.
+- Additional closed-issue audit: #9986 cancellation preserves paired results in four execution modes; #12131 model switch preserves original images without stale warning; #12019 explicit reasoning effort works, but independent reasoning-token metrics remain a broader design gap. #12066 basename-only find and #12118 synchronous bounded read have no reported TypeScript/Node root cause. No speculative runtime changes for those issues.
