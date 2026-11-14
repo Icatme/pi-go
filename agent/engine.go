@@ -882,7 +882,9 @@ func (e *Engine) generateAssistant(ctx context.Context, definition AgentDefiniti
 		systemPrompt = GetCurrentSystemPrompt(modelMessages)
 	}
 
-	stream, err := model.Stream(ctx, ModelRequest{
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	stream, err := model.Stream(streamCtx, ModelRequest{
 		Model:                 modelRef,
 		SystemPrompt:          systemPrompt,
 		Messages:              modelMessages,
@@ -902,6 +904,16 @@ func (e *Engine) generateAssistant(ctx context.Context, definition AgentDefiniti
 		return Message{}, nil, errors.New("agent: model adapter returned nil AssistantStream without error")
 	}
 
+	// On abnormal unwinding, release the request before closing its stream.
+	// Close implementations must honor cancellation; uncooperative host streams
+	// cannot be forcibly terminated. Normal Close -> Wait semantics stay below.
+	streamClosed := false
+	defer func() {
+		if !streamClosed {
+			cancelStream()
+			_ = stream.Close()
+		}
+	}()
 	started := false
 	var lastPartial Message
 	var eventErr error
@@ -969,6 +981,7 @@ eventLoop:
 		})
 	}
 
+	streamClosed = true
 	closeErr := stream.Close()
 	finalMessage, waitErr := stream.Wait()
 	streamErr := errors.Join(eventErr, waitErr, closeErr)

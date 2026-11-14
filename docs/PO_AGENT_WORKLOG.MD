@@ -4435,3 +4435,26 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14: release Agent run ownership when a host listener panics
+
+- Investigated upstream pi #11065 (TS preflight callback busy-state leak) and
+  independently reproduced the analogous Go synchronous event-listener path:
+  host recovery previously left Prompt/Continue permanently busy. The new
+  fourteen-case matrix fails against the previous Agent implementation.
+- Prompt/Continue now defer owner-checked interrupted-run cleanup. The original
+  panic propagates, its run context is canceled, running/UI transient state and
+  idle waiters are released, and a stale cleanup cannot affect a successor.
+  Snapshots and queued input are not rewritten; no fabricated successful result
+  or automatic replay is introduced.
+- A per-model-stream context permits exceptional cancellation before Close;
+  normal Close then Wait and error handling remain unchanged. Custom Close must
+  honor cancellation and not panic. This is not forcible goroutine termination.
+- Linux Go 1.26.10: focused race x3 passed 1.264s; full agent race passed 9.650s,
+  full agent/session race passed 28.936s; vet for both packages passed. Tests
+  cover Prompt/Continue event positions, exact panic propagation, retained
+  snapshots/queues, stale ownership, cancellation callback reentry, single Close,
+  normal Close-before-Wait, and exceptional cancel-before-Close.
+- Hosts must reconcile possibly executed tools before continuing a recovered
+  panic. Idle does not certify that interrupted work had no effects. No live
+  providers, paid calls, CI dispatch, merge or deployment performed.

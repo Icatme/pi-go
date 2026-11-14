@@ -559,3 +559,19 @@ Custom streaming implementations preserve the request by default, or can set
 `ThinkingLevelResolver` on `AgentDefinition` / `AgentOptions`. See
 [the runtime contracts](docs/runtime-contracts.md#model-and-thinking-state) for
 snapshot restoration and invocation-local next-turn overrides.
+
+### Host listener panics and interrupted runs
+
+A panic from a synchronous `Agent` event listener still propagates to its
+caller. If the host recovers it, `Prompt` and `Continue` release only that
+invocation's running state and idle waiter; they do not fabricate a successful
+terminal event, rewrite the snapshot, discard queued input, or retry work.
+A model stream interrupted while delivering events is canceled before its
+exceptional `Close`; the normal `Close` then `Wait` order remains unchanged.
+
+Hosts must inspect the retained snapshot and reconcile any possibly executed
+tools before choosing how to continue. An idle agent is not proof that an
+interrupted tool had no effects. This does not recover panics on unrelated host
+goroutines, or forcibly terminate a custom stream whose `Close` ignores
+cancellation and blocks indefinitely. Stream implementations remain responsible
+for returning from `Close` without panicking.

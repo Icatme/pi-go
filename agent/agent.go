@@ -98,6 +98,7 @@ func (a *Agent) Prompt(ctx context.Context, messages ...Message) error {
 	if err != nil {
 		return err
 	}
+	defer a.releaseInterruptedRun(idle)
 	a.setActiveDefinition(definition)
 
 	next, runErr := a.engine.RunWithHooks(runCtx, definition, &snapshot, messages, a.processLoopEvent, a.runtimeHooks())
@@ -134,6 +135,7 @@ func (a *Agent) Continue(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer a.releaseInterruptedRun(idle)
 	a.setActiveDefinition(definition)
 
 	var (
@@ -567,6 +569,35 @@ func (a *Agent) finishRun(snapshot *AgentSnapshot, idle chan struct{}) {
 		close(a.idle)
 		a.idle = nil
 	}
+}
+
+// releaseInterruptedRun releases only this invocation's run ownership during
+// unwinding. It does not recover a panic, rewrite history, or imply that tools
+// can safely be replayed. Normal finishRun has already cleared the owner.
+func (a *Agent) releaseInterruptedRun(idle chan struct{}) {
+	a.mu.RLock()
+	if a.idle != idle || !a.running {
+		a.mu.RUnlock()
+		return
+	}
+	cancel := a.cancel
+	a.mu.RUnlock()
+	if cancel != nil {
+		cancel()
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.idle != idle || !a.running {
+		return
+	}
+	a.state.IsStreaming = false
+	a.state.StreamMessage = nil
+	a.state.PendingToolCalls = make(map[string]PendingToolCall)
+	a.running = false
+	a.cancel = nil
+	a.activeDefinition = a.definition
+	close(idle)
+	a.idle = nil
 }
 
 func (a *Agent) handleRuntimeError(ctx context.Context, snapshot AgentSnapshot, runErr error) *AgentSnapshot {
