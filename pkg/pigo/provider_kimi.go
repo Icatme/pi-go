@@ -435,7 +435,10 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 			failure = withProviderFailure(errors.Join(errors.New(failed.ErrorMessage), readErr), ProviderFailureStream, "body_read")
 			failed.ErrorMessage = failure.Error()
 		}
-		recordProviderFailure(&failed, failure)
+		applyRequestError(&failed, failure)
+		if request.Context().Err() != nil {
+			return failed, failure
+		}
 		return failed, nil
 	}
 
@@ -572,6 +575,11 @@ func processAnthropicStreamEvent(
 		}
 		contentIndex := len(response.Content)
 		switch event.ContentBlock.Type {
+		case "fallback":
+			// Fallback replay needs a positional boundary and per-model usage.
+			// Until the content model supports it, fail rather than silently
+			// mixing signatures or executing pre-handoff tool calls.
+			return false, withProviderFailure(errors.New("unsupported Anthropic model fallback boundary"), ProviderFailureParse, "unsupported_fallback")
 		case "text":
 			response.Content = append(response.Content, TextContent{})
 			states[event.Index] = &anthropicStreamingBlockState{ContentIndex: contentIndex, Kind: "text"}

@@ -200,7 +200,10 @@ var openCodeGoModelSpecs = []openCodeGoModelSpec{
 		ImageInput:    true,
 		ContextWindow: 262_144,
 		MaxTokens:     262_144,
-		Compat:        newOpenCodeGoCompletionsCompat("openai", true, true),
+		// K2.7 is always-thinking and does not accept reasoning_effort.
+		// An omitted thinking control uses the upstream always-on default.
+		ThinkingLevelMap: ThinkingLevelMap{ModelThinkingLevelOff: ""},
+		Compat:           newOpenCodeGoCompletionsCompat("deepseek", false, true),
 	},
 	{
 		ID:         "kimi-k3",

@@ -21,7 +21,8 @@ func TestProviderFailureDiagnostics(t *testing.T) {
 	}{
 		{"upstream", "data: {\"error\":{\"message\":\"private upstream failure\"}}\n\n", ProviderFailureUpstream, "error_event", nil},
 		{"invalid JSON", "data: {broken}\n\n", ProviderFailureParse, "invalid_json", nil},
-		{"field type", "data: {\"choices\":[{\"delta\":{\"content\":[]}}]}\n\n", ProviderFailureParse, "field_type", nil},
+		{"field type", "data: {\"choices\":[{\"delta\":{\"reasoning_content\":[]}}]}\n\n", ProviderFailureParse, "field_type", nil},
+		{"unsupported content", "data: {\"choices\":[{\"delta\":{\"content\":{}}}]}\n\n", ProviderFailureParse, "unsupported_content", nil},
 		{"finish reason", "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n", ProviderFailureParse, "unsupported_finish_reason", nil},
 		{"missing terminal", "", ProviderFailureStream, "missing_terminal", nil},
 		{"done without finish", "data: [DONE]\n\n", ProviderFailureStream, "missing_terminal", nil},

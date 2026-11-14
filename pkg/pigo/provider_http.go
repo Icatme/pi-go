@@ -140,6 +140,9 @@ func (t *providerHTTPTransport) RoundTrip(request *http.Request) (*http.Response
 		t.observe(observation)
 		return nil, err
 	}
+	if response.Body != nil && request.Context().Done() != nil {
+		response.Body = bindProviderResponseBody(request.Context(), response.Body)
+	}
 	observation.Delivery = HTTPDeliveryResponseReceived
 	observation.StatusCode = response.StatusCode
 	if isProviderRedirect(response) && response.Body != nil {

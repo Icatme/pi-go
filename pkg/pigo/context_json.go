@@ -79,6 +79,7 @@ type diagnosticErrorJSON struct {
 type contentBlockJSON struct {
 	Type              string         `json:"type"`
 	Text              string         `json:"text,omitempty"`
+	SignatureOnly     bool           `json:"signatureOnly,omitempty"`
 	TextSignature     string         `json:"textSignature,omitempty"`
 	Thinking          string         `json:"thinking,omitempty"`
 	ThinkingSignature string         `json:"thinkingSignature,omitempty"`
@@ -451,12 +452,14 @@ func marshalContentBlocksJSON(blocks []ContentBlock) (json.RawMessage, error) {
 				Type:          "text",
 				Text:          typed.Text,
 				TextSignature: typed.TextSignature,
+				SignatureOnly: typed.SignatureOnly,
 			})
 		case ThinkingContent:
 			wire = append(wire, contentBlockJSON{
 				Type:              "thinking",
 				Thinking:          typed.Thinking,
 				ThinkingSignature: typed.ThinkingSignature,
+				SignatureOnly:     typed.SignatureOnly,
 				Redacted:          typed.Redacted,
 			})
 		case ImageContent:
@@ -499,11 +502,13 @@ func unmarshalContentBlocksJSON(payload json.RawMessage) ([]ContentBlock, error)
 			blocks = append(blocks, TextContent{
 				Text:          block.Text,
 				TextSignature: block.TextSignature,
+				SignatureOnly: block.SignatureOnly,
 			})
 		case "thinking":
 			blocks = append(blocks, ThinkingContent{
 				Thinking:          block.Thinking,
 				ThinkingSignature: block.ThinkingSignature,
+				SignatureOnly:     block.SignatureOnly,
 				Redacted:          block.Redacted,
 			})
 		case "image":

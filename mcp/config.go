@@ -44,8 +44,11 @@ type ServerConfig struct {
 	Headers     http.Header
 	Command     string
 	Args        []string
-	Env         []string
-	Dir         string
+	// InheritEnv defaults to true. Set false to pass only Env to a stdio child.
+	// This is environment isolation, not filesystem/network sandboxing.
+	InheritEnv *bool
+	Env        []string
+	Dir        string
 	// Trusted explicitly authorizes this application-provided process command.
 	// On Unix, the command and all owned descendants must stay in the assigned
 	// process group. Daemonizing with setsid/setpgid requires host containment.
@@ -159,6 +162,10 @@ func normalizeConfig(c Config) (Config, error) {
 		}
 		s.Args = append([]string(nil), s.Args...)
 		s.Env = append([]string(nil), s.Env...)
+		if s.InheritEnv != nil {
+			inherit := *s.InheritEnv
+			s.InheritEnv = &inherit
+		}
 		s.ToolRules = append([]ToolRule(nil), s.ToolRules...)
 		s.Headers = s.Headers.Clone()
 		for _, r := range s.ToolRules {
@@ -204,6 +211,10 @@ func cloneOAuthOptions(options *OAuthOptions) *OAuthOptions {
 func cloneServerConfig(s ServerConfig) ServerConfig {
 	s.Args = append([]string(nil), s.Args...)
 	s.Env = append([]string(nil), s.Env...)
+	if s.InheritEnv != nil {
+		inherit := *s.InheritEnv
+		s.InheritEnv = &inherit
+	}
 	s.ToolRules = append([]ToolRule(nil), s.ToolRules...)
 	s.Headers = s.Headers.Clone()
 	s.OAuth = cloneOAuthOptions(s.OAuth)

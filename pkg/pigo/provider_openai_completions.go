@@ -13,24 +13,53 @@ import (
 
 var errOpenAICompletionsStreamMissingTerminal = errors.New("openai completions stream ended without finish_reason")
 
+// Gateway routing is opt-in through model compatibility, including custom proxies.
+// Keep these wire shapes separate: Vercel's `provider` shorthand supports sort only.
+type openRouterRoutingWire struct {
+	AllowFallbacks         *bool          `json:"allow_fallbacks,omitempty"`
+	RequireParameters      *bool          `json:"require_parameters,omitempty"`
+	DataCollection         string         `json:"data_collection,omitempty"`
+	ZDR                    *bool          `json:"zdr,omitempty"`
+	EnforceDistillableText *bool          `json:"enforce_distillable_text,omitempty"`
+	Order                  []string       `json:"order,omitempty"`
+	Only                   []string       `json:"only,omitempty"`
+	Ignore                 []string       `json:"ignore,omitempty"`
+	Quantizations          []string       `json:"quantizations,omitempty"`
+	Sort                   any            `json:"sort,omitempty"`
+	MaxPrice               map[string]any `json:"max_price,omitempty"`
+	PreferredMinThroughput any            `json:"preferred_min_throughput,omitempty"`
+	PreferredMaxLatency    any            `json:"preferred_max_latency,omitempty"`
+}
+
+type vercelGatewayRoutingWire struct {
+	Only  []string `json:"only,omitempty"`
+	Order []string `json:"order,omitempty"`
+}
+
+type openAICompletionsProviderOptions struct {
+	Gateway *vercelGatewayRoutingWire `json:"gateway,omitempty"`
+}
+
 type openAICompletionsRequest struct {
-	Model                string                          `json:"model"`
-	Messages             []openAICompletionsMessage      `json:"messages"`
-	Stream               bool                            `json:"stream"`
-	StreamOptions        *openAICompletionsStreamOptions `json:"stream_options,omitempty"`
-	Store                *bool                           `json:"store,omitempty"`
-	MaxTokens            int                             `json:"max_tokens,omitempty"`
-	MaxCompletionTokens  int                             `json:"max_completion_tokens,omitempty"`
-	Temperature          *float64                        `json:"temperature,omitempty"`
-	SamplingParams       SamplingParams                  `json:"-"`
-	Tools                []openAICompletionsTool         `json:"tools,omitempty"`
-	ToolChoice           any                             `json:"tool_choice,omitempty"`
-	ResponseFormat       any                             `json:"response_format,omitempty"`
-	ReasoningEffort      string                          `json:"reasoning_effort,omitempty"`
-	Thinking             *openAICompletionsThinking      `json:"thinking,omitempty"`
-	EnableThinking       *bool                           `json:"enable_thinking,omitempty"`
-	PromptCacheKey       string                          `json:"prompt_cache_key,omitempty"`
-	PromptCacheRetention string                          `json:"prompt_cache_retention,omitempty"`
+	Provider             *openRouterRoutingWire            `json:"provider,omitempty"`
+	ProviderOptions      *openAICompletionsProviderOptions `json:"providerOptions,omitempty"`
+	Model                string                            `json:"model"`
+	Messages             []openAICompletionsMessage        `json:"messages"`
+	Stream               bool                              `json:"stream"`
+	StreamOptions        *openAICompletionsStreamOptions   `json:"stream_options,omitempty"`
+	Store                *bool                             `json:"store,omitempty"`
+	MaxTokens            int                               `json:"max_tokens,omitempty"`
+	MaxCompletionTokens  int                               `json:"max_completion_tokens,omitempty"`
+	Temperature          *float64                          `json:"temperature,omitempty"`
+	SamplingParams       SamplingParams                    `json:"-"`
+	Tools                []openAICompletionsTool           `json:"tools,omitempty"`
+	ToolChoice           any                               `json:"tool_choice,omitempty"`
+	ResponseFormat       any                               `json:"response_format,omitempty"`
+	ReasoningEffort      string                            `json:"reasoning_effort,omitempty"`
+	Thinking             *openAICompletionsThinking        `json:"thinking,omitempty"`
+	EnableThinking       *bool                             `json:"enable_thinking,omitempty"`
+	PromptCacheKey       string                            `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention string                            `json:"prompt_cache_retention,omitempty"`
 }
 
 type openAICompletionsStreamOptions struct {
@@ -64,10 +93,19 @@ type openAICompletionsToolDefinition struct {
 	Parameters  any    `json:"parameters"`
 }
 
+type openAICompletionsToolExtraContent struct {
+	Google *openAICompletionsGoogleContent `json:"google,omitempty"`
+}
+
+type openAICompletionsGoogleContent struct {
+	ThoughtSignature string `json:"thought_signature,omitempty"`
+}
+
 type openAICompletionsToolCall struct {
-	ID       string                        `json:"id,omitempty"`
-	Type     string                        `json:"type"`
-	Function openAICompletionsToolFunction `json:"function"`
+	ExtraContent *openAICompletionsToolExtraContent `json:"extra_content,omitempty"`
+	ID           string                             `json:"id,omitempty"`
+	Type         string                             `json:"type"`
+	Function     openAICompletionsToolFunction      `json:"function"`
 }
 
 type openAICompletionsToolFunction struct {
@@ -91,7 +129,7 @@ type openAICompletionsChoice struct {
 }
 
 type openAICompletionsDelta struct {
-	Content          string                           `json:"content,omitempty"`
+	Content          json.RawMessage                  `json:"content,omitempty"`
 	ReasoningContent string                           `json:"reasoning_content,omitempty"`
 	Reasoning        string                           `json:"reasoning,omitempty"`
 	ReasoningText    string                           `json:"reasoning_text,omitempty"`
@@ -100,10 +138,11 @@ type openAICompletionsDelta struct {
 }
 
 type openAICompletionsDeltaToolCall struct {
-	Index    int                           `json:"index"`
-	ID       string                        `json:"id,omitempty"`
-	Type     string                        `json:"type,omitempty"`
-	Function openAICompletionsToolFunction `json:"function,omitempty"`
+	ExtraContent *openAICompletionsToolExtraContent `json:"extra_content,omitempty"`
+	Index        int                                `json:"index"`
+	ID           string                             `json:"id,omitempty"`
+	Type         string                             `json:"type,omitempty"`
+	Function     openAICompletionsToolFunction      `json:"function,omitempty"`
 }
 
 type openAICompletionsUsage struct {
@@ -150,11 +189,12 @@ type resolvedOpenAICompletionsCompat struct {
 }
 
 type openAICompletionsToolCallState struct {
-	ID           string
-	Name         string
-	Arguments    string
-	ContentIndex int
-	Started      bool
+	ThoughtSignature string
+	ID               string
+	Name             string
+	Arguments        string
+	ContentIndex     int
+	Started          bool
 }
 
 type openAICompletionsReasoningDetailState struct {
@@ -228,7 +268,9 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 		if apiKey == "" {
 			apiKey = GetEnvAPIKey(model.Provider)
 		}
-		if apiKey == "" {
+		compat, _ := model.Compat.(*OpenAICompletionsCompat)
+		allowUnauthenticated := compat != nil && compat.AllowUnauthenticated
+		if (apiKey == "" && !allowUnauthenticated) || (apiKey != "" && strings.TrimSpace(apiKey) == "") {
 			applyRequestError(&response, errors.New("missing api key"))
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
@@ -238,12 +280,12 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventStart, Partial: response})
 		baselineResponse := cloneAssistantMessage(response)
 		state := &openAICompletionsStreamState{ToolCalls: map[int]*openAICompletionsToolCallState{}}
+		baseHeaders := map[string]string{"Content-Type": "application/json", "Accept": "text/event-stream"}
+		if apiKey != "" {
+			baseHeaders["Authorization"] = "Bearer " + apiKey
+		}
 		headers := mergeRequestHeaders(
-			map[string]string{
-				"Authorization": "Bearer " + apiKey,
-				"Content-Type":  "application/json",
-				"Accept":        "text/event-stream",
-			},
+			baseHeaders,
 			model.Headers,
 			options.Headers,
 		)
@@ -271,7 +313,7 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 			},
 			ShouldRetry: shouldRetryOpenAIResponsesRequest,
 			ShouldRetryResponse: func(status int, body []byte, message string) bool {
-				return shouldRetryOpenAIProviderResponse(status, body, message)
+				return shouldRetryCompletionsModelResponse(model, status, body, message)
 			},
 			CanRetryStreamError: func() bool {
 				return len(response.Content) == 0 && len(response.HostedToolExecutions) == 0 && !response.UsageReported
@@ -314,6 +356,12 @@ func buildOpenAICompletionsRequest(model Model, ctx Context, options ProviderStr
 		Stream:   true,
 		Tools:    convertOpenAICompletionsTools(currentContextTools(ctx)),
 	}
+	if configured, ok := model.Compat.(*OpenAICompletionsCompat); ok && configured != nil {
+		request.Provider = (*openRouterRoutingWire)(configured.OpenRouterRouting)
+		if configured.VercelGatewayRouting != nil {
+			request.ProviderOptions = &openAICompletionsProviderOptions{Gateway: (*vercelGatewayRoutingWire)(configured.VercelGatewayRouting)}
+		}
+	}
 	if compat.SupportsUsageInStreaming {
 		request.StreamOptions = &openAICompletionsStreamOptions{IncludeUsage: true}
 	}
@@ -343,7 +391,7 @@ func buildOpenAICompletionsRequest(model Model, ctx Context, options ProviderStr
 func resolveOpenAICompletionsCompat(model Model) resolvedOpenAICompletionsCompat {
 	resolved := resolvedOpenAICompletionsCompat{
 		SupportsStore:              true,
-		SupportsDeveloperRole:      true,
+		SupportsDeveloperRole:      defaultOpenAIDeveloperRole(model),
 		SupportsReasoningEffort:    true,
 		SupportsUsageInStreaming:   true,
 		MaxTokensField:             "max_completion_tokens",
@@ -489,7 +537,7 @@ func convertOpenAICompletionsMessages(model Model, ctx Context, compat resolvedO
 			}
 			if text != "" {
 				role := "system"
-				if model.Reasoning && compat.SupportsDeveloperRole {
+				if compat.SupportsDeveloperRole {
 					role = "developer"
 				}
 				messages = append(messages, openAICompletionsMessage{Role: role, Content: text})
@@ -614,9 +662,14 @@ func openAICompletionsAssistantMessage(model Model, message AssistantMessage, co
 				thinkingSignature = typed.ThinkingSignature
 			}
 		case ToolCall:
+			var extra *openAICompletionsToolExtraContent
+			if typed.ThoughtSignature != "" && message.Provider == model.Provider && message.API == model.API && message.Model == model.ID {
+				extra = &openAICompletionsToolExtraContent{Google: &openAICompletionsGoogleContent{ThoughtSignature: typed.ThoughtSignature}}
+			}
 			converted.ToolCalls = append(converted.ToolCalls, openAICompletionsToolCall{
-				ID:   typed.ID,
-				Type: "function",
+				ExtraContent: extra,
+				ID:           typed.ID,
+				Type:         "function",
 				Function: openAICompletionsToolFunction{
 					Name:      typed.Name,
 					Arguments: mustJSON(typed.Arguments),
@@ -735,8 +788,19 @@ func processOpenAICompletionsStreamEvent(data string, model Model, response *Ass
 			appendOpenAICompletionsThinking(response, stream, state, reasoning, signature)
 		}
 		appendOpenAICompletionsReasoningDetails(response, stream, state, delta.ReasoningDetails)
-		if delta.Content != "" {
-			appendOpenAICompletionsText(response, stream, state, delta.Content)
+		parts, err := decodeOpenAICompletionsContent(delta.Content)
+		if err != nil {
+			return false, withProviderFailure(err, ProviderFailureParse, "unsupported_content")
+		}
+		for _, part := range parts {
+			if part.text == "" {
+				continue
+			}
+			if part.thinking {
+				appendOpenAICompletionsThinking(response, stream, state, part.text, "")
+			} else {
+				appendOpenAICompletionsText(response, stream, state, part.text)
+			}
 		}
 		for index, toolDelta := range delta.ToolCalls {
 			if messageFallback {
@@ -966,6 +1030,11 @@ func appendOpenAICompletionsToolCall(response *AssistantMessage, stream *Assista
 	if delta.Function.Name != "" {
 		toolState.Name = delta.Function.Name
 	}
+	// The signature is opaque metadata, not an arguments fragment. It may
+	// arrive in a later signature-only delta and must survive later unsigned deltas.
+	if delta.ExtraContent != nil && delta.ExtraContent.Google != nil && delta.ExtraContent.Google.ThoughtSignature != "" {
+		toolState.ThoughtSignature = delta.ExtraContent.Google.ThoughtSignature
+	}
 	toolState.Arguments += delta.Function.Arguments
 	toolCall := openAICompletionsToolCallFromState(toolState)
 	if !toolState.Started {
@@ -984,7 +1053,7 @@ func openAICompletionsToolCallFromState(state *openAICompletionsToolCallState) T
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
-	return ToolCall{ID: state.ID, Name: state.Name, Arguments: arguments}
+	return ToolCall{ID: state.ID, Name: state.Name, Arguments: arguments, ThoughtSignature: state.ThoughtSignature}
 }
 
 func finalizeOpenAICompletionsResponse(response *AssistantMessage, stream *AssistantMessageEventStream, state *openAICompletionsStreamState) {

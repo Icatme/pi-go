@@ -27,6 +27,10 @@ The manager's exact-name/tool-rule policy selects four exposure modes:
 | `codemode` | Loaded only after selection/restoration | Callable | Searchable and loadable |
 | `hidden` | Absent | Unavailable | Absent |
 
+When no undeclared tools match a search, matching tools already in the current
+model context are reported as already declared. This hint does not reload tools,
+consume selection records, or reveal hidden tools. New matches retain priority.
+
 The constructor performs no MCP I/O. `Resolve` waits only for direct servers,
 servers needed by restored selections, and already connected catalogs. Indirect
 servers connect lazily when `code` or `tool_search` requests their capabilities.

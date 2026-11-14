@@ -17,6 +17,8 @@
   const weakGet = Function.call.bind(WeakMap.prototype.get), weakSet = Function.call.bind(WeakMap.prototype.set);
   const slice = Function.call.bind(String.prototype.slice);
   const lower = Function.call.bind(String.prototype.toLowerCase), replace = Function.call.bind(String.prototype.replace);
+  const errorNames = new Map();
+  for (const C of [Error, TypeError, RangeError, SyntaxError, ReferenceError, URIError, EvalError, AggregateError]) mapSet(errorNames, C.prototype, C.name);
   let sequence = 0;
 
   function failure(code, message, callId, execution) {
@@ -25,7 +27,7 @@
     e.execution = execution || {local: 'not_started', remote: 'not_dispatched'};
     return e;
   }
-  function safe(value) {
+  function safe(value, outputErrors) {
     let nodes = 0; const ancestors = [];
     function visit(v, depth) {
       if (++nodes > 65536 || depth > 128) throw failure('json_limit', 'JSON nesting or node limit exceeded');
@@ -37,6 +39,18 @@
       if (typeof v !== 'object') throw failure('unsupported_json', 'Value is not supported JSON');
       for (let i=0;i<ancestors.length;i++) if (ancestors[i] === v) throw failure('unsupported_json', 'Cyclic JSON value');
       const array = isArray(v), proto = getPrototype(v);
+      const errorName = outputErrors ? mapGet(errorNames, proto) : undefined;
+      if (errorName !== undefined) {
+        // Output diagnostics only: never invoke getters/toJSON, include stacks,
+        // or weaken the plain-JSON contract for arguments and stored values.
+        const name = descriptor(v, 'name'), message = descriptor(v, 'message');
+        if ((name && !descriptor(name, 'value')) || (message && !descriptor(message, 'value')))
+          throw failure('unsupported_json', 'Error accessors are not supported');
+        const original = weakGet(hostFailures, v), out = create(null);
+        out.name = name && typeof name.value === 'string' ? name.value : errorName;
+        out.message = original ? original.message : message && typeof message.value === 'string' ? message.value : '';
+        return visit(out, depth + 1);
+      }
       if (!array && proto !== objectPrototype && proto !== null) throw failure('unsupported_json', 'Only plain JSON objects are supported');
       ancestors[ancestors.length] = v;
       const out = array ? [] : create(null);
@@ -65,6 +79,7 @@
     return visit(value,0);
   }
   function encode(v) { return stringify(safe(v)); }
+  function encodeOutput(v) { return stringify(safe(v, true)); }
   function bytes(value) {
     let length=0;
     for(let i=0;i<value.length;i++) {
@@ -149,7 +164,7 @@
     searchTools(query, options) { return new PromiseClass((resolve,reject)=>{try {resolve(request('search',encode({query, options:options===undefined?{}:options})));} catch(e){reject(e);}}); },
     describeTool(name) { return new PromiseClass((resolve,reject)=>{try {const v=request('describe',encode(name));resolve(v===null?undefined:deepFreeze(v));} catch(e){reject(e);}}); },
     describeNamespace(name) { return new PromiseClass((resolve,reject)=>{try {const v=request('namespace',encode(name));resolve(v===null?undefined:deepFreeze(v));} catch(e){reject(e);}}); },
-    text(value) {request('text',typeof value==='string'?value:encode(value));},
+    text(value) {request('text',typeof value==='string'?value:encodeOutput(value));},
     image(value) {request('image',encode(value));},
     store(key,value) {if(typeof key!=='string')throw failure('store_key','Store key must be a string');if(value===undefined){request('delete',key);return;}const json=encode(value);if(bytes(json)>limits.storeValueBytes)throw failure('store_limit','value exceeds store byte limit. store() is for small IDs or summaries; keep large data in local variables and show images with image().');request('store',key,json);},
     load(key) {if(typeof key!=='string')throw failure('store_key','Store key must be a string');const v=request('load',key);return v===null?undefined:parse(v);},
@@ -157,7 +172,7 @@
   };
   const console = create(null);
   for (const name of ['log','info','warn','error','debug']) define(console,name,{value:function(...args){
-    let result='';for(let i=0;i<args.length;i++){if(i)result+=' ';result+=typeof args[i]==='string'?args[i]:encode(args[i]);}
+    let result='';for(let i=0;i<args.length;i++){if(i)result+=' ';result+=typeof args[i]==='string'?args[i]:encodeOutput(args[i]);}
     request('text',result);
   }});
   api.console=freeze(console);

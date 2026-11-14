@@ -15,7 +15,7 @@ import (
 func (t *Toolset) searchTool() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        t.options.SearchName,
-		Description: "Search allowed tools not yet declared to the model by topic, optionally within a namespace. Matching tools are loaded as direct declarations for later calls; Codemode can call them without loading. Hidden tools are unavailable.",
+		Description: "Search allowed tools not yet declared to the model by topic, optionally within a namespace. Matching tools are loaded as direct declarations for later calls; Codemode can call them without loading. Already declared matching tools are reported when no new tools match. Hidden tools are unavailable.",
 		Parameters: map[string]any{
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]any{
@@ -64,8 +64,12 @@ func (t *Toolset) searchTool() agent.ToolDefinition {
 				active[tool.Name] = true
 			}
 			summaries := make([]codemode.ToolSummary, 0, len(values))
+			var declared []codemode.ToolSummary
 			for _, value := range values {
 				name := value.binding.ExportedName()
+				if active[name] {
+					declared = append(declared, codemode.ToolSummary{Name: name, Namespace: value.binding.Namespace, Description: value.binding.Tool.Description})
+				}
 				if value.exposure == managed.Direct || active[name] {
 					continue
 				}
@@ -99,6 +103,20 @@ func (t *Toolset) searchTool() agent.ToolDefinition {
 				return agent.ToolResult{}, directoryError(err)
 			}
 			if len(names) == 0 {
+				available, err := codemode.SearchTools(declared, query, codemode.SearchOptions{Namespace: namespace, Limit: limit})
+				if err != nil {
+					return agent.ToolResult{}, searchArgumentsError()
+				}
+				if len(available) > 0 {
+					for i := range available {
+						available[i].Description = safeText(available[i].Description, 192)
+					}
+					body, err := json.Marshal(available)
+					if err != nil || len(body) > 32<<10 {
+						return agent.ToolResult{}, &agent.ToolExecutionError{Code: agent.ToolFailureResource, Message: "Tool search output exceeds its bounded result limit"}
+					}
+					return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: "Matching tools are already declared; call them directly. No new tools loaded:\n" + string(body)}}}, nil
+				}
 				return agent.ToolResult{Content: []agent.Part{{Type: agent.PartTypeText, Text: "No allowed tools matched. Try another topic or namespace."}}}, nil
 			}
 			var token [16]byte

@@ -22,6 +22,11 @@ type VercelGatewayRouting struct {
 }
 
 type OpenAICompletionsCompat struct {
+	// AllowUnauthenticated permits an empty resolved API key for this adapter.
+	// Default false. Existing credentials and caller-supplied headers are still
+	// used; this is not a policy for suppressing credentials or authorizing URLs.
+	AllowUnauthenticated bool
+
 	SupportsMidConvoSystemMessages              *bool
 	SupportsStore                               *bool
 	SupportsDeveloperRole                       *bool

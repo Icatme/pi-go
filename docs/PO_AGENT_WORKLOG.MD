@@ -1,5 +1,16 @@
 # PO Agent Worklog
 
+## 2026-11-13 - Pi instruction-role issue audit
+
+- Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.
+- Go 1.26.5 full pkg/pigo tests, race and vet passed; original code fails the new regression. No live calls or deployment. See docs/pi-issue-audit-20261113.md.
+## 2026-11-13 - Compatible-provider typed streaming content
+
+- Investigated upstream [pi #7062](https://github.com/earendil-works/pi/issues/7062), the [Databricks content reference](https://docs.databricks.com/aws/en/machine-learning/foundation-model-apis/api-reference), and [Mistral reasoning chunks](https://docs.mistral.ai/inference/conversations/reasoning). The Go failure differs from JavaScript's `[object Object]`: string-only `delta.content` decoding aborts on a typed array, including the message fallback.
+- Decode plain strings/null and typed text, Databricks reasoning summary-text, and Mistral thinking parts. Preserve whitespace and emit reasoning separately; reject unknown/malformed types rather than silently dropping content. Parse each entire content value before emitting any of its parts. Keep existing terminal/finish checks unchanged.
+- Red baseline: both HTTP SSE typed-content fixtures failed with array-to-string JSON decoding errors before the fix. Added delta/message, nested reasoning, unknown/malformed shape, no-partial-array, and missing-finish regressions. Updated the diagnostic field-type fixture to a still-invalid reasoning field because empty content arrays are now supported; unsupported content retains a structured parse diagnostic through streaming, cloning, and persistence.
+- Validation: Go 1.26.10 targeted tests passed with race; `go vet ./pkg/pigo` and `git diff --check` passed. Full `go test -race ./pkg/pigo -count=1` passed (33.816s). Local fixtures only; no live provider, paid calls, deployment, or manual CI dispatch. Existing shared text/thinking block aggregation is unchanged; opaque reasoning-signature replay is outside this fix.
+
 ## 2026-07-28 - Core review remediation
 
 - Removed stale provider-scope policy from `AGENTS.md`; provider scope remains a product/documentation concern rather than an agent rule.
@@ -3778,3 +3789,181 @@
   language model accuracy, downstream host integration and live delivery remain
   separate acceptance work. No push, merge, release, CI dispatch or live service
   call was performed by this change.
+
+## 2026-11-13 - Google thought-signature part preservation
+
+- Compared Pi issue [#11538](https://github.com/earendil-works/pi/issues/11538) with pi-go master `ae4e17f`; pi-go was dropping Google signatures on text, thinking, and tool parts entirely. Google [documents](https://cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures) that signatures stay on their original parts and signed/unsigned parts must not be merged.
+- Added opaque signature decoding/replay and signed-part boundaries, including trailing empty-text parts. Added `SignatureOnly` metadata on text/thinking content and Context JSON to distinguish an absent text field from an explicit empty string; unsigned text can still coalesce. No signature is fabricated, decrypted, validated cryptographically, or replayed across provider/API/model identity.
+- Regression covers HTTP SSE -> content -> Context persistence -> full replay transforms for trailing empty text, separate signed parts, signature-only parts, thinking boundaries, and parallel tool calls. All six cases (including signed/unsigned/signed text) fail on the original baseline and pass after the fix. Historical signatures already discarded cannot be reconstructed. Older serializers that do not preserve the new marker cannot retain the absent/empty distinction.
+- Go 1.26.10: all `pkg/pigo` tests passed under race, `go vet ./...` and `go mod tidy -diff` passed. Full-repository race evaluation was started separately; its result is tracked in the PR. No live model calls, credentials, deployment, or CI dispatch.
+
+## 2026-11-13: Provider response-body cancellation
+
+- Audited upstream pi #11211 against master ae4e17f. Reproduced blocked custom-transport reads after cancellation; bound cancellable response bodies before shared HTTP error buffering and classified Anthropic ordinary/hosted interrupted error reads as aborted.
+- Eight cancel/timeout × ordinary/hosted × 200/503 regressions and close-once coverage pass. Full pkg/pigo ordinary tests (16.727s), race (32.710s), and vet pass on Go 1.26.5. No live provider, merge, or deployment. Details: `docs/pi-anthropic-cancellation-audit-20261113.md`.
+
+## 2026-11-13: llama.cpp decode overflow classification
+
+- Audited upstream pi #10885 body and six comments against master ae4e17f. Reproduced missed `Context size has been exceeded.` classification for plain, wrapped HTTP 500, and case-insensitive errors. Added one narrowly worded overflow pattern.
+- Regression includes non-error/aborted results, neutral wording, negation and rate-limit exclusions. Full pkg/pigo race (34.277s) and vet pass on Go 1.26.5. Classification only: no new automatic compaction/retry; no live llama.cpp/LM Studio or deployment validation.
+
+## 2026-11-13: Explicit MCP stdio environment isolation
+
+- Audited pi issue #11361 body and both comments. Added opt-in `ServerConfig.InheritEnv`: nil/true keeps inherited environment with explicit overrides; false passes only explicit Env (subject to platform-required os/exec variables). Both normalization and snapshots detach the pointer. No deployed policy changed.
+- Synthetic real subprocess test failed isolated mode before implementation and passed after; default/explicit inheritance and override behavior retained. Full mcp race (6.081s) and vet passed on Linux Go 1.26.5. Windows behavior documented but not executed; no real credentials used.
+
+## 2026-11-13: Google cancelled HTTP error-body classification
+
+- Audited pi #12070 body and comment. Go already applies TimeoutMs to the Google request context and has no google-vertex adapter or matching TS retry-pattern layer. Reproduced a narrower bug: non-2xx Google response handling discarded readErr, losing cancellation/deadline identity. Preserve the wrapped read error.
+- Four synthetic 200/503 × cancel/timeout tests pass on top of the shared body-cancellation change (PR #202); the 503 classification tests failed before this fix. Full pkg/pigo race 33.842s and vet passed. No idle-timeout semantics, automatic retries, live provider validation or deployment introduced.
+## 2026-11-13 — OpenAI-compatible Gemini tool signatures
+
+- Audited upstream earendil-works/pi #10157 against Google's documented OpenAI-compatible `tool_calls[].extra_content.google.thought_signature` contract. pi-go dropped the field on parse and replay.
+- Preserve the opaque value in the existing ToolCall.ThoughtSignature slot, including late signature-only streaming deltas; replay only for identical provider/API/model identity. No fabricated signatures, cross-provider forwarding or gateway-specific metadata passthrough. Native Google part-signature PR #201 is independent.
+- HTTP SSE and message-fallback regressions cover parallel signed/unsigned calls, Context JSON persistence, replay and cross-model/provider/API stripping. Both fail on original master and pass with the fix. Live-provider behavior was not tested and historical missing signatures cannot be recovered. Validation details are tracked in the PR.
+
+## 2026-11-13: Search hints for already declared tools
+
+- Audited pi #11921 body/comments. Reproduced direct-tool search incorrectly saying no allowed tools matched. When no inactive tools match, report matching tools already present in the current model context without reloading them or spending selection records. Inactive matches retain priority; hidden tools and direct tools absent from current context are not hinted.
+- Red/green direct lookup, repeated loaded lookup, selection-budget preservation, no dispatch and final permission/directory retirement regressions pass. Full agent/toolset race 8.300s and vet pass Go 1.26.5. No real MCP service or model was used; no merge/deployment.
+
+## 2026-11-13: Nested Error output diagnostics
+
+- Audited pi #10650 body and five comments. Go had a related but different failure: text/console/return of allSettled with a rejected host Error aborted with unsupported_json, rather than TS empty objects. Added output-only native Error name/message conversion; no stack/cause/extra-property copy or getter/toJSON invocation. Arguments/store/image stay plain JSON; custom subclasses unsupported.
+- Red/green output regressions, mixed success/failure, native Error, explicit JSON.stringify preservation, rejected accessor, no tool dispatch for Error arguments pass. Full codemode race 23.232s, codemodetool 12.349s, toolset 6.742s and vet pass; final additional targeted race 4.469s passes. No live model/MCP or deployment.
+## 2026-11-13: reject cancelled queue hook output
+
+- Compared upstream earendil-works/pi#9783 with the Go engine. Offline regressions reproduced initial steering callback cancellation still appending its returned message and calling the model successfully; follow-up callback cancellation also appended unaccepted text.
+- Check the context immediately before and after host queue getters. Cancelled callback output is not accepted; host getter errors and successful delivery remain unchanged. Document that host getters retain ownership of queue acceptance/rollback: the engine cannot reverse side effects inside an arbitrary getter.
+- Two regression scenarios failed before the patch and passed afterwards. Full agent race tests passed (7.350s), plus agent vet; additional before-call cancellation and successful/error getter tests added and validated. No live provider, persistent host queue transaction, merge, CI dispatch, or deployment claimed.
+## 2026-11-13: narrowly classify DashScope token throttling
+
+- Compared pi issue #10656 with Alibaba Cloud's official error-code page (updated 2026-11-12): HTTP 429 insufficient_quota / Throttling.AllocationQuota with the two documented TPS/TPM messages is throttling, while free allocation exhaustion and overdue bills are not.
+- Only explicitly configured alibaba/dashscope/bailian chat-completions models receive this exception. Require 429, recognized structured code/type and exact documented wording; do not infer from model name or relax OpenAI quota behavior. Unknown providers retain existing classification. No global code-based retry override.
+- Explicit overdue-bill, budget and unpurchased-service codes on those providers now terminate instead of retrying generic 429. Existing retry count/delay bounds and no-stream-output boundaries remain authoritative.
+- Two HTTP throttle cases failed before the fix, then passed. Added OpenAI/free-quota/zero-retry/overdue HTTP negatives and narrow-classifier cases. No live provider calls, new provider catalog, merge or deployment.
+- Source: https://www.alibabacloud.com/help/en/model-studio/error-code
+## 2026-11-13 — OpenCode Go Kimi K2.7 request shape
+
+- Compared upstream pi issue #10237 (including the reporter's November 6
+  correction) with `ae4e17f`. The report confirms a request-shape discrepancy,
+  not a reproducible reasoning-content leak.
+- Kimi's official parameter reference says K2.7 Code has always-on thinking,
+  an optional `thinking` control and no `reasoning_effort` support:
+  https://platform.kimi.ai/docs/api/models-overview . OpenCode documents this
+  model on its Chat Completions endpoint. The pi issue's gateway-specific
+  captured requests provide the additional OpenCode context:
+  https://github.com/earendil-works/pi/issues/10237 .
+- Corrected only `opencode-go/kimi-k2.7-code`: use the existing thinking-object
+  format, never emit reasoning_effort, and exclude unsupported off from the
+  catalog. Empty/default reasoning omits the optional control rather than
+  sending disabled. Kimi K3 and all other model definitions remain unchanged.
+- Actual local HTTP fixtures cover default, medium and high requests plus
+  reasoning_content parsing. All three fail against the old catalog and pass
+  with the fix. Go 1.26.10: OpenCode tests, the full pkg/pigo race suite and
+  pkg/pigo vet passed. No real provider call, CI dispatch, merge or deployment.
+## 2026-11-13: Chat Completions gateway routing audit (upstream #9211)
+
+- Inspected https://github.com/earendil-works/pi/issues/9211. Its upstream
+  Anthropic/catalog failure is not reproduced as a catalog claim here; pi-go has
+  a narrower confirmed defect: both existing Chat Completions compatibility
+  routing options were unused by the request builder.
+- Serialize explicit OpenRouter settings as `provider` with snake_case fields,
+  and Vercel settings as `providerOptions.gateway`. Preserve explicit false
+  constraints and omit unconfigured routing; no hostname inference or new
+  provider catalog entries. Public configuration structs retain their existing
+  JSON representation. Sampling parameters cannot replace these protocol fields.
+- Contracts checked against the official routing documentation:
+  https://openrouter.ai/docs/guides/routing/provider-selection and
+  https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/advanced.
+  Vercel's `provider` shorthand is for sort, not only/order. Routing enforcement
+  remains the gateway's responsibility; ordering is not a hard allowlist.
+- Red before the fix: both routing wire regressions and both sampling-override
+  checks failed. Green after: exact serialization, custom-proxy HTTP/SSE fixture,
+  consecutive OpenRouter/Vercel/plain-request isolation, package race tests and
+  vet (Go 1.26.10). No real gateway request, credential, billing, Anthropic routing
+  extension, downstream application validation, merge or deployment.
+## 2026-11-13 — Anthropic fallback boundary safety (Pi issue 9074)
+
+- Compared current open issue https://github.com/earendil-works/pi/issues/9074 with master ae4e17f and official https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (read 2026-11-13). The shared Anthropic SSE parser silently dropped fallback markers, allowing pre-handoff tool calls to finish as executable toolUse and signed content to lose its boundary.
+- Added a narrow explicit parse failure for unsupported fallback blocks. No model retry, signature rewriting, new fallback API, or successful mixed-model transcript is introduced. Partial content remains error evidence and existing failed-response replay filtering excludes it.
+- Three local HTTP fixtures (before output, after thinking, after client tool) failed on baseline and pass with guard; focused race 1.039s. Full package validation recorded in PR. No live provider/account calls, merge or deployment. Full fallback content/persistence/replay and per-attempt accounting remain unsupported.
+## 2026-11-13 — Avoid intermediate string in durable JSON clones (Pi 9010)
+
+- Compared https://github.com/earendil-works/pi/issues/9010 with ae4e17f: the exact TypeScript prompt pipeline is absent, but compaction uses cloneValidated, which marshaled bytes then copied them into a string for decoding. Decode directly from bytes instead. Deep cloning, JSON validation, UseNumber and isolation remain unchanged; no truncation or relaxed ownership.
+- A 1 MiB local benchmark (5 iterations, 3 repeats) showed before 8.20–9.05 MB/op and after 7.15–7.99 MB/op; roughly one payload-sized allocation removed, not a latency guarantee. Benchmark validates output. Added nested mutation isolation, >2^53 json.Number and invalid NaN regression.
+- Full agent/session race passed 16.356s and vet passed before the added focused regression; focused regression rerun also passed. Independent read-only review found no blocker. Full compaction allocation/lifetime and host summarizer RSS remain unverified; not a complete fix for all upstream memory complaints. No live provider calls, deployment or merge.
+## 2026-11-13 — Scoped terminal HTTP status evidence (Pi 11071)
+
+- Compared upstream https://github.com/earendil-works/pi/issues/11071 with ae4e17f. Existing transport observation exposes status, but terminal provider_failure diagnostics discard it. Added optional http_status only at the shared HTTPStreamClient non-2xx error boundary and ProviderHTTPStatusOf accessor; ProviderFailure fields, retry classification/budgets and error text remain unchanged.
+- Underlying error chain is retained; interrupted non-2xx body keeps body_read classification. HTTP200 stream errors, local/transport errors, older records and uninstrumented adapters do not infer status. Reader accepts integer diagnostic representations across JSON persistence and rejects invalid values.
+- Local HTTP fixture baseline without wiring fails status401; patched 401/503, broken-body, single-attempt and clone/Context JSON restoration regressions pass focused race1.034s. Full package validation and independent review recorded in PR. No live calls, CI dispatch, deployment or merge. Coverage is shared HTTPStreamClient consumers only, not universal SDK/native-adapter status parity.
+## 2026-11-13 — Avoid payload copies in read-only compaction-cut validation (Pi 9010)
+
+- On ae4e17f, ValidateCompactionCut deep-cloned full argument/metadata payloads before completeTurnStarts, which only reads roles and tool identifiers and maintains its own pairing maps; no caller callback runs. Use a new combined slice with copied message elements, without copying unrelated payloads. PrepareCompaction and Compact retain their cloneValidated durable-JSON validation, and host callback isolation is unchanged.
+- Earlier audit concern that cloneMessages performed JSON validation was corrected by source inspection: cloneJSONValue only recursively copies common maps/slices. No validation was removed. Existing complete-turn/tool-pairing checks remain unchanged.
+- 1MiB argument benchmark (10x,2 repeats): baseline about1.06MB/op,12allocs; new1208B/op,4allocs. Do not read timing as reliable speedup or payload throughput. Added valid/invalid-cut assertions that nested payload and caller spare backing capacity are unchanged. Fullsession race16.710s/vet pass; focused mutation plus non-durable-input gate race1.139s. Independent review recorded in PR.
+- No live provider, CI dispatch, merge or deployment. This is a narrow second allocation improvement, not complete compaction/host RSS optimization.
+## 2026-11-13 — Explicit optional authentication for custom Completions endpoints (Pi 9508)
+
+- After source comparison with https://github.com/earendil-works/pi/issues/9508 and owner-directed continued development, add OpenAICompletionsCompat.AllowUnauthenticated (default false). Only an explicitly opted-in Completions model with an empty resolved key may proceed without a synthesized Authorization header. Existing matched auth-map/env/explicit credentials and trusted header overrides retain their normal behavior. This option is not credential suppression, URL authorization or a security boundary; use a distinct custom provider identity for a public endpoint when no stored credentials should apply.
+- Missing key still fails before dispatch by default; whitespace-only configured key is rejected rather than emitted as an empty Bearer or downgraded to anonymous. Authorization resolver errors still stop before dispatch. Other protocols are unchanged, and no built-in provider is opted in.
+- The no-auth HTTP case fails on baseline (zero requests/missing key) and passes after fix. Tests cover omitted/false/true option, absent header, explicit key, whitespace key, trusted custom header, independent clone and matching-vs-unrelated stored credentials. Full pkg/pigo race32.535s and vet; added stored-credential focused race1.108s. Independent review recorded in PR. No live upstream, CI dispatch, merge or deployment.
+
+
+## 2026-11-13 — Google terminal HTTP diagnostic parity
+
+- Follow up pi-mono #11071 on top of the terminal-status diagnostic change: attach the actual non-2xx response status at native Google SSE error return. No retry, auth, stream parsing or error-body cancellation policy changes.
+- Local HTTP fixtures reproduce missing 403/503 status on the baseline and verify the additive diagnostic, one request, clone/Context JSON round-trip; an HTTP 200 stream error containing code 503 does not become an HTTP 503 diagnostic.
+- Validation: focused and full pkg/pigo race tests plus vet; no live provider or deployment. This branch depends on PR #216. Preserve the independent PR #205 error-body read/cancellation change when integrating; this change does not replace it.
+
+
+## 2026-11-13 — Native Anthropic and Responses HTTP diagnostics
+
+- Follow up pi-mono #11071 on top of PR #216: preserve actual terminal HTTP status at native Anthropic and OpenAI Responses SDK error boundaries, without changing retry policy, error text or classification. Stream-internal HTTP 200 errors never synthesize HTTP status from provider error codes.
+- Local HTTP fixtures reproduce missing 403/503 status on both baseline adapters and verify clone/Context JSON persistence and one request; a Responses 503→403 retry fixture records final 403 with exactly two requests.
+- Validation: focused and full pkg/pigo race tests, vet and independent review. No live provider, merge or deployment. This does not claim universal SDK/hosted-adapter coverage.
+
+
+## 2026-11-13 — Transfer owned summary request prefix
+
+- Partial follow-up to pi-mono #9010: after durable JSON normalization and system-message filtering, Compact transfers its already detached prefix to the summarizer instead of copying all tool arguments once again. All existing durable validation and retained-tail cloning remain.
+- Callback mutation regression covers raw arguments, originally shared caller metadata, retained tail, and a callback-held request mutated after Compact returns. Independent review found no ownership blocker; full session race and vet passed.
+- A reproducible 64KiB/1MiB/4MiB pipeline benchmark measures Prepare and Compact separately. This removes one payload-sized allocation from Compact, not the remaining JSON/transcript copies, process RSS or provider latency. No live model, merge or deployment.
+
+
+## 2026-11-13 — Codex WebSocket handshake HTTP diagnostic
+
+- Partial #11071 follow-up: retain an actual failed WebSocket upgrade HTTP status without parsing error text, changing fallback/retry policy, or restarting an already-streaming response. Successful HTTP 200 with a failed upgrade remains a protocol error without non-2xx status.
+- Local403/502 baseline failures verify status and Context JSON round-trip, one connection attempt, and preserved bad-handshake error identity; existing no-fallback-after-start regressions remain. Full pkg/pigo race, vet and independent review.
+- Depends on PR216. Not a solution to #12124 service-enforced long-running connection limits; no live model, merge or deployment.
+
+
+## 2026-11-14 — Integrate Pi issue PRs #200–222 for review
+
+- Rebuilt the 23-PR stack from verified remote heads on master ae4e17f in a separate integration branch. Retained both sides of worklog additions; resolved Google cancellation/status and Anthropic cancellation/status code conflicts without losing cancellation identity or actual non-2xx status.
+- Added cancel/deadline × HTTP200/503 classification/status regressions. Final focused race1.345s passed; isolated incorrect-resolution overlays both fail as expected. Independent static review found no blocking conflict-resolution issue.
+- Go1.26.11 remote Linux: full29-package race passes (runtimeeval403.169s, provider33.471s); full vet; examples tests/vet; module verification and read-only graph pass. No live providers, paid model calls, CI dispatch, master merge, release, downstream update or deployment.
+- Source heads, integration decisions, verification and remaining scope are in docs/pi-issue-integration-20261114.md. Existing PR branches are untouched. Ordinary git push lacked credentials; publish the exact tested snapshot through the GitHub connector if necessary.
+
+## 2026-11-14 - Open PR review and consolidated repair
+
+- Reviewed the initial 23 open PRs (#200-222), then the #223 integration snapshot
+  created during this review. GitHub discussions contained no review comments.
+  Each original PR's added/affected focused regressions passed on Windows.
+- Fixed two reproduced defects in #201 and #207: agent persistence lost signed
+  empty/absent-text parts, and declared-tool hints truncated descriptions before
+  matching. Published both repairs and synchronized them into #223.
+- Refreshed #205 from #202, and integrated cancellation dependencies into #219
+  and #220 with tested conflict resolutions preserving HTTP status and cause.
+  These individual branch updates were published without merging any PR.
+- A separate local integration of all 23 candidates passed tests for pkg/pigo,
+  agent, agent/session, mcp, codemode, agent/codemodetool and agent/toolset;
+  root-module test compilation and vet passed. Shared worklog additions survived
+  all integration conflicts. The #223 repair has identical production Go source;
+  its focused agent/toolset/provider race tests and affected-package vet passed.
+- Git HTTPS became unavailable after the earlier pushes. #220 and this #223
+  repair use the GitHub connector, with tested-tree equality and expected-head
+  checks protecting publication. Original workspace README edits remain intact.
+  No full-repository runtime/race repeat, examples repeat, UI acceptance, live
+  provider request, main-branch merge, release or deployment was performed here.

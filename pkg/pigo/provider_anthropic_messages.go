@@ -145,7 +145,7 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 				failure = withProviderFailure(errors.Join(errors.New(response.ErrorMessage), readErr), ProviderFailureStream, "body_read")
 				response.ErrorMessage = failure.Error()
 			}
-			recordProviderFailure(&response, failure)
+			applyRequestError(&response, withProviderHTTPStatus(failure, httpResponse.StatusCode))
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 			stream.finish(response)
 			return

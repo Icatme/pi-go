@@ -406,8 +406,11 @@ func connectOpenAICodexWebSocket(
 		onResponse(cloneOpenAICodexProviderResponse(providerResponse))
 	}
 	if err != nil {
-		if httpResponse != nil && httpResponse.Body != nil {
-			_ = httpResponse.Body.Close()
+		if httpResponse != nil {
+			if httpResponse.Body != nil {
+				_ = httpResponse.Body.Close()
+			}
+			err = withProviderHTTPStatus(err, httpResponse.StatusCode)
 		}
 		return nil, err
 	}

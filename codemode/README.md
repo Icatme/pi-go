@@ -92,6 +92,13 @@ All accepted calls have bounded basic records; at most 256 error chains and
 per-field caps and at most 1024 entries, even when payload quota is exhausted.
 Opaque objects/allocations owned by a Go tool remain the tool's responsibility.
 
+For `text`, console output, and returned values only, nested native JavaScript
+Errors (including rejected tool calls in `Promise.allSettled`) become safe
+`{name, message}` diagnostics. Stack, cause, and arbitrary extra properties are
+not copied; accessors are rejected without running them. Arguments, `store`, and
+`image` retain the plain-JSON contract. Explicit `JSON.stringify` keeps ordinary
+JavaScript semantics; custom Error subclasses are not automatically supported.
+
 Nonfinite numbers, BigInt, unsafe integers (outside +/-9007199254740991),
 JSON precision loss, unsupported object/accessor values and cycles are
 rejected. Enumerable named array properties (including noncanonical indices like
