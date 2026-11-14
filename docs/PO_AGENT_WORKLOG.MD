@@ -4198,3 +4198,25 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
   Final test-only identity/text assertions passed targeted race tests three
   times (1.102s). Independent static review and targeted race tests three times
   passed (1.112s). No real provider or production validation was performed.
+
+## 2026-11-14: Recognize explicit LiteLLM context-overflow diagnostics
+
+- Upstream pi #11492 reports LiteLLM's ContextWindowExceededError and
+  "Context Window exceeded for given call" diagnostic. LiteLLM's official
+  exception mapping documents the former as an HTTP 400 context-window error:
+  https://docs.litellm.ai/docs/exception_mapping . Local regressions confirmed
+  these explicit forms were not recognized by the existing classifier.
+- Add word-bounded, case-insensitive recognition of the class name and exact
+  diagnostic phrase. Keep the explicit StopReasonError prerequisite and the
+  existing rate-limit exclusions. Do not add a generic numeric token-count
+  heuristic, change request limits, compact history, or retry requests.
+- Regression cases include the reported forms, uppercase spelling, non-error
+  responses, rate-limit exclusions, embedded lookalike names, unrelated window
+  configuration, and a token-count-only message. This standalone change does
+  not include the separate earlier input-model token-limit patch.
+- Final standalone base755e003 verification: targeted overflow/token-limit race
+  tests repeated three times passed (1.832s), full pkg/pigo race suite passed
+  (40.857s), and go vet passed. The standalone tree has no dependency on the
+  earlier input-model token-limit patch. The same two-pattern implementation
+  and final test file passed independent static review on the preceding branch;
+  no live LiteLLM/provider call or production validation was performed.
