@@ -506,17 +506,7 @@ func processMistralChatStreamEvent(data string, model Model, response *Assistant
 	}
 
 	delta := choice.Delta
-	if delta.ReasoningContent != "" {
-		if !state.ThinkingStarted {
-			state.ThinkingStarted = true
-			state.ThinkingIndex = len(response.Content)
-			response.Content = append(response.Content, ThinkingContent{})
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingStart, ContentIndex: state.ThinkingIndex, Partial: cloneAssistantMessage(*response)})
-		}
-		state.Thinking.WriteString(delta.ReasoningContent)
-		response.Content[state.ThinkingIndex] = ThinkingContent{Thinking: state.Thinking.String()}
-		stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingDelta, ContentIndex: state.ThinkingIndex, Delta: delta.ReasoningContent, Partial: cloneAssistantMessage(*response)})
-	}
+	appendMistralThinkingDelta(response, stream, state, delta.ReasoningContent)
 
 	if delta.Content != nil {
 		switch content := delta.Content.(type) {
@@ -537,6 +527,16 @@ func processMistralChatStreamEvent(data string, model Model, response *Assistant
 				chunkMap, ok := item.(map[string]any)
 				if !ok {
 					continue
+				}
+				if stringValue(chunkMap["type"]) == "thinking" {
+					if parts, ok := chunkMap["thinking"].([]any); ok {
+						for _, part := range parts {
+							if textPart, ok := part.(map[string]any); ok && stringValue(textPart["type"]) == "text" {
+								appendMistralThinkingDelta(response, stream, state, stringValue(textPart["text"]))
+							}
+						}
+						continue
+					}
 				}
 				text := stringValue(chunkMap["text"])
 				if text != "" {
@@ -600,6 +600,21 @@ func mistralToolCallFromState(state *mistralToolCallState) ToolCall {
 		args = map[string]any{}
 	}
 	return ToolCall{ID: state.ID, Name: state.Name, Arguments: args}
+}
+
+func appendMistralThinkingDelta(response *AssistantMessage, stream *AssistantMessageEventStream, state *mistralStreamState, text string) {
+	if text == "" {
+		return
+	}
+	if !state.ThinkingStarted {
+		state.ThinkingStarted = true
+		state.ThinkingIndex = len(response.Content)
+		response.Content = append(response.Content, ThinkingContent{})
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingStart, ContentIndex: state.ThinkingIndex, Partial: cloneAssistantMessage(*response)})
+	}
+	state.Thinking.WriteString(text)
+	response.Content[state.ThinkingIndex] = ThinkingContent{Thinking: state.Thinking.String()}
+	stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingDelta, ContentIndex: state.ThinkingIndex, Delta: text, Partial: cloneAssistantMessage(*response)})
 }
 
 func finalizeMistralChatResponse(model Model, response *AssistantMessage, stream *AssistantMessageEventStream, state *mistralStreamState) {

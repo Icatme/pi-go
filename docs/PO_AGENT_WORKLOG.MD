@@ -4435,3 +4435,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Mistral nested thinking stream deltas
+
+- Parse official delta.content ThinkChunk.thinking text children through the existing thinking accumulator, instead of dropping them. DeltaMessage blob6ce4da3f403751ecda225962d31fc448a5b2a2d6 uses the ContentChunk union: https://github.com/mistralai/client-python/blob/main/src/mistralai/client/models/deltamessage.py . Actual localhost RED0.009s returned only answer text despite nested reasoning.
+- This is text-only nested decoding. References/tool references/signatures remain unsupported and are not fabricated as text. Existing single thinking/text accumulators preserve first-occurrence indices and per-kind bytes, not arbitrary interleaved-block order. No deduplication guess when legacy reasoning_content and nested content coexist. Missing/null/non-array thinking retains the old top-level text compatibility fallback, not an official schema claim; valid arrays use the new path.
+- Final targetrace3 1.209s; independent final nested/legacy race3 1.598s and empty control1.085s, no blockers. Final runtime full pkg/pigo race42.170s + vet passed. Earlier41.979s was before compatibility refinement and is not the final acceptance result. Snapshot controls verify early partials stay unchanged and empty/nonstring children do not create blocks.
+- Isolated combination with Mistral #280/#281/#282 passes targetrace3 1.143s, including stream->Context JSON restore->second HTTP request replay. This is targeted combination verification, not full combined acceptance. No live provider/fees, manual CI dispatch, merge or deployment.
