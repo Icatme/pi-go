@@ -1,5 +1,11 @@
 # PO Agent Worklog
 
+## 2026-11-14 — OpenCode Go documented protocol endpoints
+
+- Followed upstream [pi #11132](https://github.com/earendil-works/pi/issues/11132) and [official Go endpoints](https://opencode.ai/docs/console/go/) (accessed 2026-11-14). Update only built-in OpenCode Go defaults to `inference/go/openai/v1` for Chat/Responses and `inference/go/anthropic` for Messages. Caller-provided BaseURL and model/protocol choices are unchanged. No new models or account settings.
+- Literal catalog regression failed on base755e003 and passes after the two-constant change. Local HTTP fixtures assert final protocol paths across Complete/CompleteSimple and preserve session-header override tests. Targeted race x3 passed1.449s; full pkg/pigo race passed38.571s; vet passed. Independent review found no blockers.
+- No real provider requests, credentials, paid inference, deployment, or claim that old endpoints have stopped working. This aligns defaults with documented routes, not a live service acceptance result.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.

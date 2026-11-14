@@ -3,6 +3,7 @@ package pigo
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -21,6 +22,16 @@ func TestOpenCodeGoSessionHeaderAcrossProtocols(t *testing.T) {
 					var captured string
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						captured = r.Header.Get("x-opencode-session")
+						wantPath := "/inference/go/openai/v1/chat/completions"
+						if modelID == "gpt-5.6-luna" {
+							wantPath = "/inference/go/openai/v1/responses"
+						}
+						if modelID == "minimax-m3" {
+							wantPath = "/inference/go/anthropic/v1/messages"
+						}
+						if r.URL.Path != wantPath {
+							t.Errorf("path = %q, want %q", r.URL.Path, wantPath)
+						}
 						w.Header().Set("Content-Type", "text/event-stream")
 						switch modelID {
 						case "minimax-m3":
@@ -33,7 +44,7 @@ func TestOpenCodeGoSessionHeaderAcrossProtocols(t *testing.T) {
 					}))
 					defer server.Close()
 					model := *GetModel("opencode-go", modelID)
-					model.BaseURL = server.URL
+					model.BaseURL = server.URL + strings.TrimPrefix(model.BaseURL, "https://opencode.ai")
 					ctx := Context{Messages: []Message{UserMessage{Content: "hello"}}}
 					var result AssistantMessage
 					if simple {

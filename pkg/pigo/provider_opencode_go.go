@@ -3,8 +3,8 @@ package pigo
 import "strings"
 
 const (
-	openCodeGoBaseURL          = "https://opencode.ai/zen/go/v1"
-	openCodeGoAnthropicBaseURL = "https://opencode.ai/zen/go"
+	openCodeGoBaseURL          = "https://opencode.ai/inference/go/openai/v1"
+	openCodeGoAnthropicBaseURL = "https://opencode.ai/inference/go/anthropic"
 )
 
 type openCodeGoModelSpec struct {
