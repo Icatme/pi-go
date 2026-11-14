@@ -4147,3 +4147,28 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Only explicitly configured `Provider:"xai", API:"openai-completions"` now reconciles separately reported reasoning when prompt/completion/total are present, nonnegative, the existing input/cache split matches prompt, and the total remainder exactly equals reasoning. Staged subtraction prevents correction-induced integer overflow. Missing/null/inconsistent counts, already-inclusive output and all other providers/APIs preserve prior behavior. The internal usage parser tracks three field presences without changing existing integer consumers.
 - No native xAI provider/catalog was added. Existing Command Code `xai/grok-*` models use Responses and are unaffected. This does not infer provider identity from model names or URLs, invent missing usage, change prices, or introduce generic gap-filling.
 - Offline coverage includes the official example, provider/API boundaries, missing/null/zero fields, inconsistent totals/cache overrides, integer boundaries, and localhost SSE repeated-usage/cost accounting. No paid/live requests or production deployment. Targeted race×3 passed in 1.651s; independent review/probe race×3 passed in 1.377s; final full `pkg/pigo` race passed in 39.643s and `go vet ./pkg/pigo` passed.
+
+## 2026-11-14: Google per-request continuation finish reason
+
+- Audit source: upstream earendil-works/pi #12097. Google's official
+  js-genai src/types.ts documents CONTINUATION as reaching a per-request token
+  limit before generation is complete, with a candidate continuation token
+  usable in a subsequent request. Official js-genai v2.29.0 (2026-10-13)
+  already records automatic-continuation handling; this is not a claim that
+  the enum was first introduced in that release.
+  Sources: https://github.com/googleapis/js-genai/blob/main/src/types.ts and
+  https://github.com/googleapis/js-genai/releases/tag/v2.29.0 .
+- Map this explicit finish reason to the existing MAX_TOKENS/length boundary
+  in the native Google provider instead of treating it as an unknown error.
+  Preserve partial text, tool calls and usage. STOP and unknown/error reasons
+  retain their existing behavior. No token consumption, automatic continuation,
+  additional network request, retry-policy change, or Vertex support is added.
+- Baseline localhost regression failed before the mapping. Real SSE fixtures
+  cover STOP/MAX_TOKENS/CONTINUATION with and without a tool call, preserved
+  usage and exactly one HTTP request even with retries configured. Unknown
+  and safety/malformed finish reasons remain errors.
+- Final runtime passed full pkg/pigo race tests (40.050s) and go vet.
+  Independent read-only review found no blocking issue. No real provider,
+  production or paid-model validation was performed.
+- Final test-only tool-ID assertion: continuation targeted race tests repeated
+  three times passed (1.152s).

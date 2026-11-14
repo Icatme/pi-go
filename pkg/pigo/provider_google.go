@@ -702,7 +702,7 @@ func mapGoogleStopReason(reason string, content []ContentBlock) StopReason {
 			}
 		}
 		return StopReasonStop
-	case "MAX_TOKENS":
+	case "MAX_TOKENS", "CONTINUATION":
 		return StopReasonLength
 	default:
 		return StopReasonError
