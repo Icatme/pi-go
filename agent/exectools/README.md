@@ -43,6 +43,36 @@ invocations rather than sharing interpreter state across tenants. The wrapper
 is portable Go, but supports only the platforms that the supplied backend
 actually supports. No external backend has been certified by these mock tests.
 
+## Dependent calls in one Agent batch
+
+The factories leave `ExecutionMode` at the Agent's normal default. They do not
+infer whether a host command/script and another tool are independent. When a
+command produces state that a following read needs, opt that definition into the
+existing ordered policy before adding it to the Agent:
+
+```go
+command, err := exectools.CommandDefinition(execute, exectools.Options{})
+if err != nil {
+    return err
+}
+command.ExecutionMode = agent.ToolExecutionSequential
+```
+
+The same assignment works for a `PythonDefinition`. If any tool in a normal
+Agent batch requires sequential execution, the **whole batch** runs in model-call
+order. This is not a per-command barrier with parallel segments. Keep the default
+only when the host accepts concurrent independent calls; names such as `bash` or
+`read` do not imply dependencies. This is in-process scheduling, not a transaction
+or proof that a remote job has completed.
+
+Code Mode has its own ordering: use explicit `await` between dependent calls, or
+the sandbox's host-owned sequential option where appropriate. The
+`agent/codemodetool` adapter propagates a Native tool's `ToolExecutionSequential`
+mode to `RunOptions.Sequential`, serializing host tool calls even within
+`Promise.all`. A standalone sandbox does not inspect Agent tool definitions;
+its host must set this option explicitly. Serial dispatch alone does not express
+which result a later call needs; use `await` for those data dependencies.
+
 ## Permission, cancellation and receipts
 
 The tool requires a reserved capture slot before dispatch, validates input and

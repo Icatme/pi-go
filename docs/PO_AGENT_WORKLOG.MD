@@ -3968,8 +3968,43 @@
   No full-repository runtime/race repeat, examples repeat, UI acceptance, live
   provider request, main-branch merge, release or deployment was performed here.
 
+## 2026-11-14: post-merge Pi issue follow-up
+
+Synced master `9a8e190` after #223; original #200–222 remain superseded. Rechecking Mistral #12148 found no Go strict-tool emission, but independently reproduced dropped cancellation/timeout errors while reading non-2xx bodies. Preserve the original read-error chain with a minimal adapter fix and targeted cancel/timeout × 200/503 regressions. MCP #11763 does not map to current go-sdk cancellation propagation (SDK cancellation race regression passed three times); Code Mode #11122 has no matching TS renderer. See `docs/pi-issue-followup-20261114.md` for scope and unresolved image-count budgeting. No live models, paid execution, merge, release or deployment.
+
+## 2026-11-14: DeepSeek error-response cancellation boundary
+
+From master `9a8e190`, independently of Mistral #224, reproduced loss of cancel/deadline classification while reading native DeepSeek non-2xx bodies; preserve readErr with `%w`. HTTP200 controls and matching CommandCode cases already pass, so CommandCode is unchanged. Added regression for read-error identity, one request, body closure and non-cancellation error behavior. See `docs/pi-deepseek-error-body-20261114.md`; no extra retry/timeout policy, live model, release, merge or deployment.
+
+## 2026-11-14: upstream contract regression guards
+
+Rechecked pi #11226 and #9134 on master `9a8e190`: Go already avoids the top-level Code Mode binding collision and preserves root Anthropic tool-schema constraints. Add real sandbox/serialized request regressions rather than unnecessary runtime patches. Temporary overlays recreating each reported defect make the new tests fail as expected. Notes distinguish these negative findings from the independent Mistral #224 and DeepSeek #225 fixes. See `docs/pi-upstream-contract-guards-20261114.md`; no real service, paid model, merge or deployment.
+
+The same follow-up documents exectools host-owned `ExecutionModeSequential` for dependent command/read batches after an offline ordering reproduction; no global scheduling default changed.
+
 ## 2026-11-14 — Optional image budget after #223
 
 - Baseline master 9a8e190; rechecked open #224–226 to avoid overlap. Pi issue #10162 reports long-running screenshot history exceeding one gateway's limit. Offline baseline diagnostic confirmed TransformMessages keeps 31 images; this is not a universal 30-image rule.
 - Added opt-in pigo.ApplyImageBudget with host MaxImages and explicit PruneBefore boundary. Defaults unchanged; preserves all user/assistant images and protected suffix, omits only oldest eligible tool images with markers, retains tool associations and metadata. Protected overflow fails atomically. Canonical representation checks prevent undercounting; copy-on-write avoids modifying history. Host integration is deliberately not automatic.
 - Independent review found pointer/nil/clone pitfalls in the initial draft; corrected with explicit enabled-policy validation and copy-on-write. Final read-only review found no blocker. Full pkg/pigo race passed 34.058s and vet passed; final added COW assertion and all image-budget tests passed three times with race (1.050s), final vet passed. Go 1.26.11, offline only. No full-root test, real provider, automatic CI, merge, release or deployment. See optional-image-budget.md for integration limits.
+
+## 2026-11-14 - Review and merge open PRs #224-227
+
+- Reviewed all four open drafts and their actual provider/sandbox paths. No existing
+  review threads or CI checks were present; repository CI remains manual-only.
+  Mistral and DeepSeek retain cancellation/deadline causes without new retries;
+  the image budget stays explicit and opt-in, protecting caller-selected evidence.
+- Corrected #226 documentation: agent/codemodetool propagates Native sequential
+  tool policy to sandbox RunOptions.Sequential, including Promise.all host calls;
+  standalone sandbox hosts must configure it themselves. Runtime code is unchanged.
+- Windows Go 1.26.4, offline fixtures: focused Mistral/DeepSeek/CommandCode,
+  image-budget, Anthropic-schema and real-sandbox lexical tests pass. Integrated
+  full pkg/pigo race passed (37.906s), codemode race passed (24.310s); affected-package
+  vet and diff checks pass. No full-root/examples repeat, live provider, UI
+  acceptance, CI dispatch, release, downstream update or deployment.
+- Preserved every append-only worklog addition while updating the PR branches.
+  #224-226 are merged; #227 is the final reviewed candidate for the authorized
+  merge. Git HTTPS failed, so GitHub API delivery checks exact local/remote tree
+  equality and expected branch heads before publication and merge.
+- Reused the clean review worktree. The original workspace's uncommitted
+  superagent/README.md edit remains untouched.
