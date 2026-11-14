@@ -4435,3 +4435,9 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14: Bound Codex CLI callback connection cleanup
+
+- Related pi #11311: the Go MCP layer does not own a callback listener; a separate CLI Codex localhost probe proved an accepted spare TCP socket survived the existing two-second Shutdown deadline (RED 2.138s). Keep that graceful budget; call server.Close only if Shutdown returns an error. No token/auth/retry or MCP-host behavior changes.
+- Regression covers complete success/error HTML, spare preconnection, accepted incomplete headers, canceled WaitForCode, repeated Close, and active response delivery before graceful shutdown completes. Closing sockets is not forcible termination of arbitrary handler goroutines or hijacked connections.
+- Final-runtime full internal/cli race PASS 5.349s and vet exit0; final strengthened test-only target race×3 PASS 13.289s and vet exit0. Independent target race×3 PASS 11.324s; independent static review and parent review found no blockers. Initial author target 13.339s preceded final test refinements. Only localhost synthetic state/code; no live sign-in, paid service, CI dispatch or deployment.

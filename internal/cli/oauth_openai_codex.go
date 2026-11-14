@@ -282,7 +282,9 @@ func (s *openAICodexCallbackServer) Close() {
 	}
 	closeContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = s.server.Shutdown(closeContext)
+	if err := s.server.Shutdown(closeContext); err != nil {
+		_ = s.server.Close()
+	}
 }
 
 func parseAuthorizationInput(input string) (string, string, error) {
