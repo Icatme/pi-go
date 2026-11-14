@@ -1,5 +1,11 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Preserve provider-native finish diagnostics
+
+- Reproduced upstream Pi #11931 on master 755e003: OpenRouter-style native_finish_reason was discarded from error diagnostics. Preserve a distinct nonempty native reason, quoted, only when the existing finish reason is classified as error. Normal stop and error classification remain unchanged; no retry permission is added.
+- Baseline regression failed; targeted Completions race repeated three times passed (1.522s), full pkg/pigo race passed (38.911s), vet passed, and independent review passed. Empty/same-value native reasons and normal stop are covered. Go terminates immediately on the first error finish, so trailing usage does not overwrite this diagnostic.
+- Diagnostic strings remain untrusted provider data. No live provider, release, deployment or downstream dependency update.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.

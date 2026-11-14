@@ -122,10 +122,11 @@ type openAICompletionsChunk struct {
 }
 
 type openAICompletionsChoice struct {
-	Delta        openAICompletionsDelta  `json:"delta"`
-	Message      *openAICompletionsDelta `json:"message,omitempty"`
-	FinishReason string                  `json:"finish_reason"`
-	Usage        *openAICompletionsUsage `json:"usage,omitempty"`
+	Delta              openAICompletionsDelta  `json:"delta"`
+	Message            *openAICompletionsDelta `json:"message,omitempty"`
+	FinishReason       string                  `json:"finish_reason"`
+	NativeFinishReason string                  `json:"native_finish_reason,omitempty"`
+	Usage              *openAICompletionsUsage `json:"usage,omitempty"`
 }
 
 type openAICompletionsDelta struct {
@@ -812,7 +813,11 @@ func processOpenAICompletionsStreamEvent(data string, model Model, response *Ass
 			state.FinishSeen = true
 			response.StopReason = mapOpenAICompletionsFinishReason(choice.FinishReason, response.Content)
 			if response.StopReason == StopReasonError {
-				return true, withProviderFailure(fmt.Errorf("unsupported finish_reason %q", choice.FinishReason), ProviderFailureParse, "unsupported_finish_reason")
+				diagnostic := fmt.Sprintf("unsupported finish_reason %q", choice.FinishReason)
+				if native := strings.TrimSpace(choice.NativeFinishReason); native != "" && native != strings.TrimSpace(choice.FinishReason) {
+					diagnostic += fmt.Sprintf(" (native_finish_reason: %q)", native)
+				}
+				return true, withProviderFailure(errors.New(diagnostic), ProviderFailureParse, "unsupported_finish_reason")
 			}
 		}
 	}
