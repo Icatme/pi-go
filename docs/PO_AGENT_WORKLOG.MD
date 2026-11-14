@@ -3791,3 +3791,20 @@
 - Follow up pi-mono #11071 on top of PR #216: preserve actual terminal HTTP status at native Anthropic and OpenAI Responses SDK error boundaries, without changing retry policy, error text or classification. Stream-internal HTTP 200 errors never synthesize HTTP status from provider error codes.
 - Local HTTP fixtures reproduce missing 403/503 status on both baseline adapters and verify clone/Context JSON persistence and one request; a Responses 503→403 retry fixture records final 403 with exactly two requests.
 - Validation: focused and full pkg/pigo race tests, vet and independent review. No live provider, merge or deployment. This does not claim universal SDK/hosted-adapter coverage.
+
+
+## 2026-11-13: Provider response-body cancellation
+
+- Audited upstream pi #11211 against master ae4e17f. Reproduced blocked custom-transport reads after cancellation; bound cancellable response bodies before shared HTTP error buffering and classified Anthropic ordinary/hosted interrupted error reads as aborted.
+- Eight cancel/timeout × ordinary/hosted × 200/503 regressions and close-once coverage pass. Full pkg/pigo ordinary tests (16.727s), race (32.710s), and vet pass on Go 1.26.5. No live provider, merge, or deployment. Details: `docs/pi-anthropic-cancellation-audit-20261113.md`.
+
+## 2026-11-14 - Integrate PR #220 with Anthropic cancellation
+
+- Incorporated current #202. Resolved the overlapping non-2xx path with
+  applyRequestError on the status-bearing error, preserving aborted state and
+  the underlying cancellation/body-read cause. Retained both appended worklogs.
+- Cancellation/timeout fixtures now assert classification for native and hosted
+  Anthropic paths and actual HTTP status for the native adapter covered by #220.
+- Windows Go 1.26.4 focused cancellation/status/EOF tests, full pkg/pigo race
+  tests, vet and staged diff checks passed with GOWORK=off. Dependencies are #216
+  and #202. No main-branch merge, live provider call, release or deployment.
