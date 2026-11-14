@@ -365,7 +365,10 @@ func streamDeepSeekChatSSE(model Model, ctx context.Context, client *http.Client
 		options.OnResponse(ProviderResponse{Status: httpResponse.StatusCode, Headers: cloneDeepSeekHTTPHeaders(httpResponse.Header)}, model)
 	}
 	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
-		body, _ := io.ReadAll(httpResponse.Body)
+		body, readErr := io.ReadAll(httpResponse.Body)
+		if readErr != nil {
+			return fmt.Errorf("deepseek upstream returned status %d: read error body: %w", httpResponse.StatusCode, readErr)
+		}
 		return fmt.Errorf("deepseek upstream returned status %d: %s", httpResponse.StatusCode, parseDeepSeekErrorMessage(body))
 	}
 
