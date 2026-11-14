@@ -4123,3 +4123,20 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Audited upstream Pi #5921 and reproduced Chat returning a successful tool-use response with blank tool name/ID. At successful stop/tool-use finalization only, reject blank identity with a typed malformed_tool_call parse error and remove the entire executable tool batch from the final response using a fresh content slice. Preserve text, reasoning metadata and usage; finalize indexed reasoning before filtering. Earlier streamed partial evidence is not authorization to execute tools. No automatic retry or toolcall-end/done for the malformed batch.
 - Late identity deltas and nonempty unknown tool names remain supported; length truncation and unrelated errors retain their existing behavior. This is not a repair of arbitrary custom Model responses, other provider protocols, or already-poisoned saved history.
 - Baseline provider and actual agent regressions reproduced the defect. Fixed localhost provider tests cover blank ID/name, mixed valid/invalid siblings, late identity, unknown names, indexed reasoning and length boundaries. Real PigoStreamModel ordinary/gated tests verify no tool execution, no tool results, no second automatic HTTP request; direct Continue retains its existing assistant-tail rejection, while an explicit new prompt resumes without orphan tool traffic. Independent static review corrected two initial boundary issues before final validation. Final provider targeted race passed three times (1.511s); full pkg/pigo race (40.453s), agent race (8.051s), and vet of both packages passed. The final test-only Continue assertion strengthening passed independent targeted race three times (1.076s). No live model calls or deployment.
+
+## 2026-11-14 — Preserve late terminal reasoning ciphertext
+
+- Reproduced [pi #4272](https://github.com/earendil-works/pi/issues/4272): an already completed reasoning item without encrypted content caused final response output carrying the same item's ciphertext to be skipped. Shared Responses/Codex parsing now fills only absent, null or empty encrypted content for one exact nonempty reasoning ID. Existing ciphertext and unrelated text/tool terminal behavior remain unchanged; no new output blocks or repeated lifecycle events.
+- Signature updates preserve unknown JSON fields and large integer values via RawMessage. A new content slice preserves already emitted partial snapshots. Ambiguous IDs, missing IDs/ciphertext, malformed signatures and invalid existing ciphertext types are left unchanged. This does not introduce Azure deployment support or change store options.
+- Protocol sources: [OpenAI reasoning guide](https://developers.openai.com/api/docs/guides/reasoning) and [Azure Responses guide](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses?tabs=rest). Stateless multi-turn use needs replayable encrypted output. Localhost SSE and serialized next-request fixtures cover ordinary Responses and Codex; no live Azure/OpenAI request or paid validation.
+- Baseline regression failed. Final slice-identity/terminal-only targeted race x3 passed1.447s; added null/wrong-type boundaries targeted race x3 passed1.196s. Full pkg/pigo race passed42.342s; vet passed. Independent reviews found no blocking issue. Old stored signatures missing ciphertext cannot be retroactively repaired without the original terminal response.
+
+## 2026-11-14 - PR #243 review correction: ambiguous terminal reasoning
+
+- Reproduced duplicate reasoning IDs in a terminal Responses output selecting the
+  first opaque ciphertext for an already completed item. Require a unique
+  reasoning ID in the terminal output before filling the missing signature.
+- The new localhost HTTP regression failed for both Responses and Codex before
+  the fix. All terminal ciphertext tests pass with race on Windows Go 1.26.4.
+  Existing signatures, completed content and event counts remain unchanged.
+- Offline fixtures only; no live model, CI dispatch, release or deployment.
