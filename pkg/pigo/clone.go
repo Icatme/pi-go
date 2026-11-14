@@ -81,6 +81,7 @@ func cloneCompat(compat ProviderCompat) ProviderCompat {
 		return &cloned
 	case *AnthropicMessagesCompat:
 		cloned := *typed
+		cloned.SupportsLongCacheRetention = cloneBoolPointer(typed.SupportsLongCacheRetention)
 		cloned.ForceAdaptiveThinking = cloneBoolPointer(typed.ForceAdaptiveThinking)
 		cloned.AllowEmptySignature = cloneBoolPointer(typed.AllowEmptySignature)
 		return &cloned
