@@ -129,6 +129,7 @@ type openAIResponsesStreamingState struct {
 	CurrentTextItemKey     string
 	CurrentThinkingItemKey string
 	FinalizedItemKeys      map[string]bool
+	FinalizedTextIndexes   map[string]int
 	ToolCalls              map[string]*openAIResponsesToolCallState
 	ToolCallOutputKeys     map[int]string
 	CustomTools            map[string]string
@@ -808,6 +809,12 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 		return nil
 	}
 
+	messageIDs := map[string]int{}
+	for _, item := range terminal.Output {
+		if item.Type == "message" && strings.TrimSpace(item.ID) != "" {
+			messageIDs[item.ID]++
+		}
+	}
 	for _, item := range terminal.Output {
 		if state.AnchorsTools && item.Type == "function_call" {
 			if err := validateOpenAIResponsesFunctionItem(state, item); err != nil {
@@ -822,6 +829,9 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 		}
 		itemKey := openAIResponsesItemKey(item)
 		if itemKey != "" && state != nil && state.FinalizedItemKeys[itemKey] {
+			if item.Type == "message" && messageIDs[item.ID] == 1 {
+				fillOpenAIResponsesFinalizedPhase(response, state, item)
+			}
 			continue
 		}
 
@@ -853,6 +863,61 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 		}
 	}
 	return nil
+}
+
+// Fill metadata only: completed output must not emit a second text lifecycle or
+// rewrite content already delivered to observers. Ambiguous IDs are not guessed.
+func fillOpenAIResponsesFinalizedPhase(response *AssistantMessage, state *openAIResponsesStreamingState, item openAIResponsesResponseItem) {
+	phase := openAIResponsesAssistantPhase(item.Phase)
+	if phase == "" || strings.TrimSpace(item.ID) == "" {
+		return
+	}
+	index := -1
+	var fields map[string]json.RawMessage
+	for i, content := range response.Content {
+		block, ok := content.(TextContent)
+		if !ok {
+			continue
+		}
+		var signature TextSignatureV1
+		if json.Unmarshal([]byte(block.TextSignature), &signature) != nil || signature.V != 1 || signature.ID != item.ID {
+			continue
+		}
+		if index >= 0 {
+			return
+		}
+		index = i
+		if signature.Phase != "" || json.Unmarshal([]byte(block.TextSignature), &fields) != nil {
+			return
+		}
+	}
+	if state != nil {
+		if i, ok := state.FinalizedTextIndexes[item.ID]; ok && (i < 0 || i >= len(response.Content) || (index >= 0 && index != i)) {
+			return
+		}
+	}
+	if index < 0 && state != nil {
+		if i, ok := state.FinalizedTextIndexes[item.ID]; ok && i >= 0 && i < len(response.Content) {
+			if block, ok := response.Content[i].(TextContent); ok && block.TextSignature == "" {
+				index = i
+				fields = map[string]json.RawMessage{"v": json.RawMessage("1")}
+				fields["id"], _ = json.Marshal(item.ID)
+			}
+		}
+	}
+	if index < 0 {
+		return
+	}
+	fields["phase"], _ = json.Marshal(phase)
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return
+	}
+	content := append([]ContentBlock(nil), response.Content...)
+	block := content[index].(TextContent)
+	block.TextSignature = string(encoded)
+	content[index] = block
+	response.Content = content
 }
 
 func openAIResponsesItemKey(item openAIResponsesResponseItem) string {
@@ -1044,7 +1109,25 @@ func finalizeOpenAIResponsesStreamItem(
 	switch item.Type {
 	case "message":
 		if state.CurrentTextIndex < 0 {
+			before := len(response.Content)
 			emitOpenAIResponsesItemLifecycle(response, stream, item)
+			// Preserve private identity for done-only items without changing the
+			// public signature when no phase is ever supplied.
+			if strings.TrimSpace(item.ID) != "" {
+				if state.FinalizedTextIndexes == nil {
+					state.FinalizedTextIndexes = map[string]int{}
+				}
+				index := -1
+				if len(response.Content) == before+1 {
+					if _, ok := response.Content[before].(TextContent); ok {
+						index = before
+					}
+				}
+				if _, duplicate := state.FinalizedTextIndexes[item.ID]; duplicate {
+					index = -1
+				}
+				state.FinalizedTextIndexes[item.ID] = index
+			}
 			if itemKey != "" {
 				state.FinalizedItemKeys[itemKey] = true
 			}
