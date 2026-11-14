@@ -1,5 +1,12 @@
 # PO Agent Worklog
 
+## 2026-11-14 — Preserve late terminal reasoning ciphertext
+
+- Reproduced [pi #4272](https://github.com/earendil-works/pi/issues/4272): an already completed reasoning item without encrypted content caused final response output carrying the same item's ciphertext to be skipped. Shared Responses/Codex parsing now fills only absent, null or empty encrypted content for one exact nonempty reasoning ID. Existing ciphertext and unrelated text/tool terminal behavior remain unchanged; no new output blocks or repeated lifecycle events.
+- Signature updates preserve unknown JSON fields and large integer values via RawMessage. A new content slice preserves already emitted partial snapshots. Ambiguous IDs, missing IDs/ciphertext, malformed signatures and invalid existing ciphertext types are left unchanged. This does not introduce Azure deployment support or change store options.
+- Protocol sources: [OpenAI reasoning guide](https://developers.openai.com/api/docs/guides/reasoning) and [Azure Responses guide](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses?tabs=rest). Stateless multi-turn use needs replayable encrypted output. Localhost SSE and serialized next-request fixtures cover ordinary Responses and Codex; no live Azure/OpenAI request or paid validation.
+- Baseline regression failed. Final slice-identity/terminal-only targeted race x3 passed1.447s; added null/wrong-type boundaries targeted race x3 passed1.196s. Full pkg/pigo race passed42.342s; vet passed. Independent reviews found no blocking issue. Old stored signatures missing ciphertext cannot be retroactively repaired without the original terminal response.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.
