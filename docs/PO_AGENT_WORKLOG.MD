@@ -4680,3 +4680,21 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Related pi #11311: the Go MCP layer does not own a callback listener; a separate CLI Codex localhost probe proved an accepted spare TCP socket survived the existing two-second Shutdown deadline (RED 2.138s). Keep that graceful budget; call server.Close only if Shutdown returns an error. No token/auth/retry or MCP-host behavior changes.
 - Regression covers complete success/error HTML, spare preconnection, accepted incomplete headers, canceled WaitForCode, repeated Close, and active response delivery before graceful shutdown completes. Closing sockets is not forcible termination of arbitrary handler goroutines or hijacked connections.
 - Final-runtime full internal/cli race PASS 5.349s and vet exit0; final strengthened test-only target race×3 PASS 13.289s and vet exit0. Independent target race×3 PASS 11.324s; independent static review and parent review found no blockers. Initial author target 13.339s preceded final test refinements. Only localhost synthetic state/code; no live sign-in, paid service, CI dispatch or deployment.
+
+## 2026-11-15 - Prepare and publish v0.23.2
+
+- Updated the primary workspace to remote master, including PRs #228-262 and
+  the reviewed #263-298 integration merged through #299. Prepared the release
+  on codex/release-v0.23.2; the pre-existing superagent/README.md edit remains
+  unchanged and excluded from the release commit.
+- Bumped package and examples versions to 0.23.2 and added release notes covering
+  provider/runtime fixes and explicit opt-ins. Called out the default provider
+  redirect restriction, OAuth redirect rejection and stricter malformed-response
+  handling. No third-party dependency was added or updated.
+- Windows Go 1.26.4: root and examples go list -mod=readonly -m all passed with
+  GOWORK=off; version references, release-note links and diff hygiene passed.
+  No release-time full/race suite, UI acceptance, live-provider call, manual CI,
+  binary/package build, deployment or downstream update was performed.
+- Delivery targets master and an annotated v0.23.2 source tag atomically, followed
+  by a GitHub Release without uploaded assets. Publication verification checks
+  remote branch/tag identity, release metadata and Go module resolution.
