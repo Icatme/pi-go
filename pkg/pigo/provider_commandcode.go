@@ -11,10 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	mathrand "math/rand/v2"
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -522,7 +524,9 @@ func processCommandCodeStreamEvent(event map[string]any, data string, model Mode
 		if normalizedReason == "networkerror" || normalizedReason == "connectionerror" || normalizedReason == "upstreamerror" {
 			return false, fmt.Errorf("Command Code upstream connection failed mid-stream (%s)", rawReason)
 		}
-		applyCommandCodeUsage(event, model, response)
+		if err := applyCommandCodeUsage(event, model, response); err != nil {
+			return false, err
+		}
 		response.StopReason = mapCommandCodeFinishReason(anyString(event["finishReason"]))
 		state.finished = true
 		return true, nil
@@ -565,27 +569,77 @@ func endCommandCodeThinking(response *AssistantMessage, stream *AssistantMessage
 	state.thinking.Reset()
 }
 
-func applyCommandCodeUsage(event map[string]any, model Model, response *AssistantMessage) {
+// commandCodeUsageInt is intentionally limited to usage: metadata retains its
+// existing conversion rules. JSON float decoding above 2^53 is not repaired here.
+func commandCodeUsageInt(value any) (int, bool, error) {
+	invalid := func() (int, bool, error) {
+		return 0, false, withProviderFailure(errors.New("invalid Command Code usage count"), ProviderFailureParse, "invalid_usage")
+	}
+	switch v := value.(type) {
+	case nil:
+		return 0, false, nil
+	case int:
+		if v < 0 {
+			return invalid()
+		}
+		return v, true, nil
+	case int64:
+		if v < 0 || uint64(v) > uint64(^uint(0)>>1) {
+			return invalid()
+		}
+		return int(v), true, nil
+	case float32:
+		return commandCodeUsageInt(float64(v))
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || math.Trunc(v) != v || v >= math.Ldexp(1, strconv.IntSize-1) {
+			return invalid()
+		}
+		return int(v), true, nil
+	default:
+		return invalid()
+	}
+}
+
+func applyCommandCodeUsage(event map[string]any, model Model, response *AssistantMessage) error {
 	totalUsage, ok := commandCodeUsageRecord(event["totalUsage"])
 	if !ok {
-		return
+		return nil
 	}
 	details := commandCodeRecord(totalUsage["inputTokenDetails"])
-	cacheRead := commandCodeInt(details["cacheReadTokens"])
-	cacheWrite := commandCodeInt(details["cacheWriteTokens"])
-	input := maxInt(0, commandCodeInt(totalUsage["inputTokens"])-cacheRead-cacheWrite)
-	if noCacheTokens, ok := commandCodeOptionalInt(details["noCacheTokens"]); ok {
-		input = noCacheTokens
+	values := []any{totalUsage["inputTokens"], totalUsage["outputTokens"], details["cacheReadTokens"], details["cacheWriteTokens"], details["noCacheTokens"]}
+	counts := make([]int, len(values))
+	noCachePresent := false
+	for i, v := range values {
+		n, present, err := commandCodeUsageInt(v)
+		if err != nil {
+			return err
+		}
+		counts[i] = n
+		if i == 4 {
+			noCachePresent = present
+		}
 	}
-	response.Usage = Usage{
-		Input:      input,
-		Output:     commandCodeInt(totalUsage["outputTokens"]),
-		CacheRead:  cacheRead,
-		CacheWrite: cacheWrite,
+	input, output, read, write := counts[0], counts[1], counts[2], counts[3]
+	max := int(^uint(0) >> 1)
+	invalid := func() error {
+		return withProviderFailure(errors.New("Command Code usage token sum overflows"), ProviderFailureParse, "invalid_usage")
 	}
-	response.Usage.TotalTokens = response.Usage.Input + response.Usage.Output + response.Usage.CacheRead + response.Usage.CacheWrite
+	if read > max-write {
+		return invalid()
+	}
+	caches := read + write
+	input = maxInt(0, input-caches)
+	if noCachePresent {
+		input = counts[4]
+	}
+	if input > max-output || input+output > max-caches {
+		return invalid()
+	}
+	usage := Usage{Input: input, Output: output, CacheRead: read, CacheWrite: write, TotalTokens: input + output + caches}
+	usage.Cost = calculateCommandCodeCost(model, usage)
+	response.Usage = usage
 	response.UsageReported = true
-	response.Usage.Cost = calculateCommandCodeCost(model, response.Usage)
+	return nil
 }
 
 func calculateCommandCodeCost(model Model, usage Usage) UsageCost {

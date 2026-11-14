@@ -4435,3 +4435,9 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Check CommandCode Generate usage before conversion and arithmetic
+
+- Reproduced invalid usage replacing a prior valid snapshot and double-cache subtraction overflow (baseline RED 0.008s). Added usage-only nonnegative integer conversion with finite/integral float validation and an exclusive int upper bound; metadata conversion is unchanged. Absent/null fields retain existing defaults, explicit noCacheTokens zero overrides derived input, and valid small cache-over-input still clamps derived input to zero.
+- Check cache and final token sums before mutation. Generate finish errors become typed parse invalid_usage while retaining partial text and prior valid usage. This is the Generate backend, not native Chat/Responses routing. Default JSON float decoding may already round integers above 2^53; this change does not claim to recover those digits.
+- Initial HTTP fixture incorrectly selected native Chat through public Stream and failed missing_terminal; corrected it to the existing explicit Generate test helper. Corrected target race x3 passed 1.602s; independent enhanced usage target race x3 passed 1.169s. Final full pkg/pigo race passed 48.902s and vet exited successfully. No live provider, billing, release, deployment or manual CI dispatch.
