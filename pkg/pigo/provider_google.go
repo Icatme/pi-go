@@ -634,6 +634,9 @@ func processGoogleStreamEvent(data string, model Model, response *AssistantMessa
 
 	if candidate.FinishReason != "" {
 		response.StopReason = mapGoogleStopReason(candidate.FinishReason, response.Content)
+		if response.StopReason == StopReasonError {
+			response.ErrorMessage = fmt.Sprintf("Google generation stopped with finish reason %q", candidate.FinishReason)
+		}
 	}
 
 	return false, nil
