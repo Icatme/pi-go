@@ -65,6 +65,7 @@ type openAIResponsesTextFormat struct {
 }
 
 type openAIResponsesResponse struct {
+	Model       string                        `json:"model"`
 	ID          string                        `json:"id"`
 	Status      string                        `json:"status"`
 	ServiceTier string                        `json:"service_tier,omitempty"`
@@ -472,6 +473,9 @@ func processOpenAIResponsesStreamEventWithProvider(
 	switch eventType {
 	case "response.created":
 		if responseMap, ok := event["response"].(map[string]any); ok {
+			if reportedModel, ok := responseMap["model"].(string); ok && reportedModel != "" && reportedModel != model.ID {
+				response.ResponseModel = reportedModel
+			}
 			if id, ok := responseMap["id"].(string); ok && strings.TrimSpace(id) != "" {
 				response.ResponseID = id
 			}
@@ -682,6 +686,9 @@ func processOpenAIResponsesStreamEventWithProvider(
 		}
 		if terminal.ID != "" {
 			response.ResponseID = terminal.ID
+		}
+		if terminal.Model != "" && terminal.Model != model.ID {
+			response.ResponseModel = terminal.Model
 		}
 		if terminal.Usage != nil {
 			applyOpenAIResponsesUsage(model, response, *terminal.Usage, terminal.ServiceTier, requestServiceTier)
@@ -1157,6 +1164,9 @@ func combineOpenAIResponsesToolCallID(callID string, itemID string) string {
 // ============================================================================
 
 func applyOpenAIResponsesTerminal(model Model, response *AssistantMessage, terminal openAIResponsesResponse, requestServiceTier string) {
+	if terminal.Model != "" && terminal.Model != model.ID {
+		response.ResponseModel = terminal.Model
+	}
 	if terminal.ID != "" {
 		response.ResponseID = terminal.ID
 	}
