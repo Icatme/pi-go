@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -359,7 +360,7 @@ func cloneValidated[T any](value T) (T, error) {
 	if err != nil {
 		return cloned, err
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.UseNumber()
 	if err := decoder.Decode(&cloned); err != nil {
 		return cloned, err

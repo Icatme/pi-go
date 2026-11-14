@@ -7,6 +7,8 @@ type ContentBlock interface {
 type TextContent struct {
 	Text          string
 	TextSignature string
+	// SignatureOnly preserves a Google signed part that had no text field.
+	SignatureOnly bool
 }
 
 func (TextContent) isContentBlock() {}
@@ -14,7 +16,9 @@ func (TextContent) isContentBlock() {}
 type ThinkingContent struct {
 	Thinking          string
 	ThinkingSignature string
-	Redacted          bool
+	// SignatureOnly preserves a Google signed thought part without text.
+	SignatureOnly bool
+	Redacted      bool
 }
 
 func (ThinkingContent) isContentBlock() {}

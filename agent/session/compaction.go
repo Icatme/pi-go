@@ -156,7 +156,9 @@ func Compact(ctx context.Context, plan CompactionPlan, summarize Summarizer) (Co
 
 	result, err := summarize(ctx, SummaryRequest{
 		PreviousSummary: plan.PreviousSummary,
-		Messages:        cloneMessages(plan.MessagesToSummarize),
+		// The normalized, system-filtered prefix is exclusively owned here.
+		// Transfer it to the callback; it is not read again after summarize.
+		Messages: plan.MessagesToSummarize,
 	})
 	if err != nil {
 		return CompactionData{}, err
@@ -281,8 +283,11 @@ func ValidateCompactionCut(prefix, tail []agent.Message) error {
 
 func validateCompactionCut(prefix, tail []agent.Message) error {
 	combined := make([]agent.Message, 0, len(prefix)+len(tail))
-	combined = append(combined, cloneMessages(prefix)...)
-	combined = append(combined, cloneMessages(tail)...)
+	// The validator only reads roles and tool IDs; it has no host callbacks.
+	// Copy the slice elements, not argument/metadata payloads. Durable JSON
+	// validation remains at PrepareCompaction/Compact entry boundaries.
+	combined = append(combined, prefix...)
+	combined = append(combined, tail...)
 	starts, err := completeTurnStarts(combined)
 	if err != nil {
 		return err

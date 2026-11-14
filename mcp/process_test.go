@@ -22,6 +22,10 @@ import (
 // exercises actual stdio framing and process-tree ownership without a shell.
 func TestManagedProcessFixture(t *testing.T) {
 	switch os.Getenv("PI_GO_MCP_HELPER") {
+	case "environment":
+		fmt.Fprintf(os.Stdout, "%s|%s\n", os.Getenv("PI_GO_MCP_UNDECLARED"), os.Getenv("PI_GO_MCP_DECLARED"))
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		os.Exit(0)
 	case "server":
 		server := wireTestServer()
 		addWireTool(server, "echo", func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
@@ -335,5 +339,38 @@ func TestManagedProcessCallbackPreservesCleanupError(t *testing.T) {
 		if err := p.close(); !errors.Is(err, fixtureErr) {
 			t.Fatalf("callback cleanup error lost on explicit close: %v", err)
 		}
+	}
+}
+
+func TestManagedProcessEnvironmentInheritance(t *testing.T) {
+	t.Setenv("PI_GO_MCP_UNDECLARED", "parent-only")
+	t.Setenv("PI_GO_MCP_DECLARED", "parent-value")
+	yes, no := true, false
+	for _, tt := range []struct {
+		name    string
+		inherit *bool
+		want    string
+	}{
+		{"default", nil, "parent-only|explicit"}, {"explicit-inherit", &yes, "parent-only|explicit"}, {"isolated", &no, "|explicit"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := processFixtureConfig("environment")
+			cfg.InheritEnv = tt.inherit
+			cfg.Env = append(cfg.Env, "PI_GO_MCP_DECLARED=explicit")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			p, err := startManagedProcess(ctx, cfg, 1024)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer p.close()
+			line, err := bufio.NewReader(p.stdout).ReadString('\n')
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(line) != tt.want {
+				t.Fatalf("got %q want %q", line, tt.want)
+			}
+		})
 	}
 }

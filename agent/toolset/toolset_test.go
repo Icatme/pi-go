@@ -247,7 +247,7 @@ func TestToolSearchLoadsOnlyInactiveIndirectTools(t *testing.T) {
 	}
 	call.ID = "search-again"
 	again := agent.RunToolCall(t.Context(), call, agent.RunToolCallOptions{Tools: loaded, Context: agent.AgentContext{Tools: loaded}})
-	if again.Err != nil || again.Result.Details != nil || !strings.Contains(resultText(again.Result), "No allowed tools matched") {
+	if again.Err != nil || again.Result.Details != nil || !strings.Contains(resultText(again.Result), "already declared") {
 		t.Fatalf("repeated search duplicated an active selection or consumed its record cap: %+v", again)
 	}
 }
@@ -487,5 +487,31 @@ func TestTrustedRestorationCannotOverrideCurrentHiddenPolicy(t *testing.T) {
 	out := agent.RunToolCall(t.Context(), agent.ToolCall{ID: "stale", Name: stale.Name, ParsedArgs: map[string]any{}}, agent.RunToolCallOptions{Tools: []agent.ToolDefinition{stale}})
 	if out.Err == nil || f.writes.Load() != 0 {
 		t.Fatalf("restored executor dispatched after hiding: %+v", out)
+	}
+}
+
+func TestSearchReportsMatchingAlreadyDeclaredTool(t *testing.T) {
+	f := newFixture(t, managed.Codemode, mixedRules())
+	ts, err := New(f.manager, f.sandbox, Options{MaxSelectionRecords: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := ts.Resolve(t.Context(), agent.AgentSnapshot{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		call := agent.ToolCall{ID: "direct-search", Name: "tool_search", ParsedArgs: map[string]any{"query": "direct", "namespace": "issues"}}
+		out := agent.RunToolCall(t.Context(), call, agent.RunToolCallOptions{Tools: initial, Context: agent.AgentContext{Tools: initial}})
+		text := resultText(out.Result)
+		if out.Err != nil || out.Result.Details != nil || !strings.Contains(text, "already declared") || !strings.Contains(text, "direct_issue") || strings.Contains(text, "hidden_issue") {
+			t.Fatalf("active tool reported missing or reloaded: %s %v", text, out.Err)
+		}
+	}
+	if got := loadBySearch(t, ts, "deferred"); got.ToolResult.Details == nil {
+		t.Fatal("active hints consumed selection budget")
+	}
+	if f.writes.Load() != 0 {
+		t.Fatal("search dispatched a tool")
 	}
 }

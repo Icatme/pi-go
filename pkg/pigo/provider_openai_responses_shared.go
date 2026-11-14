@@ -188,7 +188,7 @@ func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom ma
 			}
 			if text != "" {
 				role := "system"
-				if model.Reasoning && resolveOpenAIResponsesCompat(model).SupportsDeveloperRole {
+				if resolveOpenAIResponsesCompat(model).SupportsDeveloperRole {
 					role = "developer"
 				}
 				input = append(input, map[string]any{"role": role, "content": text})

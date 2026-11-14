@@ -107,9 +107,9 @@ func (c *HTTPStreamClient) postStream(ctx context.Context, url string, requestOp
 				continue
 			}
 			if readErr != nil {
-				return withProviderFailure(errors.Join(errors.New(message), readErr), ProviderFailureStream, "body_read")
+				return withProviderHTTPStatus(withProviderFailure(errors.Join(errors.New(message), readErr), ProviderFailureStream, "body_read"), httpResponse.StatusCode)
 			}
-			return withProviderFailure(errors.New(message), ProviderFailureUpstream, "http_error")
+			return withProviderHTTPStatus(withProviderFailure(errors.New(message), ProviderFailureUpstream, "http_error"), httpResponse.StatusCode)
 		}
 
 		if requestOptions.OnOpen != nil {
