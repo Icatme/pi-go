@@ -76,6 +76,7 @@ func cloneCompat(compat ProviderCompat) ProviderCompat {
 		return &cloned
 	case *GoogleGenerativeAICompat:
 		cloned := *typed
+		cloned.SupportsParametersJSONSchema = cloneBoolPointer(typed.SupportsParametersJSONSchema)
 		cloned.SupportsMultimodalFunctionResponses = cloneBoolPointer(typed.SupportsMultimodalFunctionResponses)
 		return &cloned
 	case *AnthropicMessagesCompat:
