@@ -1,5 +1,11 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Diagnose empty HTML Chat responses without rejecting valid SSE
+
+- Upstream Pi #9790 reproduced against master 4115596 with localhost HTTP 200 text/html: only missing_finish_reason was surfaced (RED 0.028s). In the existing Chat missing-terminal failure path only, recognize a valid explicit text/html media type when that HTTP attempt delivered no SSE data events. Report typed parse/unexpected_content_type with status and fixed media type, never page content. No shared transport behavior change, URL rewriting or retry added.
+- Preserve valid SSE even when mislabelled text/html, partial/usage/DONE-only missing-terminal behavior, missing/malformed media headers and non-2xx handling. Reset observation per HTTP response; do not widen ProviderHTTPStatusOf's non-2xx-only contract for HTTP 200.
+- Final runtime full pkg/pigo race passed 45.227s; targeted race x3 passed 1.273s. Independent final target race x3 passed 1.161s and static review had no blocker. Localhost tests include 503-to-200 final-attempt isolation, exact request/OnResponse counts, preserved partial text/usage, and no private page echo. pkg/pigo vet passed. No live model, paid request, CI dispatch, merge or deployment; not a global Content-Type enforcement change.
+
 ## 2026-11-14 - Reject explicit tool-index identity collisions
 
 - Reproduced upstream Pi #11881/#11908 on master 755e003: distinct named call IDs at one Chat Completions stream index silently yielded a successful toolUse with concatenated arguments and an overwritten ID. Reject that explicit conflict as response_parse_error/tool_call_index_collision before mutating the existing call; do not guess a split or retry.

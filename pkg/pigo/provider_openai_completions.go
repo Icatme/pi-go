@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"net/url"
 	"sort"
@@ -327,16 +328,23 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 			MaxRetries:    maxInt(0, options.MaxRetries),
 			MaxRetryDelay: time.Duration(options.MaxRetryDelay) * time.Millisecond,
 		}
+		var responseIsHTML, sawStreamEvent bool
+		var responseStatus int
 		err = client.postStream(requestContext, resolveOpenAICompletionsURL(model.BaseURL), httpStreamRequest{
 			Headers: headers,
 			Body:    bodyBytes,
 			OnEvent: func(_ string, data string) (bool, error) {
+				sawStreamEvent = true
 				if err := observeProviderStreamEvent(data, model, options); err != nil {
 					return false, err
 				}
 				return processOpenAICompletionsStreamEvent(data, model, &response, stream, state)
 			},
 			OnResponse: func(httpResponse *http.Response) {
+				mediaType, _, mediaErr := mime.ParseMediaType(httpResponse.Header.Get("Content-Type"))
+				responseIsHTML = mediaErr == nil && mediaType == "text/html"
+				responseStatus = httpResponse.StatusCode
+				sawStreamEvent = false
 				if options.OnResponse != nil {
 					options.OnResponse(ProviderResponse{
 						Status:  httpResponse.StatusCode,
@@ -361,6 +369,9 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 		})
 		if err == nil && !state.FinishSeen {
 			err = withProviderFailure(errOpenAICompletionsStreamMissingTerminal, ProviderFailureStream, "missing_terminal")
+			if responseIsHTML && !sawStreamEvent {
+				err = withProviderFailure(fmt.Errorf("openai completions upstream returned HTTP %d with text/html instead of SSE events", responseStatus), ProviderFailureParse, "unexpected_content_type")
+			}
 		}
 		if err == nil && (response.StopReason == StopReasonStop || response.StopReason == StopReasonToolUse || response.StopReason == StopReasonLength) {
 			err = validateOpenAICompletionsToolBatch(&response, state)
