@@ -454,7 +454,10 @@ func streamMistralSSE(model Model, ctx context.Context, client *http.Client, opt
 		options.OnResponse(ProviderResponse{Status: httpResponse.StatusCode, Headers: cloneMistralHTTPHeaders(httpResponse.Header)}, model)
 	}
 	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
-		body, _ := io.ReadAll(httpResponse.Body)
+		body, readErr := io.ReadAll(httpResponse.Body)
+		if readErr != nil {
+			return fmt.Errorf("mistral upstream returned status %d: read error body: %w", httpResponse.StatusCode, readErr)
+		}
 		return fmt.Errorf("mistral upstream returned status %d: %s", httpResponse.StatusCode, parseMistralErrorMessage(body))
 	}
 

@@ -3967,3 +3967,7 @@
   checks protecting publication. Original workspace README edits remain intact.
   No full-repository runtime/race repeat, examples repeat, UI acceptance, live
   provider request, main-branch merge, release or deployment was performed here.
+
+## 2026-11-14: post-merge Pi issue follow-up
+
+Synced master `9a8e190` after #223; original #200–222 remain superseded. Rechecking Mistral #12148 found no Go strict-tool emission, but independently reproduced dropped cancellation/timeout errors while reading non-2xx bodies. Preserve the original read-error chain with a minimal adapter fix and targeted cancel/timeout × 200/503 regressions. MCP #11763 does not map to current go-sdk cancellation propagation (SDK cancellation race regression passed three times); Code Mode #11122 has no matching TS renderer. See `docs/pi-issue-followup-20261114.md` for scope and unresolved image-count budgeting. No live models, paid execution, merge, release or deployment.
