@@ -4417,3 +4417,21 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Windows Go 1.26.4: targeted combined race tests passed (1.205s), final pkg/pigo
   race passed (39.048s), vet and diff checks passed. Earlier agent/MCP/CLI results
   still cover unchanged code. No live service, CI dispatch, release or deployment.
+
+## 2026-11-14 — Honor explicit Anthropic long-cache capability (#1377)
+
+- Confirmed two builder-wire failures: an explicitly enabled proxy never received TTL 1h, while explicitly disabled direct Anthropic still received it. The existing AnthropicMessagesCompat.SupportsLongCacheRetention field was not read by request construction. The official [prompt caching guide](https://platform.claude.com/docs/en/build-with-claude/prompt-caching#1-hour-cache-duration) documents extended TTL and its extra cost; upstream issue/comments note non-Anthropic gateways may not support it.
+- Consult this existing flag only when CacheRetentionLong was explicitly requested. True selects TTL 1h; false retains ephemeral caching without extended TTL. Nil keeps the existing endpoint-based behavior. Short/none requests and unrelated compat types are unchanged; no provider-name capability inference or hostname-policy rewrite. This is shared Anthropic-wire handling including Kimi only when the host explicitly supplies this compat type. Clone the newly active bool pointer to preserve model-copy isolation.
+- True does not enable long caching by itself. Hosts must request CacheRetentionLong and verify endpoint support and pricing. No live model calls or cache charges were incurred. Builder serialization tests cover three provider identities, direct/proxy endpoints, long/short/none, nil compat/nil flag/true/false/wrong compat, plus clone isolation. Baseline two-case RED0.053s; target race x3 passed1.093s; final full pkg/pigo race passed38.729s and vet passed. Independent review result follows in the publication record. No deployment, merge, manual CI or release.
+- Publication rebased onto fixed current master48959d0 after another party merged earlier PRs. Runtime patch is identical to original8854ddd (independent stable patch-id check), existing Google/Responses compat fields preserved; only worklog append conflict resolved by retaining both entries. Fresh full pkg/pigo race passed41.275s and vet passed; independent current-tree target race x3 passed1.122s. No claim this includes subsequent unobserved master changes.
+
+## 2026-11-14 - Final review cutoff at PR #262
+
+- Another session opened #262 during delivery. Included it as the final PR in
+  this review batch; subsequent new PRs are outside this batch's cutoff.
+- Reviewed the existing Anthropic long-cache capability override and pointer
+  clone against current master, retaining Google/Responses compatibility changes
+  and both new stop-diagnostic/tool-choice fixes. No blocker was found.
+- Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
+  (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
+  full-suite repeat or live cache-billing/provider request was performed.

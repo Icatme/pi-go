@@ -69,8 +69,10 @@ func (c *OpenAIResponsesCompat) compatAPI() string { return "openai-responses" }
 type AnthropicMessagesCompat struct {
 	SupportsEagerToolInputStreaming *bool
 	ForceAdaptiveThinking           *bool
-	SupportsLongCacheRetention      *bool
-	AllowEmptySignature             *bool
+	// SupportsLongCacheRetention overrides the long-cache TTL capability only
+	// when CacheRetentionLong is requested. Nil preserves endpoint defaults.
+	SupportsLongCacheRetention *bool
+	AllowEmptySignature        *bool
 }
 
 func (c *AnthropicMessagesCompat) compatAPI() string { return "anthropic-messages" }
