@@ -1289,6 +1289,31 @@ func cloneOpenAICompletionsHTTPHeaders(headers http.Header) map[string]string {
 }
 
 func resolveOpenAICompletionsURL(baseURL string) string {
+	base := strings.TrimSpace(baseURL)
+	if !strings.ContainsAny(base, "?#") {
+		return resolveLegacyOpenAICompletionsURL(baseURL)
+	}
+	if parsed, err := url.Parse(base); err == nil && parsed.Opaque == "" {
+		path := strings.TrimRight(parsed.EscapedPath(), "/")
+		if !strings.HasSuffix(path, "/chat/completions") {
+			if path == "" {
+				path = "/v1"
+			}
+			path += "/chat/completions"
+		}
+		decoded, err := url.PathUnescape(path)
+		if err != nil {
+			return resolveLegacyOpenAICompletionsURL(baseURL)
+		}
+		parsed.Path = decoded
+		parsed.RawPath = path
+		return parsed.String()
+	}
+	// Keep malformed/opaque URL handling unchanged; the request layer validates it.
+	return resolveLegacyOpenAICompletionsURL(baseURL)
+}
+
+func resolveLegacyOpenAICompletionsURL(baseURL string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if trimmed == "" {
 		trimmed = "https://api.openai.com/v1"

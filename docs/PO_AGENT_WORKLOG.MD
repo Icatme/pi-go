@@ -4435,3 +4435,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Preserve Chat URL query and fragment components (pi #2528)
+
+- Actual localhost HTTP regression reproduced deployment base and complete endpoint queries receiving the appended endpoint inside their query, including loss of a trailing query slash (RED 0.025s).
+- Only URLs containing query/fragment enter component-based path suffix resolution. Preserve escaped path bytes, duplicate/query ordering, ForceQuery and fragments without path cleaning or host/auth changes. All URLs without query/fragment use the unchanged legacy resolver; malformed/opaque URLs retain its old fallback.
+- No automatic Azure detection, API version/header inference, Responses translation or fragment workaround. Other provider resolvers are separate and unmodified. This is not full Azure support or a live Azure test.
+- Final target race x3 passed 1.083s; independent final target race x3 passed 1.083s with no review blocker. Full pkg/pigo race passed 42.810s and vet exited 0. Tests cover real HTTP query preservation and default/legacy/encoded path/fragment/malformed/opaque controls. No real provider call, CI dispatch, merge or deployment.
