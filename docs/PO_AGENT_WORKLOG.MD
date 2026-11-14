@@ -4023,3 +4023,20 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Publication uses an expected-head update of master, an annotated v0.23.1 tag
   and a GitHub Release with no uploaded assets. Exact tree and tag-target checks
   protect API publication while Git HTTPS is unavailable.
+
+## 2026-11-14: Preserve cancellation during Responses authorization
+
+- Upstream pi #9883 identifies canceled provider setup being reported as an
+  ordinary failure. An offline registered-provider fixture confirmed the Go
+  Responses authorization error path returned `error` for a wrapped canceled
+  context, unlike the existing Chat, Codex and Anthropic adapters.
+- Route that one error path through the existing `applyRequestError` helper.
+  Cancellation and deadline errors remain aborted; ordinary errors remain
+  errors and typed provider-failure metadata is retained. Requested model,
+  provider and API are unchanged. No retry policy or authorization flow changes.
+- Targeted cancellation/deadline/ordinary/typed-error regressions verify one
+  authorization attempt, no provider HTTP requests, one terminal error event
+  with matching classification, and retained diagnostic text. Target race x3
+  passed (1.250s); independent final target race x3 passed (1.243s).
+- Final full pkg/pigo race suite passed (39.694s), followed by go vet.
+  No real OAuth credentials, live provider calls, CI or deployment were used.

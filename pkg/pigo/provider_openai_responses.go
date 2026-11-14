@@ -77,8 +77,7 @@ func streamOpenAIResponses(model Model, ctx Context, options ProviderStreamOptio
 		if apiKey == "" {
 			resolved, err := ResolveAuthorization(model.Provider, options.Auth, options.HTTPClient, requestContext)
 			if err != nil {
-				response.StopReason = StopReasonError
-				response.ErrorMessage = err.Error()
+				applyRequestError(&response, err)
 				stream.push(AssistantMessageEvent{Type: AssistantMessageEventError, Reason: response.StopReason, Error: response})
 				stream.finish(response)
 				return
