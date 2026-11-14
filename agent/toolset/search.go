@@ -68,7 +68,7 @@ func (t *Toolset) searchTool() agent.ToolDefinition {
 			for _, value := range values {
 				name := value.binding.ExportedName()
 				if active[name] {
-					declared = append(declared, codemode.ToolSummary{Name: name, Namespace: value.binding.Namespace, Description: safeText(value.binding.Tool.Description, 192)})
+					declared = append(declared, codemode.ToolSummary{Name: name, Namespace: value.binding.Namespace, Description: value.binding.Tool.Description})
 				}
 				if value.exposure == managed.Direct || active[name] {
 					continue
@@ -108,6 +108,9 @@ func (t *Toolset) searchTool() agent.ToolDefinition {
 					return agent.ToolResult{}, searchArgumentsError()
 				}
 				if len(available) > 0 {
+					for i := range available {
+						available[i].Description = safeText(available[i].Description, 192)
+					}
 					body, err := json.Marshal(available)
 					if err != nil || len(body) > 32<<10 {
 						return agent.ToolResult{}, &agent.ToolExecutionError{Code: agent.ToolFailureResource, Message: "Tool search output exceeds its bounded result limit"}

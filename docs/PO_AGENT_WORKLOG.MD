@@ -3784,3 +3784,13 @@
 
 - Audited pi #11921 body/comments. Reproduced direct-tool search incorrectly saying no allowed tools matched. When no inactive tools match, report matching tools already present in the current model context without reloading them or spending selection records. Inactive matches retain priority; hidden tools and direct tools absent from current context are not hinted.
 - Red/green direct lookup, repeated loaded lookup, selection-budget preservation, no dispatch and final permission/directory retirement regressions pass. Full agent/toolset race 8.300s and vet pass Go 1.26.5. No real MCP service or model was used; no merge/deployment.
+
+## 2026-11-14 - Review PR #207 declared-tool search
+
+- Reproduced an already-declared tool becoming unfindable when its query term
+  appears after the 192-character output-description limit. The new active-tool
+  path truncated before BM25 matching, unlike the inactive-tool path.
+- Search the full authorized description, then bound only matched output.
+  Regression verifies the suffix match, bounded hint, no selection and no dispatch.
+- Windows Go 1.26.4 focused regressions, full agent/toolset race tests and vet,
+  and diff checks passed with GOWORK=off. Only offline/local fixtures were used.
