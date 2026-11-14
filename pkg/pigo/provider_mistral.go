@@ -493,7 +493,9 @@ func processMistralChatStreamEvent(data string, model Model, response *Assistant
 		response.ResponseID = chunk.ID
 	}
 	if chunk.Usage != nil {
-		applyMistralUsage(response, model, *chunk.Usage)
+		if err := applyMistralUsage(response, model, *chunk.Usage); err != nil {
+			return false, err
+		}
 	}
 
 	if len(chunk.Choices) == 0 {
@@ -623,7 +625,10 @@ func finalizeMistralChatResponse(model Model, response *AssistantMessage, stream
 	stream.finish(*response)
 }
 
-func applyMistralUsage(response *AssistantMessage, model Model, usage mistralChatUsage) {
+func applyMistralUsage(response *AssistantMessage, model Model, usage mistralChatUsage) error {
+	if usage.PromptTokens < 0 || usage.CompletionTokens < 0 || usage.TotalTokens < 0 || usage.PromptTokens > int(^uint(0)>>1)-usage.CompletionTokens {
+		return withProviderFailure(fmt.Errorf("invalid Mistral token usage"), ProviderFailureParse, "invalid_usage")
+	}
 	response.Usage = Usage{
 		Input:       usage.PromptTokens,
 		Output:      usage.CompletionTokens,
@@ -633,6 +638,7 @@ func applyMistralUsage(response *AssistantMessage, model Model, usage mistralCha
 	}
 	response.UsageReported = true
 	response.Usage.Cost = CalculateCost(model, response.Usage)
+	return nil
 }
 
 func mapMistralFinishReason(reason string, content []ContentBlock) StopReason {

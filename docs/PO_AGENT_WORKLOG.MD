@@ -4435,3 +4435,9 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Dedicated Mistral usage validation
+
+- Reject negative prompt/completion/total token counts and unrepresentable prompt+completion sums before mutating Usage or calculating cost; return typed parse/invalid_usage. Preserve the earlier valid snapshot and partial text on a later invalid chunk. Do not repair reported total, infer cache/audio formulas, or change valid rates/usage semantics.
+- Official Mistral Python UsageInfo (blob e8978e8522246ca127853f907968f290635783a3) defines the three integer fields with zero defaults: https://github.com/mistralai/client-python/blob/main/src/mistralai/client/models/usageinfo.py . Localhost baseline regression failed in 0.009s: output -4 and total -1 replaced valid usage and finished successfully. This is synthetic corrupt accounting, not a measured production billing incident.
+- Final target race x3 passed 1.129s; independent review/target race x3 passed 1.256s with no blockers. Full pkg/pigo race passed 46.695s and vet passed. Runtime applies cleanly atop independent Mistral EOF fix #280; that application check alone is not full combined acceptance. No live calls, fees, CI dispatch, merge, or deployment.
