@@ -4237,3 +4237,28 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
   passed (1.250s); independent final target race x3 passed (1.243s).
 - Final full pkg/pigo race suite passed (39.694s), followed by go vet.
   No real OAuth credentials, live provider calls, CI or deployment were used.
+
+## 2026-11-14: Responses provider-reported model diagnostics
+
+- Root-directed follow-up to upstream pi #2021 and the Anthropic diagnostic
+  omission: ordinary Responses and Codex shared parsing discarded the response
+  envelope's model field. Local SSE regressions reproduced missing diagnostics
+  for created and terminal envelopes. No silent-downgrade allegation or actual
+  execution identity has been established by these offline fixtures.
+- Capture nonempty provider-reported identifiers different from the requested
+  model in the existing ResponseModel field. Handle response.created and the
+  completed/done/incomplete/failed terminal paths. Empty, missing or same-model
+  echoes preserve an earlier differing diagnostic, matching existing Chat and
+  Anthropic conventions; without one the diagnostic remains empty.
+- Do not change requested Model/Provider/API, request routing, signature replay
+  identity, model catalog or cost calculation. This metadata is diagnostic only.
+  Earlier emitted partial snapshots retain the value observed at their event.
+- Real localhost SSE fixtures exercise ordinary Responses and Codex, created
+  plus completed/incomplete/failed envelopes, same/different/missing/explicitly
+  empty fields, terminal-only reporting and retained prior diagnostics. They
+  verify partial snapshots, request model, usage and nonzero requested-model
+  pricing. No real model, account or deployment was accessed.
+- Final runtime full pkg/pigo race suite passed (39.599s) and go vet passed.
+  Independent static review and targeted race tests repeated three times passed
+  (1.409s). Final test-only request/pricing assertions and response.done alias
+  coverage passed targeted race tests three times (1.496s).
