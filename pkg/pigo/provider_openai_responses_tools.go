@@ -61,6 +61,9 @@ func resolveOpenAIResponsesToolPlan(custom map[string]string, model Model, trans
 			break
 		}
 	}
+	if compat, ok := model.Compat.(*OpenAIResponsesCompat); ok && compat != nil && compat.SupportsAdditionalTools != nil && !*compat.SupportsAdditionalTools {
+		return plan
+	}
 	// Folding mid-conversation system messages changes the wire representation,
 	// not whether inherited server state may contain an obsolete tool set.
 	if !supportsTranscriptSystemMessages(model) {

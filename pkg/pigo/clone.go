@@ -66,6 +66,7 @@ func cloneCompat(compat ProviderCompat) ProviderCompat {
 		return &cloned
 	case *OpenAIResponsesCompat:
 		cloned := *typed
+		cloned.SupportsAdditionalTools = cloneBoolPointer(typed.SupportsAdditionalTools)
 		cloned.SupportsDeveloperRole = cloneBoolPointer(typed.SupportsDeveloperRole)
 		cloned.SupportsMidConvoSystemMessages = cloneBoolPointer(typed.SupportsMidConvoSystemMessages)
 		cloned.SendSessionIdHeader = cloneBoolPointer(typed.SendSessionIdHeader)

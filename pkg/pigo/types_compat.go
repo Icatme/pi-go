@@ -50,6 +50,10 @@ type OpenAICompletionsCompat struct {
 func (c *OpenAICompletionsCompat) compatAPI() string { return "openai-completions" }
 
 type OpenAIResponsesCompat struct {
+	// SupportsAdditionalTools=false sends the complete current tool set at the
+	// top level instead of native additional_tools items. Nil preserves defaults;
+	// true does not grant capabilities absent from the model registry.
+	SupportsAdditionalTools         *bool
 	SupportsDeveloperRole           *bool
 	SupportsMidConvoSystemMessages  *bool
 	SendSessionIdHeader             *bool
