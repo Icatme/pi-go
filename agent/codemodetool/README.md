@@ -123,3 +123,5 @@ Application executors use `execution.Args`, `execution.ToolCall`, and
 should use `execution.CheckPermission` immediately before sending requests.
 
 See [the runnable local example](../../examples/mcp-codemode/README.md).
+
+Optional per-query `descriptionBudget: {maxPerMatchBytes, maxTotalBytes}` returns marked UTF-8 description prefixes without changing ranking, names or permissions. Zero ceilings omit nonempty descriptions; absent preserves full text. Before using truncated guidance, read the complete contract with `describeTool(name)`. This is not a total JSON/token budget. See [budget contract](../../docs/search-description-budget.md).
