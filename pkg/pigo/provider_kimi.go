@@ -722,6 +722,18 @@ func processAnthropicStreamEvent(
 			applyAnthropicUsage(response, model, usage)
 		}
 	case "message_stop":
+		if emitTerminal && len(hostedTools) == 0 && response.StopReason == StopReasonToolUse {
+			hasToolCall := false
+			for _, block := range response.Content {
+				if _, ok := block.(ToolCall); ok {
+					hasToolCall = true
+					break
+				}
+			}
+			if !hasToolCall {
+				return false, withProviderFailure(errors.New("Anthropic returned tool_use without a tool call"), ProviderFailureParse, "missing_tool_call")
+			}
+		}
 		response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
 		if emitTerminal {
 			pushAssistantMessageEvent(stream, AssistantMessageEvent{
