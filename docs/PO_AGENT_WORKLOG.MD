@@ -1,5 +1,12 @@
 # PO Agent Worklog
 
+## 2026-11-14 - MCP SSE CR-only line endings
+
+- Reproduced upstream pi #11764 against 755e003: LF/CRLF RPC observation passed while CR-only lost the response. Both the observer and pinned Go MCP SDK consumed LF-only framing.
+- HTTP SSE now recognizes CR immediately and emits CRLF for the pinned SDK, swallowing a following LF across chunks. Existing LF/CRLF framing and JSON payload bytes are preserved; stdio is unchanged. Frame limits conservatively count normalized bytes, including the added LF for CR-only lines. This is delimiter normalization, not a byte-for-byte SSE framing promise. EOF handling retains existing observer/SDK semantics; no new incomplete-event dispatch behavior is introduced.
+- Added one-byte fragmented/mixed endings, comments/empty lines, trailing CR/EOF, escaped JSON byte preservation, normalized whole-event limits, open-stream prompt delivery, close-unblocking and actual SDK tool-call tests. A bounded microbenchmark records linear buffered line reading, not production performance claims.
+- Go 1.26.10: targeted race tests repeated three times passed; final full `go test -race ./mcp -count=1` passed (8.641s) and `go vet ./mcp` passed. Independent final full MCP race (7.248s) and vet also passed. Offline local fixtures only; no external server, live OAuth/model, production deployment or CI dispatch.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.

@@ -142,6 +142,13 @@ bytes remain associated with the exact SDK result object, including cache hits.
 No typed serialization is accepted as replacement raw data. Missing, evicted,
 invalidated or oversized observations fail explicitly.
 
+HTTP SSE accepts LF, CRLF and CR-only line endings. To support the pinned SDK,
+the observer normalizes CR-only delimiters to CRLF immediately, without waiting
+for another byte or EOF; existing LF/CRLF framing is preserved. JSON payload
+bytes are not reserialized. SSE frame limits count the normalized framing, so
+CR-only streams are charged conservatively for the added LF bytes. This is not
+a byte-for-byte preservation promise for SSE delimiters; stdio is unchanged.
+
 `Refresh` always walks the SDK's list API, honoring both notification invalidation
 and cache TTL. Catalog snapshots carry identity, epoch, connection generation,
 revision and a digest of the real wire pages. Incoming notifications invalidate
