@@ -1,5 +1,11 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Reject completed Chat tool batches with missing identity
+
+- Audited upstream Pi #5921 and reproduced Chat returning a successful tool-use response with blank tool name/ID. At successful stop/tool-use finalization only, reject blank identity with a typed malformed_tool_call parse error and remove the entire executable tool batch from the final response using a fresh content slice. Preserve text, reasoning metadata and usage; finalize indexed reasoning before filtering. Earlier streamed partial evidence is not authorization to execute tools. No automatic retry or toolcall-end/done for the malformed batch.
+- Late identity deltas and nonempty unknown tool names remain supported; length truncation and unrelated errors retain their existing behavior. This is not a repair of arbitrary custom Model responses, other provider protocols, or already-poisoned saved history.
+- Baseline provider and actual agent regressions reproduced the defect. Fixed localhost provider tests cover blank ID/name, mixed valid/invalid siblings, late identity, unknown names, indexed reasoning and length boundaries. Real PigoStreamModel ordinary/gated tests verify no tool execution, no tool results, no second automatic HTTP request; direct Continue retains its existing assistant-tail rejection, while an explicit new prompt resumes without orphan tool traffic. Independent static review corrected two initial boundary issues before final validation. Final provider targeted race passed three times (1.511s); full pkg/pigo race (40.453s), agent race (8.051s), and vet of both packages passed. The final test-only Continue assertion strengthening passed independent targeted race three times (1.076s). No live model calls or deployment.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.
