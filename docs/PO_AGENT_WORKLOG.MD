@@ -3967,3 +3967,9 @@
   checks protecting publication. Original workspace README edits remain intact.
   No full-repository runtime/race repeat, examples repeat, UI acceptance, live
   provider request, main-branch merge, release or deployment was performed here.
+
+## 2026-11-14 — Optional image budget after #223
+
+- Baseline master 9a8e190; rechecked open #224–226 to avoid overlap. Pi issue #10162 reports long-running screenshot history exceeding one gateway's limit. Offline baseline diagnostic confirmed TransformMessages keeps 31 images; this is not a universal 30-image rule.
+- Added opt-in pigo.ApplyImageBudget with host MaxImages and explicit PruneBefore boundary. Defaults unchanged; preserves all user/assistant images and protected suffix, omits only oldest eligible tool images with markers, retains tool associations and metadata. Protected overflow fails atomically. Canonical representation checks prevent undercounting; copy-on-write avoids modifying history. Host integration is deliberately not automatic.
+- Independent review found pointer/nil/clone pitfalls in the initial draft; corrected with explicit enabled-policy validation and copy-on-write. Final read-only review found no blocker. Full pkg/pigo race passed 34.058s and vet passed; final added COW assertion and all image-budget tests passed three times with race (1.050s), final vet passed. Go 1.26.11, offline only. No full-root test, real provider, automatic CI, merge, release or deployment. See optional-image-budget.md for integration limits.
