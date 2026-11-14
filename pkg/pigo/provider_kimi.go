@@ -435,7 +435,10 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 			failure = withProviderFailure(errors.Join(errors.New(failed.ErrorMessage), readErr), ProviderFailureStream, "body_read")
 			failed.ErrorMessage = failure.Error()
 		}
-		recordProviderFailure(&failed, failure)
+		applyRequestError(&failed, failure)
+		if request.Context().Err() != nil {
+			return failed, failure
+		}
 		return failed, nil
 	}
 
