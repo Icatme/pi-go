@@ -74,6 +74,10 @@ func cloneCompat(compat ProviderCompat) ProviderCompat {
 		cloned.SupportsExplicitPromptCacheMode = cloneBoolPointer(typed.SupportsExplicitPromptCacheMode)
 		cloned.SupportsMaxOutputTokens = cloneBoolPointer(typed.SupportsMaxOutputTokens)
 		return &cloned
+	case *GoogleGenerativeAICompat:
+		cloned := *typed
+		cloned.SupportsMultimodalFunctionResponses = cloneBoolPointer(typed.SupportsMultimodalFunctionResponses)
+		return &cloned
 	case *AnthropicMessagesCompat:
 		cloned := *typed
 		cloned.ForceAdaptiveThinking = cloneBoolPointer(typed.ForceAdaptiveThinking)

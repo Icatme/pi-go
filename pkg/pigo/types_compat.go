@@ -74,3 +74,13 @@ type AnthropicMessagesCompat struct {
 }
 
 func (c *AnthropicMessagesCompat) compatAPI() string { return "anthropic-messages" }
+
+// GoogleGenerativeAICompat controls explicitly verified gateway/model features.
+type GoogleGenerativeAICompat struct {
+	// SupportsMultimodalFunctionResponses enables image parts nested inside their
+	// functionResponse. Set true only for a model/endpoint supporting this protocol.
+	// Nil and false preserve the legacy sibling-image wire format.
+	SupportsMultimodalFunctionResponses *bool
+}
+
+func (c *GoogleGenerativeAICompat) compatAPI() string { return "google-generative-ai" }

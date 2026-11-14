@@ -94,10 +94,16 @@ func (call *googleFunctionCall) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// FunctionResponsePart only permits media, not arbitrary conversational parts.
+type googleFunctionResponsePart struct {
+	InlineData *googleInlineData `json:"inlineData,omitempty"`
+}
+
 type googleFunctionResponse struct {
-	ID       string         `json:"id,omitempty"`
-	Name     string         `json:"name"`
-	Response map[string]any `json:"response"`
+	Parts    []googleFunctionResponsePart `json:"parts,omitempty"`
+	ID       string                       `json:"id,omitempty"`
+	Name     string                       `json:"name"`
+	Response map[string]any               `json:"response"`
 }
 
 type googleGenerationConfig struct {
@@ -446,7 +452,14 @@ func convertGoogleToolResultContent(model Model, message ToolResultMessage) []go
 		},
 	}}
 	if len(imageParts) > 0 {
-		parts = append(parts, imageParts...)
+		compat, _ := model.Compat.(*GoogleGenerativeAICompat)
+		if compat != nil && compat.SupportsMultimodalFunctionResponses != nil && *compat.SupportsMultimodalFunctionResponses {
+			for _, image := range imageParts {
+				parts[0].FunctionResponse.Parts = append(parts[0].FunctionResponse.Parts, googleFunctionResponsePart{InlineData: image.InlineData})
+			}
+		} else {
+			parts = append(parts, imageParts...)
+		}
 	}
 	return parts
 }
