@@ -1,5 +1,11 @@
 # PO Agent Worklog
 
+## 2026-11-14 — Responses foreign tool-call replay IDs
+
+- Reproduced [pi #10106](https://github.com/earendil-works/pi/issues/10106) on base755e003: two completed foreign calls with the same ID produce duplicate function-call/output IDs in final Responses JSON. The ordinary Responses builder now deterministically renames later complete foreign pairs, reserving all original call/result IDs and preserving output association and original history.
+- Scope is intentionally narrow: no native/mixed Responses collision repair, no Codex builder change, no deduplication. Same-round ambiguity or missing/duplicate/mismatched results returns a builder error; repair-needed histories with previous_response_id are rejected rather than guessing server-side references. See docs/responses-foreign-tool-ids.md.
+- Baseline regression failed, fixed regression passed. Final runtime full pkg/pigo race passed44.884s and vet passed; independent targeted race x3 passed1.214s. Extra parallel out-of-order result test was added after full run and separately exercised in final targeted race x3 (1.313s). Offline serialization/localhost only; no real model calls or service acceptance claim.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.
