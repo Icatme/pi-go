@@ -23,6 +23,35 @@ var (
 	openAICodexWebSocketSessionCache = map[openAICodexWebSocketCacheKey]*cachedOpenAICodexWebSocketConnection{}
 )
 
+func init() {
+	RegisterSessionResourceCleanup(cleanupOpenAICodexSessionWebSockets)
+}
+
+// The host explicitly ends a provider session; other sessions remain reusable.
+// Empty IDs never select the whole cache. The host must quiesce new requests
+// for this session first; cleanup does not prohibit a later session reopen.
+func cleanupOpenAICodexSessionWebSockets(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	var connections []*websocket.Conn
+	openAICodexWebSocketCacheMu.Lock()
+	for key, entry := range openAICodexWebSocketSessionCache {
+		if key.sessionID != sessionID {
+			continue
+		}
+		delete(openAICodexWebSocketSessionCache, key)
+		stopOpenAICodexWebSocketTimerLocked(entry)
+		entry.closed = true
+		// Leave conn stable for an acquired caller; its release owns detachment.
+		connections = append(connections, entry.conn)
+	}
+	openAICodexWebSocketCacheMu.Unlock()
+	for _, conn := range connections {
+		closeDetachedOpenAICodexWebSocket(conn)
+	}
+}
+
 type openAICodexWebSocketCacheKey struct {
 	endpoint   string
 	accountID  string
