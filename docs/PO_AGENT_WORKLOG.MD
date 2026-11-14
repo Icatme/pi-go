@@ -1,5 +1,11 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Scoped Codex session resource cleanup
+
+- Compared upstream pi #11676 against master 755e003. A local WebSocket fixture reproduced a narrower Go defect: explicit `CleanupSessionResources(sessionID)` returned success while retaining the built-in Codex connection. No SuperAgent/Harness ownership policy is imported.
+- Registered Codex's session-scoped cleanup, removing matching cache entries and timers and closing sockets without clearing unrelated sessions. Empty/unknown IDs are not global cleanup; repeated cleanup is safe and later requests can reopen the session. Hosts must quiesce new requests first.
+- Verified two-session isolation/reuse/reconnect, concurrent cleanup/release without cache resurrection, existing timeout/TTL behavior, and the red baseline. Targeted race x3 passed; full `go test -race ./pkg/pigo` passed in 42.834s, `go vet ./pkg/pigo` and `git diff --check` passed. No live provider, paid calls, deployment or manual CI dispatch.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.

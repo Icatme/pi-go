@@ -147,3 +147,20 @@ GPT-5.4 mini entries are removed; the CLI and examples now default to GPT-5.5.
 The OpenAI API entries and other providers' DeepSeek model identifiers are
 independent and remain available. Astra supports `low` through `max`; Off is
 clamped to a supported level by the built-in agent backend.
+
+## Provider session resource ownership
+
+Codex WebSocket requests with a `SessionID` reuse connections across requests.
+Idle connections expire after five minutes. When the host has stopped new
+requests for a provider session and no longer needs its resources, it may call
+`pigo.CleanupSessionResources(sessionID)` explicitly. The built-in Codex cleanup
+closes cached connections for that exact session ID across its endpoint/account
+cache keys, stops their timers, and leaves other session IDs untouched.
+Repeated cleanup is safe. An empty or unknown ID does not clear the entire Codex
+cache. Cleanup is not a permanent revocation: a later request may reopen the
+same session ID. It does not change durable conversation history.
+
+This is a host-owned lifecycle operation, not automatic `SuperAgent.Close`
+behavior. Do not share one provider session ID between independently owned
+lifecycles if one owner may clean up while another still needs it. Registered
+application cleanup callbacks remain responsible for their own scope and errors.
