@@ -4405,3 +4405,15 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Baseline real-HTTP regression failed in 0.019s. Final-runtime full `pkg/pigo` race passed in 43.924s and vet passed. Final expanded targeted race x3 passed in 1.131s; coverage includes normal/length controls, exact text/usage/identity, one request and one terminal Done event, shared Kimi parsing, and no context-overflow classification for the tested reasons. No live requests, billing, CI, or deployment.
 - Error messages are observable to host classifiers. Arbitrary unknown upstream strings can still match existing text-based classification rules; this patch does not promise otherwise or add automatic retry/compaction. No preservation of every refusal metadata field is claimed.
 - Independent static review found no blocker; independent stop-diagnostic plus overflow target race x3 passed in 1.721s.
+
+## 2026-11-14 - Review newly opened PRs #260-261
+
+- After #228-259 merged, the final open-PR check found two new drafts. Reviewed
+  their actual diffs and interactions against the merged code; no blocking defect
+  or unresolved review thread was found. Integrated both with all worklog entries.
+- #260 omits only synthesized tool_choice for fresh tool-free xAI Responses;
+  explicit choices and inherited/anchored tools remain intact. #261 preserves
+  Anthropic/Kimi error stop-reason diagnostics without changing classification.
+- Windows Go 1.26.4: targeted combined race tests passed (1.205s), final pkg/pigo
+  race passed (39.048s), vet and diff checks passed. Earlier agent/MCP/CLI results
+  still cover unchanged code. No live service, CI dispatch, release or deployment.
