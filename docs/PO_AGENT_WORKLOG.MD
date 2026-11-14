@@ -1,5 +1,10 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Recognize explicit input-token limit overflow
+
+- Upstream Pi #11675's `Input too long: model limit N tokens` wording was not recognized on master 755e003. Added a narrow pattern requiring a numeric model token limit, including comma-formatted counts, without changing token estimation, output clamping or retry/compaction behavior.
+- Baseline plain/comma fixtures fail; positive and negative tests retain error-only classification and rate-limit exclusions. Added the example to existing Chat/Responses HTTP wire regression coverage so classification does not replay requests. Full pkg/pigo race passed (39.874s), vet passed, and independent review checked the scope. No live-provider validation or deployment.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.
