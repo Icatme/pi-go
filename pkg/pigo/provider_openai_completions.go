@@ -900,7 +900,7 @@ func appendOpenAICompletionsReasoningDetails(response *AssistantMessage, stream 
 		return
 	}
 	for _, rawDetail := range details {
-		fields := parseOpenAICompletionsReasoningDetail(rawDetail)
+		fields := parseOpenAICompletionsStreamingReasoningDetail(rawDetail)
 		if fields == nil {
 			continue
 		}
@@ -913,7 +913,7 @@ func appendOpenAICompletionsReasoningDetails(response *AssistantMessage, stream 
 			textField = "summary"
 		}
 		text, _ := requiredOpenAICompletionsStringField(fields, textField)
-		if count := len(state.ReasoningDetails); count > 0 && textField != "" && state.ReasoningDetails[count-1].Kind == kind {
+		if count := len(state.ReasoningDetails); count > 0 && textField != "" && state.ReasoningDetails[count-1].Kind == kind && canMergeOpenAICompletionsReasoningDetail(state.ReasoningDetails[count-1].Fields, fields, kind) {
 			last := state.ReasoningDetails[count-1]
 			last.Text.WriteString(text)
 			for _, name := range []string{"id", "format", "index", "signature"} {
@@ -984,6 +984,51 @@ func parseOpenAICompletionsReasoningDetails(signature string) []json.RawMessage 
 
 func isOpenAICompletionsReasoningDetail(raw json.RawMessage) bool {
 	return parseOpenAICompletionsReasoningDetail(raw) != nil
+}
+
+// Streaming reasoning.text may end with a signature-only delta. Normalize only
+// that incremental shape; persisted/replayed details retain strict validation.
+func parseOpenAICompletionsStreamingReasoningDetail(raw json.RawMessage) map[string]json.RawMessage {
+	if fields := parseOpenAICompletionsReasoningDetail(raw); fields != nil {
+		return fields
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return nil
+	}
+	kind, _ := requiredOpenAICompletionsStringField(fields, "type")
+	signature, ok := requiredOpenAICompletionsStringField(fields, "signature")
+	if kind != "reasoning.text" || !ok || signature == "" {
+		return nil
+	}
+	if text, exists := fields["text"]; exists && strings.TrimSpace(string(text)) != "null" {
+		return nil
+	}
+	fields["text"] = json.RawMessage(`""`)
+	normalized, err := json.Marshal(fields)
+	if err != nil {
+		return nil
+	}
+	return parseOpenAICompletionsReasoningDetail(normalized)
+}
+
+func canMergeOpenAICompletionsReasoningDetail(previous, next map[string]json.RawMessage, kind string) bool {
+	if kind != "reasoning.text" {
+		return true
+	}
+	// A signature closes its text block, even when all chunks use index zero.
+	if signature, _ := requiredOpenAICompletionsStringField(previous, "signature"); signature != "" {
+		return false
+	}
+	// An explicit new identity must never inherit the previous block's text.
+	for _, key := range []string{"id", "format"} {
+		before, _ := requiredOpenAICompletionsStringField(previous, key)
+		after, _ := requiredOpenAICompletionsStringField(next, key)
+		if before != "" && after != "" && before != after {
+			return false
+		}
+	}
+	return true
 }
 
 func parseOpenAICompletionsReasoningDetail(raw json.RawMessage) map[string]json.RawMessage {
