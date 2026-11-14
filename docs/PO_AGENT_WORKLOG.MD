@@ -4172,3 +4172,29 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
   production or paid-model validation was performed.
 - Final test-only tool-ID assertion: continuation targeted race tests repeated
   three times passed (1.152s).
+
+## 2026-11-14: Anthropic provider-reported model diagnostic
+
+- Root-directed relay probe audit: Anthropic message_start.message.model was
+  discarded, so callers could not distinguish a requested alias from the model
+  identifier reported by the upstream. A localhost streamed-response regression
+  failed before this change. The official stream shape is documented at
+  https://platform.claude.com/docs/en/build-with-claude/streaming .
+- Parse the model field and retain a nonempty value different from the requested
+  model in the existing ResponseModel diagnostic, matching the Chat convention.
+  Missing, empty, or same-model values do not overwrite a previously retained
+  diagnostic; with no differing value the diagnostic remains empty, allowing
+  callers to use their existing requested-model fallback without claiming an
+  observed model. Requested Model, Provider and API stay unchanged.
+- This is provider-reported metadata, not proof of the actual executing model.
+  It does not change routing, pricing, signature replay identity, model catalog,
+  fallback behavior, or relay deployment. The shared Anthropic/Kimi parser keeps
+  the same rule; no new provider-level inference is introduced.
+- Real localhost SSE fixtures flush separate events and cover different, same,
+  empty and missing model fields, response ID, partial-event diagnostics, text
+  and usage. A direct shared-parser fixture checks later empty/missing/same
+  echoes do not clear a retained diagnostic or mutate Kimi request identity.
+- Final runtime full pkg/pigo race suite passed (39.994s), followed by go vet.
+  Final test-only identity/text assertions passed targeted race tests three
+  times (1.102s). Independent static review and targeted race tests three times
+  passed (1.112s). No real provider or production validation was performed.
