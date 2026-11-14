@@ -47,6 +47,9 @@ func isDashScopeTokenThrottle(model Model, status int, body []byte) bool {
 }
 
 func shouldRetryCompletionsModelResponse(model Model, status int, body []byte, message string) bool {
+	if isZaiPeriodicQuota(model, status, body) {
+		return false
+	}
 	switch strings.ToLower(string(model.Provider)) {
 	case "dashscope", "bailian", "alibaba":
 		var envelope struct {
