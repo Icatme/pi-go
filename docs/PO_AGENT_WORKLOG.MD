@@ -1,5 +1,12 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Reject missing dedicated Mistral terminal
+
+- Localhost partial-output EOF falsely completed as Stop. Track a nonblank finish_reason and reject EOF/[DONE] without it as stream_interrupted/missing_terminal before finalization. Preserve existing partial and reported usage; never synthesize retry or ToolCallEnd. Existing explicit upstream-error handling and valid finish+EOF remain unchanged. A legitimately empty content response with stop stays valid; empty EOF/usage-only EOF do not.
+- This changes no finish-reason mapping. Official Mistral Python stream-choice enum (blob a6f7409479262e75a357c108400adb3ec25b02e7) lists stop/length/error/tool_calls with unknown strings allowed. The content_filter test merely locks prior unknown-string compatibility, not a claim of an official Mistral safety outcome. model_length remains a pre-existing alias. No Google policy changes or numeric-usage changes included.
+- Localhost RED0.013s; first copied fixture erroneously expected unknown content_filter to map Error and was corrected without runtime expansion. Corrected target1.587s; final independent targets including pure-empty/usage-only and unknown controls race x3 1.695s/static no blockers. Final full pkg/pigo race42.528s and vet passed. Unclosed tool args retain existing partial decoding only, not a new full raw-history preservation contract.
+- Official https://docs.mistral.ai/api/endpoint/chat . No paid/live calls, automatic retry, merge, release, or manual CI dispatch.
+
 ## 2026-11-14 - Reject explicit tool-index identity collisions
 
 - Reproduced upstream Pi #11881/#11908 on master 755e003: distinct named call IDs at one Chat Completions stream index silently yielded a successful toolUse with concatenated arguments and an overwritten ID. Reject that explicit conflict as response_parse_error/tool_call_index_collision before mutating the existing call; do not guess a split or retry.

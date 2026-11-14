@@ -105,6 +105,7 @@ type mistralToolCallState struct {
 }
 
 type mistralStreamState struct {
+	FinishSeen      bool
 	TextIndex       int
 	TextStarted     bool
 	Text            strings.Builder
@@ -471,6 +472,9 @@ func streamMistralSSE(model Model, ctx context.Context, client *http.Client, opt
 	}); err != nil {
 		return err
 	}
+	if !state.FinishSeen && response.StopReason != StopReasonError {
+		return withProviderFailure(fmt.Errorf("Mistral stream ended without finish_reason"), ProviderFailureStream, "missing_terminal")
+	}
 	finalizeMistralChatResponse(model, response, stream, state)
 	return nil
 }
@@ -502,6 +506,9 @@ func processMistralChatStreamEvent(data string, model Model, response *Assistant
 
 	choice := chunk.Choices[0]
 	if choice.FinishReason != nil {
+		if strings.TrimSpace(*choice.FinishReason) != "" {
+			state.FinishSeen = true
+		}
 		response.StopReason = mapMistralFinishReason(*choice.FinishReason, response.Content)
 	}
 
