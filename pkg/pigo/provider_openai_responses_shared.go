@@ -125,6 +125,7 @@ type openAIResponsesResponseError struct {
 // ============================================================================
 
 type openAIResponsesStreamingState struct {
+	AllowNestedError       bool // Only WebSocket error envelopes use nested protocol fields.
 	CurrentTextIndex       int
 	CurrentThinkingIndex   int
 	CurrentTextItemKey     string
@@ -728,15 +729,23 @@ func processOpenAIResponsesStreamEventWithProvider(
 		}
 		return true, withProviderFailure(errors.New(response.ErrorMessage), ProviderFailureUpstream, "error_event")
 	case "error":
-		if message, ok := event["message"].(string); ok && strings.TrimSpace(message) != "" {
-			response.ErrorMessage = message
-		} else {
-			response.ErrorMessage = "error"
-		}
-		response.StopReason = StopReasonError
+		message, _ := event["message"].(string)
 		code, _ := event["code"].(string)
-		// The event's type is "error", not the provider's error category.
-		return true, withProviderErrorDetails(errors.New(response.ErrorMessage), code, "")
+		errorType := ""
+		if strings.TrimSpace(message) == "" && state.AllowNestedError {
+			if nested, ok := event["error"].(map[string]any); ok {
+				message, _ = nested["message"].(string)
+				code, _ = nested["code"].(string)
+				errorType, _ = nested["type"].(string)
+			}
+		}
+		if strings.TrimSpace(message) == "" {
+			message = "error"
+		}
+		response.ErrorMessage = message
+		response.StopReason = StopReasonError
+		// The envelope's type is "error", not the provider's error category.
+		return true, withProviderErrorDetails(errors.New(message), code, errorType)
 	}
 
 	return false, nil

@@ -4435,3 +4435,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Codex WebSocket nested error diagnostics
+
+- While following upstream #10205 (reset timing not established), reproduced the more basic documented WS error envelope losing its nested message/code/type and returning only "error". Actual local WS RED0.010s, one request. Official examples: https://developers.openai.com/api/docs/guides/websocket-mode . No guessed reset time is added.
+- Enable nested-field extraction only in Codex WebSocket state. Preserve existing nonblank top-level message/code as a group; otherwise use nested string message/code/type as a group. Do not mix provider error type with envelope type, copy raw/status/headers, manufacture HTTP status, or extend retry/fallback. SSE retains prior behavior (including generic nested errors), avoiding accidental retry expansion from newly exposed busy text.
+- Existing ProviderFailure fields remain private, untrusted, potentially sensitive diagnostic strings, not sanitized public output. This is not a new WebSocket size-limit feature. No truncation policy added.
+- Final author targetrace3 1.222s includes nested busy503 AutoWS1request/nofallback, unchangedSSE1request, legacy/both-shape/malformed/partial controls and one error/no done. Independent final matrix race3 1.270s with no blockers. Full pkg/pigo race42.866s + vet passed. No live/paid requests, CI dispatch, merge or deployment.
