@@ -4435,3 +4435,9 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Owned provider HTTP redirect origin guard
+- Independently reproduced 307/308 cross-host and cross-port forwarding of synthetic API-key/custom headers and replayable body through the library-owned default client (baseline four-case RED 0.015s). This is not attribution of an Undici advisory to Go.
+- Limit only the nil-base provider client's redirects to the initial HTTP origin (scheme/hostname/effective port), preserve ten-hop limit, reject userinfo, and compare IPv6 zone hostnames exactly. Return ErrUseLastResponse without introducing a blocked-Location url.Error. Explicit client policy remains unchanged; same-origin redirects retain method/body/headers. Document compatibility impact and separate WebSocket/discovery/auth paths outside scope.
+- Actual localhost provider controls confirm blocked destination zero requests and Error outcomes; existing original-origin retry-by-error-body remains unchanged. Do not claim response bodies/headers are sanitized or that the initial request was unbilled. Synthetic downgrade transport and official Go client source cover the scheme boundary without real credentials or services.
+- Final runtime full pkg/pigo race passed 42.970s and vet exit0. Final test-only expanded target race x3 passed 1.172s; independent origin/explicit-client review target race x3 passed 1.536s. An intermediate added HTTPStatus assertion was too broad for dedicated DeepSeek/Mistral existing metadata and corrected in tests without changing runtime. Earlier malformed test-brace compile failure was fixture-only. No live provider, CI dispatch, merge or deployment.
