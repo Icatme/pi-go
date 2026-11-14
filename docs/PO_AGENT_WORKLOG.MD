@@ -4283,3 +4283,23 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
   (1.392s). Full pkg/pigo runtime race passed (40.429s), followed by go vet;
   mixed-ending test-only additions subsequently passed the target suite.
   No live provider requests, CI or production deployment were performed.
+
+## 2026-11-14 — Preserve Anthropic initial text/thinking blocks
+
+- During the upstream #8430 framing audit, separately reproduced silent loss of
+  nonempty content_block_start text/thinking/signature in the shared Anthropic
+  and Kimi parser. The official Anthropic Go SDK accumulator preserves the
+  initial block then appends deltas; its tests include nonempty initial text and
+  thinking: https://github.com/anthropics/anthropic-sdk-go/blob/main/messageutil.go
+  and https://github.com/anthropics/anthropic-sdk-go/blob/main/message_test.go .
+- Initialize existing content values from those three fields. Do not synthesize
+  delta events, change tool-input handling, reorder blocks, or alter terminal
+  policy. A signature prefix and later signature deltas concatenate once.
+- Real localhost SSE regression: both providers, initial-only and initial-plus-
+  delta cases failed on master755e003; empty-initial controls remained valid.
+  Tests cover interleaving, UTF-8, initial partial snapshots, start/end counts,
+  no additional deltas, usage and requested identity.
+- Target race x3 passed1.102s; final full pkg/pigo race passed39.897s and vet
+  passed. Independent review found no blocker; independent target race x3
+  passed1.115s. No live provider, signature validation, CI, deployment or release
+  was performed.
