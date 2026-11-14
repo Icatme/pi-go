@@ -74,6 +74,7 @@ type openAIResponsesResponse struct {
 }
 
 type openAIResponsesResponseItem struct {
+	Phase            string                               `json:"phase,omitempty"`
 	Type             string                               `json:"type"`
 	ID               string                               `json:"id,omitempty"`
 	Status           string                               `json:"status,omitempty"`
@@ -258,6 +259,15 @@ func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom ma
 							},
 						},
 					})
+					if typed.Provider == model.Provider && typed.API == model.API && typed.Model == model.ID {
+						var signature TextSignatureV1
+						if json.Unmarshal([]byte(block.TextSignature), &signature) == nil && signature.V == 1 {
+							if phase := openAIResponsesAssistantPhase(signature.Phase); phase != "" {
+								input[len(input)-1]["phase"] = phase
+							}
+						}
+					}
+
 				case ThinkingContent:
 					if strings.TrimSpace(block.ThinkingSignature) != "" {
 						var reasoning map[string]any
@@ -1002,6 +1012,14 @@ func startOpenAIResponsesThinkingBlock(response *AssistantMessage, stream *Assis
 	})
 }
 
+func openAIResponsesAssistantPhase(phase string) string {
+	switch phase {
+	case "commentary", "final_answer":
+		return phase
+	}
+	return ""
+}
+
 func encodeOpenAIResponsesTextSignatureV1(id string, phase string) string {
 	sig := TextSignatureV1{V: 1, ID: id}
 	if phase != "" {
@@ -1046,7 +1064,7 @@ func finalizeOpenAIResponsesStreamItem(
 			block.Text = strings.Join(parts, "")
 		}
 		if strings.TrimSpace(item.ID) != "" {
-			block.TextSignature = encodeOpenAIResponsesTextSignatureV1(item.ID, "")
+			block.TextSignature = encodeOpenAIResponsesTextSignatureV1(item.ID, openAIResponsesAssistantPhase(item.Phase))
 		}
 		response.Content[state.CurrentTextIndex] = block
 		stream.push(AssistantMessageEvent{
@@ -1203,7 +1221,11 @@ func parseOpenAIResponsesResponseOutput(items []openAIResponsesResponseItem) []C
 				}
 			}
 			if len(parts) > 0 {
-				blocks = append(blocks, TextContent{Text: strings.Join(parts, "")})
+				block := TextContent{Text: strings.Join(parts, "")}
+				if phase := openAIResponsesAssistantPhase(item.Phase); phase != "" && strings.TrimSpace(item.ID) != "" {
+					block.TextSignature = encodeOpenAIResponsesTextSignatureV1(item.ID, phase)
+				}
+				blocks = append(blocks, block)
 			}
 		case "reasoning":
 			thinking := openAIResponsesReasoningText(item)

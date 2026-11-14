@@ -4023,3 +4023,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Publication uses an expected-head update of master, an annotated v0.23.1 tag
   and a GitHub Release with no uploaded assets. Exact tree and tag-target checks
   protect API publication while Git HTTPS is unavailable.
+
+## 2026-11-14 — Preserve supported native Responses assistant phases (#1819)
+
+- Reproduced assistant `phase` loss through a localhost Responses stream and history serialization/replay. OpenAI's [Codex prompting guide](https://developers.openai.com/cookbook/examples/gpt-5/codex_prompting_guide/) (checked 2026-11-14) describes assistant-item `commentary`/`final_answer` metadata and its replay requirement; no release date or universal model support is inferred.
+- Record these two values in the existing V1 text signature for completed message items and terminal-only output. Replay only when provider, API, and requested model identities all match. Null, absent, unknown values and legacy signatures do not synthesize a phase. Synthetic message IDs, requested model identity, costs, user messages, and foreign history semantics are unchanged.
+- Scope excludes a previously finalized item that omitted phase followed by a terminal copy introducing it later; no late-item reconciliation is added. This does not restore metadata already lost from saved histories, validate model behavior, or claim all provider terminal shapes are covered.
+- Actual HTTP fixtures cover both Responses and Codex SSE, done plus completed and terminal-only output, both known phases and null/empty/unknown controls, serialized history roundtrip, native identity boundaries, unchanged synthetic IDs, and legacy/malformed signatures with unchanged source history. Final runtime: `go test ./pkg/pigo -race -count=1` passed (38.410s); `go vet ./pkg/pigo` passed. Final expanded target tests passed race x3 (1.366s). Independent static review and target race x3 passed (1.355s, before final legacy-only test additions). No live model, paid API, CI dispatch, or deployment.
