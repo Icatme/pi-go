@@ -3967,3 +3967,7 @@
   checks protecting publication. Original workspace README edits remain intact.
   No full-repository runtime/race repeat, examples repeat, UI acceptance, live
   provider request, main-branch merge, release or deployment was performed here.
+
+## 2026-11-14: DeepSeek error-response cancellation boundary
+
+From master `9a8e190`, independently of Mistral #224, reproduced loss of cancel/deadline classification while reading native DeepSeek non-2xx bodies; preserve readErr with `%w`. HTTP200 controls and matching CommandCode cases already pass, so CommandCode is unchanged. Added regression for read-error identity, one request, body closure and non-cancellation error behavior. See `docs/pi-deepseek-error-body-20261114.md`; no extra retry/timeout policy, live model, release, merge or deployment.
