@@ -4042,3 +4042,8 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Reproduced upstream Pi #11931 on master 755e003: OpenRouter-style native_finish_reason was discarded from error diagnostics. Preserve a distinct nonempty native reason, quoted, only when the existing finish reason is classified as error. Normal stop and error classification remain unchanged; no retry permission is added.
 - Baseline regression failed; targeted Completions race repeated three times passed (1.522s), full pkg/pigo race passed (38.911s), vet passed, and independent review passed. Empty/same-value native reasons and normal stop are covered. Go terminates immediately on the first error finish, so trailing usage does not overwrite this diagnostic.
 - Diagnostic strings remain untrusted provider data. No live provider, release, deployment or downstream dependency update.
+
+## 2026-11-14 - Recognize explicit input-token limit overflow
+
+- Upstream Pi #11675's `Input too long: model limit N tokens` wording was not recognized on master 755e003. Added a narrow pattern requiring a numeric model token limit, including comma-formatted counts, without changing token estimation, output clamping or retry/compaction behavior.
+- Baseline plain/comma fixtures fail; positive and negative tests retain error-only classification and rate-limit exclusions. Added the example to existing Chat/Responses HTTP wire regression coverage so classification does not replay requests. Full pkg/pigo race passed (39.874s), vet passed, and independent review checked the scope. No live-provider validation or deployment.

@@ -14,6 +14,7 @@ var compatibleOverflowErrors = []struct {
 	name string
 	text string
 }{
+	{"input model limit", "400: Input too long: model limit 1048576 tokens, requested 1080887 tokens"},
 	{"LiteLLM", "Error: 503 litellm.ServiceUnavailableError: litellm.MidStreamFallbackError: litellm.APIConnectionError: APIConnectionError: OpenAIException - Requested token count exceeds the model's maximum context length of 131072 tokens."},
 	{"parenthesized limit", "Error: 400 Input length (265330) exceeds model's maximum context length (262144)."},
 	{"comma limit", "Requested token count exceeds the maximum context length of 131,072 tokens."},
