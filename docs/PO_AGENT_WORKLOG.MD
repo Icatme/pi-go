@@ -1,5 +1,11 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Reject explicit tool-index identity collisions
+
+- Reproduced upstream Pi #11881/#11908 on master 755e003: distinct named call IDs at one Chat Completions stream index silently yielded a successful toolUse with concatenated arguments and an overwritten ID. Reject that explicit conflict as response_parse_error/tool_call_index_collision before mutating the existing call; do not guess a split or retry.
+- This is deliberately not universal identity validation: unnamed ID refreshes/late IDs remain compatible, as do repeated matching IDs and distinct parallel indices. Callers must honor terminal error outcomes and not execute partial tool events.
+- Original wire regression fails before the guard. Independent review completed. Full pkg/pigo race passed (44.284s), vet passed; targeted repeat tests cover collision diagnostics/identity preservation and compatibility. No live-provider validation, release or deployment.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.
