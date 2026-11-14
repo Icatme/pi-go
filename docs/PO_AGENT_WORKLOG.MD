@@ -1,5 +1,11 @@
 # PO Agent Worklog
 
+## 2026-11-14 — Reject empty Anthropic tool-use terminal responses
+
+- Reproduced [pi #9681](https://github.com/earendil-works/pi/issues/9681): a complete message_start/message_delta(tool_use)/message_stop stream with no tool call was accepted as successful toolUse, silently ending a turn. The terminal non-hosted Anthropic parser path now reports a typed parse failure (`missing_tool_call`) instead of done.
+- Usage remains available (fixture output168); no automatic retry was added (one HTTP request with MaxRetries2). Thinking/text-only cases fail; normal empty end-turn, actual tool calls, and hosted/deferred paths remain unchanged. This does not add argument validation or attempt to repair partial tools.
+- Baseline regression failed; focused Anthropic/Kimi race suite passed5.051s; new boundary tests race x3 passed1.068s; final runtime full pkg/pigo race passed47.423s and vet passed. After test-only failure-kind/reason assertions, final targeted race x3 passed1.098s. Independent review found no blockers. Offline localhost fixtures only, no live provider acceptance or deployment.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.
