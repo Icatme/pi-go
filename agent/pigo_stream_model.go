@@ -285,12 +285,13 @@ func convertPartsToPigoBlocks(parts []Part) []pigo.ContentBlock {
 	for _, part := range parts {
 		switch part.Type {
 		case PartTypeText:
-			if strings.TrimSpace(part.Text) == "" {
+			if strings.TrimSpace(part.Text) == "" && part.Signature == "" {
 				continue
 			}
 			blocks = append(blocks, pigo.TextContent{
 				Text:          part.Text,
 				TextSignature: part.Signature,
+				SignatureOnly: part.SignatureOnly,
 			})
 		case PartTypeThinking:
 			if strings.TrimSpace(part.Text) == "" && strings.TrimSpace(part.Signature) == "" && !part.Redacted {
@@ -299,6 +300,7 @@ func convertPartsToPigoBlocks(parts []Part) []pigo.ContentBlock {
 			blocks = append(blocks, pigo.ThinkingContent{
 				Thinking:          part.Text,
 				ThinkingSignature: part.Signature,
+				SignatureOnly:     part.SignatureOnly,
 				Redacted:          part.Redacted,
 			})
 		case PartTypeImage:
@@ -399,16 +401,18 @@ func convertPigoAssistantSnapshot(message pigo.AssistantMessage) Message {
 		switch typed := block.(type) {
 		case pigo.TextContent:
 			parts = append(parts, Part{
-				Type:      PartTypeText,
-				Text:      typed.Text,
-				Signature: typed.TextSignature,
+				Type:          PartTypeText,
+				Text:          typed.Text,
+				Signature:     typed.TextSignature,
+				SignatureOnly: typed.SignatureOnly,
 			})
 		case pigo.ThinkingContent:
 			parts = append(parts, Part{
-				Type:      PartTypeThinking,
-				Text:      typed.Thinking,
-				Signature: typed.ThinkingSignature,
-				Redacted:  typed.Redacted,
+				Type:          PartTypeThinking,
+				Text:          typed.Thinking,
+				Signature:     typed.ThinkingSignature,
+				SignatureOnly: typed.SignatureOnly,
+				Redacted:      typed.Redacted,
 			})
 		case pigo.ToolCall:
 			toolCalls = append(toolCalls, convertPigoToolCall(typed))

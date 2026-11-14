@@ -3945,3 +3945,25 @@
 - Added cancel/deadline × HTTP200/503 classification/status regressions. Final focused race1.345s passed; isolated incorrect-resolution overlays both fail as expected. Independent static review found no blocking conflict-resolution issue.
 - Go1.26.11 remote Linux: full29-package race passes (runtimeeval403.169s, provider33.471s); full vet; examples tests/vet; module verification and read-only graph pass. No live providers, paid model calls, CI dispatch, master merge, release, downstream update or deployment.
 - Source heads, integration decisions, verification and remaining scope are in docs/pi-issue-integration-20261114.md. Existing PR branches are untouched. Ordinary git push lacked credentials; publish the exact tested snapshot through the GitHub connector if necessary.
+
+## 2026-11-14 - Open PR review and consolidated repair
+
+- Reviewed the initial 23 open PRs (#200-222), then the #223 integration snapshot
+  created during this review. GitHub discussions contained no review comments.
+  Each original PR's added/affected focused regressions passed on Windows.
+- Fixed two reproduced defects in #201 and #207: agent persistence lost signed
+  empty/absent-text parts, and declared-tool hints truncated descriptions before
+  matching. Published both repairs and synchronized them into #223.
+- Refreshed #205 from #202, and integrated cancellation dependencies into #219
+  and #220 with tested conflict resolutions preserving HTTP status and cause.
+  These individual branch updates were published without merging any PR.
+- A separate local integration of all 23 candidates passed tests for pkg/pigo,
+  agent, agent/session, mcp, codemode, agent/codemodetool and agent/toolset;
+  root-module test compilation and vet passed. Shared worklog additions survived
+  all integration conflicts. The #223 repair has identical production Go source;
+  its focused agent/toolset/provider race tests and affected-package vet passed.
+- Git HTTPS became unavailable after the earlier pushes. #220 and this #223
+  repair use the GitHub connector, with tested-tree equality and expected-head
+  checks protecting publication. Original workspace README edits remain intact.
+  No full-repository runtime/race repeat, examples repeat, UI acceptance, live
+  provider request, main-branch merge, release or deployment was performed here.

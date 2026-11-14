@@ -4,9 +4,9 @@ This is an isolated integration of the open PR stack, not a merge into `master`,
 
 ## Contents
 
-All changes from PRs #200–222 are included. Existing PR branches remain untouched. The integration snapshot can be reviewed as a whole; do not independently merge it and then reapply the same patches from the individual PRs.
+The initial snapshot includes PRs #200–222 at the source heads below. The later review repairs described at the end are also included. The integration can be reviewed as a whole; do not independently merge it and then reapply the same patches from the individual PRs.
 
-| Source PR | Verified source head |
+| Source PR | Initial snapshot source head |
 | --- | --- |
 | [#200](https://github.com/Icatme/pi-go/pull/200) | `2d5f5a0abf03cc698e8415383569ad7160f88b45` |
 | [#201](https://github.com/Icatme/pi-go/pull/201) | `3ca8948d2ea81504ae27e706d83c0f31e5980c95` |
@@ -50,4 +50,24 @@ Go 1.26.11 on remote Linux, offline fixtures only:
 - `go mod verify`, read-only module graph, and diff whitespace checks passed.
 - Full `go test -p 2 -race ./... -count=1` passed across all 29 test-bearing packages (including runtimeeval 403.169s, provider 33.471s, SuperAgent 21.344s); `go vet ./...` passed.
 
-No live provider calls, paid model usage, Windows/macOS execution, manual GitHub CI dispatch, release, merge into master, downstream dependency update, or deployment. The repository workflow is dispatch-only. Native fallback continuation, durable per-tool crash reconciliation, auxiliary billing attribution and broader live-provider compatibility are not completed by this integration.
+The initial cloud validation did not include live provider calls, paid model usage, Windows/macOS execution, manual GitHub CI dispatch, release, merge into master, downstream dependency update, or deployment. The repository workflow is dispatch-only. Native fallback continuation, durable per-tool crash reconciliation, auxiliary billing attribution and broader live-provider compatibility are not completed by this integration.
+
+## Review repairs and Windows verification
+
+- Synchronized the review repair from #201: retain signed empty/whitespace text
+  and the absent-text marker through agent message JSON persistence and replay.
+  The optional `agent.Part.SignatureOnly` field is omitted when false; old readers
+  cannot retain its new absent-text distinction.
+- Synchronized the review repair from #207: match the full authorized tool
+  description before truncating hint output, so keywords after character 192
+  remain searchable without loading or dispatching an already-declared tool.
+- Both defects were reproduced before their fixes on the individual PRs. Their
+  regressions now pass on this consolidated snapshot, alongside its existing
+  Google/Anthropic cancellation and HTTP-status cross-regressions.
+- Windows Go 1.26.4: focused agent/adapter/toolset and provider cancellation/status
+  race tests, affected-package vet and diff checks passed on this snapshot.
+  Its production Go source matches the separately combined review branch, where
+  tests for pkg/pigo, agent, agent/session, mcp, codemode, agent/codemodetool and
+  agent/toolset, root-module compilation and root-module vet all passed.
+- The repair does not repeat the initial full-repository race or examples suites.
+  No UI acceptance, live provider calls, main-branch merge, release or deployment.

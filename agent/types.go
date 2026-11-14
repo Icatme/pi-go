@@ -176,7 +176,9 @@ type Part struct {
 	Data      string   `json:"data,omitempty"`
 	MIMEType  string   `json:"mime_type,omitempty"`
 	Signature string   `json:"signature,omitempty"`
-	Redacted  bool     `json:"redacted,omitempty"`
+	// SignatureOnly preserves a signed provider part with no text field.
+	SignatureOnly bool `json:"signature_only,omitempty"`
+	Redacted      bool `json:"redacted,omitempty"`
 }
 
 // ToolCall is an assistant-emitted tool invocation request.
