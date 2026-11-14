@@ -35,10 +35,11 @@ type deepSeekThinkingOptions struct {
 }
 
 type deepSeekChatMessage struct {
-	Role       string                 `json:"role"`
-	Content    any                    `json:"content"`
-	ToolCallID string                 `json:"tool_call_id,omitempty"`
-	ToolCalls  []deepSeekChatToolCall `json:"tool_calls,omitempty"`
+	ReasoningContent *string                `json:"reasoning_content,omitempty"`
+	Role             string                 `json:"role"`
+	Content          any                    `json:"content"`
+	ToolCallID       string                 `json:"tool_call_id,omitempty"`
+	ToolCalls        []deepSeekChatToolCall `json:"tool_calls,omitempty"`
 }
 
 type deepSeekChatToolCall struct {
@@ -243,9 +244,9 @@ func convertDeepSeekChatMessages(model Model, ctx Context) []deepSeekChatMessage
 				messages = append(messages, deepSeekChatMessage{Role: "user", Content: content})
 			}
 		case AssistantMessage:
-			content, toolCalls := convertDeepSeekAssistantContent(typed.Content)
-			if strings.TrimSpace(content) != "" || len(toolCalls) > 0 {
-				messages = append(messages, deepSeekChatMessage{Role: "assistant", Content: content, ToolCalls: toolCalls})
+			content, toolCalls, reasoning := convertDeepSeekAssistantContent(typed.Content)
+			if strings.TrimSpace(content) != "" || len(toolCalls) > 0 || reasoning != nil {
+				messages = append(messages, deepSeekChatMessage{Role: "assistant", Content: content, ToolCalls: toolCalls, ReasoningContent: reasoning})
 			}
 		case ToolResultMessage:
 			var content any = deepSeekTextFromContent(typed.Content)
@@ -289,7 +290,9 @@ func deepSeekTextFromContent(content any) string {
 	}
 }
 
-func convertDeepSeekAssistantContent(blocks []ContentBlock) (string, []deepSeekChatToolCall) {
+func convertDeepSeekAssistantContent(blocks []ContentBlock) (string, []deepSeekChatToolCall, *string) {
+	var reasoning strings.Builder
+	hasReasoning := false
 	parts := make([]string, 0, len(blocks))
 	toolCalls := make([]deepSeekChatToolCall, 0)
 	for _, block := range blocks {
@@ -299,8 +302,9 @@ func convertDeepSeekAssistantContent(blocks []ContentBlock) (string, []deepSeekC
 				parts = append(parts, typed.Text)
 			}
 		case ThinkingContent:
-			if strings.TrimSpace(typed.Thinking) != "" {
-				parts = append(parts, typed.Thinking)
+			if !typed.Redacted {
+				hasReasoning = true
+				reasoning.WriteString(typed.Thinking)
 			}
 		case ToolCall:
 			toolCalls = append(toolCalls, deepSeekChatToolCall{
@@ -313,7 +317,12 @@ func convertDeepSeekAssistantContent(blocks []ContentBlock) (string, []deepSeekC
 			})
 		}
 	}
-	return strings.Join(parts, "\n"), toolCalls
+	var reasoningContent *string
+	if hasReasoning {
+		value := reasoning.String()
+		reasoningContent = &value
+	}
+	return strings.Join(parts, "\n"), toolCalls, reasoningContent
 }
 
 func convertDeepSeekChatTools(tools []Tool) []map[string]any {
