@@ -1,5 +1,12 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Exact integer schema validation at agent tool boundaries
+
+- Audited Pi #11697 at the actual agent tool path, separately from the lightweight `pkg/pigo` validator. A local `$ref` to integer rejected raw JSON `2` because `json.Number` reaches jsonschema-go v0.4.3's string type classifier. No-ID/absolute-ID fixtures reproduce this; relative root `$id` base resolution is a separate unchanged restriction. The official upstream latest release remains v0.4.3.
+- Project exact int64/uint64-range integers only for default schema validation, including decimal/exponent integer notation. Preserve executor arguments/history, leave numeric strings uncoerced through references, and retain existing default behavior outside this limited range. Use bounded decimal manipulation, not floating point or unbounded exponent expansion.
+- The shared custom-parser/child-output validation projection now also preserves exact exponent integers and rejects out-of-range integers instead of rounding. This fixes maximum false acceptance and minimum false rejection around 2^53. Nonintegral custom/output values keep existing float64 semantics; numeric schema keywords retain the dependency's float64 representation. This is not arbitrary-precision validation or a relative `$id` fix.
+- Added real RunToolCall input/custom/child-output regressions, int64/uint64 limits, exponent limits, nested-copy/typed executor preservation, string-reference and noninteger controls. Baseline local-ref integer regression fails before the fix; default targets race x3 passed1.254s; independent default/custom targets race x3 passed1.318s. Final `go test -race ./agent` passed (6.950s), `go vet ./agent` passed, and diff check passed. Independent bounded 5,000-sample rational-oracle comparison passed race x3 (1.127s), not a full fuzz campaign. No live provider, database, CI or deployment executed.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.

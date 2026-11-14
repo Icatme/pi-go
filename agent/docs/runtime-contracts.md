@@ -162,6 +162,18 @@ and is executed by the runtime engine in [`engine.go`](../engine.go).
   runtime; `format` and content annotations are not enforcement hooks. Invalid
   static schemas fail definition validation, and invalid resolver-provided
   schemas fail the run before a model request.
+  For default argument decoding, exact integral `json.Number` values in the
+  int64/uint64 range (including decimal/exponent integer notation) are projected
+  only for schema validation. Executor arguments and history retain their original
+  values; this also works through local `$ref` definitions. Numeric strings are
+  not newly coerced through references. Custom `ParseArguments` validation rejects
+  integers outside that range instead of rounding them to float64; child output-schema
+  validation uses the same exact-integer projection and rejection. Nonintegral
+  custom values retain the existing float64 validation semantics; default-path
+  nonintegral/out-of-range `json.Number` values retain their existing behavior.
+  This is not arbitrary-precision schema validation: numeric schema keywords use
+  the validator's float64 representation. Relative root `$id` resolution is
+  unchanged and still requires an absolute base supported by the resolver.
 
 ## Turn Boundary Hooks
 

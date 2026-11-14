@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/Icatme/pi-go/internal/jsontext"
 	"github.com/Icatme/pi-go/pkg/pigo"
@@ -72,6 +71,8 @@ func newToolArgumentValidator(tool ToolDefinition, argumentLimit int) (func(any)
 					return nil, fmt.Errorf("agent: project arguments for tool %q: %w", tool.Name, err)
 				}
 				instance = projected
+			} else {
+				instance = projectExactSchemaIntegers(validated)
 			}
 			if err := resolved.Validate(instance); err != nil {
 				return nil, fmt.Errorf("agent: arguments for tool %q do not match schema: %w", tool.Name, err)
@@ -203,13 +204,11 @@ func normalizeJSONNumbers(value any) (any, error) {
 	switch typed := value.(type) {
 	case json.Number:
 		text := typed.String()
-		if !strings.ContainsAny(text, ".eE") {
-			if integer, err := strconv.ParseInt(text, 10, 64); err == nil {
-				return integer, nil
+		if integer, whole := exactSchemaInteger(typed); whole {
+			if integer == nil {
+				return nil, fmt.Errorf("integer outside int64/uint64 validation range")
 			}
-			if integer, err := strconv.ParseUint(text, 10, 64); err == nil {
-				return integer, nil
-			}
+			return integer, nil
 		}
 		number, err := strconv.ParseFloat(text, 64)
 		if err != nil {
