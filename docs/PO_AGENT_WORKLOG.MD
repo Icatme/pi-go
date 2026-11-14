@@ -1,5 +1,12 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Reject empty Chat tool-use terminals
+
+- Reproduced upstream Pi #2119 third symptom: tool_calls/function_call finish reasons with no actual calls produced ToolUse and a silent successful Engine stop (SDK RED0.025s, independent Engine RED0.013s). Reject only final ToolUse with zero parsed calls as response_parse_error/missing_tool_call. No invented tools, retry, or model continuation.
+- Keep partial text/usage, normal Stop/Length/unknown handling and valid tool_calls carrying the legacy function_call finish reason. Legacy delta.function_call itself was already unsupported and this patch does not add support. Distinct from #10299's present-but-malformed entry, which existing identity validation handles.
+- Final targeted race x3 pigo1.181s/agent1.135s; independent Engine1.136s and static review passed. Full agent race11.381s and package vet checks passed. First full pigo run failed an initially incorrect test expectation about usage after unknown terminal plus the pre-existing two-second dropped-delta producer test; corrected test only. Second full run failed only that old producer deadline. No timeout change: standalone producer race x3 passed5.073s; final reduced-concurrency full pigo race passed57.523s. These observations do not establish load as the cause.
+- Clean isolated application atop263-273 plus274; targeted ChatHTML/usage/content-filter/empty-tool checks race pigo1.972s/agent1.154s, not a full combined suite. No live provider, paid call, merge, release or CI dispatch.
+
 ## 2026-11-14 - Reject explicit tool-index identity collisions
 
 - Reproduced upstream Pi #11881/#11908 on master 755e003: distinct named call IDs at one Chat Completions stream index silently yielded a successful toolUse with concatenated arguments and an overwritten ID. Reject that explicit conflict as response_parse_error/tool_call_index_collision before mutating the existing call; do not guess a split or retry.

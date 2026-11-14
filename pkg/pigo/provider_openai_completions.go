@@ -1150,6 +1150,9 @@ func openAICompletionsToolCallFromState(state *openAICompletionsToolCallState) T
 // identity fields until later chunks. A malformed batch must not reach an agent
 // as executable calls, even on the final error message.
 func validateOpenAICompletionsToolBatch(response *AssistantMessage, state *openAICompletionsStreamState) error {
+	if response.StopReason == StopReasonToolUse && len(state.ToolCalls) == 0 {
+		return withProviderFailure(errors.New("OpenAI Completions ended with tool use but no tool call"), ProviderFailureParse, "missing_tool_call")
+	}
 	for _, call := range state.ToolCalls {
 		if strings.TrimSpace(call.ID) != "" && strings.TrimSpace(call.Name) != "" {
 			continue
