@@ -4140,3 +4140,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
   the fix. All terminal ciphertext tests pass with race on Windows Go 1.26.4.
   Existing signatures, completed content and event counts remain unchanged.
 - Offline fixtures only; no live model, CI dispatch, release or deployment.
+
+## 2026-11-14 — xAI Chat independent reasoning usage (#5771)
+
+- Reviewed [sub2api #5771](https://github.com/Wei-Shaw/sub2api/issues/5771) and the official [xAI Chat reference](https://docs.x.ai/developers/rest-api-reference/inference/chat-completions) (page updated 2026-10-20). Its sample reports prompt32, completion9, reasoning94 and total135. The [usage pricing reference](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/usage-and-pricing) (updated2026-05-10) prices reasoning as completion output. Baseline755e003 reproduced loss: Input26/CacheRead6/Output9/Total41.
+- Only explicitly configured `Provider:"xai", API:"openai-completions"` now reconciles separately reported reasoning when prompt/completion/total are present, nonnegative, the existing input/cache split matches prompt, and the total remainder exactly equals reasoning. Staged subtraction prevents correction-induced integer overflow. Missing/null/inconsistent counts, already-inclusive output and all other providers/APIs preserve prior behavior. The internal usage parser tracks three field presences without changing existing integer consumers.
+- No native xAI provider/catalog was added. Existing Command Code `xai/grok-*` models use Responses and are unaffected. This does not infer provider identity from model names or URLs, invent missing usage, change prices, or introduce generic gap-filling.
+- Offline coverage includes the official example, provider/API boundaries, missing/null/zero fields, inconsistent totals/cache overrides, integer boundaries, and localhost SSE repeated-usage/cost accounting. No paid/live requests or production deployment. Targeted race×3 passed in 1.651s; independent review/probe race×3 passed in 1.377s; final full `pkg/pigo` race passed in 39.643s and `go vet ./pkg/pigo` passed.

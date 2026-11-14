@@ -147,6 +147,10 @@ type openAICompletionsDeltaToolCall struct {
 }
 
 type openAICompletionsUsage struct {
+	countsPresent           bool
+	CompletionTokensDetails struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details"`
 	PromptTokens             int                                  `json:"prompt_tokens"`
 	CompletionTokens         int                                  `json:"completion_tokens"`
 	TotalTokens              int                                  `json:"total_tokens"`
@@ -156,6 +160,34 @@ type openAICompletionsUsage struct {
 	CacheReadInputTokens     *int                                 `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens *int                                 `json:"cache_creation_input_tokens"`
 	PromptTokensDetails      openAICompletionsPromptTokensDetails `json:"prompt_tokens_details"`
+}
+
+// Retain presence only for the xAI reconciliation. Other providers preserve the
+// existing zero-value behavior for absent/null counts.
+func (u *openAICompletionsUsage) UnmarshalJSON(data []byte) error {
+	type usageFields openAICompletionsUsage
+	var fields usageFields
+	wire := struct {
+		*usageFields
+		Prompt     *int `json:"prompt_tokens"`
+		Completion *int `json:"completion_tokens"`
+		Total      *int `json:"total_tokens"`
+	}{usageFields: &fields}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*u = openAICompletionsUsage(fields)
+	if wire.Prompt != nil {
+		u.PromptTokens = *wire.Prompt
+	}
+	if wire.Completion != nil {
+		u.CompletionTokens = *wire.Completion
+	}
+	if wire.Total != nil {
+		u.TotalTokens = *wire.Total
+	}
+	u.countsPresent = wire.Prompt != nil && wire.Completion != nil && wire.Total != nil
+	return nil
 }
 
 type openAICompletionsPromptTokensDetails struct {
@@ -1135,10 +1167,24 @@ func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage 
 	if input < 0 {
 		input = 0
 	}
-	total := input + usage.CompletionTokens + cacheRead + cacheWrite
+	output := usage.CompletionTokens
+	// xAI Chat reports reasoning separately in the documented usage example.
+	// Reconcile only that explicit provider/API and exact nonnegative total;
+	// gateways that already include reasoning, missing totals, and other APIs
+	// keep their existing semantics. Subtract in stages to avoid overflow.
+	if model.Provider == "xai" && model.API == "openai-completions" && usage.countsPresent &&
+		usage.PromptTokens >= cacheRead && usage.PromptTokens-cacheRead >= cacheWrite &&
+		input == usage.PromptTokens-cacheRead-cacheWrite && output >= 0 && usage.TotalTokens >= usage.PromptTokens {
+		reportedOutput := usage.TotalTokens - usage.PromptTokens
+		if reportedOutput >= output && usage.CompletionTokensDetails.ReasoningTokens > 0 &&
+			reportedOutput-output == usage.CompletionTokensDetails.ReasoningTokens {
+			output = reportedOutput
+		}
+	}
+	total := input + output + cacheRead + cacheWrite
 	response.Usage = Usage{
 		Input:       input,
-		Output:      usage.CompletionTokens,
+		Output:      output,
 		CacheRead:   cacheRead,
 		CacheWrite:  cacheWrite,
 		TotalTokens: total,
