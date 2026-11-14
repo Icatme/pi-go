@@ -4008,3 +4008,18 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
   equality and expected branch heads before publication and merge.
 - Reused the clean review worktree. The original workspace's uncommitted
   superagent/README.md edit remains untouched.
+
+## 2026-11-14 - Publish v0.23.1 patch release
+
+- User requested a small release after merging #224-227. Confirmed v0.23.0 is
+  the latest remote tag and v0.23.1 is unused; release notes also cover #198-199
+  and the reviewed #223 integration since the previous version.
+- Updated only pkg/pigo.Version, the examples module requirement and release
+  documentation. Preserved the original workspace's uncommitted README edit.
+- Read-only root/examples module graphs passed with GOWORK=off and GOPROXY=off;
+  version references, formatting and diff hygiene checked. Reused preceding
+  review evidence; no release-time full tests, race rerun, binary compilation,
+  packaging, live service, CI dispatch, deployment or downstream update.
+- Publication uses an expected-head update of master, an annotated v0.23.1 tag
+  and a GitHub Release with no uploaded assets. Exact tree and tag-target checks
+  protect API publication while Git HTTPS is unavailable.
