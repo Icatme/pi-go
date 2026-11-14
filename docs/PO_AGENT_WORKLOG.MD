@@ -4023,3 +4023,11 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Publication uses an expected-head update of master, an annotated v0.23.1 tag
   and a GitHub Release with no uploaded assets. Exact tree and tag-target checks
   protect API publication while Git HTTPS is unavailable.
+
+## 2026-11-14 — Honor explicit Google blocked/finish outcomes without content
+
+- Adjacent to upstream #7255, localhost SSE reproduced two success-misclassification cases: a candidate with `finishReason: SAFETY` but no content, and no candidates with `promptFeedback.blockReason: SAFETY`. Both previously returned an empty successful Stop. The [official GenerateContent reference](https://aistudio.google.com/api-reference/generate-content) (checked 2026-11-14) defines a set prompt block reason as blocked with no candidates; no publication date is inferred.
+- For no candidates, only an explicit nonempty block reason other than `BLOCK_REASON_UNSPECIFIED` now produces Error with its quoted diagnostic, following the existing provider-error early terminal path. For a candidate without content, honor its explicit finish reason using the existing mapper. Usage and response ID are applied first; the no-content candidate path keeps reading later metadata. No retry, safety-setting change, generated content, or reinterpretation of ordinary safety ratings.
+- Null/empty/default feedback, usage-only frames and the existing empty-stream behavior remain unchanged. STOP and MAX_TOKENS retain Stop/Length. A prior streamed text followed by a content-less SAFETY terminal retains text and usage but becomes Error. Terminal events retain the existing Done(Error) convention, not a new Error-event contract.
+- Independent master-base patch touches only the former early-return paths, not PR256's content-bearing diagnostic change. Interacts with PR245's existing reason mapper but does not duplicate its CONTINUATION mapping. No claim of complete blocked-response/Vertex support or aggregate PR validation.
+- Final runtime full `pkg/pigo` race passed (40.103s), vet passed; final expanded target race x3 passed (1.330s). Independent static review found no blockers. No paid/live model, CI dispatch, deployment, or production configuration change.
