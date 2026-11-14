@@ -4435,3 +4435,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Preserve dedicated DeepSeek URL components
+
+- Independently reproduced query corruption in the dedicated DeepSeek provider with actual localhost requests: base and complete endpoint queries absorbed the endpoint suffix (RED 0.014s). Related bug class to pi2528, not a claim of an actual DeepSeek service incident.
+- Only query/fragment-bearing inputs enter the parsed-path wrapper; preserve raw query/escaped path/fragment without cleaning. Root default remains /chat/completions, never adds /v1. No-query and malformed/opaque inputs keep legacy behavior; this is not new URL validation. No credentials/header/provider/retry changes.
+- Final runtime full pkg/pigo race passed42.448s and vet exited0. Final test-only Authorization/one-request assertions passed target race x3 1.111s. Independent runtime target race x3 passed1.122s and final static review found no blocker.
+- In a separate detached tree based on the earlier277–279 integration90b13c8, applied only this runtime diff plus tests; no source conflict or full-file overwrite. Two actual HTTP rounds verify exact query alongside reasoning replay, normal completion, EOF failure and invalid usage. Combined targeted race x3 passed1.380s; not a new full combination suite. No remote merge, CI dispatch, live provider, release or deployment.

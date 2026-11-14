@@ -572,6 +572,28 @@ func cloneDeepSeekHTTPHeaders(headers http.Header) map[string]string {
 }
 
 func resolveDeepSeekChatURL(baseURL string) string {
+	base := strings.TrimSpace(baseURL)
+	if !strings.ContainsAny(base, "?#") {
+		return resolveLegacyDeepSeekChatURL(baseURL)
+	}
+	if parsed, err := url.Parse(base); err == nil && parsed.Opaque == "" {
+		path := strings.TrimRight(parsed.EscapedPath(), "/")
+		if !strings.HasSuffix(path, "/chat/completions") {
+			path += "/chat/completions"
+		}
+		decoded, err := url.PathUnescape(path)
+		if err != nil {
+			return resolveLegacyDeepSeekChatURL(baseURL)
+		}
+		parsed.Path = decoded
+		parsed.RawPath = path
+		return parsed.String()
+	}
+	// Keep malformed/opaque URL handling unchanged; the request layer validates it.
+	return resolveLegacyDeepSeekChatURL(baseURL)
+}
+
+func resolveLegacyDeepSeekChatURL(baseURL string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if trimmed == "" {
 		trimmed = "https://api.deepseek.com"
