@@ -4435,3 +4435,12 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14: Reject invalid Anthropic usage snapshots
+
+- Pinned to master `4115596fa5ca3252a855f0960e52bfdbc8c73170`. Local HTTP SSE reproduced negative counts and unrepresentable sums being accepted on both message_start and message_delta; baseline regression failed in 0.017s.
+- Shared Anthropic/Kimi usage mapper validates the four independent nonnegative token fields and checks their sum before mutating usage or cost. Invalid snapshots return typed parse `invalid_usage`; the existing stream error path preserves partial content and the last valid usage snapshot. That retained snapshot is not a claim of complete final accounting. Invalid initial usage stays unreported. No saturation, inferred charges, retry, or model/cost identity changes.
+- Preserve Anthropic's uncached input semantics: zero input with cache reads/writes is valid, and cache counts are not bounded by input. Delta omission retains prior fields, while explicit zero overwrites them. Maximum representable total is accepted.
+- Final targeted race x3 passed in 1.912s: ten actual HTTP invalid start/delta cases, one request/one error event/no Done, prior nonzero cost and text preserved, valid maximum/all-cache cases, and Anthropic/Kimi delta-presence controls. This patch does not validate other providers or multi-request hosted-tool aggregate addition. No live provider calls, paid requests, CI dispatch, merge, or deployment.
+- Final-runtime full `pkg/pigo` race passed in 42.157s; vet passed.
+- Independent final target race x3 passed in 1.322s; static review found no blocker.

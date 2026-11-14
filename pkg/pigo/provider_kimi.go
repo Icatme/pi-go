@@ -581,7 +581,9 @@ func processAnthropicStreamEvent(
 			}
 			appendAnthropicCacheDiagnostics(response, event.Message.Diagnostics)
 			if event.Message.Usage != nil {
-				applyAnthropicUsage(response, model, *event.Message.Usage)
+				if err := applyAnthropicUsage(response, model, *event.Message.Usage); err != nil {
+					return false, err
+				}
 			}
 		}
 	case "content_block_start":
@@ -737,7 +739,9 @@ func processAnthropicStreamEvent(
 			} else {
 				usage.CacheCreationTokens = response.Usage.CacheWrite
 			}
-			applyAnthropicUsage(response, model, usage)
+			if err := applyAnthropicUsage(response, model, usage); err != nil {
+				return false, err
+			}
 		}
 	case "message_stop":
 		if emitTerminal && len(hostedTools) == 0 && response.StopReason == StopReasonToolUse {
@@ -798,16 +802,28 @@ func finishAssistantMessageStream(stream *AssistantMessageEventStream, result As
 	stream.finish(result)
 }
 
-func applyAnthropicUsage(response *AssistantMessage, model Model, usage anthropicUsage) {
+func applyAnthropicUsage(response *AssistantMessage, model Model, usage anthropicUsage) error {
+	// Anthropic input is uncached input, so cache counts are independent.
+	// Validate the whole snapshot before replacing previously valid accounting.
+	total := 0
+	max := int(^uint(0) >> 1)
+	for _, count := range []int{usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheCreationTokens} {
+		if count < 0 || count > max-total {
+			return withProviderFailure(errors.New("invalid Anthropic usage counts"), ProviderFailureParse, "invalid_usage")
+		}
+		total += count
+	}
+
 	response.Usage = Usage{
 		Input:       usage.InputTokens,
 		Output:      usage.OutputTokens,
 		CacheRead:   usage.CacheReadTokens,
 		CacheWrite:  usage.CacheCreationTokens,
-		TotalTokens: usage.InputTokens + usage.OutputTokens + usage.CacheReadTokens + usage.CacheCreationTokens,
+		TotalTokens: total,
 	}
 	response.UsageReported = true
 	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
+	return nil
 }
 
 func defaultMaxTokens(model Model, override int) int {
