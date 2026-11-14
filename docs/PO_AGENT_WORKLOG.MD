@@ -4029,3 +4029,9 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Publication uses an expected-head update of master, an annotated v0.23.1 tag
   and a GitHub Release with no uploaded assets. Exact tree and tag-target checks
   protect API publication while Git HTTPS is unavailable.
+
+## 2026-11-14 — Opt in to Google function parametersJsonSchema (#1398)
+
+- This change is stacked on PR236's exact head e04e4521998d3fdd046547732ee8f49d928af740, reusing its GoogleGenerativeAICompat rather than redefining a competing type. The official [FunctionDeclaration reference](https://ai.google.dev/api/caching#FunctionDeclaration) documents parametersJsonSchema for JSON Schema and mutual exclusion with legacy parameters. Original upstream issue/comments read. Baseline serialized wire confirmed const/$defs/ref schema was placed in the legacy slot; no live rejection was reproduced.
+- Add SupportsParametersJSONSchema *bool. Only explicit true uses parametersJsonSchema; nil/false preserve parameters. No endpoint/model-name guessing, catalog activation, schema rewriting, reference resolution, Vertex/Cloud Code Assist expansion, or promise that every JSON Schema keyword is supported. Preserve nil-schema empty-object default and clone the new pointer. Independent of the image opt-in from PR236.
+- Actual local HTTP tests cover nil/false/true x full/nil schema, exactly one field/request, tool identity/description, unmodified source schema, clone isolation and no-tools/no-compat controls. Old runtime overlay failed both explicit-true cases; legacy cases passed. Final runtime full pkg/pigo race passed41.025s and vet passed; final expanded target race x3 passed1.313s. Independent review and target race x3 passed1.095s. No live calls, manual CI, merge, release or deploy.

@@ -73,6 +73,10 @@ func (c *AnthropicMessagesCompat) compatAPI() string { return "anthropic-message
 
 // GoogleGenerativeAICompat controls explicitly verified gateway/model features.
 type GoogleGenerativeAICompat struct {
+	// SupportsParametersJSONSchema opts into the parametersJsonSchema function
+	// declaration field. Verify endpoint support before enabling; nil/false
+	// preserve legacy parameters encoding, without full JSON Schema guarantees.
+	SupportsParametersJSONSchema *bool
 	// SupportsMultimodalFunctionResponses enables image parts nested inside their
 	// functionResponse. Set true only for a model/endpoint supporting this protocol.
 	// Nil and false preserve the legacy sibling-image wire format.
