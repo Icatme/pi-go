@@ -4397,3 +4397,23 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Baseline serialized request reproduces exact xAI Responses sending default tool_choice:auto without tools. The official xAI Responses no-tool example omits both fields. This is local wire evidence and upstream reports, not a paid/live backend rejection reproduction.
 - Omit only the synthesized default for exact Provider=xai/API=openai-responses with no serialized tools, no native anchor, no previous_response_id and no explicit choice. Preserve explicit auto/none/required, other providers, inherited/dynamic tools and old server state. Do not infer by model/hostname or force tools:[].
 - Eight actual localhost HTTP controls passed race x3 (1.186s). Final runtime full pkg/pigo race passed39.604s and vet passed. Independent target plus isolated late-tool/OpenAI-anchor controls passed race x3 (1.222s), static review no blocker. No live provider, CI dispatch, merge or deployment.
+
+## 2026-11-14: Anthropic stop-reason diagnostics (upstream #4769)
+
+- Reproduced with localhost HTTP SSE: `refusal`, `sensitive`, and an unknown reason already mapped to `StopReasonError`, but lost the upstream reason and returned an empty error message. Preserve the quoted reason on this existing error mapping in the shared Anthropic/Kimi parser. No change to stop categories, message-stop `Done(Error)` events, partial text, usage, requested identity, or retry behavior.
+- Official Claude stop-reasons documentation confirms `refusal`: https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons (checked 2026-11-14; no publication date inferred). `sensitive` and unknown strings retain existing compatibility classification, without assigning new official semantics. No fallback, refusal bypass, or `stop_details` interpretation added.
+- Baseline real-HTTP regression failed in 0.019s. Final-runtime full `pkg/pigo` race passed in 43.924s and vet passed. Final expanded targeted race x3 passed in 1.131s; coverage includes normal/length controls, exact text/usage/identity, one request and one terminal Done event, shared Kimi parsing, and no context-overflow classification for the tested reasons. No live requests, billing, CI, or deployment.
+- Error messages are observable to host classifiers. Arbitrary unknown upstream strings can still match existing text-based classification rules; this patch does not promise otherwise or add automatic retry/compaction. No preservation of every refusal metadata field is claimed.
+- Independent static review found no blocker; independent stop-diagnostic plus overflow target race x3 passed in 1.721s.
+
+## 2026-11-14 - Review newly opened PRs #260-261
+
+- After #228-259 merged, the final open-PR check found two new drafts. Reviewed
+  their actual diffs and interactions against the merged code; no blocking defect
+  or unresolved review thread was found. Integrated both with all worklog entries.
+- #260 omits only synthesized tool_choice for fresh tool-free xAI Responses;
+  explicit choices and inherited/anchored tools remain intact. #261 preserves
+  Anthropic/Kimi error stop-reason diagnostics without changing classification.
+- Windows Go 1.26.4: targeted combined race tests passed (1.205s), final pkg/pigo
+  race passed (39.048s), vet and diff checks passed. Earlier agent/MCP/CLI results
+  still cover unchanged code. No live service, CI dispatch, release or deployment.
