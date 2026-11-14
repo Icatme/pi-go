@@ -3967,3 +3967,9 @@
   checks protecting publication. Original workspace README edits remain intact.
   No full-repository runtime/race repeat, examples repeat, UI acceptance, live
   provider request, main-branch merge, release or deployment was performed here.
+
+## 2026-11-14: upstream contract regression guards
+
+Rechecked pi #11226 and #9134 on master `9a8e190`: Go already avoids the top-level Code Mode binding collision and preserves root Anthropic tool-schema constraints. Add real sandbox/serialized request regressions rather than unnecessary runtime patches. Temporary overlays recreating each reported defect make the new tests fail as expected. Notes distinguish these negative findings from the independent Mistral #224 and DeepSeek #225 fixes. See `docs/pi-upstream-contract-guards-20261114.md`; no real service, paid model, merge or deployment.
+
+The same follow-up documents exectools host-owned `ExecutionModeSequential` for dependent command/read batches after an offline ordering reproduction; no global scheduling default changed.
