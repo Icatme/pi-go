@@ -64,14 +64,19 @@ type openAIResponsesTextFormat struct {
 	Strict bool            `json:"strict,omitempty"`
 }
 
+type openAIResponsesIncompleteDetails struct {
+	Reason string `json:"reason"`
+}
+
 type openAIResponsesResponse struct {
-	Model       string                        `json:"model"`
-	ID          string                        `json:"id"`
-	Status      string                        `json:"status"`
-	ServiceTier string                        `json:"service_tier,omitempty"`
-	Output      []openAIResponsesResponseItem `json:"output"`
-	Usage       *openAIResponsesUsage         `json:"usage,omitempty"`
-	Error       *openAIResponsesResponseError `json:"error,omitempty"`
+	IncompleteDetails *openAIResponsesIncompleteDetails `json:"incomplete_details,omitempty"`
+	Model             string                            `json:"model"`
+	ID                string                            `json:"id"`
+	Status            string                            `json:"status"`
+	ServiceTier       string                            `json:"service_tier,omitempty"`
+	Output            []openAIResponsesResponseItem     `json:"output"`
+	Usage             *openAIResponsesUsage             `json:"usage,omitempty"`
+	Error             *openAIResponsesResponseError     `json:"error,omitempty"`
 }
 
 type openAIResponsesResponseItem struct {
@@ -125,6 +130,7 @@ type openAIResponsesResponseError struct {
 // ============================================================================
 
 type openAIResponsesStreamingState struct {
+	AllowNestedError       bool // Only WebSocket error envelopes use nested protocol fields.
 	CurrentTextIndex       int
 	CurrentThinkingIndex   int
 	CurrentTextItemKey     string
@@ -677,9 +683,15 @@ func processOpenAIResponsesStreamEventWithProvider(
 			return false, err
 		}
 		outputErr := emitOpenAIResponsesTerminalOutputIfNeeded(response, stream, state, terminal)
-		applyOpenAIResponsesTerminal(model, response, terminal, requestServiceTier)
+		usageErr := applyOpenAIResponsesTerminal(model, response, terminal, requestServiceTier)
+		if usageErr != nil {
+			return true, usageErr
+		}
 		if outputErr != nil {
 			return true, outputErr
+		}
+		if terminal.Status == "incomplete" && terminal.IncompleteDetails != nil && terminal.IncompleteDetails.Reason == "content_filter" {
+			return true, withProviderFailure(errors.New("response incomplete: content_filter"), ProviderFailureUpstream, "content_filter")
 		}
 		if response.StopReason == StopReasonToolUse {
 			for _, call := range state.ToolCalls {
@@ -710,7 +722,9 @@ func processOpenAIResponsesStreamEventWithProvider(
 			response.ResponseModel = terminal.Model
 		}
 		if terminal.Usage != nil {
-			applyOpenAIResponsesUsage(model, response, *terminal.Usage, terminal.ServiceTier, requestServiceTier)
+			if err := applyOpenAIResponsesUsage(model, response, *terminal.Usage, terminal.ServiceTier, requestServiceTier); err != nil {
+				return true, err
+			}
 		}
 		if terminal.Error != nil && strings.TrimSpace(terminal.Error.Message) != "" {
 			response.StopReason = StopReasonError
@@ -728,15 +742,23 @@ func processOpenAIResponsesStreamEventWithProvider(
 		}
 		return true, withProviderFailure(errors.New(response.ErrorMessage), ProviderFailureUpstream, "error_event")
 	case "error":
-		if message, ok := event["message"].(string); ok && strings.TrimSpace(message) != "" {
-			response.ErrorMessage = message
-		} else {
-			response.ErrorMessage = "error"
-		}
-		response.StopReason = StopReasonError
+		message, _ := event["message"].(string)
 		code, _ := event["code"].(string)
-		// The event's type is "error", not the provider's error category.
-		return true, withProviderErrorDetails(errors.New(response.ErrorMessage), code, "")
+		errorType := ""
+		if strings.TrimSpace(message) == "" && state.AllowNestedError {
+			if nested, ok := event["error"].(map[string]any); ok {
+				message, _ = nested["message"].(string)
+				code, _ = nested["code"].(string)
+				errorType, _ = nested["type"].(string)
+			}
+		}
+		if strings.TrimSpace(message) == "" {
+			message = "error"
+		}
+		response.ErrorMessage = message
+		response.StopReason = StopReasonError
+		// The envelope's type is "error", not the provider's error category.
+		return true, withProviderErrorDetails(errors.New(message), code, errorType)
 	}
 
 	return false, nil
@@ -1327,7 +1349,7 @@ func combineOpenAIResponsesToolCallID(callID string, itemID string) string {
 // Shared terminal response handling
 // ============================================================================
 
-func applyOpenAIResponsesTerminal(model Model, response *AssistantMessage, terminal openAIResponsesResponse, requestServiceTier string) {
+func applyOpenAIResponsesTerminal(model Model, response *AssistantMessage, terminal openAIResponsesResponse, requestServiceTier string) error {
 	if terminal.Model != "" && terminal.Model != model.ID {
 		response.ResponseModel = terminal.Model
 	}
@@ -1339,12 +1361,16 @@ func applyOpenAIResponsesTerminal(model Model, response *AssistantMessage, termi
 	}
 	response.StopReason = mapOpenAIResponsesStopReason(terminal.Status, response.Content)
 	if terminal.Usage != nil {
-		applyOpenAIResponsesUsage(model, response, *terminal.Usage, terminal.ServiceTier, requestServiceTier)
+		return applyOpenAIResponsesUsage(model, response, *terminal.Usage, terminal.ServiceTier, requestServiceTier)
 	}
+	return nil
 }
 
-func applyOpenAIResponsesUsage(model Model, response *AssistantMessage, usage openAIResponsesUsage, responseServiceTier string, requestServiceTier string) {
-	inputTokens := usage.InputTokens - usage.InputDetails.CachedTokens - usage.InputDetails.CacheWriteTokens
+func applyOpenAIResponsesUsage(model Model, response *AssistantMessage, usage openAIResponsesUsage, responseServiceTier string, requestServiceTier string) error {
+	if err := validateOpenAIResponsesUsageCounts(usage); err != nil {
+		return withProviderFailure(err, ProviderFailureParse, "invalid_usage")
+	}
+	inputTokens := usage.InputTokens - (usage.InputDetails.CachedTokens + usage.InputDetails.CacheWriteTokens)
 	if inputTokens < 0 {
 		inputTokens = 0
 	}
@@ -1360,6 +1386,19 @@ func applyOpenAIResponsesUsage(model Model, response *AssistantMessage, usage op
 	if model.Provider != "opencode-go" {
 		applyOpenAIResponsesServiceTierPricing(model, &response.Usage, resolveOpenAIResponsesServiceTier(responseServiceTier, requestServiceTier))
 	}
+	return nil
+}
+
+func validateOpenAIResponsesUsageCounts(usage openAIResponsesUsage) error {
+	for _, value := range []int{usage.InputTokens, usage.OutputTokens, usage.TotalTokens, usage.InputDetails.CachedTokens, usage.InputDetails.CacheWriteTokens} {
+		if value < 0 {
+			return errors.New("OpenAI Responses usage contains a negative token count")
+		}
+	}
+	if usage.InputDetails.CachedTokens > math.MaxInt-usage.InputDetails.CacheWriteTokens || usage.InputTokens > math.MaxInt-usage.OutputTokens {
+		return errors.New("OpenAI Responses usage token counts overflow")
+	}
+	return nil
 }
 
 func parseOpenAIResponsesResponseOutput(items []openAIResponsesResponseItem) []ContentBlock {

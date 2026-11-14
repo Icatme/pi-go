@@ -45,6 +45,7 @@ type Agent struct {
 	running          bool
 	cancel           context.CancelFunc
 	idle             chan struct{}
+	listenerResults  *listenerResultBatch
 	mu               sync.RWMutex
 }
 
@@ -98,6 +99,7 @@ func (a *Agent) Prompt(ctx context.Context, messages ...Message) error {
 	if err != nil {
 		return err
 	}
+	defer a.releaseInterruptedRun(idle)
 	a.setActiveDefinition(definition)
 
 	next, runErr := a.engine.RunWithHooks(runCtx, definition, &snapshot, messages, a.processLoopEvent, a.runtimeHooks())
@@ -134,6 +136,7 @@ func (a *Agent) Continue(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer a.releaseInterruptedRun(idle)
 	a.setActiveDefinition(definition)
 
 	var (
@@ -506,6 +509,7 @@ func (a *Agent) startRun(ctx context.Context) (context.Context, AgentDefinition,
 	a.running = true
 	a.cancel = cancel
 	a.idle = idle
+	a.listenerResults = nil
 	a.activeDefinition = a.definition
 	a.state.IsStreaming = true
 	a.state.StreamMessage = nil
@@ -513,6 +517,7 @@ func (a *Agent) startRun(ctx context.Context) (context.Context, AgentDefinition,
 	a.snapshot.Error = ""
 	a.state.PendingToolCalls = make(map[string]PendingToolCall)
 
+	a.initializeListenerResultsLocked()
 	return runCtx, a.definition, cloneSnapshotValue(a.snapshot), idle, nil
 }
 
@@ -561,12 +566,43 @@ func (a *Agent) finishRun(snapshot *AgentSnapshot, idle chan struct{}) {
 	a.state.StreamMessage = nil
 	a.state.PendingToolCalls = make(map[string]PendingToolCall)
 	a.running = false
+	a.listenerResults = nil
 	a.cancel = nil
 	a.activeDefinition = a.definition
 	if a.idle == idle {
 		close(a.idle)
 		a.idle = nil
 	}
+}
+
+// releaseInterruptedRun releases only this invocation's run ownership during
+// unwinding. It does not recover a panic, rewrite history, or imply that tools
+// can safely be replayed. Normal finishRun has already cleared the owner.
+func (a *Agent) releaseInterruptedRun(idle chan struct{}) {
+	a.mu.RLock()
+	if a.idle != idle || !a.running {
+		a.mu.RUnlock()
+		return
+	}
+	cancel := a.cancel
+	a.mu.RUnlock()
+	if cancel != nil {
+		cancel()
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.idle != idle || !a.running {
+		return
+	}
+	a.state.IsStreaming = false
+	a.state.StreamMessage = nil
+	a.state.PendingToolCalls = make(map[string]PendingToolCall)
+	a.running = false
+	a.listenerResults = nil
+	a.cancel = nil
+	a.activeDefinition = a.definition
+	close(idle)
+	a.idle = nil
 }
 
 func (a *Agent) handleRuntimeError(ctx context.Context, snapshot AgentSnapshot, runErr error) *AgentSnapshot {
@@ -614,6 +650,7 @@ func (a *Agent) handleRuntimeError(ctx context.Context, snapshot AgentSnapshot, 
 
 func (a *Agent) processLoopEvent(event AgentEvent) {
 	a.mu.Lock()
+	owner := a.idle
 	switch event.Type {
 	case EventAgentStart:
 		a.state.IsStreaming = true
@@ -671,8 +708,17 @@ func (a *Agent) processLoopEvent(event AgentEvent) {
 		a.state.StreamMessage = nil
 		a.state.PendingToolCalls = make(map[string]PendingToolCall)
 	}
+	a.observeListenerResultsLocked(event)
 	a.mu.Unlock()
 
+	// Preserve completed root results only when a listener unwinds this run.
+	// Normal message events retain their existing order and commit timing.
+	defer func() {
+		if value := recover(); value != nil {
+			a.flushListenerResults(owner)
+			panic(value)
+		}
+	}()
 	a.dispatchEvent(event)
 }
 

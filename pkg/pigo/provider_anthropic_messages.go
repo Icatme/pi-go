@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -92,7 +91,7 @@ func streamAnthropicMessages(model Model, ctx Context, options ProviderStreamOpt
 		request, err := http.NewRequestWithContext(
 			requestContext,
 			http.MethodPost,
-			strings.TrimRight(model.BaseURL, "/")+"/v1/messages",
+			resolveAnthropicMessagesURL(model.BaseURL),
 			bytes.NewReader(bodyBytes),
 		)
 		if err != nil {

@@ -140,3 +140,16 @@ func TestStoreLimitExplainsSmallStateWithoutEchoingValue(t *testing.T) {
 		t.Fatalf("store limit lacks safe repair guidance: %+v err=%v", script, err)
 	}
 }
+
+func TestSandboxSearchExactNameUsesSharedRanking(t *testing.T) {
+	s := sandboxForTest(t, DefaultConfig())
+	invoke := func(context.Context, HostCall) (json.RawMessage, error) {
+		t.Fatal("discovery executed tool")
+		return nil, nil
+	}
+	tools := []Tool{{Name: "mcp__app__queue_read", Description: "Read a queued message of this thread.", Invoke: invoke}, {Name: "mcp__app__thread_read", Description: "Read durable state and a paginated timeline from any thread. The default view returns user messages, assistant messages and plans. Continue with afterPosition until hasMore is false.", Invoke: invoke}}
+	result, err := s.Run(t.Context(), `text((await searchTools("mcp__app__thread_read",{limit:1}))[0].name)`, RunOptions{Tools: tools})
+	if err != nil || textOutput(result) != "mcp__app__thread_read" || len(result.Calls) != 0 {
+		t.Fatalf("result%+v err%v", result, err)
+	}
+}

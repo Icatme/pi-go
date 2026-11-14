@@ -194,7 +194,8 @@ func New(sandbox *codemode.Sandbox, bindings []Binding, options Options) (agent.
 			available = strings.Join(list, ", ")
 		}
 		options.Description = "Run an async JavaScript body; await tools.<name>(args) or use Promise.all. " +
-			"Discover with ALL_TOOLS, searchTools(query,{namespace?,limit?}), describeTool(name), describeNamespace(name). " +
+			"Discover with ALL_TOOLS, await searchTools(query,{namespace?,limit?,descriptionBudget?:{maxPerMatchBytes,maxTotalBytes}}), await describeTool(name), await describeNamespace(name). " +
+			"Optional descriptionBudget uses nonnegative UTF-8 byte ceilings (zero omits descriptions); descriptionTruncated marks prefixes, not full contracts. Read describeTool before using truncated guidance. " +
 			"Descriptions explain input and resolved values. Check availability with \"name\" in tools. " +
 			"Globals: text/return and console.* emit bounded output; image emits inline images; store/load keep small host-scoped JSON values; exit succeeds. " +
 			"Allowed namespaces: " + available + ". No filesystem, network or timers except through allowed tools."

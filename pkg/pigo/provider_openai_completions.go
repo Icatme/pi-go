@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"net/url"
 	"sort"
@@ -174,7 +175,7 @@ func (u *openAICompletionsUsage) UnmarshalJSON(data []byte) error {
 		Total      *int `json:"total_tokens"`
 	}{usageFields: &fields}
 	if err := json.Unmarshal(data, &wire); err != nil {
-		return err
+		return invalidChatUsage("malformed token count")
 	}
 	*u = openAICompletionsUsage(fields)
 	if wire.Prompt != nil {
@@ -327,16 +328,23 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 			MaxRetries:    maxInt(0, options.MaxRetries),
 			MaxRetryDelay: time.Duration(options.MaxRetryDelay) * time.Millisecond,
 		}
+		var responseIsHTML, sawStreamEvent bool
+		var responseStatus int
 		err = client.postStream(requestContext, resolveOpenAICompletionsURL(model.BaseURL), httpStreamRequest{
 			Headers: headers,
 			Body:    bodyBytes,
 			OnEvent: func(_ string, data string) (bool, error) {
+				sawStreamEvent = true
 				if err := observeProviderStreamEvent(data, model, options); err != nil {
 					return false, err
 				}
 				return processOpenAICompletionsStreamEvent(data, model, &response, stream, state)
 			},
 			OnResponse: func(httpResponse *http.Response) {
+				mediaType, _, mediaErr := mime.ParseMediaType(httpResponse.Header.Get("Content-Type"))
+				responseIsHTML = mediaErr == nil && mediaType == "text/html"
+				responseStatus = httpResponse.StatusCode
+				sawStreamEvent = false
 				if options.OnResponse != nil {
 					options.OnResponse(ProviderResponse{
 						Status:  httpResponse.StatusCode,
@@ -361,6 +369,9 @@ func streamOpenAICompletions(model Model, ctx Context, options ProviderStreamOpt
 		})
 		if err == nil && !state.FinishSeen {
 			err = withProviderFailure(errOpenAICompletionsStreamMissingTerminal, ProviderFailureStream, "missing_terminal")
+			if responseIsHTML && !sawStreamEvent {
+				err = withProviderFailure(fmt.Errorf("openai completions upstream returned HTTP %d with text/html instead of SSE events", responseStatus), ProviderFailureParse, "unexpected_content_type")
+			}
 		}
 		if err == nil && (response.StopReason == StopReasonStop || response.StopReason == StopReasonToolUse || response.StopReason == StopReasonLength) {
 			err = validateOpenAICompletionsToolBatch(&response, state)
@@ -808,7 +819,9 @@ func processOpenAICompletionsStreamEvent(data string, model Model, response *Ass
 		response.ResponseModel = chunk.Model
 	}
 	if chunk.Usage != nil {
-		applyOpenAICompletionsUsage(response, model, *chunk.Usage)
+		if err := applyOpenAICompletionsUsage(response, model, *chunk.Usage); err != nil {
+			return false, err
+		}
 	}
 
 	for _, choice := range chunk.Choices {
@@ -818,7 +831,9 @@ func processOpenAICompletionsStreamEvent(data string, model Model, response *Ass
 			delta = *choice.Message
 		}
 		if choice.Usage != nil && chunk.Usage == nil {
-			applyOpenAICompletionsUsage(response, model, *choice.Usage)
+			if err := applyOpenAICompletionsUsage(response, model, *choice.Usage); err != nil {
+				return false, err
+			}
 		}
 		if reasoning, signature := openAICompletionsReasoningDelta(delta, model.Provider); reasoning != "" {
 			appendOpenAICompletionsThinking(response, stream, state, reasoning, signature)
@@ -1150,6 +1165,9 @@ func openAICompletionsToolCallFromState(state *openAICompletionsToolCallState) T
 // identity fields until later chunks. A malformed batch must not reach an agent
 // as executable calls, even on the final error message.
 func validateOpenAICompletionsToolBatch(response *AssistantMessage, state *openAICompletionsStreamState) error {
+	if response.StopReason == StopReasonToolUse && len(state.ToolCalls) == 0 {
+		return withProviderFailure(errors.New("OpenAI Completions ended with tool use but no tool call"), ProviderFailureParse, "missing_tool_call")
+	}
 	for _, call := range state.ToolCalls {
 		if strings.TrimSpace(call.ID) != "" && strings.TrimSpace(call.Name) != "" {
 			continue
@@ -1193,7 +1211,21 @@ func finalizeOpenAICompletionsResponse(response *AssistantMessage, stream *Assis
 	stream.finish(*response)
 }
 
-func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage openAICompletionsUsage) {
+func invalidChatUsage(reason string) error {
+	return withProviderFailure(fmt.Errorf("invalid chat usage: %s", reason), ProviderFailureParse, "invalid_usage")
+}
+
+func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage openAICompletionsUsage) error {
+	for _, count := range []int{usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.PromptCacheMissTokens, usage.CompletionTokensDetails.ReasoningTokens} {
+		if count < 0 {
+			return invalidChatUsage("negative token count")
+		}
+	}
+	for _, count := range []*int{usage.CachedTokens, usage.PromptCacheHitTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptTokensDetails.CacheWriteTokens, usage.PromptTokensDetails.CacheCreationTokens} {
+		if count != nil && *count < 0 {
+			return invalidChatUsage("negative token count")
+		}
+	}
 	cacheRead := firstOpenAICompletionsTokenCount(
 		usage.PromptTokensDetails.CachedTokens,
 		usage.PromptCacheHitTokens,
@@ -1205,7 +1237,12 @@ func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage 
 		usage.PromptTokensDetails.CacheCreationTokens,
 		usage.CacheCreationInputTokens,
 	)
-	input := usage.PromptTokens - cacheRead - cacheWrite
+	maxCount := int(^uint(0) >> 1)
+	if cacheRead > maxCount-cacheWrite {
+		return invalidChatUsage("token sum exceeds integer range")
+	}
+	cacheTotal := cacheRead + cacheWrite
+	input := usage.PromptTokens - cacheTotal
 	if usage.PromptCacheMissTokens > 0 {
 		input = usage.PromptCacheMissTokens
 	}
@@ -1226,7 +1263,10 @@ func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage 
 			output = reportedOutput
 		}
 	}
-	total := input + output + cacheRead + cacheWrite
+	if input > maxCount-output || input+output > maxCount-cacheTotal {
+		return invalidChatUsage("token sum exceeds integer range")
+	}
+	total := input + output + cacheTotal
 	response.Usage = Usage{
 		Input:       input,
 		Output:      output,
@@ -1236,6 +1276,7 @@ func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage 
 	}
 	response.UsageReported = true
 	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
+	return nil
 }
 
 func firstOpenAICompletionsTokenCount(counts ...*int) int {
@@ -1289,6 +1330,31 @@ func cloneOpenAICompletionsHTTPHeaders(headers http.Header) map[string]string {
 }
 
 func resolveOpenAICompletionsURL(baseURL string) string {
+	base := strings.TrimSpace(baseURL)
+	if !strings.ContainsAny(base, "?#") {
+		return resolveLegacyOpenAICompletionsURL(baseURL)
+	}
+	if parsed, err := url.Parse(base); err == nil && parsed.Opaque == "" {
+		path := strings.TrimRight(parsed.EscapedPath(), "/")
+		if !strings.HasSuffix(path, "/chat/completions") {
+			if path == "" {
+				path = "/v1"
+			}
+			path += "/chat/completions"
+		}
+		decoded, err := url.PathUnescape(path)
+		if err != nil {
+			return resolveLegacyOpenAICompletionsURL(baseURL)
+		}
+		parsed.Path = decoded
+		parsed.RawPath = path
+		return parsed.String()
+	}
+	// Keep malformed/opaque URL handling unchanged; the request layer validates it.
+	return resolveLegacyOpenAICompletionsURL(baseURL)
+}
+
+func resolveLegacyOpenAICompletionsURL(baseURL string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if trimmed == "" {
 		trimmed = "https://api.openai.com/v1"

@@ -35,10 +35,11 @@ type deepSeekThinkingOptions struct {
 }
 
 type deepSeekChatMessage struct {
-	Role       string                 `json:"role"`
-	Content    any                    `json:"content"`
-	ToolCallID string                 `json:"tool_call_id,omitempty"`
-	ToolCalls  []deepSeekChatToolCall `json:"tool_calls,omitempty"`
+	ReasoningContent *string                `json:"reasoning_content,omitempty"`
+	Role             string                 `json:"role"`
+	Content          any                    `json:"content"`
+	ToolCallID       string                 `json:"tool_call_id,omitempty"`
+	ToolCalls        []deepSeekChatToolCall `json:"tool_calls,omitempty"`
 }
 
 type deepSeekChatToolCall struct {
@@ -243,9 +244,9 @@ func convertDeepSeekChatMessages(model Model, ctx Context) []deepSeekChatMessage
 				messages = append(messages, deepSeekChatMessage{Role: "user", Content: content})
 			}
 		case AssistantMessage:
-			content, toolCalls := convertDeepSeekAssistantContent(typed.Content)
-			if strings.TrimSpace(content) != "" || len(toolCalls) > 0 {
-				messages = append(messages, deepSeekChatMessage{Role: "assistant", Content: content, ToolCalls: toolCalls})
+			content, toolCalls, reasoning := convertDeepSeekAssistantContent(typed.Content)
+			if strings.TrimSpace(content) != "" || len(toolCalls) > 0 || reasoning != nil {
+				messages = append(messages, deepSeekChatMessage{Role: "assistant", Content: content, ToolCalls: toolCalls, ReasoningContent: reasoning})
 			}
 		case ToolResultMessage:
 			var content any = deepSeekTextFromContent(typed.Content)
@@ -289,7 +290,9 @@ func deepSeekTextFromContent(content any) string {
 	}
 }
 
-func convertDeepSeekAssistantContent(blocks []ContentBlock) (string, []deepSeekChatToolCall) {
+func convertDeepSeekAssistantContent(blocks []ContentBlock) (string, []deepSeekChatToolCall, *string) {
+	var reasoning strings.Builder
+	hasReasoning := false
 	parts := make([]string, 0, len(blocks))
 	toolCalls := make([]deepSeekChatToolCall, 0)
 	for _, block := range blocks {
@@ -299,8 +302,9 @@ func convertDeepSeekAssistantContent(blocks []ContentBlock) (string, []deepSeekC
 				parts = append(parts, typed.Text)
 			}
 		case ThinkingContent:
-			if strings.TrimSpace(typed.Thinking) != "" {
-				parts = append(parts, typed.Thinking)
+			if !typed.Redacted {
+				hasReasoning = true
+				reasoning.WriteString(typed.Thinking)
 			}
 		case ToolCall:
 			toolCalls = append(toolCalls, deepSeekChatToolCall{
@@ -313,7 +317,12 @@ func convertDeepSeekAssistantContent(blocks []ContentBlock) (string, []deepSeekC
 			})
 		}
 	}
-	return strings.Join(parts, "\n"), toolCalls
+	var reasoningContent *string
+	if hasReasoning {
+		value := reasoning.String()
+		reasoningContent = &value
+	}
+	return strings.Join(parts, "\n"), toolCalls, reasoningContent
 }
 
 func convertDeepSeekChatTools(tools []Tool) []map[string]any {
@@ -383,11 +392,15 @@ func streamDeepSeekChatSSE(model Model, ctx context.Context, client *http.Client
 	}); err != nil {
 		return err
 	}
+	if !state.FinishSeen && response.StopReason != StopReasonError {
+		return withProviderFailure(fmt.Errorf("DeepSeek stream ended without finish_reason"), ProviderFailureStream, "missing_terminal")
+	}
 	finalizeDeepSeekChatResponse(response, stream, state)
 	return nil
 }
 
 type deepSeekChatState struct {
+	FinishSeen      bool
 	TextIndex       int
 	TextStarted     bool
 	Text            strings.Builder
@@ -417,7 +430,9 @@ func processDeepSeekChatStreamEvent(data string, model Model, response *Assistan
 		response.ResponseModel = chunk.Model
 	}
 	if chunk.Usage != nil {
-		applyDeepSeekUsage(response, model, *chunk.Usage)
+		if err := applyDeepSeekUsage(response, model, *chunk.Usage); err != nil {
+			return true, err
+		}
 	}
 	for _, choice := range chunk.Choices {
 		delta := choice.Delta
@@ -469,6 +484,7 @@ func processDeepSeekChatStreamEvent(data string, model Model, response *Assistan
 			stream.push(AssistantMessageEvent{Type: AssistantMessageEventToolCallDelta, ContentIndex: toolState.Index, Delta: toolDelta.Function.Arguments, ToolCall: toolCall, Partial: *response})
 		}
 		if strings.TrimSpace(choice.FinishReason) != "" {
+			state.FinishSeen = true
 			response.StopReason = mapDeepSeekFinishReason(choice.FinishReason, response.Content)
 		}
 	}
@@ -516,13 +532,29 @@ func finalizeDeepSeekChatResponse(response *AssistantMessage, stream *AssistantM
 	stream.finish(*response)
 }
 
-func applyDeepSeekUsage(response *AssistantMessage, model Model, usage deepSeekChatUsage) {
+func applyDeepSeekUsage(response *AssistantMessage, model Model, usage deepSeekChatUsage) error {
+	invalid := func() error {
+		return withProviderFailure(fmt.Errorf("DeepSeek returned invalid token usage"), ProviderFailureParse, "invalid_usage")
+	}
+	for _, value := range []int{usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.PromptCacheHitTokens, usage.PromptCacheMissTokens} {
+		if value < 0 {
+			return invalid()
+		}
+	}
+	if usage.CompletionTokensDetails != nil && usage.CompletionTokensDetails.ReasoningTokens < 0 {
+		return invalid()
+	}
+	maxInt := int(^uint(0) >> 1)
+	if usage.PromptCacheHitTokens > usage.PromptTokens || usage.PromptCacheMissTokens > usage.PromptTokens || usage.PromptTokens > maxInt-usage.CompletionTokens {
+		return invalid()
+	}
+
 	input := usage.PromptTokens - usage.PromptCacheHitTokens
 	if usage.PromptCacheMissTokens > 0 {
 		input = usage.PromptCacheMissTokens
 	}
-	if input < 0 {
-		input = 0
+	if input > maxInt-usage.PromptCacheHitTokens || input+usage.PromptCacheHitTokens > maxInt-usage.CompletionTokens {
+		return invalid()
 	}
 	response.Usage = Usage{
 		Input:       input,
@@ -532,6 +564,7 @@ func applyDeepSeekUsage(response *AssistantMessage, model Model, usage deepSeekC
 	}
 	response.UsageReported = true
 	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
+	return nil
 }
 
 func mapDeepSeekFinishReason(reason string, content []ContentBlock) StopReason {
@@ -572,6 +605,28 @@ func cloneDeepSeekHTTPHeaders(headers http.Header) map[string]string {
 }
 
 func resolveDeepSeekChatURL(baseURL string) string {
+	base := strings.TrimSpace(baseURL)
+	if !strings.ContainsAny(base, "?#") {
+		return resolveLegacyDeepSeekChatURL(baseURL)
+	}
+	if parsed, err := url.Parse(base); err == nil && parsed.Opaque == "" {
+		path := strings.TrimRight(parsed.EscapedPath(), "/")
+		if !strings.HasSuffix(path, "/chat/completions") {
+			path += "/chat/completions"
+		}
+		decoded, err := url.PathUnescape(path)
+		if err != nil {
+			return resolveLegacyDeepSeekChatURL(baseURL)
+		}
+		parsed.Path = decoded
+		parsed.RawPath = path
+		return parsed.String()
+	}
+	// Keep malformed/opaque URL handling unchanged; the request layer validates it.
+	return resolveLegacyDeepSeekChatURL(baseURL)
+}
+
+func resolveLegacyDeepSeekChatURL(baseURL string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if trimmed == "" {
 		trimmed = "https://api.deepseek.com"

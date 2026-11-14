@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -249,7 +250,15 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 			options.RequestContext = observedRequestContext
 		}
 		if response.UsageReported {
-			usage = addAnthropicHostedToolUsage(usage, response.Usage)
+			combined, aggregateErr := addAnthropicHostedToolUsage(usage, response.Usage)
+			if aggregateErr != nil {
+				appendAnthropicUsageAggregateDiagnostic(&response, usage, response.Usage)
+				response.Usage = usage
+				response.UsageReported = usageReported
+				response.HostedToolExecutions = append(cloneHostedToolExecutions(executions), cloneHostedToolExecutions(response.HostedToolExecutions)...)
+				return response, aggregateErr
+			}
+			usage = combined
 			usageReported = true
 		}
 		response.Usage = usage
@@ -299,7 +308,14 @@ func completeAnthropicHostedToolLoop(model Model, ctx Context, options Anthropic
 	}, nil
 }
 
-func addAnthropicHostedToolUsage(total Usage, next Usage) Usage {
+func addAnthropicHostedToolUsage(total Usage, next Usage) (Usage, error) {
+	max := int(^uint(0) >> 1)
+	for _, pair := range [][2]int{{total.Input, next.Input}, {total.Output, next.Output}, {total.CacheRead, next.CacheRead}, {total.CacheWrite, next.CacheWrite}, {total.TotalTokens, next.TotalTokens}} {
+		if pair[0] < 0 || pair[1] < 0 || pair[1] > max-pair[0] {
+			return total, withProviderFailure(errors.New("Anthropic hosted usage aggregate cannot be represented; retained usage covers previous requests only"), ProviderFailureParse, "invalid_usage_aggregate")
+		}
+	}
+
 	total.Input += next.Input
 	total.Output += next.Output
 	total.CacheRead += next.CacheRead
@@ -310,7 +326,7 @@ func addAnthropicHostedToolUsage(total Usage, next Usage) Usage {
 	total.Cost.CacheRead += next.Cost.CacheRead
 	total.Cost.CacheWrite += next.Cost.CacheWrite
 	total.Cost.Total += next.Cost.Total
-	return total
+	return total, nil
 }
 
 func emitHostedToolLifecycle(stream *AssistantMessageEventStream, partial AssistantMessage, call HostedToolExecution) {
@@ -352,6 +368,34 @@ func completeAnthropicOnce(model Model, ctx Context, options AnthropicMessagesPr
 	return completeAnthropicOnceWithStream(model, ctx, options, apiKey, isOAuth, nil, true, false, nil)
 }
 
+func validateAnthropicOAuthToolNames(bodyBytes []byte) error {
+	var wire struct {
+		Tools []anthropicTool `json:"tools"`
+	}
+	if err := json.Unmarshal(bodyBytes, &wire); err != nil {
+		return nil
+	}
+	return validateAnthropicOAuthTools(wire.Tools)
+}
+
+func validateAnthropicOAuthTools(tools []anthropicTool) error {
+	seen := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		name := tool.Name
+		if tool.Type == "builtin_function" && tool.Function != nil {
+			name = tool.Function.Name
+		}
+		if name == "" {
+			continue
+		}
+		if seen[name] {
+			return withProviderFailure(errors.New("Anthropic OAuth tool names collide after wire normalization"), ProviderFailureSDK, "invalid_tool_names")
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
 func completeAnthropicOnceWithStream(model Model, ctx Context, options AnthropicMessagesProviderOptions, apiKey string, isOAuth bool, stream *AssistantMessageEventStream, emitTerminal bool, observeRequest bool, observedRequestContext *context.Context) (AssistantMessage, error) {
 	response := AssistantMessage{
 		API:        model.API,
@@ -360,7 +404,14 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 		StopReason: StopReasonStop,
 		Timestamp:  time.Now().UTC(),
 	}
-	payload := any(buildAnthropicRequest(model, ctx, options, isOAuth, true))
+	requestBody := buildAnthropicRequest(model, ctx, options, isOAuth, true)
+	if isOAuth {
+		if err := validateAnthropicOAuthTools(requestBody.Tools); err != nil {
+			applyRequestError(&response, err)
+			return response, err
+		}
+	}
+	payload := any(requestBody)
 	if options.OnPayload != nil {
 		if next := options.OnPayload(payload, model); next != nil {
 			payload = next
@@ -369,6 +420,13 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
 		return AssistantMessage{}, err
+	}
+
+	if isOAuth && options.OnPayload != nil {
+		if err := validateAnthropicOAuthToolNames(bodyBytes); err != nil {
+			applyRequestError(&response, err)
+			return response, err
+		}
 	}
 
 	requestContext := options.RequestContext
@@ -386,7 +444,7 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 	request, err := http.NewRequestWithContext(
 		requestContext,
 		http.MethodPost,
-		strings.TrimRight(model.BaseURL, "/")+"/v1/messages",
+		resolveAnthropicMessagesURL(model.BaseURL),
 		bytes.NewReader(bodyBytes),
 	)
 	if err != nil {
@@ -581,7 +639,9 @@ func processAnthropicStreamEvent(
 			}
 			appendAnthropicCacheDiagnostics(response, event.Message.Diagnostics)
 			if event.Message.Usage != nil {
-				applyAnthropicUsage(response, model, *event.Message.Usage)
+				if err := applyAnthropicUsage(response, model, *event.Message.Usage); err != nil {
+					return false, err
+				}
 			}
 		}
 	case "content_block_start":
@@ -737,7 +797,9 @@ func processAnthropicStreamEvent(
 			} else {
 				usage.CacheCreationTokens = response.Usage.CacheWrite
 			}
-			applyAnthropicUsage(response, model, usage)
+			if err := applyAnthropicUsage(response, model, usage); err != nil {
+				return false, err
+			}
 		}
 	case "message_stop":
 		if emitTerminal && len(hostedTools) == 0 && response.StopReason == StopReasonToolUse {
@@ -798,16 +860,28 @@ func finishAssistantMessageStream(stream *AssistantMessageEventStream, result As
 	stream.finish(result)
 }
 
-func applyAnthropicUsage(response *AssistantMessage, model Model, usage anthropicUsage) {
+func applyAnthropicUsage(response *AssistantMessage, model Model, usage anthropicUsage) error {
+	// Anthropic input is uncached input, so cache counts are independent.
+	// Validate the whole snapshot before replacing previously valid accounting.
+	total := 0
+	max := int(^uint(0) >> 1)
+	for _, count := range []int{usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheCreationTokens} {
+		if count < 0 || count > max-total {
+			return withProviderFailure(errors.New("invalid Anthropic usage counts"), ProviderFailureParse, "invalid_usage")
+		}
+		total += count
+	}
+
 	response.Usage = Usage{
 		Input:       usage.InputTokens,
 		Output:      usage.OutputTokens,
 		CacheRead:   usage.CacheReadTokens,
 		CacheWrite:  usage.CacheCreationTokens,
-		TotalTokens: usage.InputTokens + usage.OutputTokens + usage.CacheReadTokens + usage.CacheCreationTokens,
+		TotalTokens: total,
 	}
 	response.UsageReported = true
 	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
+	return nil
 }
 
 func defaultMaxTokens(model Model, override int) int {
@@ -1404,4 +1478,26 @@ func mapAnthropicStopReason(reason string, content []ContentBlock) StopReason {
 	default:
 		return StopReasonError
 	}
+}
+
+// resolveAnthropicMessagesURL preserves query bytes while retaining the existing
+// /v1/messages suffix contract. Other URL shapes retain the legacy behavior.
+func resolveAnthropicMessagesURL(baseURL string) string {
+	legacy := strings.TrimRight(baseURL, "/") + "/v1/messages"
+	if !strings.ContainsAny(baseURL, "?#") {
+		return legacy
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.Opaque != "" {
+		return legacy
+	}
+	escapedPath := strings.TrimRight(parsed.EscapedPath(), "/") + "/v1/messages"
+	parsed.Path, err = url.PathUnescape(escapedPath)
+	if err != nil {
+		return legacy
+	}
+	if parsed.RawPath != "" {
+		parsed.RawPath = escapedPath
+	}
+	return parsed.String()
 }

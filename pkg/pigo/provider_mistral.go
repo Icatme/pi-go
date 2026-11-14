@@ -105,6 +105,7 @@ type mistralToolCallState struct {
 }
 
 type mistralStreamState struct {
+	FinishSeen      bool
 	TextIndex       int
 	TextStarted     bool
 	Text            strings.Builder
@@ -295,9 +296,15 @@ func convertMistralUserContent(content any, supportsImages bool) any {
 }
 
 type mistralContentChunk struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	ImageURL string `json:"image_url,omitempty"`
+	Type     string                     `json:"type"`
+	Text     string                     `json:"text,omitempty"`
+	ImageURL string                     `json:"image_url,omitempty"`
+	Thinking []mistralThinkingTextChunk `json:"thinking,omitempty"`
+}
+
+type mistralThinkingTextChunk struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 func convertMistralAssistantContent(blocks []ContentBlock) ([]mistralContentChunk, []mistralToolCall) {
@@ -313,8 +320,8 @@ func convertMistralAssistantContent(blocks []ContentBlock) ([]mistralContentChun
 		case ThinkingContent:
 			if strings.TrimSpace(typed.Thinking) != "" {
 				contentParts = append(contentParts, mistralContentChunk{
-					Type: "thinking",
-					Text: typed.Thinking,
+					Type:     "thinking",
+					Thinking: []mistralThinkingTextChunk{{Type: "text", Text: typed.Thinking}},
 				})
 			}
 		case ToolCall:
@@ -471,6 +478,9 @@ func streamMistralSSE(model Model, ctx context.Context, client *http.Client, opt
 	}); err != nil {
 		return err
 	}
+	if !state.FinishSeen && response.StopReason != StopReasonError {
+		return withProviderFailure(fmt.Errorf("Mistral stream ended without finish_reason"), ProviderFailureStream, "missing_terminal")
+	}
 	finalizeMistralChatResponse(model, response, stream, state)
 	return nil
 }
@@ -493,7 +503,9 @@ func processMistralChatStreamEvent(data string, model Model, response *Assistant
 		response.ResponseID = chunk.ID
 	}
 	if chunk.Usage != nil {
-		applyMistralUsage(response, model, *chunk.Usage)
+		if err := applyMistralUsage(response, model, *chunk.Usage); err != nil {
+			return false, err
+		}
 	}
 
 	if len(chunk.Choices) == 0 {
@@ -502,21 +514,14 @@ func processMistralChatStreamEvent(data string, model Model, response *Assistant
 
 	choice := chunk.Choices[0]
 	if choice.FinishReason != nil {
+		if strings.TrimSpace(*choice.FinishReason) != "" {
+			state.FinishSeen = true
+		}
 		response.StopReason = mapMistralFinishReason(*choice.FinishReason, response.Content)
 	}
 
 	delta := choice.Delta
-	if delta.ReasoningContent != "" {
-		if !state.ThinkingStarted {
-			state.ThinkingStarted = true
-			state.ThinkingIndex = len(response.Content)
-			response.Content = append(response.Content, ThinkingContent{})
-			stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingStart, ContentIndex: state.ThinkingIndex, Partial: cloneAssistantMessage(*response)})
-		}
-		state.Thinking.WriteString(delta.ReasoningContent)
-		response.Content[state.ThinkingIndex] = ThinkingContent{Thinking: state.Thinking.String()}
-		stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingDelta, ContentIndex: state.ThinkingIndex, Delta: delta.ReasoningContent, Partial: cloneAssistantMessage(*response)})
-	}
+	appendMistralThinkingDelta(response, stream, state, delta.ReasoningContent)
 
 	if delta.Content != nil {
 		switch content := delta.Content.(type) {
@@ -537,6 +542,16 @@ func processMistralChatStreamEvent(data string, model Model, response *Assistant
 				chunkMap, ok := item.(map[string]any)
 				if !ok {
 					continue
+				}
+				if stringValue(chunkMap["type"]) == "thinking" {
+					if parts, ok := chunkMap["thinking"].([]any); ok {
+						for _, part := range parts {
+							if textPart, ok := part.(map[string]any); ok && stringValue(textPart["type"]) == "text" {
+								appendMistralThinkingDelta(response, stream, state, stringValue(textPart["text"]))
+							}
+						}
+						continue
+					}
 				}
 				text := stringValue(chunkMap["text"])
 				if text != "" {
@@ -602,6 +617,21 @@ func mistralToolCallFromState(state *mistralToolCallState) ToolCall {
 	return ToolCall{ID: state.ID, Name: state.Name, Arguments: args}
 }
 
+func appendMistralThinkingDelta(response *AssistantMessage, stream *AssistantMessageEventStream, state *mistralStreamState, text string) {
+	if text == "" {
+		return
+	}
+	if !state.ThinkingStarted {
+		state.ThinkingStarted = true
+		state.ThinkingIndex = len(response.Content)
+		response.Content = append(response.Content, ThinkingContent{})
+		stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingStart, ContentIndex: state.ThinkingIndex, Partial: cloneAssistantMessage(*response)})
+	}
+	state.Thinking.WriteString(text)
+	response.Content[state.ThinkingIndex] = ThinkingContent{Thinking: state.Thinking.String()}
+	stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingDelta, ContentIndex: state.ThinkingIndex, Delta: text, Partial: cloneAssistantMessage(*response)})
+}
+
 func finalizeMistralChatResponse(model Model, response *AssistantMessage, stream *AssistantMessageEventStream, state *mistralStreamState) {
 	if state.ThinkingStarted {
 		stream.push(AssistantMessageEvent{Type: AssistantMessageEventThinkingEnd, ContentIndex: state.ThinkingIndex, Content: state.Thinking.String(), Partial: cloneAssistantMessage(*response)})
@@ -623,7 +653,10 @@ func finalizeMistralChatResponse(model Model, response *AssistantMessage, stream
 	stream.finish(*response)
 }
 
-func applyMistralUsage(response *AssistantMessage, model Model, usage mistralChatUsage) {
+func applyMistralUsage(response *AssistantMessage, model Model, usage mistralChatUsage) error {
+	if usage.PromptTokens < 0 || usage.CompletionTokens < 0 || usage.TotalTokens < 0 || usage.PromptTokens > int(^uint(0)>>1)-usage.CompletionTokens {
+		return withProviderFailure(fmt.Errorf("invalid Mistral token usage"), ProviderFailureParse, "invalid_usage")
+	}
 	response.Usage = Usage{
 		Input:       usage.PromptTokens,
 		Output:      usage.CompletionTokens,
@@ -633,6 +666,7 @@ func applyMistralUsage(response *AssistantMessage, model Model, usage mistralCha
 	}
 	response.UsageReported = true
 	response.Usage.Cost = CalculateCost(model, response.Usage)
+	return nil
 }
 
 func mapMistralFinishReason(reason string, content []ContentBlock) StopReason {
