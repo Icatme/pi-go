@@ -136,11 +136,16 @@ type googleThinkingConfig struct {
 	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
 }
 
+type googlePromptFeedback struct {
+	BlockReason string `json:"blockReason,omitempty"`
+}
+
 type googleStreamChunk struct {
-	ResponseID    string               `json:"responseId,omitempty"`
-	Candidates    []googleCandidate    `json:"candidates,omitempty"`
-	UsageMetadata *googleUsageMetadata `json:"usageMetadata,omitempty"`
-	Error         *googleErrorPayload  `json:"error,omitempty"`
+	PromptFeedback *googlePromptFeedback `json:"promptFeedback,omitempty"`
+	ResponseID     string                `json:"responseId,omitempty"`
+	Candidates     []googleCandidate     `json:"candidates,omitempty"`
+	UsageMetadata  *googleUsageMetadata  `json:"usageMetadata,omitempty"`
+	Error          *googleErrorPayload   `json:"error,omitempty"`
 }
 
 type googleCandidate struct {
@@ -565,7 +570,25 @@ func processGoogleStreamEvent(data string, model Model, response *AssistantMessa
 		applyGoogleUsage(response, model, *chunk.UsageMetadata)
 	}
 
-	if len(chunk.Candidates) == 0 || chunk.Candidates[0].Content == nil {
+	if len(chunk.Candidates) == 0 {
+		if chunk.PromptFeedback != nil {
+			reason := strings.TrimSpace(chunk.PromptFeedback.BlockReason)
+			if reason != "" && reason != "BLOCK_REASON_UNSPECIFIED" {
+				response.StopReason = StopReasonError
+				response.ErrorMessage = fmt.Sprintf("Google prompt blocked with reason %q", reason)
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	if chunk.Candidates[0].Content == nil {
+		reason := chunk.Candidates[0].FinishReason
+		if reason != "" {
+			response.StopReason = mapGoogleStopReason(reason, response.Content)
+			if response.StopReason == StopReasonError {
+				response.ErrorMessage = fmt.Sprintf("Google generation stopped with finish reason %q", reason)
+			}
+		}
 		return false, nil
 	}
 
