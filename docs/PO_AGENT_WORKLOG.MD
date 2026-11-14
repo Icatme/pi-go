@@ -4023,3 +4023,11 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Publication uses an expected-head update of master, an annotated v0.23.1 tag
   and a GitHub Release with no uploaded assets. Exact tree and tag-target checks
   protect API publication while Git HTTPS is unavailable.
+
+## 2026-11-14: Anthropic stop-reason diagnostics (upstream #4769)
+
+- Reproduced with localhost HTTP SSE: `refusal`, `sensitive`, and an unknown reason already mapped to `StopReasonError`, but lost the upstream reason and returned an empty error message. Preserve the quoted reason on this existing error mapping in the shared Anthropic/Kimi parser. No change to stop categories, message-stop `Done(Error)` events, partial text, usage, requested identity, or retry behavior.
+- Official Claude stop-reasons documentation confirms `refusal`: https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons (checked 2026-11-14; no publication date inferred). `sensitive` and unknown strings retain existing compatibility classification, without assigning new official semantics. No fallback, refusal bypass, or `stop_details` interpretation added.
+- Baseline real-HTTP regression failed in 0.019s. Final-runtime full `pkg/pigo` race passed in 43.924s and vet passed. Final expanded targeted race x3 passed in 1.131s; coverage includes normal/length controls, exact text/usage/identity, one request and one terminal Done event, shared Kimi parsing, and no context-overflow classification for the tested reasons. No live requests, billing, CI, or deployment.
+- Error messages are observable to host classifiers. Arbitrary unknown upstream strings can still match existing text-based classification rules; this patch does not promise otherwise or add automatic retry/compaction. No preservation of every refusal metadata field is claimed.
+- Independent static review found no blocker; independent stop-diagnostic plus overflow target race x3 passed in 1.721s.

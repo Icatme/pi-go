@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -696,6 +697,9 @@ func processAnthropicStreamEvent(
 	case "message_delta":
 		if event.Delta != nil && strings.TrimSpace(event.Delta.StopReason) != "" {
 			response.StopReason = mapAnthropicStopReason(event.Delta.StopReason, response.Content)
+			if response.StopReason == StopReasonError {
+				response.ErrorMessage = fmt.Sprintf("anthropic stream stopped with stop_reason %q", event.Delta.StopReason)
+			}
 		}
 		if event.Usage != nil {
 			usage := anthropicUsage{}
