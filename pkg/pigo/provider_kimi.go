@@ -472,6 +472,14 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 func buildAnthropicRequest(model Model, ctx Context, options AnthropicMessagesProviderOptions, isOAuth bool, stream bool) anthropicRequest {
 	ctx = resolveProviderContext(model, ctx)
 	cacheControl := resolveAnthropicCacheControl(model.BaseURL, options.CacheRetention)
+	if options.CacheRetention == CacheRetentionLong {
+		if compat, ok := model.Compat.(*AnthropicMessagesCompat); ok && compat != nil && compat.SupportsLongCacheRetention != nil {
+			cacheControl.TTL = ""
+			if *compat.SupportsLongCacheRetention {
+				cacheControl.TTL = "1h"
+			}
+		}
+	}
 	thinkingConfig := buildAnthropicThinkingConfig(model, options)
 	if len(ctx.HostedTools) > 0 && model.Provider == "kimi-coding" {
 		thinkingConfig = anthropicThinkingConfig{Thinking: map[string]any{"type": "disabled"}}
