@@ -69,6 +69,34 @@ type assistantMessageDiagnosticJSON struct {
 	Details   map[string]any       `json:"details,omitempty"`
 }
 
+// Cache diagnostic counters are observations, not floating-point usage. Only
+// this new diagnostic type adopts lossless numeric decoding; older types retain
+// their existing float64 Details contract.
+func (item *assistantMessageDiagnosticJSON) UnmarshalJSON(data []byte) error {
+	type diagnosticAlias assistantMessageDiagnosticJSON
+	var value diagnosticAlias
+	wire := struct {
+		*diagnosticAlias
+		Details json.RawMessage `json:"details"`
+	}{diagnosticAlias: &value}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	if len(wire.Details) != 0 {
+		if value.Type == "anthropic_cache_diagnostics" {
+			decoder := json.NewDecoder(bytes.NewReader(wire.Details))
+			decoder.UseNumber()
+			if err := decoder.Decode(&value.Details); err != nil {
+				return err
+			}
+		} else if err := json.Unmarshal(wire.Details, &value.Details); err != nil {
+			return err
+		}
+	}
+	*item = assistantMessageDiagnosticJSON(value)
+	return nil
+}
+
 type diagnosticErrorJSON struct {
 	Name    string `json:"name,omitempty"`
 	Message string `json:"message,omitempty"`

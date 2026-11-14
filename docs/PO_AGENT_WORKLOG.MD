@@ -4303,3 +4303,13 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
   passed. Independent review found no blocker; independent target race x3
   passed1.115s. No live provider, signature validation, CI, deployment or release
   was performed.
+
+## 2026-11-14 — Anthropic cache diagnostics observations (upstream #11866)
+
+- Preserve bounded `message_start.message.diagnostics` in the existing assistant diagnostic list (`anthropic_cache_diagnostics`, `Details.diagnostics`). Missing, explicit null, pending `cache_miss_reason: null`, and a returned reason remain distinguishable. Null is not evidence of a cache hit; unavailable/not-found reasons are not evidence of a changed prompt.
+- Retain only a bounded reason type and an optional non-negative integer `cache_missed_input_tokens`, using `json.Number` to preserve integers above 2^53. Unknown reason names are not interpreted; unknown payload fields are discarded. Malformed/oversized observations are ignored without failing the model response. Repeated message starts replace this observation without mutating prior snapshots.
+- No automatic diagnostics opt-in, previous-message chaining, routing, billing, usage, or cache-policy changes. The diagnostic token estimate is never added to chargeable usage. This covers the shared Anthropic-compatible event parser; no live-provider acceptance or actual cache comparison was tested.
+- Official protocol checked 2026-11-14: https://platform.claude.com/docs/en/build-with-claude/cache-diagnostics (no publication date established). Its streaming response location and three-state semantics inform this diagnostic-only projection.
+- Local actual-SSE baseline failed because the diagnostic was absent; the fixture retains unchanged usage and exact large integers. Additional tests cover null/pending/unknown reason, payload filtering, malformed/oversized input, and repeated-start snapshot isolation.
+- The retained raw diagnostic is capped at 4 KiB and the reason type at 128 bytes; this is not whole-payload preservation. Context JSON decoding uses `json.Number` only for this new diagnostic type, preserving large counters across save/reload while keeping legacy/unknown diagnostic numeric decoding unchanged. Null, empty, and missing Details remain compatible.
+- Validation on final runtime: targeted diagnostics/context tests `-race -count=3` passed (1.642s); full `go test -race ./pkg/pigo -count=1` passed (39.557s) and `go vet ./pkg/pigo` passed. Independent final static review found no blocking issue. All requests were localhost fixtures; no paid/live call, CI dispatch, or deployment.
