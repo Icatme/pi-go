@@ -1,5 +1,12 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Validate dedicated DeepSeek usage snapshots
+
+- Localhost damaged usage reproduced negative output/total/cost and MinInt prompt minus cache-hit wrapping to MaxInt. Check existing token fields for nonnegative values, cache hit/miss not exceeding prompt, and representable prompt/output and selected input/cache/output sums before any Usage/Cost mutation. Reject with response_parse_error/invalid_usage; keep prior valid usage and partial output. This replaces old cache-hit-over-prompt clamping with rejection of an invalid official snapshot, not support for partial usage deltas.
+- Preserve legacy positive cache-miss precedence and zero/omitted miss fallback, all-cache inputs, reported total and existing pricing. Do not infer or repair total conservation, copy xAI accounting, infer production bills from pathological fixtures, or add meaning to costs/reasoning beyond existing fields. Official prompt includes cache hits: https://api-docs.deepseek.com/api/create-chat-completion/ .
+- Final runtime full pkg/pigo race42.012s and vet passed; target race x3 initially1.511s/final test-only strengthening1.781s. Independent review no blockers and target1.280s. Tests cover each invalid count, MaxInt boundaries, all-cache, preserved inconsistent-but-representable positive miss/unknown total, and actual HTTP valid snapshot followed by invalid snapshot with one request/one error/no Done.
+- Independent replay5cc9279 + EOF + this usage patch apply cleanly; scoped DeepSeek race x3 passed1.288s. Not a combined full suite. No live calls, extra fees, retry policy changes, merge/release/CI dispatch.
+
 ## 2026-11-14 - Reject explicit tool-index identity collisions
 
 - Reproduced upstream Pi #11881/#11908 on master 755e003: distinct named call IDs at one Chat Completions stream index silently yielded a successful toolUse with concatenated arguments and an overwritten ID. Reject that explicit conflict as response_parse_error/tool_call_index_collision before mutating the existing call; do not guess a split or retry.

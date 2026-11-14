@@ -417,7 +417,9 @@ func processDeepSeekChatStreamEvent(data string, model Model, response *Assistan
 		response.ResponseModel = chunk.Model
 	}
 	if chunk.Usage != nil {
-		applyDeepSeekUsage(response, model, *chunk.Usage)
+		if err := applyDeepSeekUsage(response, model, *chunk.Usage); err != nil {
+			return true, err
+		}
 	}
 	for _, choice := range chunk.Choices {
 		delta := choice.Delta
@@ -516,13 +518,29 @@ func finalizeDeepSeekChatResponse(response *AssistantMessage, stream *AssistantM
 	stream.finish(*response)
 }
 
-func applyDeepSeekUsage(response *AssistantMessage, model Model, usage deepSeekChatUsage) {
+func applyDeepSeekUsage(response *AssistantMessage, model Model, usage deepSeekChatUsage) error {
+	invalid := func() error {
+		return withProviderFailure(fmt.Errorf("DeepSeek returned invalid token usage"), ProviderFailureParse, "invalid_usage")
+	}
+	for _, value := range []int{usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.PromptCacheHitTokens, usage.PromptCacheMissTokens} {
+		if value < 0 {
+			return invalid()
+		}
+	}
+	if usage.CompletionTokensDetails != nil && usage.CompletionTokensDetails.ReasoningTokens < 0 {
+		return invalid()
+	}
+	maxInt := int(^uint(0) >> 1)
+	if usage.PromptCacheHitTokens > usage.PromptTokens || usage.PromptCacheMissTokens > usage.PromptTokens || usage.PromptTokens > maxInt-usage.CompletionTokens {
+		return invalid()
+	}
+
 	input := usage.PromptTokens - usage.PromptCacheHitTokens
 	if usage.PromptCacheMissTokens > 0 {
 		input = usage.PromptCacheMissTokens
 	}
-	if input < 0 {
-		input = 0
+	if input > maxInt-usage.PromptCacheHitTokens || input+usage.PromptCacheHitTokens > maxInt-usage.CompletionTokens {
+		return invalid()
 	}
 	response.Usage = Usage{
 		Input:       input,
@@ -532,6 +550,7 @@ func applyDeepSeekUsage(response *AssistantMessage, model Model, usage deepSeekC
 	}
 	response.UsageReported = true
 	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
+	return nil
 }
 
 func mapDeepSeekFinishReason(reason string, content []ContentBlock) StopReason {
