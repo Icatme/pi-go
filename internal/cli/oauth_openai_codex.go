@@ -311,6 +311,15 @@ func parseAuthorizationInput(input string) (string, string, error) {
 	return value, "", nil
 }
 
+// oauthTokenExchangeRequestError keeps the original cause for host inspection.
+// The error chain can contain sensitive server metadata and must not be logged.
+type oauthTokenExchangeRequestError struct{ cause error }
+
+func (e *oauthTokenExchangeRequestError) Error() string {
+	return "openai codex oauth token exchange request failed"
+}
+func (e *oauthTokenExchangeRequestError) Unwrap() error { return e.cause }
+
 func exchangeOpenAICodexAuthorizationCode(
 	ctx context.Context,
 	httpClient *http.Client,
@@ -320,6 +329,11 @@ func exchangeOpenAICodexAuthorizationCode(
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+
+	// Token forms contain authorization secrets and must never be replayed by redirects.
+	// Clone rather than changing the caller or the process-wide default client.
+	exchangeClient := *httpClient
+	exchangeClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
@@ -334,11 +348,15 @@ func exchangeOpenAICodexAuthorizationCode(
 	}
 	request.Header.Set("content-type", "application/x-www-form-urlencoded")
 
-	response, err := httpClient.Do(request)
+	response, err := exchangeClient.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, &oauthTokenExchangeRequestError{cause: err}
 	}
 	defer response.Body.Close()
+
+	if response.StatusCode >= 300 && response.StatusCode < 400 {
+		return nil, fmt.Errorf("openai codex oauth token exchange refused redirect: HTTP %d", response.StatusCode)
+	}
 
 	var payload openAICodexTokenResponse
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {

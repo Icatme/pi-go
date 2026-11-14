@@ -4435,3 +4435,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — CLI OAuth token exchange redirect containment
+
+- Clone the token exchange HTTP client and reject redirects locally, including same-origin hops; do not mutate the caller/default client, its transport, timeout or cookie jar, or public provider streaming policies. Authorization-code/verifier forms cannot be replayed to a redirect target.
+- Return a numeric-only status diagnostic for 3xx without decoding body or exposing Location. A malformed Location can fail inside net/http before the redirect callback; exchange request errors now have fixed public text while retaining Unwrap for cancellation/error identity. The underlying chain is host-private and can contain sensitive server metadata; callers must not log it indiscriminately.
+- Offline fake-transport baseline confirmed 307/308 cross-host and downgrade replay of synthetic form fields. Final tests cover 301/302/303/307/308, same/cross-origin/downgrade, nil and explicit clients, preserved caller callback/global client, successful exchange, cancellation/deadline identity and malformed Location. No browser, real credentials, login or network calls.
+- Final targeted race x3 passed (1.043s); full internal/cli race passed (1.352s), vet passed. This is not a full-repository or live OAuth validation.
