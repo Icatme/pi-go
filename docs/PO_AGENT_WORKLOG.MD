@@ -3785,3 +3785,17 @@
 - Added opaque signature decoding/replay and signed-part boundaries, including trailing empty-text parts. Added `SignatureOnly` metadata on text/thinking content and Context JSON to distinguish an absent text field from an explicit empty string; unsigned text can still coalesce. No signature is fabricated, decrypted, validated cryptographically, or replayed across provider/API/model identity.
 - Regression covers HTTP SSE -> content -> Context persistence -> full replay transforms for trailing empty text, separate signed parts, signature-only parts, thinking boundaries, and parallel tool calls. All six cases (including signed/unsigned/signed text) fail on the original baseline and pass after the fix. Historical signatures already discarded cannot be reconstructed. Older serializers that do not preserve the new marker cannot retain the absent/empty distinction.
 - Go 1.26.10: all `pkg/pigo` tests passed under race, `go vet ./...` and `go mod tidy -diff` passed. Full-repository race evaluation was started separately; its result is tracked in the PR. No live model calls, credentials, deployment, or CI dispatch.
+
+## 2026-11-14 - Review PR #201 agent signature replay
+
+- Reviewed the open Google signed-part change through the agent adapter. Reproduced
+  lost signed empty/whitespace text and loss of the absent-text marker after agent
+  message JSON persistence. The provider-only fixtures did not exercise this path.
+- Preserve SignatureOnly in agent.Part and both provider conversion directions;
+  keep signed empty text while retaining existing unsigned-whitespace filtering.
+  Existing stored records omit the new false-valued field unchanged. Old readers
+  cannot preserve the newly recorded absent-text distinction.
+- The new regression failed before the adapter fix and passed after it. Windows
+  Go 1.26.4: pkg/pigo, agent and agent/session package tests; focused adapter race
+  tests; vet for all three packages; and diff checks passed with GOWORK=off.
+  Offline fixtures only; no live provider or UI acceptance, merge or release.
