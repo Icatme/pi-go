@@ -301,3 +301,11 @@ SSE。非成功响应的 `io.ReadAll` 消费的是已受限的 body。`HTTPObser
 本轮完成的用户可观察结果应是：同一可信会话在进程重启后继续使用此前成功保存的
 Codemode 小量状态与合法工具选择；切分支保持隔离；失败和不确定执行不会被自动重放。
 这也是 N1 的整体完成判据。
+
+### 2026-11-14: host-selected image-count budget
+
+Implemented opt-in [image budget preparation](optional-image-budget.md) after
+master 9a8e190, following Pi #10162. No provider/model default was changed and no
+host integration or live gateway acceptance is claimed. Protected images fail
+explicitly rather than being silently dropped; only host-designated old tool
+images are eligible for omission. Verification details are in the shared worklog.
