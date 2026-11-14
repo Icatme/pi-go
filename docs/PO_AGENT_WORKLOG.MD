@@ -4391,3 +4391,9 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - No full-root/examples suite, live provider, UI acceptance, manual CI dispatch,
   release, downstream update or deployment. The primary worktree's uncommitted
   superagent/README.md edit is preserved.
+
+## 2026-11-14 — Avoid synthesized xAI tool choice without tools (#8820)
+
+- Baseline serialized request reproduces exact xAI Responses sending default tool_choice:auto without tools. The official xAI Responses no-tool example omits both fields. This is local wire evidence and upstream reports, not a paid/live backend rejection reproduction.
+- Omit only the synthesized default for exact Provider=xai/API=openai-responses with no serialized tools, no native anchor, no previous_response_id and no explicit choice. Preserve explicit auto/none/required, other providers, inherited/dynamic tools and old server state. Do not infer by model/hostname or force tools:[].
+- Eight actual localhost HTTP controls passed race x3 (1.186s). Final runtime full pkg/pigo race passed39.604s and vet passed. Independent target plus isolated late-tool/OpenAI-anchor controls passed race x3 (1.222s), static review no blocker. No live provider, CI dispatch, merge or deployment.

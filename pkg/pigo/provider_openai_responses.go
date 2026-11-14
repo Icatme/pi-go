@@ -150,6 +150,14 @@ func buildOpenAIResponsesRequest(customTools map[string]string, model Model, ctx
 		Include:           []string{"reasoning.encrypted_content"},
 	}
 
+	// Do not synthesize a tool selection for a fresh, tool-free xAI request.
+	// Explicit choices and inherited/anchored tools retain their existing wire.
+	if model.Provider == "xai" && model.API == "openai-responses" &&
+		strings.TrimSpace(resolvedOptions.ToolChoice) == "" && len(requestBody.Tools) == 0 &&
+		!toolPlan.Anchor && strings.TrimSpace(resolvedOptions.PreviousResponseID) == "" {
+		requestBody.ToolChoice = ""
+	}
+
 	if resolvedOptions.Temperature != nil {
 		requestBody.Temperature = resolvedOptions.Temperature
 	}
