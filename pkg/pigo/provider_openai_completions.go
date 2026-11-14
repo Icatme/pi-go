@@ -174,7 +174,7 @@ func (u *openAICompletionsUsage) UnmarshalJSON(data []byte) error {
 		Total      *int `json:"total_tokens"`
 	}{usageFields: &fields}
 	if err := json.Unmarshal(data, &wire); err != nil {
-		return err
+		return invalidChatUsage("malformed token count")
 	}
 	*u = openAICompletionsUsage(fields)
 	if wire.Prompt != nil {
@@ -808,7 +808,9 @@ func processOpenAICompletionsStreamEvent(data string, model Model, response *Ass
 		response.ResponseModel = chunk.Model
 	}
 	if chunk.Usage != nil {
-		applyOpenAICompletionsUsage(response, model, *chunk.Usage)
+		if err := applyOpenAICompletionsUsage(response, model, *chunk.Usage); err != nil {
+			return false, err
+		}
 	}
 
 	for _, choice := range chunk.Choices {
@@ -818,7 +820,9 @@ func processOpenAICompletionsStreamEvent(data string, model Model, response *Ass
 			delta = *choice.Message
 		}
 		if choice.Usage != nil && chunk.Usage == nil {
-			applyOpenAICompletionsUsage(response, model, *choice.Usage)
+			if err := applyOpenAICompletionsUsage(response, model, *choice.Usage); err != nil {
+				return false, err
+			}
 		}
 		if reasoning, signature := openAICompletionsReasoningDelta(delta, model.Provider); reasoning != "" {
 			appendOpenAICompletionsThinking(response, stream, state, reasoning, signature)
@@ -1193,7 +1197,21 @@ func finalizeOpenAICompletionsResponse(response *AssistantMessage, stream *Assis
 	stream.finish(*response)
 }
 
-func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage openAICompletionsUsage) {
+func invalidChatUsage(reason string) error {
+	return withProviderFailure(fmt.Errorf("invalid chat usage: %s", reason), ProviderFailureParse, "invalid_usage")
+}
+
+func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage openAICompletionsUsage) error {
+	for _, count := range []int{usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.PromptCacheMissTokens, usage.CompletionTokensDetails.ReasoningTokens} {
+		if count < 0 {
+			return invalidChatUsage("negative token count")
+		}
+	}
+	for _, count := range []*int{usage.CachedTokens, usage.PromptCacheHitTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptTokensDetails.CacheWriteTokens, usage.PromptTokensDetails.CacheCreationTokens} {
+		if count != nil && *count < 0 {
+			return invalidChatUsage("negative token count")
+		}
+	}
 	cacheRead := firstOpenAICompletionsTokenCount(
 		usage.PromptTokensDetails.CachedTokens,
 		usage.PromptCacheHitTokens,
@@ -1205,7 +1223,12 @@ func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage 
 		usage.PromptTokensDetails.CacheCreationTokens,
 		usage.CacheCreationInputTokens,
 	)
-	input := usage.PromptTokens - cacheRead - cacheWrite
+	maxCount := int(^uint(0) >> 1)
+	if cacheRead > maxCount-cacheWrite {
+		return invalidChatUsage("token sum exceeds integer range")
+	}
+	cacheTotal := cacheRead + cacheWrite
+	input := usage.PromptTokens - cacheTotal
 	if usage.PromptCacheMissTokens > 0 {
 		input = usage.PromptCacheMissTokens
 	}
@@ -1226,7 +1249,10 @@ func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage 
 			output = reportedOutput
 		}
 	}
-	total := input + output + cacheRead + cacheWrite
+	if input > maxCount-output || input+output > maxCount-cacheTotal {
+		return invalidChatUsage("token sum exceeds integer range")
+	}
+	total := input + output + cacheTotal
 	response.Usage = Usage{
 		Input:       input,
 		Output:      output,
@@ -1236,6 +1262,7 @@ func applyOpenAICompletionsUsage(response *AssistantMessage, model Model, usage 
 	}
 	response.UsageReported = true
 	response.Usage.Cost = calculateProviderUsageCost(model, response.Usage)
+	return nil
 }
 
 func firstOpenAICompletionsTokenCount(counts ...*int) int {

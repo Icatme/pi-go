@@ -4435,3 +4435,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Reject invalid Chat Completions usage arithmetic
+
+- Pinned base4115596. Baseline RED showed two individually representable MaxInt cache counts wrapping subtraction into Input10 and a plausible Total11, replacing a prior valid snapshot. This is offline synthetic accounting evidence, not an observed invoice or charge.
+- Chat usage now rejects negative supplied counts (including ignored alias fields), malformed/out-of-range typed count JSON, and unrepresentable cache/total sums as response_parse_error/invalid_usage before mutating Usage or computing cost. Both top-level and choice-local usage paths propagate that typed failure. Preserve already accumulated content and the last valid usage snapshot; retained UsageReported is evidence of a previous reported snapshot, not confirmation of complete final accounting after an error.
+- Preserve existing nonnegative cache-alias priority, explicit cache-miss override, small cache-greater-than-prompt clamp, absent/null zero defaults, provider-total discrepancies and xAI exact-total reasoning reconciliation. No guessed totals, saturation, default equality constraint or retry changes. Six older xAI cases that explicitly accepted negative counts or overflowing totals now assert rejection; ordinary/max-exact/ambiguous but representable cases remain covered.
+- Tests cover MaxInt exact and overflow, invalid first snapshot, prior snapshot retention, negative primary/secondary counts, out-of-range JSON, both SSE usage positions, exact partial text/identity, one error/no done and one request. Final runtime full pkg/pigo race passed45.381s and vet passed. Final expanded targeted race x3 passed2.665s. Independent static review and target race x3 passed1.193s with no blocker. No live providers, paid requests, CI dispatch, deployment or release.

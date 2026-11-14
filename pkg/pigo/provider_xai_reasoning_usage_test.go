@@ -34,7 +34,16 @@ func TestXAIChatReasoningUsageScopeAndAmbiguity(t *testing.T) {
 				t.Fatal(e)
 			}
 			var r AssistantMessage
-			applyOpenAICompletionsUsage(&r, Model{Provider: tc.provider, API: tc.api}, u)
+			err := applyOpenAICompletionsUsage(&r, Model{Provider: tc.provider, API: tc.api}, u)
+			if tc.name == "negative reasoning" {
+				if err == nil || r.UsageReported {
+					t.Fatal("negative reasoning accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
 			if r.Usage.Output != tc.output {
 				t.Fatalf("usage %+v want output %d", r.Usage, tc.output)
 			}
@@ -89,7 +98,18 @@ func TestXAIChatReasoningUsageSubtractionBoundary(t *testing.T) {
 				t.Fatal(e)
 			}
 			var r AssistantMessage
-			applyOpenAICompletionsUsage(&r, Model{Provider: "xai", API: "openai-completions"}, u)
+			err := applyOpenAICompletionsUsage(&r, Model{Provider: "xai", API: "openai-completions"}, u)
+			// Nonnegative but unrepresentable totals, and negative counts, are
+			// rejected before xAI reconciliation rather than recorded wrapped.
+			if tc.name != "max exact" {
+				if err == nil || r.UsageReported {
+					t.Fatal("invalid arithmetic accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
 			if r.Usage.Output != tc.want {
 				t.Fatalf("got %d want%d", r.Usage.Output, tc.want)
 			}
