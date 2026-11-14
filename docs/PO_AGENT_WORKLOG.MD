@@ -4435,3 +4435,11 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Google streaming base query routing
+
+- Confirmed with localhost HTTP that a Google BaseURL query swallowed the endpoint into the query, while a fragment swallowed both endpoint and SSE selector. Baseline regression failed in 0.019s; normal no-query routing passed.
+- For absolute HTTP(S) bases with `?`/`#`, append the existing endpoint suffix to EscapedPath and retain RawPath/RawQuery/fragment. No-query and invalid/opaque/relative bases keep legacy construction. No model-ID, default-base, discovery, authentication or retry changes.
+- Preserve all original query bytes. Append `alt=sse` when decoded alt is absent; retain existing alt only when every value is exactly sse. Conflicting/empty alt and unparsable query fail locally with SDK `invalid_stream_query`, without echoing query data or making HTTP requests. This is the explicit SSE transport contract, not silent parameter overriding.
+- Final targeted race x3 passed in 1.114s; complete pkg/pigo race passed in 40.087s and vet exited 0. Tests cover actual HTTP path/query/auth/one-request success, zero-request rejection with typed failure, encoded trailing slash/key, duplicate parameters, ForceQuery/fragment and legacy controls. Only synthetic keys and localhost; no live provider or billing validation, no CI dispatch.
+- Independent read-only review plus overlay boundary controls passed race x3 in 1.320s (encoded path slash, trailing query marker, encoded SSE value/key, duplicate empty/mixed-case/space alt and legacy trimming). No blocking findings.

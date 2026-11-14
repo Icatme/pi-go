@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -503,9 +504,50 @@ func resolveThoughtSignature(isSameModel bool, signature string) string {
 	return signature
 }
 
+// resolveGoogleStreamURL preserves legacy routing unless a base query or fragment
+// needs component-wise joining. The transport requires SSE; conflicting explicit
+// alt values are configuration errors, never silently overridden.
+func resolveGoogleStreamURL(base, modelID string) (string, error) {
+	base = strings.TrimSpace(base)
+	legacy := strings.TrimRight(base, "/") + "/models/" + modelID + ":streamGenerateContent?alt=sse"
+	if !strings.ContainsAny(base, "?#") {
+		return legacy, nil
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Opaque != "" || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return legacy, nil
+	}
+	query, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return "", withProviderFailure(fmt.Errorf("Google streaming URL has an invalid query"), ProviderFailureSDK, "invalid_stream_query")
+	}
+	if values, exists := query["alt"]; exists {
+		for _, value := range values {
+			if value != "sse" {
+				return "", withProviderFailure(fmt.Errorf("Google streaming URL requires SSE transport"), ProviderFailureSDK, "invalid_stream_query")
+			}
+		}
+	} else {
+		if u.RawQuery != "" {
+			u.RawQuery += "&"
+		}
+		u.RawQuery += "alt=sse"
+	}
+	escaped := strings.TrimRight(u.EscapedPath(), "/") + "/models/" + modelID + ":streamGenerateContent"
+	path, err := url.PathUnescape(escaped)
+	if err != nil {
+		return legacy, nil
+	}
+	u.Path, u.RawPath = path, escaped
+	return u.String(), nil
+}
+
 func streamGoogleSSE(model Model, ctx context.Context, client *http.Client, options ProviderStreamOptions, bodyBytes []byte, apiKey string, response *AssistantMessage, stream *AssistantMessageEventStream) error {
-	url := strings.TrimRight(strings.TrimSpace(model.BaseURL), "/") + "/models/" + model.ID + ":streamGenerateContent?alt=sse"
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	endpoint, err := resolveGoogleStreamURL(model.BaseURL, model.ID)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return err
 	}
