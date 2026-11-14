@@ -4435,3 +4435,9 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Explicit low-level Retry-After policy
+- Upstream10601 concerns TS agent retries; independently confirmed related Go HTTPStreamClient delay behavior with a localhost429 Retry-After30 fixture that repeated before a2second context deadline (current-behavior race3 PASS1.054s). RFC9110 waiting guidance does not itself add retry permission.
+- Add only low-level exported HTTPStreamClient RespectRetryAfter opt-in (defaultfalse) and RetryAfterMaxDelay finite header-wait budget (<=0 defaults30s). Only an already eligible HTTP response retry is considered. Missing headers retain old backoff; valid seconds/HTTP-date wait max(existing capped backoff, hint), while duplicate/malformed/overflow/over-budget values return originalHTTPerror without earlier retry. Past dates contributezero. Cancellation and nextrequest context retained.
+- No Stream/StreamSimple/provider-option plumbing, no agent-level automatic recovery, no altered network/SSE retry eligibility, no change to separate Responses/CommandCode/Kiro loops. Two delay caps and original-error priority documented.
+- Final target race3 PASS4.360s including actual1second floor despite1ms old cap, missingheader budget independence, custom503 denial, cancellation single-send, originalstatus/body and extremevalue controls. Independent expanded review race3 PASS4.617s. Full pkg/pigo race PASS42.582s and vet exit0. No paidmodel/realcredential/CI dispatch/merge/deploy.

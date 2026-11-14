@@ -15,6 +15,10 @@ type HTTPStreamClient struct {
 	MaxRetries     int
 	BaseRetryDelay time.Duration
 	MaxRetryDelay  time.Duration
+	// RespectRetryAfter is opt-in and applies only to already retryable HTTP responses.
+	RespectRetryAfter bool
+	// RetryAfterMaxDelay bounds a header-informed wait; nonpositive uses 30 seconds.
+	RetryAfterMaxDelay time.Duration
 }
 
 type httpStreamRequest struct {
@@ -101,10 +105,13 @@ func (c *HTTPStreamClient) postStream(ctx context.Context, url string, requestOp
 				shouldRetry = requestOptions.ShouldRetry(httpResponse.StatusCode, message)
 			}
 			if shouldRetry && attempt < maxRetries {
-				if waitErr := c.waitRetryDelay(ctx, attempt, baseRetryDelay); waitErr != nil {
+				retry, waitErr := c.waitHTTPRetryDelay(ctx, httpResponse.Header, attempt, baseRetryDelay)
+				if waitErr != nil {
 					return waitErr
 				}
-				continue
+				if retry {
+					continue
+				}
 			}
 			if readErr != nil {
 				return withProviderHTTPStatus(withProviderFailure(errors.Join(errors.New(message), readErr), ProviderFailureStream, "body_read"), httpResponse.StatusCode)
