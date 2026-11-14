@@ -3,6 +3,8 @@ package pigo
 import "regexp"
 
 var overflowPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bContextWindowExceededError\b`),
+	regexp.MustCompile(`(?i)\bcontext window exceeded for given call\b`),
 	regexp.MustCompile(`(?i)prompt (?:is )?too long`),
 	regexp.MustCompile(`(?i)prompt exceeds max length`),
 	regexp.MustCompile(`(?i)request_too_large`),
