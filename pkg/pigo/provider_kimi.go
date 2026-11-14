@@ -581,11 +581,11 @@ func processAnthropicStreamEvent(
 			// mixing signatures or executing pre-handoff tool calls.
 			return false, withProviderFailure(errors.New("unsupported Anthropic model fallback boundary"), ProviderFailureParse, "unsupported_fallback")
 		case "text":
-			response.Content = append(response.Content, TextContent{})
+			response.Content = append(response.Content, TextContent{Text: event.ContentBlock.Text})
 			states[event.Index] = &anthropicStreamingBlockState{ContentIndex: contentIndex, Kind: "text"}
 			pushAssistantMessageEvent(stream, AssistantMessageEvent{Type: AssistantMessageEventTextStart, ContentIndex: contentIndex, Partial: *response})
 		case "thinking":
-			response.Content = append(response.Content, ThinkingContent{})
+			response.Content = append(response.Content, ThinkingContent{Thinking: event.ContentBlock.Thinking, ThinkingSignature: event.ContentBlock.Signature})
 			states[event.Index] = &anthropicStreamingBlockState{ContentIndex: contentIndex, Kind: "thinking"}
 			pushAssistantMessageEvent(stream, AssistantMessageEvent{Type: AssistantMessageEventThinkingStart, ContentIndex: contentIndex, Partial: *response})
 		case "redacted_thinking":
