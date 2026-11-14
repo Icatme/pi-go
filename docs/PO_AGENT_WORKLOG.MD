@@ -4023,3 +4023,9 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Publication uses an expected-head update of master, an annotated v0.23.1 tag
   and a GitHub Release with no uploaded assets. Exact tree and tag-target checks
   protect API publication while Git HTTPS is unavailable.
+
+## 2026-11-14 — Preserve Google error finish-reason diagnostics (#7255)
+
+- Localhost SSE reproduced `SAFETY`, `RECITATION`, `MALFORMED_FUNCTION_CALL`, `OTHER`, and an unknown finish reason becoming `StopReasonError` with an empty error message. Google's [GenerateContent FinishReason reference](https://ai.google.dev/api/generate-content#FinishReason), checked 2026-11-14, defines the first four as distinct outcomes; no publication date is inferred.
+- Add the quoted provider-reported finish reason to `ErrorMessage` only when the existing mapping returns Error. No reason classification, retry policy, terminal event type, content, usage, requested model identity, or request configuration changes. Unknown values remain errors with diagnostics, not new recovery instructions. This covers the existing Google Generative AI provider, not an unimplemented Vertex adapter. Prompt-level no-candidate feedback and additional safety/finish-message metadata remain outside scope.
+- Actual HTTP fixtures verify one request, exact text and usage preservation, unchanged requested identity and existing one-Done/no-Error-event lifecycle, known and unknown error reasons plus STOP/MAX_TOKENS controls. Final runtime full package race passed (39.977s) and vet passed; final expanded target race x3 passed (1.108s). Independent review and earlier target race x3 passed (1.204s). No paid/live model request, CI dispatch, deployment, or automatic continuation.
