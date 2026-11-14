@@ -1,5 +1,10 @@
 # PO Agent Worklog
 
+## 2026-11-14 - Distinct Responses text message item IDs
+
+- Audited upstream Pi #5165 and reproduced a separate shared Responses/Codex converter defect: multiple text blocks in one assistant message received the same synthetic message item ID. Preserve the first text ID and give subsequent text blocks deterministic message/block-index IDs, without merging or reordering text, thinking, or tool items. Single-text wire behavior and the existing text-signature handling remain unchanged. This does not rewrite opaque provider IDs or solve arbitrary caller-supplied cross-type collisions.
+- Baseline regression failed; both request builders now pass serialized-wire tests covering skipped empty text, native text signatures, interleaved reasoning/tools, multiple messages, and source immutability. Targeted race tests passed three times (1.190s); full pkg/pigo race passed (39.574s) and vet passed; independent static review passed. No live model calls or deployment.
+
 ## 2026-11-13 - Pi instruction-role issue audit
 
 - Compared upstream Pi #12101 with master ae4e17f; reproduced unknown-endpoint developer default and ignored explicit capability on non-reasoning models in Chat and Responses. Unknown endpoints now use system unless explicitly opted in; native OpenAI/Codex defaults are retained.

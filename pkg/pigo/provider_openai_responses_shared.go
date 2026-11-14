@@ -240,16 +240,24 @@ func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom ma
 				})
 			}
 		case AssistantMessage:
-			for _, block := range typed.Content {
+			textEmitted := false
+			for blockIndex, block := range typed.Content {
 				switch block := block.(type) {
 				case TextContent:
 					if strings.TrimSpace(block.Text) == "" {
 						continue
 					}
+					// Each text block is emitted as a separate message item. Keep
+					// the first ID stable, but do not reuse it for later blocks.
+					messageID := fmt.Sprintf("msg_%d", index)
+					if textEmitted {
+						messageID = fmt.Sprintf("msg_%d_%d", index, blockIndex)
+					}
+					textEmitted = true
 					input = append(input, map[string]any{
 						"type":   "message",
 						"role":   "assistant",
-						"id":     fmt.Sprintf("msg_%d", index),
+						"id":     messageID,
 						"status": "completed",
 						"content": []map[string]any{
 							{
