@@ -45,6 +45,7 @@ type Agent struct {
 	running          bool
 	cancel           context.CancelFunc
 	idle             chan struct{}
+	listenerResults  *listenerResultBatch
 	mu               sync.RWMutex
 }
 
@@ -508,6 +509,7 @@ func (a *Agent) startRun(ctx context.Context) (context.Context, AgentDefinition,
 	a.running = true
 	a.cancel = cancel
 	a.idle = idle
+	a.listenerResults = nil
 	a.activeDefinition = a.definition
 	a.state.IsStreaming = true
 	a.state.StreamMessage = nil
@@ -515,6 +517,7 @@ func (a *Agent) startRun(ctx context.Context) (context.Context, AgentDefinition,
 	a.snapshot.Error = ""
 	a.state.PendingToolCalls = make(map[string]PendingToolCall)
 
+	a.initializeListenerResultsLocked()
 	return runCtx, a.definition, cloneSnapshotValue(a.snapshot), idle, nil
 }
 
@@ -563,6 +566,7 @@ func (a *Agent) finishRun(snapshot *AgentSnapshot, idle chan struct{}) {
 	a.state.StreamMessage = nil
 	a.state.PendingToolCalls = make(map[string]PendingToolCall)
 	a.running = false
+	a.listenerResults = nil
 	a.cancel = nil
 	a.activeDefinition = a.definition
 	if a.idle == idle {
@@ -594,6 +598,7 @@ func (a *Agent) releaseInterruptedRun(idle chan struct{}) {
 	a.state.StreamMessage = nil
 	a.state.PendingToolCalls = make(map[string]PendingToolCall)
 	a.running = false
+	a.listenerResults = nil
 	a.cancel = nil
 	a.activeDefinition = a.definition
 	close(idle)
@@ -645,6 +650,7 @@ func (a *Agent) handleRuntimeError(ctx context.Context, snapshot AgentSnapshot, 
 
 func (a *Agent) processLoopEvent(event AgentEvent) {
 	a.mu.Lock()
+	owner := a.idle
 	switch event.Type {
 	case EventAgentStart:
 		a.state.IsStreaming = true
@@ -702,8 +708,17 @@ func (a *Agent) processLoopEvent(event AgentEvent) {
 		a.state.StreamMessage = nil
 		a.state.PendingToolCalls = make(map[string]PendingToolCall)
 	}
+	a.observeListenerResultsLocked(event)
 	a.mu.Unlock()
 
+	// Preserve completed root results only when a listener unwinds this run.
+	// Normal message events retain their existing order and commit timing.
+	defer func() {
+		if value := recover(); value != nil {
+			a.flushListenerResults(owner)
+			panic(value)
+		}
+	}()
 	a.dispatchEvent(event)
 }
 

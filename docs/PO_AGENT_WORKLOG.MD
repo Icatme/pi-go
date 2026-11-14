@@ -4458,3 +4458,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Hosts must reconcile possibly executed tools before continuing a recovered
   panic. Idle does not certify that interrupted work had no effects. No live
   providers, paid calls, CI dispatch, merge or deployment performed.
+
+## 2026-11-14 — Sequential Agent listener panic result preservation (upstream #9599)
+
+- Stacked on PR #275's run-owner cleanup; only the explicitly sequential Agent facade retains already finalized root tool results in its in-memory snapshot before propagating an external listener panic. Results are copied before listeners, scoped to the current assistant batch, and omitted when already committed by normal MessageEnd. Normal event order/commit timing is unchanged; no new events or automatic retries.
+- Permission rejection and after-hook failure remain final errors. Child summaries, parallel mode (including forced-sequential individual tools), raw Engine calls, durable journals and unfinished calls are excluded. A retained snapshot can still have unmatched calls and is not a safe replay/resume guarantee. Continue rejects assistant-tail/pending snapshots under the existing contract; no speculative resolver reinitialization was added.
+- Old PR275 baseline regression RED (0.008s): listener panic at first/second tool end or second start loses completed results. Final focused tests passed race x3 (1.271s); independent review plus additional MessageStart/after-hook failure overlay passed race x3 (1.135s), and those two cases were then incorporated into permanent tests.
+- Final `go test -race ./agent/... ./superagent/...` and `go vet ./agent/... ./superagent/...` both exited 0, including agent 16.531s, agent/session 39.125s and superagent 48.921s. Linux offline fixtures only; not full repository, no live model, remote CI dispatch, merge or deployment.

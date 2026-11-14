@@ -565,9 +565,23 @@ snapshot restoration and invocation-local next-turn overrides.
 A panic from a synchronous `Agent` event listener still propagates to its
 caller. If the host recovers it, `Prompt` and `Continue` release only that
 invocation's running state and idle waiter; they do not fabricate a successful
-terminal event, rewrite the snapshot, discard queued input, or retry work.
+terminal event, discard queued input, or retry work.
 A model stream interrupted while delivering events is canceled before its
 exceptional `Close`; the normal `Close` then `Wait` order remains unchanged.
+
+For an explicitly sequential `Agent` run, finalized root tool results are
+copied before listeners are invoked. If a listener panics before the normal
+result messages are committed, those completed results are retained exactly
+once in the in-memory snapshot, in call order, without emitting additional
+events. Final permission or hook errors remain errors. This is scoped to the
+current assistant batch, not globally to tool-call IDs. Normal event order and
+message commit timing are unchanged.
+
+This result preservation does not cover raw `Engine` calls, parallel mode
+(including tools forced sequential within parallel mode), child summary events,
+or durable persistence/journals. It does not fabricate results for unfinished
+calls: the snapshot may still contain unmatched tool calls. It is not permission
+to automatically replay tools or a guarantee that `Continue` can resume it.
 
 Hosts must inspect the retained snapshot and reconcile any possibly executed
 tools before choosing how to continue. An idle agent is not proof that an
