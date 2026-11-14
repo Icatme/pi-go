@@ -4435,3 +4435,9 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Targeted Anthropic, CommandCode, cache, clone and xAI race regressions passed
   (1.938s) on Windows Go 1.26.4; pkg/pigo vet and diff checks passed. No additional
   full-suite repeat or live cache-billing/provider request was performed.
+
+## 2026-11-14 — Anthropic/Kimi URL query and fragment preservation
+
+- Both ordinary Anthropic Messages and the Kimi hosted request entry use a narrow component-aware suffix builder only for absolute HTTP(S) BaseURLs containing query/fragment. Preserve raw duplicate/query signature bytes and encoded path separators; fragments remain off HTTP request targets. Existing no-query, malformed, opaque and relative behavior remains; no /v1 auto-deduplication, auth, body, retry or billing change.
+- Localhost baseline RED0.010s showed /v1/messages appended into the fragment and never reaching the server for both providers. Initial incomplete patch changed only the hosted entry, caught by the same red fixture; ordinary entry then fixed. Independent trailing encoded slash RED0.008s caught decoded-path trimming; final path derives from the escaped path and preserves %2F. A fixture initially assumed Kimi Bearer auth; corrected to its existing x-api-key contract, without product auth changes.
+- Final 12-case real HTTP matrix plus component controls race x3 PASS1.412s; independent expanded target race x3 PASS1.538s. Full pkg/pigo race count1 PASS40.642s and vet exit0. No live calls, fees, CI dispatch, deployment or merge. #10992 original catalog mismatch is separately already absent from Go builtins (catalog probe race3 PASS1.028s); this patch fixes the independently reproduced URL component bug, not remote catalog metadata.

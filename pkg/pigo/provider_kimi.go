@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -386,7 +387,7 @@ func completeAnthropicOnceWithStream(model Model, ctx Context, options Anthropic
 	request, err := http.NewRequestWithContext(
 		requestContext,
 		http.MethodPost,
-		strings.TrimRight(model.BaseURL, "/")+"/v1/messages",
+		resolveAnthropicMessagesURL(model.BaseURL),
 		bytes.NewReader(bodyBytes),
 	)
 	if err != nil {
@@ -1404,4 +1405,26 @@ func mapAnthropicStopReason(reason string, content []ContentBlock) StopReason {
 	default:
 		return StopReasonError
 	}
+}
+
+// resolveAnthropicMessagesURL preserves query bytes while retaining the existing
+// /v1/messages suffix contract. Other URL shapes retain the legacy behavior.
+func resolveAnthropicMessagesURL(baseURL string) string {
+	legacy := strings.TrimRight(baseURL, "/") + "/v1/messages"
+	if !strings.ContainsAny(baseURL, "?#") {
+		return legacy
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.Opaque != "" {
+		return legacy
+	}
+	escapedPath := strings.TrimRight(parsed.EscapedPath(), "/") + "/v1/messages"
+	parsed.Path, err = url.PathUnescape(escapedPath)
+	if err != nil {
+		return legacy
+	}
+	if parsed.RawPath != "" {
+		parsed.RawPath = escapedPath
+	}
+	return parsed.String()
 }
