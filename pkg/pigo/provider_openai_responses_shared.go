@@ -75,6 +75,7 @@ type openAIResponsesResponse struct {
 }
 
 type openAIResponsesResponseItem struct {
+	Phase            string                               `json:"phase,omitempty"`
 	Type             string                               `json:"type"`
 	ID               string                               `json:"id,omitempty"`
 	Status           string                               `json:"status,omitempty"`
@@ -129,6 +130,7 @@ type openAIResponsesStreamingState struct {
 	CurrentTextItemKey     string
 	CurrentThinkingItemKey string
 	FinalizedItemKeys      map[string]bool
+	FinalizedTextIndexes   map[string]int
 	ToolCalls              map[string]*openAIResponsesToolCallState
 	ToolCallOutputKeys     map[int]string
 	CustomTools            map[string]string
@@ -267,6 +269,15 @@ func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom ma
 							},
 						},
 					})
+					if typed.Provider == model.Provider && typed.API == model.API && typed.Model == model.ID {
+						var signature TextSignatureV1
+						if json.Unmarshal([]byte(block.TextSignature), &signature) == nil && signature.V == 1 {
+							if phase := openAIResponsesAssistantPhase(signature.Phase); phase != "" {
+								input[len(input)-1]["phase"] = phase
+							}
+						}
+					}
+
 				case ThinkingContent:
 					if strings.TrimSpace(block.ThinkingSignature) != "" {
 						var reasoning map[string]any
@@ -814,9 +825,13 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 	}
 
 	reasoningIDs := make(map[string]int)
+	messageIDs := make(map[string]int)
 	for _, item := range terminal.Output {
 		if item.Type == "reasoning" && item.ID != "" {
 			reasoningIDs[item.ID]++
+		}
+		if item.Type == "message" && strings.TrimSpace(item.ID) != "" {
+			messageIDs[item.ID]++
 		}
 	}
 	for _, item := range terminal.Output {
@@ -833,8 +848,11 @@ func emitOpenAIResponsesTerminalOutputIfNeeded(
 		}
 		itemKey := openAIResponsesItemKey(item)
 		if itemKey != "" && state != nil && state.FinalizedItemKeys[itemKey] {
-			if reasoningIDs[item.ID] == 1 {
+			if item.Type == "reasoning" && reasoningIDs[item.ID] == 1 {
 				backfillOpenAIResponsesReasoningCipher(response, item)
+			}
+			if item.Type == "message" && messageIDs[item.ID] == 1 {
+				fillOpenAIResponsesFinalizedPhase(response, state, item)
 			}
 			continue
 		}
@@ -914,6 +932,61 @@ func backfillOpenAIResponsesReasoningCipher(response *AssistantMessage, item ope
 	// Previously emitted partial events retain their original content slice.
 	content := append([]ContentBlock(nil), response.Content...)
 	content[found] = thinking
+	response.Content = content
+}
+
+// Fill metadata only: completed output must not emit a second text lifecycle or
+// rewrite content already delivered to observers. Ambiguous IDs are not guessed.
+func fillOpenAIResponsesFinalizedPhase(response *AssistantMessage, state *openAIResponsesStreamingState, item openAIResponsesResponseItem) {
+	phase := openAIResponsesAssistantPhase(item.Phase)
+	if phase == "" || strings.TrimSpace(item.ID) == "" {
+		return
+	}
+	index := -1
+	var fields map[string]json.RawMessage
+	for i, content := range response.Content {
+		block, ok := content.(TextContent)
+		if !ok {
+			continue
+		}
+		var signature TextSignatureV1
+		if json.Unmarshal([]byte(block.TextSignature), &signature) != nil || signature.V != 1 || signature.ID != item.ID {
+			continue
+		}
+		if index >= 0 {
+			return
+		}
+		index = i
+		if signature.Phase != "" || json.Unmarshal([]byte(block.TextSignature), &fields) != nil {
+			return
+		}
+	}
+	if state != nil {
+		if i, ok := state.FinalizedTextIndexes[item.ID]; ok && (i < 0 || i >= len(response.Content) || (index >= 0 && index != i)) {
+			return
+		}
+	}
+	if index < 0 && state != nil {
+		if i, ok := state.FinalizedTextIndexes[item.ID]; ok && i >= 0 && i < len(response.Content) {
+			if block, ok := response.Content[i].(TextContent); ok && block.TextSignature == "" {
+				index = i
+				fields = map[string]json.RawMessage{"v": json.RawMessage("1")}
+				fields["id"], _ = json.Marshal(item.ID)
+			}
+		}
+	}
+	if index < 0 {
+		return
+	}
+	fields["phase"], _ = json.Marshal(phase)
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return
+	}
+	content := append([]ContentBlock(nil), response.Content...)
+	block := content[index].(TextContent)
+	block.TextSignature = string(encoded)
+	content[index] = block
 	response.Content = content
 }
 
@@ -1074,6 +1147,14 @@ func startOpenAIResponsesThinkingBlock(response *AssistantMessage, stream *Assis
 	})
 }
 
+func openAIResponsesAssistantPhase(phase string) string {
+	switch phase {
+	case "commentary", "final_answer":
+		return phase
+	}
+	return ""
+}
+
 func encodeOpenAIResponsesTextSignatureV1(id string, phase string) string {
 	sig := TextSignatureV1{V: 1, ID: id}
 	if phase != "" {
@@ -1098,7 +1179,25 @@ func finalizeOpenAIResponsesStreamItem(
 	switch item.Type {
 	case "message":
 		if state.CurrentTextIndex < 0 {
+			before := len(response.Content)
 			emitOpenAIResponsesItemLifecycle(response, stream, item)
+			// Preserve private identity for done-only items without changing the
+			// public signature when no phase is ever supplied.
+			if strings.TrimSpace(item.ID) != "" {
+				if state.FinalizedTextIndexes == nil {
+					state.FinalizedTextIndexes = map[string]int{}
+				}
+				index := -1
+				if len(response.Content) == before+1 {
+					if _, ok := response.Content[before].(TextContent); ok {
+						index = before
+					}
+				}
+				if _, duplicate := state.FinalizedTextIndexes[item.ID]; duplicate {
+					index = -1
+				}
+				state.FinalizedTextIndexes[item.ID] = index
+			}
 			if itemKey != "" {
 				state.FinalizedItemKeys[itemKey] = true
 			}
@@ -1118,7 +1217,7 @@ func finalizeOpenAIResponsesStreamItem(
 			block.Text = strings.Join(parts, "")
 		}
 		if strings.TrimSpace(item.ID) != "" {
-			block.TextSignature = encodeOpenAIResponsesTextSignatureV1(item.ID, "")
+			block.TextSignature = encodeOpenAIResponsesTextSignatureV1(item.ID, openAIResponsesAssistantPhase(item.Phase))
 		}
 		response.Content[state.CurrentTextIndex] = block
 		stream.push(AssistantMessageEvent{
@@ -1278,7 +1377,11 @@ func parseOpenAIResponsesResponseOutput(items []openAIResponsesResponseItem) []C
 				}
 			}
 			if len(parts) > 0 {
-				blocks = append(blocks, TextContent{Text: strings.Join(parts, "")})
+				block := TextContent{Text: strings.Join(parts, "")}
+				if phase := openAIResponsesAssistantPhase(item.Phase); phase != "" && strings.TrimSpace(item.ID) != "" {
+					block.TextSignature = encodeOpenAIResponsesTextSignatureV1(item.ID, phase)
+				}
+				blocks = append(blocks, block)
 			}
 		case "reasoning":
 			thinking := openAIResponsesReasoningText(item)
