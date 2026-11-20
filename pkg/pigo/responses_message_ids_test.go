@@ -56,6 +56,14 @@ func TestResponsesMessageIDsPreserveBlockOrder(t *testing.T) {
 			for _, item := range wire.Input {
 				typ, _ := item["type"].(string)
 				types = append(types, typ)
+				summary, hasSummary := item["summary"]
+				if typ == "reasoning" {
+					if !reflect.DeepEqual(summary, []any{}) {
+						t.Fatalf("reasoning replay omitted required empty summary: %v", item)
+					}
+				} else if hasSummary {
+					t.Fatalf("unexpected summary on %s item", typ)
+				}
 				if typ == "message" {
 					ids = append(ids, item["id"].(string))
 					parts := item["content"].([]any)

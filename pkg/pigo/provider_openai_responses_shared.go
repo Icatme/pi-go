@@ -89,7 +89,7 @@ type openAIResponsesResponseItem struct {
 	Namespace        string                               `json:"namespace,omitempty"`
 	Arguments        string                               `json:"arguments,omitempty"`
 	Input            *string                              `json:"input,omitempty"`
-	Summary          []openAIResponsesReasoningSummary    `json:"summary,omitempty"`
+	Summary          []openAIResponsesReasoningSummary    `json:"summary,omitzero"`
 	Content          []openAIResponsesResponseContentPart `json:"content,omitempty"`
 	EncryptedContent string                               `json:"encrypted_content,omitempty"`
 }
@@ -288,6 +288,10 @@ func convertOpenAIResponsesMessages(toolPlan *openAIResponsesToolPlan, custom ma
 					if strings.TrimSpace(block.ThinkingSignature) != "" {
 						var reasoning map[string]any
 						if json.Unmarshal([]byte(block.ThinkingSignature), &reasoning) == nil {
+							// Older saved signatures omitted the required empty Responses summary.
+							if _, ok := reasoning["summary"]; !ok && reasoning["type"] == "reasoning" {
+								reasoning["summary"] = []any{}
+							}
 							input = append(input, reasoning)
 						}
 					}

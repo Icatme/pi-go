@@ -4698,3 +4698,10 @@ The same follow-up documents exectools host-owned `ExecutionModeSequential` for 
 - Delivery targets master and an annotated v0.23.2 source tag atomically, followed
   by a GitHub Release without uploaded assets. Publication verification checks
   remote branch/tag identity, release metadata and Go module resolution.
+
+## 2026-11-20 — Preserve required reasoning summaries in OpenAI Responses continuations
+
+- Preserve a supplied empty summary array when capturing reasoning from incremental or terminal Responses events. The shared Responses replay writer supplies an empty array for older reasoning signatures that omitted the field. Existing nonempty summaries, encrypted content and function items retain their values.
+- Reproduced the loss with incremental and terminal-only fixtures and replayed older history through the OpenAI and Codex writers. The pkg/pigo package tests and vet passed, along with focused replay tests under the race detector. Local source change only.
+
+- Release preparation for v0.23.3 updates the package version, example module and source release notes so ai-relay can consume the fix by tag.
